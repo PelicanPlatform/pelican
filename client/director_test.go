@@ -637,3 +637,79 @@ func TestQueryDirectorGeoLocationHeader(t *testing.T) {
 		assert.Empty(t, receivedCoordHeader, "X-Pelican-Coordinate should not be sent when GeoLocation is invalid")
 	})
 }
+
+// A director that answers has answered -- reporting Contact.Director for it
+// claims the client never reached the director, which sends the reader off to
+// check the network when the real problem is the path or the credential. Only a
+// genuine failure to get an answer is Contact.Director.
+func TestDirectorResponseClassification(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
+	server_utils.ResetTestState()
+	defer server_utils.ResetTestState()
+	test_utils.InitClient(t, map[param.Param]any{
+		param.Client_DirectorRetries: 1,
+	})
+
+	tests := []struct {
+		name         string
+		status       int
+		msg          string
+		wantType     string
+		wantExitCode int
+	}{
+		{
+			// Nothing in the federation serves the path: a definitive answer
+			// about what was asked for, so Specification.
+			name:         "NotFoundIsSpecification",
+			status:       http.StatusNotFound,
+			msg:          "No sources found for the requested path: no origins found for the requested namespace '/nope'",
+			wantType:     error_codes.NewSpecificationError(nil).ErrorType(),
+			wantExitCode: 8,
+		},
+		{
+			// The director returns 401 for an expired token. It refused the
+			// credential; it did not fail to answer.
+			name:         "UnauthorizedIsAuthorization",
+			status:       http.StatusUnauthorized,
+			msg:          "bearer token has expired",
+			wantType:     error_codes.NewAuthorizationError(nil).ErrorType(),
+			wantExitCode: 7,
+		},
+		{
+			// A 5xx is the director failing rather than answering, so the
+			// original classification still applies.
+			name:         "ServerErrorStaysContactDirector",
+			status:       http.StatusInternalServerError,
+			msg:          "internal error",
+			wantType:     error_codes.NewContact_DirectorError(nil).ErrorType(),
+			wantExitCode: 6,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.Header().Set("Server", "pelican/7.20.0")
+				w.Header().Set("Content-Type", "application/json")
+				w.WriteHeader(tc.status)
+				_, _ = w.Write([]byte(`{"status":"error","msg":"` + tc.msg + `"}`))
+			}))
+			defer server.Close()
+
+			pUrl := pelican_url.PelicanURL{
+				FedInfo: pelican_url.FederationDiscovery{DirectorEndpoint: server.URL},
+				Path:    "/nope/object.txt",
+			}
+
+			_, err := GetDirectorInfoForPath(context.Background(), &pUrl, http.MethodGet, "")
+			require.Error(t, err)
+
+			var pe *error_codes.PelicanError
+			require.ErrorAs(t, err, &pe, "the director's answer should be classified, got %q", err)
+			assert.Equal(t, tc.wantType, pe.ErrorType())
+			assert.Equal(t, tc.wantExitCode, pe.ExitCode())
+			// The director's own text must still reach the reader.
+			assert.Contains(t, err.Error(), tc.msg)
+		})
+	}
+}

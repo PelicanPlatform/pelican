@@ -44,6 +44,7 @@ import (
 	"github.com/pelicanplatform/pelican/client"
 	"github.com/pelicanplatform/pelican/client_agent"
 	"github.com/pelicanplatform/pelican/config"
+	"github.com/pelicanplatform/pelican/error_codes"
 	"github.com/pelicanplatform/pelican/param"
 	"github.com/pelicanplatform/pelican/pelican_url"
 )
@@ -536,15 +537,25 @@ func putMain(cmd *cobra.Command, args []string) {
 			os.Exit(1)
 		}
 		// Print the list of errors
+		// The message and the exit code are separate lookups, not one
+		// if/else. A refused upload is the case that proves it: the error
+		// is a TransferErrors whose attempt error is an Authorization
+		// PelicanError, so the accumulator's message wins while the exit code
+		// still has to come from the nested classification.
 		errMsg := result.Error()
 		var te *client.TransferErrors
 		if errors.As(result, &te) {
 			errMsg = te.UserError()
+		} else if msg, ok := error_codes.Message(result); ok {
+			errMsg = msg
 		}
 		log.Errorln("Failure putting " + lastSrc + ": " + errMsg)
 		if client.ShouldRetry(result) {
 			log.Errorln("Errors are retryable")
 			os.Exit(11)
+		}
+		if code, ok := error_codes.ExitCodeFor(result); ok {
+			os.Exit(code)
 		}
 		os.Exit(1)
 	}
