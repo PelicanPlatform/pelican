@@ -1,3 +1,10 @@
+// Matches authentication_test.go, which is where the shared schema
+// helper (migrateTestDB) lives. Without the constraint the Windows build
+// of this package's tests references a helper that is not compiled
+// there, and golangci-lint's typecheck fails the build before any test
+// runs.
+//go:build !windows
+
 /***************************************************************
  *
  * Copyright (C) 2026, Pelican Project, Morgridge Institute for Research
@@ -19,6 +26,7 @@
 package web_ui
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"testing"
@@ -293,4 +301,69 @@ func TestIsConfirmedSystemAdminTreatsUncertaintyAsNo(t *testing.T) {
 
 	RecordAssertedGroups(database.GroupSourceOIDC, unobserved.ID, unobserved.Username, []string{"ops"})
 	assert.True(t, IsConfirmedSystemAdmin(db, unobserved.ID))
+}
+
+// The file source is the only one that can recover from an outage on
+// its own: LaunchPeriodicGroupFileRefresh runs a pass at startup
+// precisely so a server that was down across a group-file edit — or
+// down for longer than Issuer.AssertedGroupMembershipTTL — does not
+// serve stale memberships until each user happens to log in.
+func TestGroupFileRefreshReconcilesEveryKnownUser(t *testing.T) {
+	db := setupAssertedGroupTest(t, `{"alice": ["ops"], "bob": ["research"]}`)
+	alice := seedTestUser(t, db, "u-alice", "alice")
+	bob := seedTestUser(t, db, "u-bob", "bob")
+	carol := seedTestUser(t, db, "u-carol", "carol")
+
+	refreshGroupFileMemberships(context.Background())
+
+	assert.Contains(t, memberships(t, db, alice.ID), "ops")
+	assert.Contains(t, memberships(t, db, bob.ID), "research")
+	assert.Empty(t, memberships(t, db, carol.ID),
+		"a user the file says nothing about gets no membership invented for them")
+
+	t.Run("a pass after an outage re-asserts stale memberships", func(t *testing.T) {
+		var ops database.Group
+		require.NoError(t, db.First(&ops, "name = ?", "ops").Error)
+		require.NoError(t, db.Model(&database.GroupMember{}).
+			Where("group_id = ? AND user_id = ?", ops.ID, alice.ID).
+			Update("asserted_at", time.Now().Add(-30*24*time.Hour)).Error)
+
+		refreshGroupFileMemberships(context.Background())
+
+		refreshed := memberships(t, db, alice.ID)
+		require.Contains(t, refreshed, "ops")
+		require.NotNil(t, refreshed["ops"].AssertedAt)
+		assert.WithinDuration(t, time.Now(), *refreshed["ops"].AssertedAt, time.Minute,
+			"the pass must re-assert, not merely leave the row alone")
+	})
+
+	t.Run("a user removed from the file has their membership retracted", func(t *testing.T) {
+		// This is why the pass walks USERS rather than the file's keys:
+		// an account dropped from the file only gets retracted if we ask
+		// about the account.
+		require.NoError(t, os.WriteFile(param.Issuer_GroupFile.GetString(),
+			[]byte(`{"bob": ["research"]}`), 0o600))
+
+		refreshGroupFileMemberships(context.Background())
+
+		assert.Empty(t, memberships(t, db, alice.ID),
+			"removing someone from the group file takes effect within one interval, not at their next login")
+		assert.Contains(t, memberships(t, db, bob.ID), "research")
+	})
+
+	t.Run("a cancelled context stops the pass and silences it", func(t *testing.T) {
+		// Under `go test` the logging hooks route through t.Log, which
+		// panics if a goroutine writes after its test completes — a
+		// background pass that keeps talking during teardown turns into
+		// a failure somewhere else in the suite.
+		cancelled, cancel := context.WithCancel(context.Background())
+		cancel()
+		require.NoError(t, os.WriteFile(param.Issuer_GroupFile.GetString(),
+			[]byte(`{"alice": ["ops"]}`), 0o600))
+
+		refreshGroupFileMemberships(cancelled)
+
+		assert.Empty(t, memberships(t, db, alice.ID),
+			"a cancelled pass must do no work, not merely skip its logging")
+	})
 }
