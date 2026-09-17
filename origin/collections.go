@@ -405,20 +405,23 @@ type MetadataValue struct {
 
 // GrantAclReq names the ACL target and the role to grant.
 //
-// `groupId` names the target the way a human writes it: a group name, a
-// group ID, `user-<name>` for a personal grant, or the `@authenticated`
-// sentinel, all resolved by database.ResolveACLSubject. `group_id` is
-// the equivalent snake_case spelling — the frontend uses camelCase,
-// older tooling and existing tests use snake_case — and the field name
-// is historical: it has never been restricted to groups. A target that
-// resolves to nothing is a 400; ACL rows are keyed on IDs, so there is
-// nothing to store for an unknown name.
+// The two ways to name a target correspond to the two identifier spaces,
+// and the caller says which they mean by choosing fields — the server
+// never infers it from the string.
 //
-// `subjectType` + `subjectId` address the principal by its stored ID
-// instead, with no resolution step. That pair is the only way to name a
-// *user* by ID: a bare user ID is deliberately not a `groupId` spelling,
-// since a third guessed form would put names and IDs back in the same
-// space. See ResolveACLSubject.
+// `groupId` is the NAME space: a group name, `user-<name>` for a
+// personal grant, or the `@authenticated` sentinel. `group_id` is the
+// equivalent snake_case spelling; the field name is historical, it has
+// never been restricted to groups. A name that resolves to nothing is a
+// 400, since ACL rows are keyed on IDs and there is nothing to store.
+//
+// `subjectType` + `subjectId` is the ID space, and is the only way to
+// name a principal by ID — a bare ID is NOT a `groupId` spelling. It
+// used to be, and the server told the two apart by the shape of the
+// string, which is not a distinction that can be made safely: group
+// creation is open to any authenticated user, so a group NAMED after
+// another principal's ID was enough to intercept grants addressed to
+// that ID. See database.ACLSubjectRef.
 type GrantAclReq struct {
 	GroupID         string     `json:"groupId"`
 	GroupIDSnakeAlt string     `json:"group_id"`
@@ -429,10 +432,12 @@ type GrantAclReq struct {
 	SubjectID       string     `json:"subjectId"`
 }
 
-// resolvedGroupID returns whichever of groupId / group_id the caller
+// resolvedACLTarget returns whichever of groupId / group_id the caller
 // actually populated. The frontend uses camelCase; older tooling and
-// existing tests use snake_case.
-func (r *GrantAclReq) resolvedGroupID() string {
+// existing tests use snake_case. Both are NAME-space values — see the
+// type doc — so the result is only ever handed to the name-space entry
+// point.
+func (r *GrantAclReq) resolvedACLTarget() string {
 	if r.GroupID != "" {
 		return r.GroupID
 	}
@@ -458,10 +463,7 @@ type RevokeAclReq struct {
 	SubjectID       string `json:"subjectId"`
 }
 
-func (r *RevokeAclReq) resolvedGroupID() string {
-	if r.SubjectID != "" {
-		return r.SubjectID
-	}
+func (r *RevokeAclReq) resolvedACLTarget() string {
 	if r.GroupID != "" {
 		return r.GroupID
 	}
@@ -2117,12 +2119,12 @@ func handleGrantCollectionAcl(ctx *gin.Context) {
 		})
 		return
 	}
-	groupID := req.resolvedGroupID()
+	aclTarget := req.resolvedACLTarget()
 	expiresAt := req.resolvedExpiresAt()
 
 	// An `authenticated` subject has an empty subject ID by design, so
 	// the presence of subjectType is what makes that target complete.
-	if (groupID == "" && req.SubjectType == "") || req.Role == "" {
+	if (aclTarget == "" && req.SubjectType == "") || req.Role == "" {
 		ctx.JSON(http.StatusBadRequest, server_structs.SimpleApiResp{
 			Status: server_structs.RespFailed,
 			Msg:    "groupId (or subjectType) and role are required",
@@ -2167,13 +2169,16 @@ func handleGrantCollectionAcl(ctx *gin.Context) {
 	}
 	isAdmin, _ := web_ui.CheckCollectionAdmin(identity)
 
-	// An explicit subjectType addresses the principal by its stored ID,
-	// skipping name resolution — the only way to grant to a user by ID.
+	// The two spaces have separate entry points, chosen by which fields
+	// the caller populated — never by inspecting the string. `groupId`
+	// is the name space; `subjectType` + `subjectId` is the ID space.
 	if req.SubjectType != "" {
 		err = database.GrantCollectionAclBySubject(database.ServerDatabase, ctx.Param("id"), user, userId, groups,
-			database.ACLSubjectType(req.SubjectType), req.SubjectID, role, expiresAt, isAdmin)
+			database.ACLSubject{Type: database.ACLSubjectType(req.SubjectType), ID: req.SubjectID},
+			role, expiresAt, isAdmin)
 	} else {
-		err = database.GrantCollectionAcl(database.ServerDatabase, ctx.Param("id"), user, userId, groups, groupID, role, expiresAt, isAdmin)
+		err = database.GrantCollectionAcl(database.ServerDatabase, ctx.Param("id"), user, userId, groups,
+			database.ACLSubjectRef(aclTarget), role, expiresAt, isAdmin)
 	}
 	if err != nil {
 		if errors.Is(err, database.ErrUnknownACLSubject) {
@@ -2222,10 +2227,10 @@ func handleRevokeCollectionAcl(ctx *gin.Context) {
 		return
 	}
 
-	groupID := req.resolvedGroupID()
+	aclTarget := req.resolvedACLTarget()
 	// An `authenticated` subject has an empty subject ID by design, so
 	// the presence of subjectType is what makes the target complete.
-	if (groupID == "" && req.SubjectType == "") || req.Role == "" {
+	if (aclTarget == "" && req.SubjectType == "") || req.Role == "" {
 		ctx.JSON(http.StatusBadRequest, server_structs.SimpleApiResp{
 			Status: server_structs.RespFailed,
 			Msg:    "groupId (or subjectType) and role are required",
@@ -2269,13 +2274,16 @@ func handleRevokeCollectionAcl(ctx *gin.Context) {
 	}
 	isAdmin, _ := web_ui.CheckCollectionAdmin(identity)
 
-	// An explicit subjectType skips name resolution — the escape hatch
-	// for clearing a grant whose group or user row is already gone.
+	// As on the grant path, the space is chosen by which fields the
+	// caller populated. The ID space is also the escape hatch for
+	// clearing a grant whose group or user row is already gone.
 	if req.SubjectType != "" {
 		err = database.RevokeCollectionAclBySubject(database.ServerDatabase, ctx.Param("id"), user, userId, groups,
-			database.ACLSubjectType(req.SubjectType), req.SubjectID, role, isAdmin)
+			database.ACLSubject{Type: database.ACLSubjectType(req.SubjectType), ID: req.SubjectID},
+			role, isAdmin)
 	} else {
-		err = database.RevokeCollectionAcl(database.ServerDatabase, ctx.Param("id"), user, userId, groups, groupID, role, isAdmin)
+		err = database.RevokeCollectionAcl(database.ServerDatabase, ctx.Param("id"), user, userId, groups,
+			database.ACLSubjectRef(aclTarget), role, isAdmin)
 	}
 	if err != nil {
 		if errors.Is(err, database.ErrUnknownACLSubject) {

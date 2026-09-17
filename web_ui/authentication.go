@@ -811,44 +811,135 @@ func CheckCollectionAdmin(identity UserIdentity) (bool, string) {
 	return false, "You don't have collection administrator permission"
 }
 
-// IsSystemAdminUserID checks whether the given user ID belongs to a system admin.
-// This is used to prevent user administrators from modifying system admin accounts.
+// MustTreatAsSystemAdmin reports whether a caller holding only
+// server.user_admin must be refused on this target account, and a
+// human-readable reason to return with the refusal.
 //
-// This is a RESTRICTING check: a true answer refuses an action, so the
-// conservative reading of an uncertain one is "yes". That is why the
-// target's group list comes from GroupNamesForRestrictionCheck, which
-// includes mirrored memberships the provider asserted some time ago and
-// has not asserted since. An admin whose authority comes from
-// Server.AdminGroups plus a provider-asserted group would otherwise be
-// invisible here — nothing about them is in `group_members` unless the
-// membership was mirrored — and every caller of this guard would open on
-// their account.
+// It replaces a predicate that asked "is this user an admin?" and
+// answered false whenever it could not tell. That default was the bug:
+// a system administrator whose authority comes from Server.AdminGroups
+// plus a group an outside provider asserts may have nothing on this
+// server to evaluate, because membership lives at the provider. Every
+// guard built on it — rename, delete, clear-password, mint a
+// password-set invite, clear an AUP acceptance — then opened on exactly
+// the accounts it existed to protect.
 //
-// The residual gap, stated plainly: an admin of that shape who has never
-// logged in since membership mirroring was enabled still has no record
-// to find, and reads as a non-admin exactly as before. Mirroring
-// narrows this guard's blind spot to accounts Pelican has never
-// observed; it does not eliminate it.
-func IsSystemAdminUserID(db *gorm.DB, userID string) bool {
+// The question is now the safe one: not "have we proved this account IS
+// an administrator", but "have we proved it is NOT one". Three things
+// can establish that it might be, and the first two are positive
+// evidence while the third is the absence of any:
+//
+//  1. The account's currently-evaluable privileges include server.admin
+//     — a config username match, a directly granted scope, or a group
+//     Pelican has a record of, including a mirrored membership that has
+//     gone stale. (Stale counts here for the same reason: this is a
+//     restricting question, so an old observation still answers it.)
+//  2. The account is latched GroupAdminPossible: it has been observed
+//     holding an administrative group at some point, even if the
+//     provider has since retracted it. See GroupAdminStatus.
+//  3. Nothing has ever been established about it (GroupAdminUnknown)
+//     AND a group could confer admin on this server AND its groups come
+//     from somewhere Pelican cannot enumerate on demand.
+//
+// Case 3 is the conservative default, and it is deliberately broad: on
+// upgrade every account is GroupAdminUnknown, so a user-administrator
+// can act on none of them until each has signed in once. In a
+// deployment where no group confers admin (Server.AdminGroups unset)
+// nothing changes at all, and elsewhere it self-heals one login at a
+// time.
+//
+// Recourse is a full server.admin, who bypasses every one of these
+// guards (they all test `!isAdmin && ...`). There is deliberately no
+// API to clear the latch, because that would be an API to defeat this.
+func MustTreatAsSystemAdmin(db *gorm.DB, userID string) (bool, string) {
+	user, err := database.GetUserByID(db, userID)
+	if err != nil {
+		// Cannot load the account, so cannot rule anything out.
+		return true, "could not load the target account to check its privileges"
+	}
+
+	// (1) Positive evidence from whatever is evaluable right now.
+	if IsConfirmedSystemAdmin(db, userID) {
+		return true, "the target account holds administrator privileges"
+	}
+
+	// (2) The latch.
+	if user.GroupAdminStatus == database.GroupAdminPossible {
+		return true, "the target account has previously held administrator privileges through a group"
+	}
+
+	// (3) No evidence either way. If no group can confer admin here,
+	// there is nothing a group could be hiding and the account is ruled
+	// out by (1) alone.
+	if !param.Server_AdminGroups.IsSet() || len(param.Server_AdminGroups.GetStringSlice()) == 0 {
+		return false, ""
+	}
+	// If group membership is Pelican's own, `group_members` is complete
+	// and (1) has already seen everything there is to see.
+	if !assertedGroupSourceConfigured() {
+		return false, ""
+	}
+	if user.GroupAdminStatus == database.GroupAdminUnknown {
+		return true, "cannot determine whether the target account holds administrator privileges: " +
+			"its group memberships come from an external group source and have not been observed yet. " +
+			"Ask the account to sign in, or perform this action as a full administrator"
+	}
+	return false, ""
+}
+
+// IsConfirmedSystemAdmin reports whether an account can be shown, from
+// what this server currently knows, to hold server.admin.
+//
+// This is the GRANTING-direction counterpart of MustTreatAsSystemAdmin,
+// and the two are not interchangeable — picking the wrong one inverts
+// the failure mode. Use this one where a true answer hands out
+// something (transfer.registerOAuthClient marks an admin's client
+// shared, so an uncertain answer must mean "private"). Use
+// MustTreatAsSystemAdmin where a true answer refuses something, so an
+// uncertain answer must mean "refuse".
+//
+// Uncertainty resolves to FALSE here. Unlike the restricting guard this
+// consults no latch and makes no inference from silence: it reports
+// only what is demonstrable. Mirrored group memberships DO count, stale
+// ones included, because this asks whether the account holds the
+// privilege rather than whether to hand one out on the strength of it.
+func IsConfirmedSystemAdmin(db *gorm.DB, userID string) bool {
 	user, err := database.GetUserByID(db, userID)
 	if err != nil {
 		return false
 	}
-	// Errors are swallowed rather than failing the check open OR closed
-	// on a transient DB hiccup: the config-derived username paths below
-	// still answer, which is the pre-mirroring behavior.
+	// Errors are logged rather than folded into the verdict: the
+	// config-derived username paths still answer, which is the
+	// pre-mirroring behavior.
 	groups, err := database.GroupNamesForRestrictionCheck(db, userID)
 	if err != nil {
 		log.Warningf("Failed to load group memberships while checking whether user %s is a system admin: %v", userID, err)
 	}
-	identity := UserIdentity{
+	isAdmin, _ := CheckAdmin(UserIdentity{
 		Username: user.Username,
 		ID:       user.ID,
 		Sub:      user.Sub,
 		Groups:   groups,
-	}
-	isAdmin, _ := CheckAdmin(identity)
+	})
 	return isAdmin
+}
+
+// assertedGroupSourceConfigured reports whether some provider outside
+// Pelican decides group membership on this server — in which case
+// `group_members` is a mirror that may be incomplete, rather than the
+// whole truth.
+//
+// The group file counts whatever Issuer.GroupSource says, because the
+// password-login path reads it unconditionally.
+func assertedGroupSourceConfigured() bool {
+	if param.Issuer_GroupFile.GetString() != "" {
+		return true
+	}
+	switch strings.ToLower(param.Issuer_GroupSource.GetString()) {
+	case GroupSourceTypeOIDC, GroupSourceTypeFile, GroupSourceTypeGitHub:
+		return true
+	}
+	return false
 }
 
 // UserAdminAuthHandler accepts callers whose effective scope set

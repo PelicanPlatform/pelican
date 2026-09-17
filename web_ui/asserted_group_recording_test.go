@@ -184,92 +184,113 @@ func TestMirroredMembershipsFollowTheProvider(t *testing.T) {
 }
 
 // The admin guard is a RESTRICTING check: a true answer refuses an
-// action, so an uncertain one must read as "yes". That is why it looks
-// at mirrored memberships without a freshness filter — an admin whose
-// authority comes from Server.AdminGroups plus an asserted group has
-// nothing else on the server to find them by.
-func TestIsSystemAdminUserIDSeesAssertedAdminGroups(t *testing.T) {
+// action, so it must default to "yes" whenever the account's
+// group-derived privileges have not been established. That default is
+// the fix — the predicate it replaced answered "not an admin" whenever
+// it could not tell, and so opened on exactly the accounts it existed
+// to protect.
+func TestMustTreatAsSystemAdmin(t *testing.T) {
 	db := setupAssertedGroupTest(t, "")
 	require.NoError(t, param.Server_AdminGroups.Set([]string{"ops"}))
+	require.NoError(t, param.Issuer_GroupSource.Set(GroupSourceTypeOIDC))
 
 	admin := seedTestUser(t, db, "u-admin-via-group", "grace")
-	stranger := seedTestUser(t, db, "u-stranger", "mallory")
+	ordinary := seedTestUser(t, db, "u-ordinary", "mallory")
 
-	assert.False(t, IsSystemAdminUserID(db, admin.ID),
-		"before anything is mirrored there is no record to find them by")
+	t.Run("an unobserved account is refused, not waved through", func(t *testing.T) {
+		// Nothing is known about either account yet. Before the latch,
+		// both read as "not an admin" and a user-administrator could act
+		// on both — including the one that is.
+		for _, u := range []*database.User{admin, ordinary} {
+			mustRefuse, why := MustTreatAsSystemAdmin(db, u.ID)
+			assert.True(t, mustRefuse, "account %s", u.Username)
+			assert.Contains(t, why, "have not been observed")
+		}
+	})
 
-	RecordAssertedGroups(database.GroupSourceOIDC, admin.ID, admin.Username, []string{"ops"})
+	t.Run("observing an ordinary account rules it out", func(t *testing.T) {
+		RecordAssertedGroups(database.GroupSourceOIDC, ordinary.ID, ordinary.Username,
+			[]string{"some-team"})
+		mustRefuse, _ := MustTreatAsSystemAdmin(db, ordinary.ID)
+		assert.False(t, mustRefuse, "a user-administrator may act once the account is ruled out")
 
-	assert.True(t, IsSystemAdminUserID(db, admin.ID),
-		"a mirrored membership in an AdminGroups group must make the guard fire")
-	assert.False(t, IsSystemAdminUserID(db, stranger.ID))
+		var after database.User
+		require.NoError(t, db.First(&after, "id = ?", ordinary.ID).Error)
+		assert.Equal(t, database.GroupAdminRuledOut, after.GroupAdminStatus)
+		assert.NotNil(t, after.GroupsObservedAt)
+	})
 
-	t.Run("a stale copy still fires it", func(t *testing.T) {
-		// Granting paths stop honouring this membership once stale.
-		// This one must not: "we last saw this account in an admin group
-		// a month ago" has to mean refuse, not go ahead.
+	t.Run("observing an admin account latches it", func(t *testing.T) {
+		RecordAssertedGroups(database.GroupSourceOIDC, admin.ID, admin.Username, []string{"ops"})
+		mustRefuse, why := MustTreatAsSystemAdmin(db, admin.ID)
+		assert.True(t, mustRefuse)
+		assert.Contains(t, why, "holds administrator privileges")
+
+		var after database.User
+		require.NoError(t, db.First(&after, "id = ?", admin.ID).Error)
+		assert.Equal(t, database.GroupAdminPossible, after.GroupAdminStatus)
+	})
+
+	t.Run("the latch survives the provider retracting the membership", func(t *testing.T) {
+		// This is the case the latch exists for: the evidence goes away
+		// but the history does not, and an account that could administer
+		// this server must not become manageable by a user-administrator
+		// because a group assignment changed.
+		RecordAssertedGroups(database.GroupSourceOIDC, admin.ID, admin.Username, nil)
+
+		assert.False(t, IsConfirmedSystemAdmin(db, admin.ID),
+			"there is no longer any evidence of the privilege")
+		mustRefuse, why := MustTreatAsSystemAdmin(db, admin.ID)
+		assert.True(t, mustRefuse, "but the latch still refuses")
+		assert.Contains(t, why, "previously held administrator privileges")
+
+		var after database.User
+		require.NoError(t, db.First(&after, "id = ?", admin.ID).Error)
+		assert.Equal(t, database.GroupAdminPossible, after.GroupAdminStatus,
+			"nothing downgrades the latch")
+	})
+
+	t.Run("a stale mirrored membership still refuses", func(t *testing.T) {
+		// Granting paths stop honouring a stale membership. This one
+		// must not: it asks whether the account might HOLD the
+		// privilege, and an old observation still answers that.
+		other := seedTestUser(t, db, "u-other-admin", "heidi")
+		RecordAssertedGroups(database.GroupSourceOIDC, other.ID, other.Username, []string{"ops"})
 		var ops database.Group
 		require.NoError(t, db.First(&ops, "name = ?", "ops").Error)
 		require.NoError(t, db.Model(&database.GroupMember{}).
-			Where("group_id = ? AND user_id = ?", ops.ID, admin.ID).
+			Where("group_id = ? AND user_id = ?", ops.ID, other.ID).
 			Update("asserted_at", time.Now().Add(-365*24*time.Hour)).Error)
 
-		assert.True(t, IsSystemAdminUserID(db, admin.ID),
-			"expiry governs granting, not retention — a restricting check still sees the copy")
+		mustRefuse, _ := MustTreatAsSystemAdmin(db, other.ID)
+		assert.True(t, mustRefuse)
 	})
 
-	t.Run("it stops firing once the provider retracts the membership", func(t *testing.T) {
-		RecordAssertedGroups(database.GroupSourceOIDC, admin.ID, admin.Username, nil)
-		assert.False(t, IsSystemAdminUserID(db, admin.ID),
-			"a retraction removes the row outright, unlike expiry")
+	t.Run("no group can confer admin, so nothing needs observing", func(t *testing.T) {
+		// The conservative default is scoped: where Server.AdminGroups
+		// is unset, a group cannot make anyone an admin, so an
+		// unobserved account is ruled out on the evidence alone and
+		// ordinary user administration is unaffected.
+		require.NoError(t, param.Server_AdminGroups.Set([]string{}))
+		fresh := seedTestUser(t, db, "u-fresh", "ivan")
+		mustRefuse, _ := MustTreatAsSystemAdmin(db, fresh.ID)
+		assert.False(t, mustRefuse)
 	})
 }
 
-// The file source is the only one that can recover from an outage on
-// its own: LaunchPeriodicGroupFileRefresh runs a pass at startup
-// precisely so a server that was down across a group-file edit — or
-// down for longer than Issuer.AssertedGroupMembershipTTL — does not
-// serve stale memberships until each user happens to log in.
-func TestGroupFileRefreshReconcilesEveryKnownUser(t *testing.T) {
-	db := setupAssertedGroupTest(t, `{"alice": ["ops"], "bob": ["research"]}`)
-	alice := seedTestUser(t, db, "u-alice", "alice")
-	bob := seedTestUser(t, db, "u-bob", "bob")
-	carol := seedTestUser(t, db, "u-carol", "carol")
+// The granting-direction counterpart takes uncertainty the other way.
+// Wiring the wrong one into a call site inverts its failure mode.
+func TestIsConfirmedSystemAdminTreatsUncertaintyAsNo(t *testing.T) {
+	db := setupAssertedGroupTest(t, "")
+	require.NoError(t, param.Server_AdminGroups.Set([]string{"ops"}))
+	require.NoError(t, param.Issuer_GroupSource.Set(GroupSourceTypeOIDC))
 
-	refreshGroupFileMemberships()
+	unobserved := seedTestUser(t, db, "u-unobserved", "judy")
+	assert.False(t, IsConfirmedSystemAdmin(db, unobserved.ID),
+		"an account nothing is known about is not demonstrably an admin")
+	mustRefuse, _ := MustTreatAsSystemAdmin(db, unobserved.ID)
+	assert.True(t, mustRefuse, "...while the restricting guard refuses on the same account")
 
-	assert.Contains(t, memberships(t, db, alice.ID), "ops")
-	assert.Contains(t, memberships(t, db, bob.ID), "research")
-	assert.Empty(t, memberships(t, db, carol.ID),
-		"a user the file says nothing about gets no membership invented for them")
-
-	t.Run("a pass after an outage re-asserts stale memberships", func(t *testing.T) {
-		var ops database.Group
-		require.NoError(t, db.First(&ops, "name = ?", "ops").Error)
-		require.NoError(t, db.Model(&database.GroupMember{}).
-			Where("group_id = ? AND user_id = ?", ops.ID, alice.ID).
-			Update("asserted_at", time.Now().Add(-30*24*time.Hour)).Error)
-
-		refreshGroupFileMemberships()
-
-		refreshed := memberships(t, db, alice.ID)
-		require.Contains(t, refreshed, "ops")
-		require.NotNil(t, refreshed["ops"].AssertedAt)
-		assert.WithinDuration(t, time.Now(), *refreshed["ops"].AssertedAt, time.Minute,
-			"the pass must re-assert, not merely leave the row alone")
-	})
-
-	t.Run("a user removed from the file has their membership retracted", func(t *testing.T) {
-		// This is why the pass walks USERS rather than the file's keys:
-		// an account dropped from the file only gets retracted if we ask
-		// about the account.
-		require.NoError(t, os.WriteFile(param.Issuer_GroupFile.GetString(),
-			[]byte(`{"bob": ["research"]}`), 0o600))
-
-		refreshGroupFileMemberships()
-
-		assert.Empty(t, memberships(t, db, alice.ID),
-			"removing someone from the group file takes effect within one interval, not at their next login")
-		assert.Contains(t, memberships(t, db, bob.ID), "research")
-	})
+	RecordAssertedGroups(database.GroupSourceOIDC, unobserved.ID, unobserved.Username, []string{"ops"})
+	assert.True(t, IsConfirmedSystemAdmin(db, unobserved.ID))
 }

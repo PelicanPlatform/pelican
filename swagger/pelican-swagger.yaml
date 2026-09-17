@@ -1210,6 +1210,37 @@ definitions:
         type: string
         format: date-time
         description: Timestamp when the user agreed to the AUP.
+      groupAdminStatus:
+        type: string
+        description: >-
+          What has been established about this account's group-derived
+          administrator privileges. Read-only, and consulted only to
+          decide whether a caller holding `server.user_admin` may act on
+          the account — never to grant anything.
+
+          `unknown` means Pelican has not established it (the default,
+          and what every account carries until its groups are first
+          observed); `possible` means the account has been observed
+          holding a group that confers an administrator scope, and is
+          sticky — a provider retracting the membership removes the
+          evidence, not the history; `ruled-out` means its groups have
+          been observed and none is administrative.
+
+          A user-administrator may act on the account only when this is
+          `ruled-out`. A full `server.admin` is not constrained by it.
+        enum:
+          - unknown
+          - possible
+          - ruled-out
+        example: "ruled-out"
+      groupsObservedAt:
+        type: string
+        format: date-time
+        description: >-
+          When this account's provider-asserted group set was last
+          reconciled; absent if it never has been. Says when the
+          observation happened, where `groupAdminStatus` says what it
+          concluded.
       createdBy:
         type: string
         description: >-
