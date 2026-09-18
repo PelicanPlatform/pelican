@@ -410,7 +410,10 @@ func Verify(ctx *gin.Context, authOption AuthOption) (status int, verified bool,
 			if len(authzToken) <= 0 {
 				continue
 			} else {
-				token = authzToken[0]
+				// An XRootD server forwards the client's Authorization header as
+				// "?authz=Bearer%20<jwt>", so the scheme has to come off before the
+				// value is treated as a token; see CutBearerPrefix.
+				token = StripBearerPrefix(authzToken[0])
 				tokenFound = true
 				foundSource = Authz
 			}
@@ -476,13 +479,11 @@ func Verify(ctx *gin.Context, authOption AuthOption) (status int, verified bool,
 // Given a request, try to get a token from its "authz" query parameter or "Authorization" header
 func GetAuthzEscaped(ctx *gin.Context) (authzEscaped string) {
 	if authzQuery := ctx.Request.URL.Query()["authz"]; len(authzQuery) > 0 {
-		authzEscaped = authzQuery[0]
-		// if the authz URL query is coming from XRootD, it probably has a "Bearer " tacked in front
-		// even though it's coming via a URL
-		authzEscaped = strings.TrimPrefix(authzEscaped, "Bearer ")
+		// An XRootD server forwards the client's Authorization header as
+		// "?authz=Bearer%20<jwt>"; see CutBearerPrefix.
+		authzEscaped = StripBearerPrefix(authzQuery[0])
 	} else if authzHeader := ctx.Request.Header["Authorization"]; len(authzHeader) > 0 {
-		authzEscaped = strings.TrimPrefix(authzHeader[0], "Bearer ")
-		authzEscaped = url.QueryEscape(authzEscaped)
+		authzEscaped = url.QueryEscape(StripBearerPrefix(authzHeader[0]))
 	} else if authzCookie, err := ctx.Cookie("login"); err == nil && len(authzCookie) > 0 {
 		authzEscaped = url.QueryEscape(authzCookie)
 	}

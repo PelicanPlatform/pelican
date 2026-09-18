@@ -164,6 +164,29 @@ func TestVerify(t *testing.T) {
 			expectedResult: true,
 		},
 		{
+			// XRootD-based caches forward the client's Authorization header as
+			// "?authz=Bearer%20<token>", so the query value arrives with the HTTP
+			// scheme attached; it must be stripped before reaching a checker.
+			name: "valid-token-from-authz-query-parameter-with-bearer-prefix",
+			authOption: AuthOption{
+				Sources: []TokenSource{Authz},
+				Issuers: []TokenIssuer{FederationIssuer},
+			},
+			setupMock: func() {
+				mock.FederationCheckFunc = func(ctx *gin.Context, token string, expectedScopes []token_scopes.TokenScope, allScope bool) error {
+					if token == "valid-query-token" {
+						ctx.Set("User", "Federation")
+						return nil
+					}
+					return errors.New(fmt.Sprint("Bearer prefix not stripped from authz query value: ", token))
+				}
+			},
+			tokenSetup: func() *gin.Context {
+				return createContextWithToken("", "", "Bearer valid-query-token")
+			},
+			expectedResult: true,
+		},
+		{
 			name: "no-token-present",
 			authOption: AuthOption{
 				Sources: []TokenSource{Cookie, Header, Authz},
@@ -419,8 +442,29 @@ func TestGetAuthzEscaped(t *testing.T) {
 	escapedToken = GetAuthzEscaped(ctx)
 	assert.Equal(t, escapedToken, "tokenstring")
 
-	// Finally, the same test as before, but test with %20 encoded space
+	// The same test as before, but test with %20 encoded space
 	req, err = http.NewRequest(http.MethodPost, "http://fake-server.com/foo?authz=Bearer%20tokenstring", bytes.NewBuffer([]byte("a body")))
+	assert.NoError(t, err)
+	ctx = &gin.Context{Request: req}
+	escapedToken = GetAuthzEscaped(ctx)
+	assert.Equal(t, escapedToken, "tokenstring")
+
+	// The scheme name is case-insensitive, in the header and in the query
+	req, err = http.NewRequest(http.MethodPost, "http://fake-server.com", bytes.NewBuffer([]byte("a body")))
+	assert.NoError(t, err)
+	ctx = &gin.Context{Request: req}
+	req.Header.Set("Authorization", "bearer tokenstring")
+	escapedToken = GetAuthzEscaped(ctx)
+	assert.Equal(t, escapedToken, "tokenstring")
+
+	req, err = http.NewRequest(http.MethodPost, "http://fake-server.com/foo?authz=bearer%20tokenstring", bytes.NewBuffer([]byte("a body")))
+	assert.NoError(t, err)
+	ctx = &gin.Context{Request: req}
+	escapedToken = GetAuthzEscaped(ctx)
+	assert.Equal(t, escapedToken, "tokenstring")
+
+	// A doubly-encoded value decodes to a literal "Bearer%20", which is also stripped
+	req, err = http.NewRequest(http.MethodPost, "http://fake-server.com/foo?authz=Bearer%2520tokenstring", bytes.NewBuffer([]byte("a body")))
 	assert.NoError(t, err)
 	ctx = &gin.Context{Request: req}
 	escapedToken = GetAuthzEscaped(ctx)
