@@ -7,6 +7,7 @@ export type StringFieldProps = {
   name: string;
   value: string;
   focused?: boolean;
+  readOnly?: boolean;
   onChange: (a: string) => void;
   verify?: (a: string) => string | undefined;
 };
@@ -16,6 +17,7 @@ const StringField = ({
   name,
   value,
   focused,
+  readOnly,
   verify,
 }: StringFieldProps) => {
   const id = useMemo(() => createId(name), [name]);
@@ -40,6 +42,7 @@ const StringField = ({
       name={name.toLowerCase()}
       variant={'outlined'}
       focused={focused}
+      InputProps={{ readOnly }}
       value={bufferValue}
       onChange={(e) => {
         setBufferValue(e.target.value);
