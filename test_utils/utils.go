@@ -517,6 +517,12 @@ func SetupGlobalTestLogging() func() {
 	originalFormatter := logrus.StandardLogger().Formatter
 	originalReportCaller := logrus.StandardLogger().ReportCaller
 	globalHookEnabled.Store(true)
+	// Package-level capture wants full verbosity too, and must survive any
+	// InitClient/InitServer a TestMain performs before tests run. Declaring
+	// the floor also raises logrus's level to it, and the returned restore
+	// re-derives the level (configured value plus any remaining floors) when
+	// the cleanup runs -- no manual save/restore of the raw level.
+	restoreFloor := config.SetTestLogFloor(logrus.TraceLevel)
 
 	globalLogMu.Lock()
 	globalLogBuffer.Reset()
@@ -532,6 +538,7 @@ func SetupGlobalTestLogging() func() {
 		logrus.StandardLogger().ReplaceHooks(originalHooks)
 		logrus.SetFormatter(originalFormatter)
 		logrus.SetReportCaller(originalReportCaller)
+		restoreFloor()
 	}
 }
 
@@ -562,6 +569,19 @@ func SetupTestLogging(t testing.TB) func() {
 	logrus.SetOutput(io.Discard)
 	logrus.StandardLogger().ReplaceHooks(make(logrus.LevelHooks))
 	logrus.SetReportCaller(true)
+	// The test hook wants to observe every entry regardless of the configured
+	// level: tests assert on debug/trace lines, and TestLogHook forwards
+	// entries to t.Log so failing tests carry their diagnostics. Production
+	// code no longer pins logrus to TraceLevel (see config.initFilterLogging),
+	// so the harness must request the verbosity itself -- and must declare it
+	// as a floor, or a test that calls InitClient/InitServer would re-derive
+	// the level from the configured value and silently starve the hook for
+	// the rest of the test. Declaring the floor raises logrus's level; the
+	// returned restore re-derives it (configured value plus any remaining
+	// floors) on cleanup. Keep the restore rather than clearing: a
+	// package-level SetupGlobalTestLogging (or a parent test) may own an
+	// outer floor that this per-test harness must reinstate, not wipe.
+	restoreFloor := config.SetTestLogFloor(logrus.TraceLevel)
 	hook := NewTestLogHook(t)
 	logrus.AddHook(hook)
 
@@ -583,6 +603,7 @@ func SetupTestLogging(t testing.TB) func() {
 		logrus.StandardLogger().ReplaceHooks(originalHooks)
 		logrus.SetFormatter(originalFormatter)
 		logrus.SetReportCaller(originalReportCaller)
+		restoreFloor()
 		globalHookEnabled.Store(previousGlobalHookState)
 	}
 }
