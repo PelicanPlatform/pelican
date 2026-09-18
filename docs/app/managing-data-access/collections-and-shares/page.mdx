@@ -15,33 +15,34 @@ For the authoritative "who may do this", see the [Permissions Reference](/managi
 ## The lab in the examples
 
 One story runs through this page, so that every task has a reason behind it instead of just a form to fill in.
+It is the same cast as the worked example in [Managing Data Access](/managing-data-access#example), followed task by task.
 
 **Riptide University** runs a Pelican origin in front of its research storage, already exporting the prefix `/riptide-university`.
 The **Reyes Lab** studies nearshore currents, and has just come back from a field season with several terabytes of instrument data that its collaborators need to reach.
-Over the sections below, the lab's collection gets created, handed to the people who run it, and opened up to students — and one student passes part of their own access on to a group of interns.
+Over the sections below, the lab's collection gets created, handed to the people who run it, and opened up to students — and one student passes part of that access on to classmates outside the lab.
 
 | Person | Role in the story | Group |
 | --- | --- | --- |
-| Dana Cho | Origin administrator, Riptide University Research Computing. Holds `server.collection_admin`. | — |
-| Dr. Elena Reyes | Principal investigator. Owns the collection and answers for it. | — |
-| Dr. Priya Raman | Postdoc. Runs the collection day to day. | `reyes-postdocs` — the admin group |
-| Wes Danforth | Graduate student. Processes each new deployment; supervises a group of interns. | `reyes-grads` — `write` |
-| Tomás Vela and Bea Nkemelu | Undergraduates on a senior project. Read the processed data, never overwrite it. | `reyes-undergrads` — `read` |
-| Sophia Adeyemi | Summer intern, working on an experimental data transformation. | `reyes-interns` — `write`, through Wes's share |
+| Sysadmin Brian | Riptide University Research Computing. Deploys the origin and holds `server.collection_admin`, but has no effort to spend on day-to-day permissions. | — |
+| Dr. Reyes | Research professor and principal investigator. Owns the collection and answers for it. | — |
+| Christina | Lab manager. Runs the collection day to day. | `reyes_admins` — the admin group; `reyes_researchers` — `write` |
+| Danny | Graduate student. Collects each new deployment's data. | `reyes_researchers` — `write` |
+| Andrew | Undergraduate. Reads the processed data for his analyses, never overwrites it. | `reyes_students` — `read` |
+| Andrew's classmates | On a class project, with no other connection to the lab. | `read`, through Andrew's share |
 
 ## Before you start
 
 You need an exported namespace.
 A collection is access control *inside* an exported namespace, not a way to publish new storage, so export the storage first — see [Serving an Origin](/federating-your-data/origin) — then create a collection at that prefix or below it.
 
-> Riptide University's storage is exported at `/riptide-university` long before Dana touches the Collections page.
+> Riptide University's storage is exported at `/riptide-university` long before Brian touches the Collections page.
 
 ## Create a collection
 
 *Requires `server.collection_admin` or `server.admin` — see [Collection administration](/managing-data-access/permissions-reference#collection-administration).*
 
 > Dr. Reyes emails Research Computing: the lab's spring field season produced four terabytes of current-meter data, three institutions want to work on it, and right now it is sitting on a departmental disk.
-> Dana Cho picks up the ticket.
+> Sysadmin Brian picks up the ticket.
 > The storage is already exported at `/riptide-university`, so there is no new hardware and no new export to arrange — what the lab actually needs is a collection: a named prefix with an owner and a list of who may read and write it.
 
 The **ONBOARD COLLECTION** form does the whole thing in one pass: the collection, its owner, and its three groups.
@@ -49,36 +50,54 @@ The **ONBOARD COLLECTION** form does the whole thing in one pass: the collection
 1. In the Origin web interface, open **Collections** in the left sidebar.
 2. Click **ONBOARD COLLECTION**.
 3. Under **Collection**, fill in:
-   - **Name** — a short human-readable name.
-   - **Exported prefix** — pick the exported prefix from the dropdown and type the rest of the path in the box beside it. The full path is shown back as you type. *If only one namespace is served from this origin you won't have a dropdown.*
-   - **Description** and **Visibility** (`Private` or `Public`).
+- **Name** — a short human-readable name.
+- **Exported prefix** — pick the exported prefix from the dropdown and type the rest of the path in the box beside it. The full path is shown back as you type. *If only one namespace is served from this origin you won't have a dropdown.*
+- **Description** and **Visibility** (`Private` or `Public`).
 
-   > Dana names it `Reyes Lab`, picks the `/riptide-university` namespace from the dropdown and types `reyes-lab` beside it, describes it as "Nearshore current data, Reyes Lab", and leaves it `Private`.
+> Brian names it `Reyes Lab`, picks the `/riptide-university` namespace from the dropdown and types `reyes-lab` beside it, describes it as "Nearshore current data, Reyes Lab", and leaves it `Private`.
 
 4. Under **Ownership**, choose who owns the collection.
-   The default is you; use **Pick an existing user** to name them, **Create a new user** if they have no account yet, or **Send an ownership invite** to mint a link they redeem themselves.
+The default is you; use **Pick an existing user** to name them, **Create a new user** if they have no account yet, or **Send an ownership invite** to mint a link they redeem themselves.
 
-   > Dr. Reyes has never signed in to the origin, so Dana reaches for an ownership invite — see [Transfer ownership of a collection](#transfer-ownership-of-a-collection).
+> Dr. Reyes has never signed in to the origin, so Brian reaches for an ownership invite — see [Transfer ownership of a collection](#transfer-ownership-of-a-collection).
 5. Under **Access Control**, fill in the three group rows — the `admin` row becomes the collection's admin group, the `write` row and the `read` row become access grants.
-   Each row can either create a fresh group or attach one that already exists.
+Each row can either create a fresh group or attach one that already exists.
 
-   > Dana creates `reyes-postdocs` as the admin group and `reyes-grads` with `write`, and leaves the `read` row disabled for now because the undergraduates have not joined yet.
+> Brian does not know the groups that will want to access collections, he will let the Reyes lab manage that after he passes it on.
 6. Click **ONBOARD COLLECTION** at the bottom of the form.
 
-> One form, and Dana is done: the lab now runs its own access control, and Research Computing is out of the loop for everything that follows.
+> One form, and Brian is done: the lab now runs its own access control, and Research Computing is out of the loop for everything that follows.
 
 **QUICK CREATE** is the escape hatch: it creates the collection only (**Name**, **Namespace**, **Description**, **Visibility**, and optional **Reader Group** / **Writer Group** / **Admin Group** pickers), leaving ownership and the rest of the access grants for the edit page.
+
+## Delegate day-to-day management to an admin group
+
+*Requires the collection's owner, an existing admin-group member, or `server.collection_admin` — see [Collection administration](/managing-data-access/permissions-reference#collection-administration).*
+
+> Dr. Reyes spends six weeks a year in the field without internet access to manage data access.
+> She stays the owner — the collection is the lab's — but puts Christina in the admin group `reyes_admins`, so her lab manager can grant and revoke on her behalf.
+
+Admin-group members can edit the collection's name, description, visibility and sharing setting, read and write its metadata, grant and revoke access, and reassign the admin group.
+They cannot transfer ownership and they cannot delete the collection — both stay with the owner.
+
+1. Open the collection's **Edit collection** page.
+2. In the **Ownership** panel, use the **Admin group (optional)** picker to select the group.
+3. Click **SAVE CHANGES**.
+
+> Dr. Reyes picks `reyes_admins`, and from then on Christina handles the lab's groups and grants.
+
+Clearing the picker removes the admin group.
+Once one is set, a **Manage admin group →** link appears beside it so you can jump straight to that group's membership page.
 
 ## Grant read or write access to a group
 
 *Requires a member of the collection's admin group, the collection's owner, or `server.collection_admin` — a `write` grant is not enough to change who else has access. See [Collection administration](/managing-data-access/permissions-reference#collection-administration).*
 
-> Two weeks into the semester, Tomás Vela and Bea Nkemelu join the lab for a senior project.
-> They need to read the processed deployment files, and they must not be able to overwrite them.
-> Dr. Raman puts both of them in `reyes-undergrads` and grants that group `read` to the collection.
+> Christina sets up the lab's two working groups: `reyes_researchers`, for the people who collect and process data, and `reyes_students`, for the people who only analyze it.
+> Danny goes in the first, Andrew in the second.
+> Then Christina grants `reyes_researchers` `write` on the collection and `reyes_students` `read` — Andrew can read the processed deployment files and cannot overwrite them.
 
-Grants are written against **groups**, never against individual users.
-To give one person access, put them in a group — every user also has an implicit personal group named `user-<username>` you can grant to directly.
+Grants are written against **groups**. To give one person access, put them in a group.
 Any signed-in user can create a group; see [Create a group](/managing-data-access/users-and-groups#create-a-group).
 
 1. Open **Collections**, find the collection, and click the **Edit collection** (pencil) icon on its row.
@@ -88,37 +107,126 @@ Any signed-in user can create a group; see [Create a group](/managing-data-acces
 5. Click **ADD**.
 6. Repeat for each further group you want to grant.
 
-   > Dr. Raman adds `reyes-undergrads` with **Role** `Read`.
+> Christina adds `reyes_researchers` with **Role** `Write`, then `reyes_students` with **Role** `Read`.
 
 Existing rows are listed above the picker with their role; the trash icon beside a row revokes it.
 
-## Delegate day-to-day management to an admin group
+## Turn on sharing
 
-*Requires the collection's owner, an existing admin-group member, or `server.collection_admin` — see [Collection administration](/managing-data-access/permissions-reference#collection-administration).*
+*Requires the collection's owner, an admin-group member, or `server.collection_admin` — see [Collection administration](/managing-data-access/permissions-reference#collection-administration).*
 
-> Dr. Reyes spends six weeks a year in the field without internet access to manage data access.
-> She stays the owner — the collection is the lab's, but she uses membership to the admin group `reyes-postdocs` to enable others to manage for her.
+> Andrew wants to use part of the lab's data for a class project, alongside two classmates who have no connection to the lab.
+> They need to read one folder, and Andrew is the one who should be answerable for it — not Dr. Reyes.
+> Andrew cannot create a collection for them: that needs `server.collection_admin`.
+> So Christina copies the example data the class needs into `/riptide-university/reyes-lab/andrews-project` and switches sharing on, which lets the collection's own readers lend out their own corners of it, on their own authority, with nobody gaining a management scope.
 
-Admin-group members can edit the collection's name, description, visibility and sharing setting, read and write its metadata, grant and revoke access, and reassign the admin group.
-They cannot transfer ownership and they cannot delete the collection — both stay with the owner.
+Shares are off by default.
+Turning them on lets anyone who holds `read` on the collection delegate part of that access onward.
+It creates nothing by itself; it only makes share creation reachable for the collection's readers.
 
 1. Open the collection's **Edit collection** page.
-2. In the **Ownership** panel, use the **Admin group (optional)** picker to select the group.
+2. Under **Details**, switch on **Allow users to create shares**.
 3. Click **SAVE CHANGES**.
 
-   > Dr. Reyes picks `reyes-postdocs`, and from then on Dr. Raman's group handles the student groups.
+<Callout type="info">
+  **A share binds data to its owner — check that is what you want.**
+  Objects reached through a share are served as its *owner*, and the share is re-intersected with that owner's access to the parent on every issuance, so it shrinks and disappears as they do.
+  That is the right shape when one person is lending out their own corner of a collection and should stay answerable for it.
 
-Clearing the picker removes the admin group.
-Once one is set, a **Manage admin group →** link appears beside it so you can jump straight to that group's membership page.
+  The deciding question is not whether the recipients are outsiders — a collection can grant a group of outsiders perfectly well.
+  It is whose data this is, how many people need it, and how long it has to last.
+  When the answers are the group's, several, and indefinitely, that is a collection with a group grant, and it is worth the request to whoever holds `server.collection_admin` — see [Create a collection](#create-a-collection) and [Grant read or write access to a group](#grant-read-or-write-access-to-a-group).
+  A share pressed into that job makes one member a single point of failure and files every collaborator's reads under that person's name.
+</Callout>
+
+<Callout type="warning">
+  Shares are not supported when the origin runs a multi-user POSIX backend ([`Origin.Multiuser`](/parameters#Origin-Multiuser)).
+</Callout>
+
+## Create a share
+
+*Requires `read` or `write` on the parent collection, with sharing enabled on it — see [Share administration](/managing-data-access/permissions-reference#share-administration).*
+
+> Andrew creates a share named `Class project`, scoped to the folder Christina prepared at `/riptide-university/reyes-lab/andrews-project`.
+> Andrew owns it and manages it, and the classmates see that one folder and nothing else in the lab's archive.
+> It also expires on its own: when Andrew's `reyes_students` grant comes off, the share stops issuing usable tokens, and nobody has to remember it existed.
+
+A share is a collection, so everything you already know about granting access applies to it.
+What makes it a share is the parent link, and the constraints that come with it:
+
+- **You own the share, not the parent's owner.** You hold owner authority on the share and manage it yourself.
+- **It is bound to you.** Data read through it is served as you, and its access is re-intersected with your own access to the parent on every issuance — so a share can never outgrow the person who made it, and it fades as they do.
+- **The namespace has to equal the parent's or sit beneath it.** Leave it blank to inherit the parent's namespace exactly.
+- **Shares start private**, and sharing is forced off on the new share — you cannot create a share of a share.
+
+Access through a share is always the weaker of two things: what the share grants its recipient, and what the share's owner can currently do on the parent collection.
+That intersection is recomputed each time a token is *issued*, so if the share owner is downgraded from write to read — or loses access to the parent altogether — every token minted through the share from that point on is clamped or emptied.
+A share cannot be used to delegate access its owner no longer has.
+
+To create one:
+
+1. Open **Collections** and find the parent collection.
+The share icon appears on its row only when sharing is enabled there.
+2. Click the **Create share** (share) icon.
+3. In the **Create share of …** dialog, fill in **Share name**, an optional **Description**, and optionally a **Namespace (optional)** beneath the parent's — leave it blank to use the parent's namespace.
+4. Choose a **Visibility**.
+5. Click **CREATE SHARE**.
+
+Shares appear in the collections list alongside collections, tagged with a **share** chip.
+
+## Give people access to a share
+
+*Requires the share's owner (or `server.collection_admin`) — see [Share administration](/managing-data-access/permissions-reference#share-administration).*
+
+> Andrew grants the classmates `read`, through a group made for the project or through each classmate's personal `user-` group.
+> Andrew holds only `read` on the parent through `reyes_students`, so `read` is the most this share can ever hand out: setting the role to `Write` would still issue read-only tokens, because the intersection clamps it.
+
+Because a share is a collection, you grant access to it exactly as in [Grant read or write access to a group](#grant-read-or-write-access-to-a-group) — same **Access groups** panel on the share's edit page, with the share's ID in place of the collection's.
+
+## Revoke access
+
+*Prerequisites vary by lever — see [Collection administration](/managing-data-access/permissions-reference#collection-administration) and [Share administration](/managing-data-access/permissions-reference#share-administration).*
+
+> Three things end in May, and each one calls for a different lever.
+> One of Andrew's classmates drops the class — Andrew removes that person from the share's group and touches nothing else.
+> The lab stops taking undergraduates, so Christina revokes the `reyes_students` read grant on the collection entirely.
+> And that grant is the whole basis of Andrew's class-project share, so the share empties on its next issuance — a consequence of the second lever, with nobody editing the share at all.
+
+Three levers, in increasing order of blast radius.
+
+1. **Remove the person from the group.**
+Everything else keeps working; only that person loses the access the group carried.
+See [Add and remove group members](/managing-data-access/users-and-groups#add-and-remove-group-members).
+2. **Revoke the grant**
+The whole group loses that role on that collection.
+Use the trash icon beside the row under **Access groups**.
+3. **Remove a share owner's access to the parent.**
+This clamps or empties every token minted through every share that person owns, because the intersection is recomputed on each issuance.
+
+All three take effect the next time a token is *issued*, not against tokens already in the field.
+An access token minted before you revoked keeps working until it expires, and the one after it is smaller or empty.
+Deleting a group is the blunt version of lever 2 — it removes every collection grant that names that group, everywhere.
+
+## Delete a collection or share
+
+*Requires the owner or `server.collection_admin`; admin-group members cannot delete — see [Collection administration](/managing-data-access/permissions-reference#collection-administration).*
+
+Deleting a collection removes its grants, its metadata and its list of member objects along with it.
+Deleting a share is the same operation — a share is a collection — and is done by the share's owner.
+
+On the **Collections** page, click the **Delete collection** (trash) icon on the row.
+The icon is shown to callers who can edit the collection, which is a slightly wider set than those who can delete it, so an admin-group member may see it and get an error.
+
+<Callout type="warning">
+  Deleting a collection does not delete any objects under its namespace.
+  It removes the access-control record; the data stays exactly where the export put it, governed by the export alone.
+</Callout>
 
 ## Transfer ownership of a collection
 
 *Requires the current owner or `server.collection_admin`; admin-group members cannot transfer — see [Collection administration](/managing-data-access/permissions-reference#collection-administration).*
 
-> Dana created the collection before Dr. Reyes had ever signed in to the origin, which made Dana the initial owner.
-> Dana mints a transfer link and pastes it into the ticket reply.
-> Dr. Reyes signs in for the first time, redeems it, and owns the collection from that moment; Dana's ownership ends in the same instant.
-> Three years later, when Dr. Reyes moves to another university and Dr. Raman takes over the project, the same page moves ownership again — this time directly, because Dr. Raman already has an account.
+> Dr. Reyes decides to retire a leave the lab to Christina. She must transfer the collection to Christina to enable Christina to manage her own admin users.
 
 Every collection has exactly one owner, and it can be moved but never cleared.
 There are two routes, depending on whether the new owner already has an account.
@@ -140,116 +248,6 @@ These links are always single-use.
 3. Copy the URL with **COPY URL**.
 4. Send this link to the new owner of the collection.
 
-## Turn on sharing
-
-*Requires the collection's owner, an admin-group member, or `server.collection_admin` — see [Collection administration](/managing-data-access/permissions-reference#collection-administration).*
-
-> Wes Danforth has taken on a group of summer interns to try an experimental data transformation.
-> They need somewhere to write their output, and Wes is the one who should be answerable for it — not Dr. Reyes, and certainly not Research Computing.
-> Wes cannot create a collection for them: that needs `server.collection_admin`.
-> So Dr. Reyes switches sharing on, which lets the collection's own readers lend out their own corners of it, on their own authority, with nobody gaining a management scope.
-
-Shares are off by default.
-Turning them on lets anyone who holds `read` on the collection delegate part of that access onward.
-It creates nothing by itself; it only makes share creation reachable for the collection's readers.
-
-1. Open the collection's **Edit collection** page.
-2. Under **Details**, switch on **Allow users to create shares**.
-3. Click **SAVE CHANGES**.
-
-<Callout type="info">
-**A share binds data to its owner — check that is what you want.**
-Objects reached through a share are served as its *owner*, and the share is re-intersected with that owner's access to the parent on every issuance, so it shrinks and disappears as they do.
-That is the right shape when one person is lending out their own corner of a collection and should stay answerable for it.
-
-The deciding question is not whether the recipients are outsiders — a collection can grant a group of outsiders perfectly well.
-It is whose data this is, how many people need it, and how long it has to last.
-When the answers are the group's, several, and indefinitely, that is a collection with a group grant, and it is worth the request to whoever holds `server.collection_admin` — see [Create a collection](#create-a-collection) and [Grant read or write access to a group](#grant-read-or-write-access-to-a-group).
-A share pressed into that job makes one member a single point of failure and files every collaborator's reads under that person's name.
-</Callout>
-
-<Callout type="warning">
-Shares are not supported when the origin runs a multi-user POSIX backend ([`Origin.Multiuser`](/parameters#Origin-Multiuser)).
-</Callout>
-
-## Create a share
-
-*Requires `read` or `write` on the parent collection, with sharing enabled on it — see [Share administration](/managing-data-access/permissions-reference#share-administration).*
-
-> Wes creates a share named `Intern transformations`, scoped to the folder made for them at `/riptide-university/reyes-lab/interns`.
-> Wes owns it and manages it, and the interns see that one folder and nothing else in the lab's archive.
-> It also expires on its own: when Wes's `reyes-grads` grant comes off, the share stops issuing usable tokens, and nobody has to remember it existed.
-
-A share is a collection, so everything you already know about granting access applies to it.
-What makes it a share is the parent link, and the constraints that come with it:
-
-- **You own the share, not the parent's owner.** You hold owner authority on the share and manage it yourself.
-- **It is bound to you.** Data read through it is served as you, and its access is re-intersected with your own access to the parent on every issuance — so a share can never outgrow the person who made it, and it fades as they do.
-- **The namespace has to equal the parent's or sit beneath it.** Leave it blank to inherit the parent's namespace exactly.
-- **Shares start private**, and sharing is forced off on the new share — you cannot create a share of a share.
-
-Access through a share is always the weaker of two things: what the share grants its recipient, and what the share's owner can currently do on the parent collection.
-That intersection is recomputed each time a token is *issued*, so if the share owner is downgraded from write to read — or loses access to the parent altogether — every token minted through the share from that point on is clamped or emptied.
-A share cannot be used to delegate access its owner no longer has.
-
-To create one:
-
-1. Open **Collections** and find the parent collection.
-   The share icon appears on its row only when sharing is enabled there.
-2. Click the **Create share** (share) icon.
-3. In the **Create share of …** dialog, fill in **Share name**, an optional **Description**, and optionally a **Namespace (optional)** beneath the parent's — leave it blank to use the parent's namespace.
-4. Choose a **Visibility**.
-5. Click **CREATE SHARE**.
-
-Shares appear in the collections list alongside collections, tagged with a **share** chip.
-
-## Give people access to a share
-
-*Requires the share's owner (or `server.collection_admin`) — see [Share administration](/managing-data-access/permissions-reference#share-administration).*
-
-> Wes grants `reyes-interns` the `write` role, so Sophia and the other interns can write their output into the folder.
-> Wes holds `write` on the parent through `reyes-grads`, so the intersection leaves that `write` intact; had Wes only held `read`, the interns would get `read` no matter what the share said.
-
-Because a share is a collection, you grant access to it exactly as in [Grant read or write access to a group](#grant-read-or-write-access-to-a-group) — same **Access groups** panel on the share's edit page, with the share's ID in place of the collection's.
-
-## Revoke access
-
-*Prerequisites vary by lever — see [Collection administration](/managing-data-access/permissions-reference#collection-administration) and [Share administration](/managing-data-access/permissions-reference#share-administration).*
-
-> Three things end in the same May, and each one calls for a different lever.
-> Bea graduates while Tomás stays on for a master's — Dr. Raman removes Bea from `reyes-undergrads` and touches nothing else.
-> The senior project itself wraps up, so the `reyes-undergrads` read grant comes off the collection entirely.
-> And Wes finishes and leaves, so the `reyes-grads` grant goes — which empties the intern share on its next issuance, without anyone editing the share.
-
-Three levers, in increasing order of blast radius.
-
-1. **Remove the person from the group.**
-   Everything else keeps working; only that person loses the access the group carried.
-   See [Add and remove group members](/managing-data-access/users-and-groups#add-and-remove-group-members).
-2. **Revoke the grant**
-   The whole group loses that role on that collection.
-   Use the trash icon beside the row under **Access groups**.
-3. **Remove a share owner's access to the parent.**
-   This clamps or empties every token minted through every share that person owns, because the intersection is recomputed on each issuance.
-
-All three take effect the next time a token is *issued*, not against tokens already in the field.
-An access token minted before you revoked keeps working until it expires, and the one after it is smaller or empty.
-Deleting a group is the blunt version of lever 2 — it removes every collection grant that names that group, everywhere.
-
-## Delete a collection or share
-
-*Requires the owner or `server.collection_admin`; admin-group members cannot delete — see [Collection administration](/managing-data-access/permissions-reference#collection-administration).*
-
-Deleting a collection removes its grants, its metadata and its list of member objects along with it.
-Deleting a share is the same operation — a share is a collection — and is done by the share's owner.
-
-On the **Collections** page, click the **Delete collection** (trash) icon on the row.
-The icon is shown to callers who can edit the collection, which is a slightly wider set than those who can delete it, so an admin-group member may see it and get an error.
-
-<Callout type="warning">
-Deleting a collection does not delete any objects under its namespace.
-It removes the access-control record; the data stays exactly where the export put it, governed by the export alone.
-</Callout>
 
 ## Doing this from the command line or the API
 
