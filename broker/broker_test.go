@@ -143,6 +143,8 @@ func Setup(t *testing.T, ctx context.Context, egrp *errgroup.Group) {
 	require.NoError(t, param.Server_WebPort.Set(0))
 	require.NoError(t, param.Server_DbLocation.Set(filepath.Join(dirpath, "ns-registry.sqlite")))
 	require.NoError(t, param.Origin_FederationPrefix.Set("/foo"))
+	require.NoError(t, param.Registry_RequireCacheApproval.Set(false))
+	require.NoError(t, param.Registry_RequireOriginApproval.Set(false))
 
 	test_utils.MockFederationRoot(t, nil, nil)
 
