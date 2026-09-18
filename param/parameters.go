@@ -223,12 +223,15 @@ var runtimeConfigurableMap = map[string]bool{
 	"GeoIPOverrides": false,
 	"GeoLocation": false,
 	"Issuer.AccessTokenLifetime": false,
+	"Issuer.AssertedGroupMembershipTTL": false,
 	"Issuer.AuthenticationSource": false,
 	"Issuer.AuthorizationCodeLifetime": false,
 	"Issuer.AuthorizationTemplates": false,
+	"Issuer.DisableGroupAutoCreation": false,
 	"Issuer.DynamicClientStaleTimeout": false,
 	"Issuer.DynamicClientUnusedTimeout": false,
 	"Issuer.GroupFile": false,
+	"Issuer.GroupFileRefreshInterval": false,
 	"Issuer.GroupRequirements": false,
 	"Issuer.GroupSource": false,
 	"Issuer.IDTokenLifetime": false,
@@ -1124,6 +1127,7 @@ var boolAccessors = map[string]func(*Config) bool{
 	"Director.FilterCachesInErrorState": func(c *Config) bool { return c.Director.FilterCachesInErrorState },
 	"DisableHttpProxy": func(c *Config) bool { return c.DisableHttpProxy },
 	"DisableProxyFallback": func(c *Config) bool { return c.DisableProxyFallback },
+	"Issuer.DisableGroupAutoCreation": func(c *Config) bool { return c.Issuer.DisableGroupAutoCreation },
 	"Issuer.OIDCPreferClaimsFromIDToken": func(c *Config) bool { return c.Issuer.OIDCPreferClaimsFromIDToken },
 	"Issuer.UserStripDomain": func(c *Config) bool { return c.Issuer.UserStripDomain },
 	"Logging.Client.DisableProgressBars": func(c *Config) bool { return c.Logging.Client.DisableProgressBars },
@@ -1245,9 +1249,11 @@ var durationAccessors = map[string]func(*Config) time.Duration{
 	"Director.StatTimeout": func(c *Config) time.Duration { return c.Director.StatTimeout },
 	"Federation.TopologyReloadInterval": func(c *Config) time.Duration { return c.Federation.TopologyReloadInterval },
 	"Issuer.AccessTokenLifetime": func(c *Config) time.Duration { return c.Issuer.AccessTokenLifetime },
+	"Issuer.AssertedGroupMembershipTTL": func(c *Config) time.Duration { return c.Issuer.AssertedGroupMembershipTTL },
 	"Issuer.AuthorizationCodeLifetime": func(c *Config) time.Duration { return c.Issuer.AuthorizationCodeLifetime },
 	"Issuer.DynamicClientStaleTimeout": func(c *Config) time.Duration { return c.Issuer.DynamicClientStaleTimeout },
 	"Issuer.DynamicClientUnusedTimeout": func(c *Config) time.Duration { return c.Issuer.DynamicClientUnusedTimeout },
+	"Issuer.GroupFileRefreshInterval": func(c *Config) time.Duration { return c.Issuer.GroupFileRefreshInterval },
 	"Issuer.IDTokenLifetime": func(c *Config) time.Duration { return c.Issuer.IDTokenLifetime },
 	"Issuer.RefreshTokenGracePeriod": func(c *Config) time.Duration { return c.Issuer.RefreshTokenGracePeriod },
 	"Issuer.RefreshTokenLifetime": func(c *Config) time.Duration { return c.Issuer.RefreshTokenLifetime },
@@ -1533,12 +1539,15 @@ var allParameterNames = []string{
 	"GeoIPOverrides",
 	"GeoLocation",
 	"Issuer.AccessTokenLifetime",
+	"Issuer.AssertedGroupMembershipTTL",
 	"Issuer.AuthenticationSource",
 	"Issuer.AuthorizationCodeLifetime",
 	"Issuer.AuthorizationTemplates",
+	"Issuer.DisableGroupAutoCreation",
 	"Issuer.DynamicClientStaleTimeout",
 	"Issuer.DynamicClientUnusedTimeout",
 	"Issuer.GroupFile",
+	"Issuer.GroupFileRefreshInterval",
 	"Issuer.GroupRequirements",
 	"Issuer.GroupSource",
 	"Issuer.IDTokenLifetime",
@@ -2286,6 +2295,7 @@ var (
 	Director_FilterCachesInErrorState = BoolParam{"Director.FilterCachesInErrorState"}
 	DisableHttpProxy = BoolParam{"DisableHttpProxy"}
 	DisableProxyFallback = BoolParam{"DisableProxyFallback"}
+	Issuer_DisableGroupAutoCreation = BoolParam{"Issuer.DisableGroupAutoCreation"}
 	Issuer_OIDCPreferClaimsFromIDToken = BoolParam{"Issuer.OIDCPreferClaimsFromIDToken"}
 	Issuer_UserStripDomain = BoolParam{"Issuer.UserStripDomain"}
 	Logging_Client_DisableProgressBars = BoolParam{"Logging.Client.DisableProgressBars"}
@@ -2379,9 +2389,11 @@ var (
 	Director_StatTimeout = DurationParam{"Director.StatTimeout"}
 	Federation_TopologyReloadInterval = DurationParam{"Federation.TopologyReloadInterval"}
 	Issuer_AccessTokenLifetime = DurationParam{"Issuer.AccessTokenLifetime"}
+	Issuer_AssertedGroupMembershipTTL = DurationParam{"Issuer.AssertedGroupMembershipTTL"}
 	Issuer_AuthorizationCodeLifetime = DurationParam{"Issuer.AuthorizationCodeLifetime"}
 	Issuer_DynamicClientStaleTimeout = DurationParam{"Issuer.DynamicClientStaleTimeout"}
 	Issuer_DynamicClientUnusedTimeout = DurationParam{"Issuer.DynamicClientUnusedTimeout"}
+	Issuer_GroupFileRefreshInterval = DurationParam{"Issuer.GroupFileRefreshInterval"}
 	Issuer_IDTokenLifetime = DurationParam{"Issuer.IDTokenLifetime"}
 	Issuer_RefreshTokenGracePeriod = DurationParam{"Issuer.RefreshTokenGracePeriod"}
 	Issuer_RefreshTokenLifetime = DurationParam{"Issuer.RefreshTokenLifetime"}
@@ -2828,6 +2840,7 @@ func init() {
 		"Director.FilterCachesInErrorState": Director_FilterCachesInErrorState,
 		"DisableHttpProxy": DisableHttpProxy,
 		"DisableProxyFallback": DisableProxyFallback,
+		"Issuer.DisableGroupAutoCreation": Issuer_DisableGroupAutoCreation,
 		"Issuer.OIDCPreferClaimsFromIDToken": Issuer_OIDCPreferClaimsFromIDToken,
 		"Issuer.UserStripDomain": Issuer_UserStripDomain,
 		"Logging.Client.DisableProgressBars": Logging_Client_DisableProgressBars,
@@ -2918,9 +2931,11 @@ func init() {
 		"Director.StatTimeout": Director_StatTimeout,
 		"Federation.TopologyReloadInterval": Federation_TopologyReloadInterval,
 		"Issuer.AccessTokenLifetime": Issuer_AccessTokenLifetime,
+		"Issuer.AssertedGroupMembershipTTL": Issuer_AssertedGroupMembershipTTL,
 		"Issuer.AuthorizationCodeLifetime": Issuer_AuthorizationCodeLifetime,
 		"Issuer.DynamicClientStaleTimeout": Issuer_DynamicClientStaleTimeout,
 		"Issuer.DynamicClientUnusedTimeout": Issuer_DynamicClientUnusedTimeout,
+		"Issuer.GroupFileRefreshInterval": Issuer_GroupFileRefreshInterval,
 		"Issuer.IDTokenLifetime": Issuer_IDTokenLifetime,
 		"Issuer.RefreshTokenGracePeriod": Issuer_RefreshTokenGracePeriod,
 		"Issuer.RefreshTokenLifetime": Issuer_RefreshTokenLifetime,

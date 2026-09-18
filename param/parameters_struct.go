@@ -165,12 +165,15 @@ type Config struct {
 	GeoLocation string `mapstructure:"geolocation" yaml:"GeoLocation"`
 	Issuer struct {
 		AccessTokenLifetime time.Duration `mapstructure:"accesstokenlifetime" yaml:"AccessTokenLifetime"`
+		AssertedGroupMembershipTTL time.Duration `mapstructure:"assertedgroupmembershipttl" yaml:"AssertedGroupMembershipTTL"`
 		AuthenticationSource string `mapstructure:"authenticationsource" yaml:"AuthenticationSource"`
 		AuthorizationCodeLifetime time.Duration `mapstructure:"authorizationcodelifetime" yaml:"AuthorizationCodeLifetime"`
 		AuthorizationTemplates any `mapstructure:"authorizationtemplates" yaml:"AuthorizationTemplates"`
+		DisableGroupAutoCreation bool `mapstructure:"disablegroupautocreation" yaml:"DisableGroupAutoCreation"`
 		DynamicClientStaleTimeout time.Duration `mapstructure:"dynamicclientstaletimeout" yaml:"DynamicClientStaleTimeout"`
 		DynamicClientUnusedTimeout time.Duration `mapstructure:"dynamicclientunusedtimeout" yaml:"DynamicClientUnusedTimeout"`
 		GroupFile string `mapstructure:"groupfile" yaml:"GroupFile"`
+		GroupFileRefreshInterval time.Duration `mapstructure:"groupfilerefreshinterval" yaml:"GroupFileRefreshInterval"`
 		GroupRequirements []string `mapstructure:"grouprequirements" yaml:"GroupRequirements"`
 		GroupSource string `mapstructure:"groupsource" yaml:"GroupSource"`
 		IDTokenLifetime time.Duration `mapstructure:"idtokenlifetime" yaml:"IDTokenLifetime"`
@@ -755,12 +758,15 @@ type configWithType struct {
 	GeoLocation struct { Type string; Value string }
 	Issuer struct {
 		AccessTokenLifetime struct { Type string; Value time.Duration }
+		AssertedGroupMembershipTTL struct { Type string; Value time.Duration }
 		AuthenticationSource struct { Type string; Value string }
 		AuthorizationCodeLifetime struct { Type string; Value time.Duration }
 		AuthorizationTemplates struct { Type string; Value any }
+		DisableGroupAutoCreation struct { Type string; Value bool }
 		DynamicClientStaleTimeout struct { Type string; Value time.Duration }
 		DynamicClientUnusedTimeout struct { Type string; Value time.Duration }
 		GroupFile struct { Type string; Value string }
+		GroupFileRefreshInterval struct { Type string; Value time.Duration }
 		GroupRequirements struct { Type string; Value []string }
 		GroupSource struct { Type string; Value string }
 		IDTokenLifetime struct { Type string; Value time.Duration }

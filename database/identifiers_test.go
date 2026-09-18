@@ -40,6 +40,17 @@ func TestValidateIdentifier(t *testing.T) {
 		{"User2026", true},
 		{strings.Repeat("a", 64), true},
 
+		// The ID shape is reserved so names and IDs stay disjoint —
+		// otherwise a group could be named after another principal's
+		// slug and intercept references addressed to it.
+		{"a1b2c3d4", false},
+		{"0badf00d", false},
+		{"deadbeef", false},
+		{"A1B2C3D4", true},  // uppercase is not the slug shape
+		{"a1b2c3d", true},   // seven characters is not the slug shape
+		{"a1b2c3d45", true}, // nine characters is not the slug shape
+		{"a1b2c3dg", true},  // 'g' is not a hex digit
+
 		// banned characters — '/' is the most important
 		{"alice/admin", false},
 		{`alice\admin`, false},

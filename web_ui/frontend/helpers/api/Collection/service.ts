@@ -4,6 +4,7 @@ import { fetchApi } from '@/helpers/api';
 import {
   CollectionAcl,
   CollectionAclGrant,
+  CollectionAclGrantBySubject,
   CollectionPost,
   CollectionSummary,
 } from './types';
@@ -94,7 +95,7 @@ const CollectionService = {
   // name on write — pass either, the resulting row will store the name.
   grantAcl: async (
     collectionId: string,
-    grant: CollectionAclGrant
+    grant: CollectionAclGrant | CollectionAclGrantBySubject
   ): Promise<void> => {
     await fetchApi(
       async () =>
@@ -177,7 +178,12 @@ const CollectionService = {
   // may carry both `read` and `write` rows.
   revokeAcl: async (
     collectionId: string,
-    revoke: { groupId: string; role: string }
+    // Either name the target (`groupId`) or address the stored row
+    // directly (`subjectType` + `subjectId`). The latter is the only
+    // way to clear a grant whose group or user has been deleted.
+    revoke:
+      | { groupId: string; role: string }
+      | { subjectType: string; subjectId: string; role: string }
   ): Promise<void> => {
     await fetchApi(
       async () =>

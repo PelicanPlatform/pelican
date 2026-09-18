@@ -242,6 +242,27 @@ const GroupDetail: React.FC<GroupDetailProps> = ({
             canEdit={canEditAuthTemplateEligible}
             onChanged={onChanged}
           />
+          {group.source && group.source !== 'pelican' && (
+            <Box>
+              <Box display='flex' alignItems='center' gap={1}>
+                <Typography variant='body2' color='text.secondary'>
+                  Source:
+                </Typography>
+                <Chip size='small' label={group.source} color='info' />
+              </Box>
+              <Typography variant='caption' color='text.secondary'>
+                This group was recorded automatically the first time the{' '}
+                {group.source === 'unknown'
+                  ? 'configured group source'
+                  : `${group.source} group source`}{' '}
+                asserted its name. Membership is decided there and mirrored here
+                as people log in, so the list below may lag the provider, and a
+                member marked <em>via</em> a source can only be removed at that
+                provider. The group&apos;s name cannot be changed — it is what
+                the provider&apos;s assertion is matched against.
+              </Typography>
+            </Box>
+          )}
         </Stack>
       </Box>
 

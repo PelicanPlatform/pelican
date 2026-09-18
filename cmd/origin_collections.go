@@ -368,6 +368,28 @@ func makeCollectionAPIRequest(ctx context.Context, method, endpoint string, body
 }
 
 // formatOutput formats output as JSON or human-readable based on global flag
+// aclTargetLabel renders an ACL row's grant target. Rows are stored
+// against an immutable (subjectType, subjectId) pair; the server
+// resolves the current display handle into subjectName, which is empty
+// when the referenced group or user has been deleted — a row that
+// matches nobody and exists only to be revoked.
+func aclTargetLabel(acl database.CollectionACL) string {
+	switch acl.SubjectType {
+	case database.ACLSubjectAuthenticated:
+		return "All authenticated users"
+	case database.ACLSubjectUser:
+		if acl.SubjectName == "" {
+			return fmt.Sprintf("User: <deleted> (%s)", acl.SubjectID)
+		}
+		return fmt.Sprintf("User: %s", acl.SubjectName)
+	default:
+		if acl.SubjectName == "" {
+			return fmt.Sprintf("Group: <deleted> (%s)", acl.SubjectID)
+		}
+		return fmt.Sprintf("Group: %s", acl.SubjectName)
+	}
+}
+
 func formatOutput(data interface{}) error {
 	if outputJSON {
 		jsonBytes, err := json.MarshalIndent(data, "", "  ")
@@ -419,7 +441,7 @@ func formatOutput(data interface{}) error {
 		if len(v.ACLs) > 0 {
 			fmt.Printf("\nACLs (%d):\n", len(v.ACLs))
 			for _, acl := range v.ACLs {
-				fmt.Printf("  - Group: %s, Role: %s", acl.GroupID, acl.Role)
+				fmt.Printf("  - %s, Role: %s", aclTargetLabel(acl), acl.Role)
 				if acl.ExpiresAt != nil {
 					fmt.Printf(", Expires: %s", acl.ExpiresAt.Format(time.RFC3339))
 				}
@@ -447,7 +469,7 @@ func formatOutput(data interface{}) error {
 			return nil
 		}
 		for _, acl := range v {
-			fmt.Printf("Group: %s, Role: %s", acl.GroupID, acl.Role)
+			fmt.Printf("%s, Role: %s", aclTargetLabel(acl), acl.Role)
 			if acl.ExpiresAt != nil {
 				fmt.Printf(", Expires: %s", acl.ExpiresAt.Format(time.RFC3339))
 			}
@@ -917,11 +939,11 @@ func init() {
 	originCollectionsUpdateCmd.Flags().String("description", "", "New collection description")
 	originCollectionsUpdateCmd.Flags().String("visibility", "", "New collection visibility (private|public)")
 
-	originCollectionsACLGrantCmd.Flags().String("group-id", "", "Group ID for the ACL (required)")
+	originCollectionsACLGrantCmd.Flags().String("group-id", "", "The principal to grant to: a group name or ID, user-<username>, or @authenticated (required)")
 	originCollectionsACLGrantCmd.Flags().String("role", "", "Role for the ACL (required)")
 	originCollectionsACLGrantCmd.Flags().String("expires-at", "", "Expiration time in RFC3339 format (e.g., 2006-01-02T15:04:05Z07:00)")
 
-	originCollectionsACLRevokeCmd.Flags().String("group-id", "", "Group ID for the ACL (required)")
+	originCollectionsACLRevokeCmd.Flags().String("group-id", "", "The principal to revoke from: a group name or ID, user-<username>, or @authenticated (required)")
 	originCollectionsACLRevokeCmd.Flags().String("role", "", "Role for the ACL (required)")
 
 	originCollectionsOwnershipInviteCreateCmd.Flags().String("expires-in", "", "Expiration duration as a Go duration string (e.g. '168h'); defaults to 7 days server-side")

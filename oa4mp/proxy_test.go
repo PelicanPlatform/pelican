@@ -19,6 +19,7 @@
 package oa4mp
 
 import (
+	"strings"
 	"testing"
 	"time"
 
@@ -40,7 +41,35 @@ func newCollectionTestDB(t *testing.T) *gorm.DB {
 	require.NoError(t, err)
 	require.NoError(t, db.AutoMigrate(&database.Collection{}))
 	require.NoError(t, db.AutoMigrate(&database.CollectionACL{}))
+	// ACL rows are keyed on group / user IDs, so the resolver needs
+	// the tables those IDs live in.
+	require.NoError(t, db.AutoMigrate(&database.User{}, &database.Group{}, &database.GroupMember{}))
+	require.NoError(t, database.AutoMigrateCredentialsForTests(db))
 	return db
+}
+
+// seedUser inserts (or reuses) a user row. Test IDs follow the
+// "<username>-id" convention so a fixture can name the same user by
+// either handle without threading the slug around.
+func seedUser(t *testing.T, db *gorm.DB, username string) string {
+	t.Helper()
+	id := username + "-id"
+	var u database.User
+	require.NoError(t, db.Where(database.User{Username: username}).Attrs(database.User{
+		ID: id, Sub: username, Issuer: "https://idp.example.com",
+		Status: database.UserStatusActive,
+	}).FirstOrCreate(&u).Error)
+	return u.ID
+}
+
+// seedGroup inserts (or reuses) a group row and returns its ID.
+func seedGroup(t *testing.T, db *gorm.DB, name string) string {
+	t.Helper()
+	var g database.Group
+	require.NoError(t, db.Where(database.Group{Name: name}).Attrs(database.Group{
+		ID: "g-" + name, CreatedBy: "owner-user-id", OwnerID: "owner-user-id",
+	}).FirstOrCreate(&g).Error)
+	return g.ID
 }
 
 // seedCollection inserts a collection row directly. We bypass the
@@ -48,25 +77,40 @@ func newCollectionTestDB(t *testing.T) *gorm.DB {
 // ownership / authorization logic.
 func seedCollection(t *testing.T, db *gorm.DB, id, namespace string) {
 	t.Helper()
+	seedUser(t, db, "owner-user")
 	require.NoError(t, db.Create(&database.Collection{
 		ID:         id,
 		Name:       id,
-		Owner:      "owner-user",
 		OwnerID:    "owner-user-id",
 		Namespace:  namespace,
 		Visibility: database.VisibilityPrivate,
 	}).Error)
 }
 
-func seedACL(t *testing.T, db *gorm.DB, collectionID, groupID string, role database.AclRole, expiresAt *time.Time) {
+// seedACL grants a role on a collection to `target`, which is written
+// the way an operator would name it: a group name, `user-<username>`,
+// or the all-authenticated sentinel. The helper materializes whatever
+// row that names and stores the resulting ID, mirroring what
+// database.ResolveACLSubject does in production.
+func seedACL(t *testing.T, db *gorm.DB, collectionID, target string, role database.AclRole, expiresAt *time.Time) {
 	t.Helper()
-	require.NoError(t, db.Create(&database.CollectionACL{
+	acl := database.CollectionACL{
 		CollectionID: collectionID,
-		GroupID:      groupID,
 		Role:         role,
-		GrantedBy:    "owner-user",
+		GrantedBy:    "owner-user-id",
 		ExpiresAt:    expiresAt,
-	}).Error)
+	}
+	switch {
+	case target == database.AllAuthenticatedUsersACLGroup:
+		acl.SubjectType = database.ACLSubjectAuthenticated
+	case strings.HasPrefix(target, database.PersonalACLGroupPrefix):
+		acl.SubjectType = database.ACLSubjectUser
+		acl.SubjectID = seedUser(t, db, strings.TrimPrefix(target, database.PersonalACLGroupPrefix))
+	default:
+		acl.SubjectType = database.ACLSubjectGroup
+		acl.SubjectID = seedGroup(t, db, target)
+	}
+	require.NoError(t, db.Create(&acl).Error)
 }
 
 // TestGetUserCollectionScopes_StorageScopeBridge verifies the data-plane

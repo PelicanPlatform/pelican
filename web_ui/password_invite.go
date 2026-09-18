@@ -85,10 +85,10 @@ func handleCreatePasswordInvite(ctx *gin.Context) {
 	// User admins must not be able to mint setup links for system admins —
 	// otherwise a user admin could effectively claim a system admin
 	// account. Only system admins may do that.
-	if !isAdmin && IsSystemAdminUserID(database.ServerDatabase, id) {
+	if mustRefuse, why := MustTreatAsSystemAdmin(database.ServerDatabase, id); !isAdmin && mustRefuse {
 		ctx.JSON(http.StatusForbidden, server_structs.SimpleApiResp{
 			Status: server_structs.RespFailed,
-			Msg:    "user administrators cannot mint password invites for system admin accounts",
+			Msg:    "cannot mint a password invite for this account: " + why,
 		})
 		return
 	}
@@ -368,10 +368,10 @@ func handleClearUserPassword(ctx *gin.Context) {
 		})
 		return
 	}
-	if !isAdmin && IsSystemAdminUserID(database.ServerDatabase, id) {
+	if mustRefuse, why := MustTreatAsSystemAdmin(database.ServerDatabase, id); !isAdmin && mustRefuse {
 		ctx.JSON(http.StatusForbidden, server_structs.SimpleApiResp{
 			Status: server_structs.RespFailed,
-			Msg:    "user administrators cannot clear a system admin's password",
+			Msg:    "cannot clear this account's password: " + why,
 		})
 		return
 	}

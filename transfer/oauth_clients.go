@@ -83,7 +83,15 @@ func handleCreateOAuthClient(db *gorm.DB) gin.HandlerFunc {
 		// A client registered by a system administrator is shared: any caller
 		// with the pelican.transfer scope may bootstrap credentials with it.
 		// A client registered by a non-admin user is private to that user.
-		adminConfigured := web_ui.IsSystemAdminUserID(db, owner.UserID)
+		//
+		// Granting direction — a true answer here widens who may use the
+		// client — so this asks for demonstrable privilege and treats
+		// uncertainty as "not an admin", keeping the client private. The
+		// restricting counterpart (web_ui.MustTreatAsSystemAdmin) takes
+		// uncertainty the other way, and using it here would quietly
+		// share the clients of accounts nobody has established anything
+		// about.
+		adminConfigured := web_ui.IsConfirmedSystemAdmin(db, owner.UserID)
 
 		client := TransferOAuthClient{
 			ID:                    uuid.New().String(),

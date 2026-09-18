@@ -403,6 +403,17 @@ func handleCreateGroup(ctx *gin.Context) {
 			})
 			return
 		}
+		if errors.Is(err, database.ErrGroupNameConflict) {
+			// The name belongs to a group this server's identity
+			// provider asserts. Handing it to a local group would let
+			// its members stand in for the provider's group in every
+			// ACL keyed on it.
+			ctx.JSON(http.StatusConflict, server_structs.SimpleApiResp{
+				Status: server_structs.RespFailed,
+				Msg:    err.Error(),
+			})
+			return
+		}
 		if errors.Is(err, database.ErrInvalidIdentifier) || errors.Is(err, database.ErrInvalidDisplayName) {
 			ctx.JSON(http.StatusBadRequest, server_structs.SimpleApiResp{
 				Status: server_structs.RespFailed,
@@ -485,6 +496,11 @@ func handleUpdateGroup(ctx *gin.Context) {
 			ctx.JSON(http.StatusBadRequest, server_structs.SimpleApiResp{
 				Status: server_structs.RespFailed,
 				Msg:    "Group name cannot start with 'user-'",
+			})
+		} else if errors.Is(err, database.ErrGroupNameConflict) {
+			ctx.JSON(http.StatusConflict, server_structs.SimpleApiResp{
+				Status: server_structs.RespFailed,
+				Msg:    err.Error(),
 			})
 		} else if errors.Is(err, database.ErrInvalidIdentifier) {
 			ctx.JSON(http.StatusBadRequest, server_structs.SimpleApiResp{
@@ -840,6 +856,13 @@ func handleRemoveGroupMember(ctx *gin.Context) {
 				Status: server_structs.RespFailed,
 				Msg:    "you do not have permission to remove members from this group",
 			})
+		} else if errors.Is(err, database.ErrMembershipNotLocal) {
+			// Not a permission problem — no one, including an admin, can
+			// remove a membership the identity provider keeps asserting.
+			ctx.JSON(http.StatusConflict, server_structs.SimpleApiResp{
+				Status: server_structs.RespFailed,
+				Msg:    err.Error() + "; remove them at the identity provider instead",
+			})
 		} else {
 			ctx.JSON(http.StatusInternalServerError, server_structs.SimpleApiResp{
 				Status: server_structs.RespFailed,
@@ -993,10 +1016,10 @@ func handleUpdateUser(ctx *gin.Context) {
 		Sub:      ctx.GetString("OIDCSub"),
 	}
 	isSystemAdmin, _ := CheckAdmin(identity)
-	if !isSystemAdmin && IsSystemAdminUserID(database.ServerDatabase, id) {
+	if mustRefuse, why := MustTreatAsSystemAdmin(database.ServerDatabase, id); !isSystemAdmin && mustRefuse {
 		ctx.JSON(http.StatusForbidden, server_structs.SimpleApiResp{
 			Status: server_structs.RespFailed,
-			Msg:    "user administrators cannot modify system admin accounts",
+			Msg:    "cannot modify this account: " + why,
 		})
 		return
 	}
@@ -1171,10 +1194,10 @@ func handleDeleteUser(ctx *gin.Context) {
 	}
 
 	// User admins cannot delete system admin users
-	if !isAdmin && IsSystemAdminUserID(database.ServerDatabase, id) {
+	if mustRefuse, why := MustTreatAsSystemAdmin(database.ServerDatabase, id); !isAdmin && mustRefuse {
 		ctx.JSON(http.StatusForbidden, server_structs.SimpleApiResp{
 			Status: server_structs.RespFailed,
-			Msg:    "user administrators cannot delete system admin accounts",
+			Msg:    "cannot delete this account: " + why,
 		})
 		return
 	}
@@ -1825,10 +1848,10 @@ func handleUpdateUserStatus(ctx *gin.Context) {
 
 	// User admins cannot modify system admin users (only system admins can)
 	isSystemAdmin, _ := CheckAdmin(identity)
-	if !isSystemAdmin && IsSystemAdminUserID(database.ServerDatabase, id) {
+	if mustRefuse, why := MustTreatAsSystemAdmin(database.ServerDatabase, id); !isSystemAdmin && mustRefuse {
 		ctx.JSON(http.StatusForbidden, server_structs.SimpleApiResp{
 			Status: server_structs.RespFailed,
-			Msg:    "user administrators cannot modify system admin accounts",
+			Msg:    "cannot modify this account: " + why,
 		})
 		return
 	}
@@ -1948,10 +1971,10 @@ func handleClearAUPAgreement(ctx *gin.Context) {
 		Sub:      ctx.GetString("OIDCSub"),
 	}
 	isAdmin, _ := CheckAdmin(identity)
-	if !isAdmin && IsSystemAdminUserID(database.ServerDatabase, id) {
+	if mustRefuse, why := MustTreatAsSystemAdmin(database.ServerDatabase, id); !isAdmin && mustRefuse {
 		ctx.JSON(http.StatusForbidden, server_structs.SimpleApiResp{
 			Status: server_structs.RespFailed,
-			Msg:    "user administrators cannot clear a system admin's AUP acceptance",
+			Msg:    "cannot clear this account's AUP acceptance: " + why,
 		})
 		return
 	}
