@@ -4116,8 +4116,7 @@ description: |+
   Only allow approved caches to join the federation and serve files. If set to true, caches can
   successfully self-register or registered via registry, but director won't direct traffic to the cache.
 type: bool
-default: false
-osdf_default: true
+default: true
 components: ["registry"]
 ---
 name: Registry.RequireOriginApproval
@@ -4126,8 +4125,7 @@ description: |+
   successfully self-register or registered via registry, but director won't direct traffic to the origin,
   nor would files on the origin show up in the federation.
 type: bool
-default: false
-osdf_default: true
+default: true
 components: ["registry"]
 ---
 name: Registry.InactiveRegistrationTimeout
