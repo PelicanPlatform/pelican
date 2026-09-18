@@ -598,40 +598,78 @@ func SetXNamespaceHeaderWithCollections(hdr http.Header, collUrl string, bestNSA
 	setXNamespaceHeader(hdr, collUrl, bestNSAd)
 }
 
-// LongestNSMatch returns the namespace ad whose path is the longest logical prefix of reqPath.
-// For example, for path `/foo/bar/baz` and namespace ads `/foo` & `/foo/bar`, it returns the
-// ad for `/foo/bar`.  Returns nil if no ad matches.
-func LongestNSMatch(reqPath string, namespaceAds []NamespaceAd) *NamespaceAd {
+// nsPathCoversReq reports whether the namespace path nsBase covers the request
+// path reqPath, comparing at "/" segment boundaries rather than as raw byte
+// prefixes: /foo covers /foo and /foo/bar, but not /foobar.
+//
+// reqPath must carry a trailing "/" and nsBase must not; LongestNSMatchIndex
+// normalizes each of them once, so that scanning a whole federation's worth of
+// candidate ads adds no allocations of its own.
+func nsPathCoversReq(reqPath, nsBase string) bool {
+	// The "/" at the boundary is what separates a child path from a sibling
+	// whose name merely starts the same.  The length test keeps that index in
+	// range, and rejects most non-matches before the string comparison.
+	return len(reqPath) > len(nsBase) &&
+		reqPath[len(nsBase)] == '/' &&
+		strings.HasPrefix(reqPath, nsBase)
+}
+
+// LongestNSMatchIndex returns the index into namespaceAds of the ad whose path
+// is the longest logical prefix of reqPath, or -1 if no ad matches.  Ties go to
+// the earliest ad in the slice, matching LongestNSMatch's long-standing
+// behavior.
+//
+// The number of allocations does not grow with len(namespaceAds): the trailing
+// "/" each path is compared with is accounted for by index arithmetic instead
+// of being concatenated onto every candidate.  That matters because the
+// director calls this once per advertised server on every redirect, so the
+// per-candidate allocation the previous implementation made scaled with the
+// size of the federation.
+func LongestNSMatchIndex(reqPath string, namespaceAds []NamespaceAd) int {
 	// Normalize incoming path if needed --> adding the trailing / makes
-	// basic prefix matching safer
+	// basic prefix matching safer.  The director's getAdsForPath has already
+	// done this before its per-server loop, so the concatenation here does not
+	// land on the hot path.
 	if !strings.HasSuffix(reqPath, "/") {
 		reqPath += "/"
 	}
 
-	var bestFedPrefix string
-	var bestNamespace *NamespaceAd
-	for _, ns := range namespaceAds {
-		// Create a copy of ns to avoid reusing the loop variable
-		currentNS := ns
-
-		// Additionally normalize stored namespace paths
-		nsPath := currentNS.Path
-		if !strings.HasSuffix(currentNS.Path, "/") {
-			nsPath += "/"
-		}
-
-		if !strings.HasPrefix(reqPath, nsPath) {
-			// This namespace doesn't match the request path, skip it
+	best := -1
+	bestLen := -1
+	for i := range namespaceAds {
+		// TrimSuffix returns a substring, so this costs nothing.
+		nsBase := strings.TrimSuffix(namespaceAds[i].Path, "/")
+		// Skip candidates that cannot beat the incumbent before comparing any
+		// bytes.  Two equal-length prefixes of one reqPath are necessarily the
+		// same string, so `<=` is what keeps the first ad of a tie.
+		if len(nsBase) <= bestLen {
 			continue
 		}
-
-		if bestFedPrefix == "" || len(nsPath) > len(bestFedPrefix) {
-			bestFedPrefix = nsPath
-			bestNamespace = &currentNS
+		if !nsPathCoversReq(reqPath, nsBase) {
+			continue
 		}
+		best, bestLen = i, len(nsBase)
 	}
+	return best
+}
 
-	return bestNamespace
+// LongestNSMatch returns the namespace ad whose path is the longest logical prefix of reqPath.
+// For example, for path `/foo/bar/baz` and namespace ads `/foo` & `/foo/bar`, it returns the
+// ad for `/foo/bar`.  Returns nil if no ad matches.
+//
+// The returned ad is a shallow copy: its top-level fields are detached from
+// the input, but the embedded Generation and Issuer slices still alias the
+// caller's slice -- on the director, live TTL-cache memory read concurrently
+// by other goroutines.  Do not mutate through those slices; copy them first.
+// Callers on a hot path that only need to read the winning ad should use
+// LongestNSMatchIndex, which makes no copy at all.
+func LongestNSMatch(reqPath string, namespaceAds []NamespaceAd) *NamespaceAd {
+	idx := LongestNSMatchIndex(reqPath, namespaceAds)
+	if idx < 0 {
+		return nil
+	}
+	bestNamespace := namespaceAds[idx]
+	return &bestNamespace
 }
 
 func NewRedirectInfoFromIP(ipAddr string) *RedirectInfo {

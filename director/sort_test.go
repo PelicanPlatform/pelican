@@ -23,6 +23,8 @@ import (
 	_ "embed"
 	"net/http"
 	"net/url"
+	"strings"
+	"sync"
 	"testing"
 
 	"github.com/gin-gonic/gin"
@@ -300,6 +302,63 @@ func TestGetAdsForPath(t *testing.T) {
 			}
 		})
 	}
+
+	// getAdsForPath trims the trailing "/" that topology puts on a namespace
+	// path, and it selects the winning namespace ad by index into the
+	// Advertisement held in the TTL cache -- memory other request goroutines
+	// are reading at the same time.  The trim must therefore land on a copy,
+	// never on the cached ad.  /chtc/PUBLIC2/ is the one export stored with a
+	// trailing slash, so it is the case that would catch a write-through.
+	t.Run("does not mutate the cached namespace ad", func(t *testing.T) {
+		cachedPath := func() string {
+			for _, ad := range getServerAdsSnapshot() {
+				for _, nsAd := range ad.NamespaceAds {
+					if strings.TrimSuffix(nsAd.Path, "/") == "/chtc/PUBLIC2" {
+						return nsAd.Path
+					}
+				}
+			}
+			return ""
+		}
+
+		require.Equal(t, "/chtc/PUBLIC2/", cachedPath(),
+			"test fixture no longer stores a trailing-slash export; this test cannot catch a write-through")
+
+		oAds, _ := getAdsForPath("/chtc/PUBLIC2/some/object")
+		require.NotEmpty(t, oAds)
+		assert.Equal(t, "/chtc/PUBLIC2", oAds[0].NamespaceAd.Path,
+			"the returned copy should have the trailing slash trimmed")
+		assert.Equal(t, "/chtc/PUBLIC2/", cachedPath(),
+			"getAdsForPath wrote the trimmed path back into the TTL cache")
+
+		// Mutating what we were handed must also not reach the cache: callers
+		// treat these as detached copies.
+		oAds[0].NamespaceAd.Path = "/mutated-by-caller"
+		oAds[0].NamespaceAd.Caps.PublicReads = !oAds[0].NamespaceAd.Caps.PublicReads
+		assert.Equal(t, "/chtc/PUBLIC2/", cachedPath())
+	})
+
+	// Concurrent readers plus the trim above is precisely the shape the race
+	// detector is for; run the same call from several goroutines so a future
+	// refactor that writes through the returned alias fails under -race
+	// instead of corrupting a live federation's ads.
+	t.Run("is safe to call concurrently", func(t *testing.T) {
+		var wg sync.WaitGroup
+		for i := 0; i < 8; i++ {
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				for j := 0; j < 50; j++ {
+					if oAds, _ := getAdsForPath("/chtc/PUBLIC2/some/object"); len(oAds) > 0 {
+						oAds[0].NamespaceAd.Path = "/mutated-by-caller"
+					}
+					getAdsForPath("/chtc/PUBLIC")
+					getAdsForPath("/does/not/exist")
+				}
+			}()
+		}
+		wg.Wait()
+	})
 }
 
 func TestAllPredicatesPass(t *testing.T) {
