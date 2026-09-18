@@ -24,7 +24,7 @@ To register a prefix manually in advance, see [Federation Namespace Prefix Regis
 
 * **Transition Rules:** Claiming and submitting an `Incomplete` registration moves it to `Pending`. An administrator then moves it to `Approved` or `Denied`.
 * **Re-submitting:** Denial is non-final. Editing and resubmitting a `Denied` registration returns it to `Pending`.
-* **Trust Boundary:** Approval is the primary trust boundary. The Director only routes traffic to `Approved` services, and once approved, core properties can only be altered by an administrator.
+* **Trust Boundary:** Approval is the primary trust boundary. The Director only routes traffic to `Approved` services. Once approved, the owner can still update the description, site name, institution, and security contact; the prefix, public key, custom fields, and ownership can only be altered by an administrator (ownership through a transfer invite).
 
 ## How Services Register
 
@@ -63,6 +63,7 @@ Once claimed, you will be directed to the registration form:
 
 As a registration owner, you can manage your resource through the Registry UI:
 
+* **Edit Approved Entries:** From the card of an `Approved` registration you own, click the pencil button to update its description, site name, institution, and security contact. The other fields are locked; ask a federation administrator to change them.
 * **Resubmit Denied Entries:** Your `Denied` registrations are listed at `/view/registry/denied/` on the Registry (they do not appear on the dashboard). Edit one and submit it to return it to the `Pending` queue.
 * **Transfer Ownership:** From the card of an `Approved` registration you own, generate a single-use invite link (valid for 7 days; it is shown only once). Once a colleague logs into their Pelican account and redeems the link, ownership is transferred to them; the second redemption of the same link will be rejected.
 

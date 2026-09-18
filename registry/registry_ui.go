@@ -357,7 +357,10 @@ func resolveRegistrationOwnership(ctx *gin.Context, id int, userId string, isAdm
 
 // Create a new namespace registration or update existing namespace registration.
 //
-// For update, only admin-user can update an existing registration if it's been approved already.
+// For update, an admin can change any field of any registration. The owner of an approved
+// registration can change only its descriptive fields (description, site name, institution,
+// security contact); the prefix, public key, custom fields, and ownership stay pinned to
+// their stored values.
 //
 // One caveat in updating is that if the namespace to update was a legacy registration, i.e. It doesn't have
 // AdminMetaData populated, an update __will__ populate the AdminMetaData field and update
@@ -604,11 +607,22 @@ func createUpdateNamespace(ctx *gin.Context, isUpdate bool) {
 				}
 			}
 			if existingNs.AdminMetadata.Status == server_structs.RegApproved {
-				log.Errorf("User '%s' is trying to modify approved namespace registration with id=%d", user, ns.ID)
-				ctx.JSON(http.StatusForbidden, server_structs.SimpleApiResp{
-					Status: server_structs.RespFailed,
-					Msg:    "You don't have permission to modify an approved registration. Please contact your federation administrator"})
-				return
+				if !belongsTo {
+					log.Errorf("User '%s' is trying to modify approved namespace registration with id=%d", user, ns.ID)
+					ctx.JSON(http.StatusForbidden, server_structs.SimpleApiResp{
+						Status: server_structs.RespFailed,
+						Msg:    "You don't have permission to modify an approved registration. Please contact your federation administrator"})
+					return
+				}
+				// The owner of an approved registration may change only its
+				// descriptive fields: description, site name, institution, and
+				// security contact. The prefix, public key, and custom fields
+				// identify the registration within the federation, so they stay
+				// pinned to their stored values and the admin's approval keeps
+				// meaning what was reviewed. Ownership is pinned above.
+				ns.Prefix = existingNs.Prefix
+				ns.Pubkey = existingNs.Pubkey
+				ns.CustomFields = existingNs.CustomFields
 			}
 
 			// If non-admin user accesses a namespace with user_id != user but with access_token
