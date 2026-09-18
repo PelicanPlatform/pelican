@@ -49,6 +49,7 @@ import (
 	"github.com/pelicanplatform/pelican/server_structs"
 	"github.com/pelicanplatform/pelican/server_utils"
 	"github.com/pelicanplatform/pelican/ssh_posixv2"
+	"github.com/pelicanplatform/pelican/token"
 	"github.com/pelicanplatform/pelican/token_scopes"
 	"github.com/pelicanplatform/pelican/utils"
 )
@@ -272,40 +273,33 @@ func ResetHandlers() {
 
 // extractTokens extracts bearer tokens from the request
 // Tokens can come from:
-// 1. Authorization header (may have multiple comma-separated tokens)
-// 2. Query parameter "access_token" (standard)
-// 3. Query parameter "authz" (non-standard)
+//  1. Authorization header (may have multiple comma-separated tokens)
+//  2. Query parameter "access_token" (standard)
+//  3. Query parameter "authz" (non-standard)
+//
+// A "Bearer" scheme is required in the header and tolerated in either query
+// parameter: an XRootD cache forwards the client's Authorization header to the
+// origin as "?authz=Bearer%20<jwt>" (see token.CutBearerPrefix).
 func extractTokens(r *http.Request) []string {
 	tokens := make([]string, 0)
 
-	// Check Authorization header
-	authHeader := r.Header.Get("Authorization")
-	if authHeader != "" {
+	// Check Authorization header; entries with any other scheme are ignored
+	if authHeader := r.Header.Get("Authorization"); authHeader != "" {
 		// Split by comma to handle multiple tokens
 		for _, part := range strings.Split(authHeader, ",") {
-			part = strings.TrimSpace(part)
-			// Case-insensitive bearer token extraction
-			if len(part) > 7 && strings.ToLower(part[:7]) == "bearer " {
-				token := strings.TrimSpace(part[7:])
-				if token != "" {
-					tokens = append(tokens, token)
-				}
+			if tok, found := token.CutBearerPrefix(part); found && tok != "" {
+				tokens = append(tokens, tok)
 			}
 		}
 	}
 
 	// Check query parameters (may be multi-valued)
 	query := r.URL.Query()
-	// Handle multi-valued access_token parameters
-	for _, accessToken := range query["access_token"] {
-		if accessToken != "" {
-			tokens = append(tokens, accessToken)
-		}
-	}
-	// Handle multi-valued authz parameters
-	for _, authzToken := range query["authz"] {
-		if authzToken != "" {
-			tokens = append(tokens, authzToken)
+	for _, key := range []string{"access_token", "authz"} {
+		for _, val := range query[key] {
+			if tok := token.StripBearerPrefix(val); tok != "" {
+				tokens = append(tokens, tok)
+			}
 		}
 	}
 
