@@ -4914,6 +4914,14 @@ description: |+
   did not create. With it set, an asserted group has no ID, so it cannot
   be named in a collection ACL, and its name remains available for any
   authenticated user to claim.
+
+  This knob does not affect the group names listed in
+  `Server.AdminGroups`, `Server.UserAdminGroups` or
+  `Server.CollectionAdminGroups`. Those are names the operator chose,
+  not names observed from a provider, and Pelican always records them at
+  startup so that no user can create a group shadowing one of them. With
+  auto-creation disabled nothing else would reserve them, which is
+  precisely when that matters most.
 type: bool
 default: false
 components: ["origin", "registry", "director", "cache"]
@@ -4964,9 +4972,9 @@ description: |+
   from this source continuously fresh rather than only as fresh as each
   user's last login.
 
-  Only takes effect when `Issuer.GroupFile` is set. Set to 0 to disable
-  the periodic refresh, in which case file-derived memberships refresh
-  at login like the other sources.
+  Only takes effect when `Issuer.GroupSource` is `file` and
+  `Issuer.GroupFile` is set. Set to 0 to disable the periodic refresh,
+  in which case file-derived memberships refresh at login instead.
 type: duration
 default: 15m
 components: ["origin", "registry", "director", "cache"]
@@ -5002,6 +5010,11 @@ description: |+
   The location of a file containing group information.  The file should contain a single JSON object with
   keys corresponding to the "user" name and the value a list of strings that are interpreted as the user's
   groups.
+
+  Only consulted when `Issuer.GroupSource` is set to `file`. The file is
+  not a second source layered under another one: on a server configured
+  for `oidc` or `github` it is never read, so a user missing from it has
+  no effect on their group membership.
 type: string
 default: none
 components: ["origin"]

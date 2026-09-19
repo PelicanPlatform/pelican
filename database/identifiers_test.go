@@ -229,3 +229,21 @@ func TestValidateDisplayName(t *testing.T) {
 		}
 	}
 }
+
+// The slug-shape rule is hygiene, and hygiene is only enforceable
+// against a name somebody here chose. A username derived from an
+// identity provider's claim is not such a name: applying the rule there
+// turned "your provider's subject happens to be eight hex characters"
+// into "you cannot log in".
+func TestSlugShapeRuleAppliesOnlyToChosenNames(t *testing.T) {
+	assert.Error(t, ValidateIdentifier("a1b2c3d4"),
+		"a name a person types is still held to the hygiene rule")
+
+	assert.Equal(t, "a1b2c3d4", SanitizeIdentifier("a1b2c3d4"),
+		"a claim from an identity provider must survive sanitisation, not be refused for its shape")
+
+	// The rules that exist because of what an identifier is embedded in
+	// still apply to both.
+	assert.Equal(t, "", SanitizeIdentifier("/"), "nothing salvageable")
+	assert.Equal(t, "a.b", SanitizeIdentifier("a..b"), "the path-traversal guard still applies")
+}

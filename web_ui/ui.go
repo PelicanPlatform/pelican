@@ -831,7 +831,7 @@ func registerCommonEndpoints(routerGroup *gin.RouterGroup) error {
 
 	// /users/* is gated by UserAdminAuthHandler — accepts holders of either
 	// server.admin OR server.user_admin. Per-target guards inside the
-	// handlers (IsSystemAdminUserID) prevent a user-admin from acting on a
+	// handlers (MustTreatAsSystemAdmin) prevent a user-admin from acting on a
 	// system-admin account. Self-service for ordinary users lives under
 	// /me/* (see below). Even admins must be AUP-compliant.
 	//

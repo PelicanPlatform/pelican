@@ -966,7 +966,7 @@ func assertedGroupSourceConfigured() bool {
 // able to use, and which a "user administrator" (per the design
 // contract: manage non-admin users and unprivileged groups) is also
 // expected to use. Per-target guards inside the handlers (notably
-// IsSystemAdminUserID) prevent a user-admin from acting on a
+// MustTreatAsSystemAdmin) prevent a user-admin from acting on a
 // system-admin account; this gate just decides who clears the door.
 //
 // Cascade behind AuthHandler (cookie/bearer parsing must have run
