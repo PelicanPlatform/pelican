@@ -392,3 +392,39 @@ func TestGroupAdminObservationLatch(t *testing.T) {
 		}
 	})
 }
+
+// TestStaleAdminGroupMembershipCannotManageAGroup covers the other
+// granting path that used to read memberships raw: a group whose
+// administrator is itself a group. Membership of that admin group is
+// mirrored, so it expires like any other assertion — otherwise a user
+// the provider removed from the admin group a year ago could still add
+// and remove members.
+func TestStaleAdminGroupMembershipCannotManageAGroup(t *testing.T) {
+	db := setupCollectionTestDB(t)
+	withExternalWebURL(t, db)
+	withMembershipTTL(t, time.Hour)
+
+	owner := mkUser(t, db, "u-gowner", "gowner")
+	deputy := mkUser(t, db, "u-deputy", "deputy")
+
+	// "ops" is asserted by the provider and administers "storage".
+	mustEnsureAssertedGroups(t, db, GroupSourceOIDC, []string{"ops"})
+	var ops Group
+	require.NoError(t, db.First(&ops, "name = ?", "ops").Error)
+	require.NoError(t, MirrorAssertedGroupMemberships(db, GroupSourceOIDC, deputy.ID, []string{"ops"}))
+
+	storage, err := CreateGroup(db, "storage", "", "", Creator{UserID: owner.ID}, "", false)
+	require.NoError(t, err)
+	require.NoError(t, db.Model(&Group{}).Where("id = ?", storage.ID).
+		Updates(map[string]any{"admin_id": ops.ID, "admin_type": AdminTypeGroup}).Error)
+	require.NoError(t, db.First(storage, "id = ?", storage.ID).Error)
+
+	assert.True(t, CanManageGroup(db, storage, deputy.ID, false),
+		"precondition: a freshly asserted membership of the admin group does confer management")
+
+	ageMembership(t, db, ops.ID, deputy.ID, 48*time.Hour)
+	require.NoError(t, db.First(storage, "id = ?", storage.ID).Error)
+
+	assert.False(t, CanManageGroup(db, storage, deputy.ID, false),
+		"a mirrored membership past the TTL must not still confer authority over the group")
+}

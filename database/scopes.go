@@ -380,7 +380,7 @@ func EffectiveScopes(db *gorm.DB, userID string, externalGroupNames []string) ([
 		}
 		if err := db.Table("group_scopes").
 			Select("group_scopes.scope").
-			Joins("JOIN groups ON groups.id = group_scopes.group_id").
+			Joins("JOIN groups ON groups.id = group_scopes.group_id AND groups.deleted_at IS NULL").
 			Where("groups.name IN ?", externalGroupNames).
 			Scan(&extRows).Error; err != nil {
 			return nil, err
