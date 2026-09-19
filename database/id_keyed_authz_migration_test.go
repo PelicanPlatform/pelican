@@ -245,16 +245,22 @@ func TestIDKeyedAPIKeysAndGroupSoftDeleteMigration(t *testing.T) {
 	t.Run("api_keys.created_by becomes a user ID, or empty", func(t *testing.T) {
 		db, sqlDB := migrateToVersion(t, versionBeforeIDKeyedAPIKeys)
 
-		require.NoError(t, db.Exec(`INSERT INTO users (id, username, sub, issuer, created_by) VALUES
-			('u-alice', 'alice', 'alice@idp', 'https://idp.example', 'unknown')`).Error)
-		// Three shapes the column has held: a username (what the create
-		// handler wrote), an ID (what the code always assumed), and a
-		// name that resolves to nobody at all.
+		// alice predates her key. bob is the reuse case: the original
+		// bob was deleted and someone new was onboarded under the same
+		// username AFTER the old bob's key was minted.
+		require.NoError(t, db.Exec(`INSERT INTO users (id, username, sub, issuer, created_by, created_at) VALUES
+			('u-alice',   'alice', 'alice@idp', 'https://idp.example', 'unknown', '2025-06-01'),
+			('u-bob-new', 'bob',   'bob2@idp',  'https://idp.example', 'unknown', '2026-03-01')`).Error)
+		// Four shapes the column has held: a username (what the create
+		// handler wrote), an ID (what the code always assumed), a name
+		// that resolves to nobody at all, and a name that resolves to
+		// somebody who is not who minted the key.
 		require.NoError(t, db.Exec(`INSERT INTO api_keys (id, name, hashed_value, scopes, expires_at, created_at, created_by) VALUES
 			('k1', 'by-name',    'h1', 'web_ui.access', '2030-01-01', '2026-01-01', 'alice'),
 			('k2', 'by-id',      'h2', 'web_ui.access', '2030-01-01', '2026-01-01', 'u-alice'),
 			('k3', 'by-nobody',  'h3', 'web_ui.access', '2030-01-01', '2026-01-01', 'long-gone'),
-			('k4', 'pre-column', 'h4', 'web_ui.access', '2030-01-01', '2026-01-01', '')`).Error)
+			('k4', 'pre-column', 'h4', 'web_ui.access', '2030-01-01', '2026-01-01', ''),
+			('k5', 'by-reused',  'h5', 'web_ui.access', '2030-01-01', '2026-01-01', 'bob')`).Error)
 
 		finishMigrations(t, sqlDB)
 
@@ -263,12 +269,15 @@ func TestIDKeyedAPIKeysAndGroupSoftDeleteMigration(t *testing.T) {
 			CreatedBy string
 		}
 		require.NoError(t, db.Table("api_keys").Select("id, created_by").Order("id").Scan(&rows).Error)
-		require.Len(t, rows, 4)
+		require.Len(t, rows, 5)
 		assert.Equal(t, "u-alice", rows[0].CreatedBy, "a username must be converted to the account's ID")
 		assert.Equal(t, "u-alice", rows[1].CreatedBy, "a value that is already an ID is left alone")
 		assert.Empty(t, rows[2].CreatedBy,
 			"a creator that resolves to nobody becomes empty, which fails closed on user-grantable scopes")
 		assert.Empty(t, rows[3].CreatedBy)
+		assert.Empty(t, rows[4].CreatedBy,
+			"a username whose current holder was onboarded after the key was minted is NOT that key's creator; "+
+				"binding it would be the very handle-reuse this migration exists to close")
 	})
 
 	// Rebuilding `groups` drops the old table, and SQLite treats that as
@@ -285,12 +294,21 @@ func TestIDKeyedAPIKeysAndGroupSoftDeleteMigration(t *testing.T) {
 			VALUES ('g-ops', 'ops', 'unknown', 1, 'pelican')`).Error)
 		require.NoError(t, db.Exec(`INSERT INTO group_members (group_id, user_id, added_by)
 			VALUES ('g-ops', 'u-alice', 'unknown')`).Error)
+		// group_scopes cascades from groups too, and would go the same
+		// way — a group silently losing its granted scopes rather than
+		// its members.
+		require.NoError(t, db.Exec(`INSERT INTO group_scopes (group_id, scope, granted_by)
+			VALUES ('g-ops', 'web_ui.access', 'unknown')`).Error)
 
 		finishMigrations(t, sqlDB)
 
 		var members int64
 		require.NoError(t, db.Model(&GroupMember{}).Count(&members).Error)
 		assert.EqualValues(t, 1, members, "the membership must survive the rebuild")
+
+		var scopes int64
+		require.NoError(t, db.Table("group_scopes").Count(&scopes).Error)
+		assert.EqualValues(t, 1, scopes, "the granted scope must survive the rebuild")
 
 		// And the schema is still sound afterwards: foreign keys back on,
 		// no dangling references left behind by the swap.
