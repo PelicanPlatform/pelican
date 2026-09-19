@@ -271,6 +271,34 @@ func TestIDKeyedAPIKeysAndGroupSoftDeleteMigration(t *testing.T) {
 		assert.Empty(t, rows[3].CreatedBy)
 	})
 
+	// Rebuilding `groups` drops the old table, and SQLite treats that as
+	// deleting every row in it — firing group_members' ON DELETE CASCADE
+	// and taking every membership on the server with it. The first
+	// version of this migration did exactly that; the first version of
+	// this test did not notice, because it seeded no memberships.
+	t.Run("rebuilding groups does not cascade away group memberships", func(t *testing.T) {
+		db, sqlDB := migrateToVersion(t, versionBeforeIDKeyedAPIKeys)
+		require.NoError(t, db.Exec(`PRAGMA foreign_keys = ON`).Error)
+		require.NoError(t, db.Exec(`INSERT INTO users (id, username, sub, issuer, created_by) VALUES
+			('u-alice', 'alice', 'alice@idp', 'https://idp.example', 'unknown')`).Error)
+		require.NoError(t, db.Exec(`INSERT INTO groups (id, name, created_by, auth_template_eligible, source)
+			VALUES ('g-ops', 'ops', 'unknown', 1, 'pelican')`).Error)
+		require.NoError(t, db.Exec(`INSERT INTO group_members (group_id, user_id, added_by)
+			VALUES ('g-ops', 'u-alice', 'unknown')`).Error)
+
+		finishMigrations(t, sqlDB)
+
+		var members int64
+		require.NoError(t, db.Model(&GroupMember{}).Count(&members).Error)
+		assert.EqualValues(t, 1, members, "the membership must survive the rebuild")
+
+		// And the schema is still sound afterwards: foreign keys back on,
+		// no dangling references left behind by the swap.
+		var violations []map[string]interface{}
+		require.NoError(t, db.Raw("PRAGMA foreign_key_check").Scan(&violations).Error)
+		assert.Empty(t, violations, "the rebuilt table must leave no foreign-key violations")
+	})
+
 	t.Run("groups gain a tombstone and release their name", func(t *testing.T) {
 		db, sqlDB := migrateToVersion(t, versionBeforeIDKeyedAPIKeys)
 		require.NoError(t, db.Exec(`INSERT INTO groups (id, name, created_by, auth_template_eligible, source)

@@ -936,7 +936,7 @@ func assertedGroupSourceConfigured() bool {
 		return true
 	}
 	switch strings.ToLower(param.Issuer_GroupSource.GetString()) {
-	case GroupSourceTypeOIDC, GroupSourceTypeFile, GroupSourceTypeGitHub:
+	case database.GroupSourceTypeOIDC, database.GroupSourceTypeFile, database.GroupSourceTypeGitHub:
 		return true
 	}
 	return false
@@ -1190,17 +1190,18 @@ func loginHandler(ctx *gin.Context) {
 		}
 	}
 
-	groups, err := generateGroupInfo(userRecord.Username)
+	groups, consulted, err := GroupsForLogin(userRecord)
 	if err != nil {
-		log.Errorf("Failed to generate group info for user %s: %s", userRecord.Username, err)
+		log.Errorf("Failed to determine group membership for user %s: %s", userRecord.Username, err)
 		groups = nil
 	}
-	// The group file is read here regardless of Issuer.GroupSource, so
-	// this path is a `file` assertion even on a server configured for
-	// oidc or github. Recording it under that source keeps each
-	// provider's mirrored memberships separate — see
-	// MirrorAssertedGroupMemberships.
-	RecordAssertedGroups(database.GroupSourceFile, userRecord.ID, userRecord.Username, groups)
+	// Record only what the configured source actually told us. `consulted`
+	// is false when this path could not ask it — an `oidc` server reached
+	// through a password login — and recording an empty list there would
+	// assert, falsely, that the account is in no groups.
+	if consulted {
+		RecordAssertedGroups(database.ConfiguredGroupSource(), userRecord.ID, userRecord.Username, groups)
+	}
 
 	setLoginCookie(ctx, userRecord, groups)
 
@@ -1267,11 +1268,10 @@ func initLoginHandler(ctx *gin.Context) {
 		return
 	}
 
-	groups, err := generateGroupInfo("admin")
-	if err != nil {
-		log.Errorln("Failed to generate group info for admin:", err)
-		groups = nil
-	}
+	// Resolved after the admin's user record exists, below: the
+	// configured source may need the account's ID, and recording a
+	// membership certainly does.
+	var groups []string
 
 	// Get or create the admin user in the database. The init-code path
 	// is the bootstrap admin authenticating themselves — self-enrolled.
@@ -1286,9 +1286,14 @@ func initLoginHandler(ctx *gin.Context) {
 			})
 		return
 	}
-	// Same `file` assertion as the password-login path; recorded after
-	// the user record exists, since mirroring a membership needs its ID.
-	RecordAssertedGroups(database.GroupSourceFile, userRecord.ID, userRecord.Username, groups)
+	groups, consulted, err := GroupsForLogin(userRecord)
+	if err != nil {
+		log.Errorln("Failed to determine group membership for admin:", err)
+		groups = nil
+	}
+	if consulted {
+		RecordAssertedGroups(database.ConfiguredGroupSource(), userRecord.ID, userRecord.Username, groups)
+	}
 
 	setLoginCookie(ctx, userRecord, groups)
 }

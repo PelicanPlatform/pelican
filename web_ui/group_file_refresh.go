@@ -47,6 +47,15 @@ import (
 // rather than returned — a malformed group file must not take the
 // server down, and the next pass will pick up a corrected one.
 func LaunchPeriodicGroupFileRefresh(ctx context.Context, egrp *errgroup.Group) {
+	// Only when the file is THE group source. It used to run whenever a
+	// group file existed, which made it a second provider layered under
+	// oidc or github — and since it walks every account, it asserted the
+	// file's silence about an OIDC user as "this user is in no groups",
+	// ruling their admin latch out on evidence it never had.
+	if database.ConfiguredGroupSource() != database.GroupSourceFile {
+		log.Debug("Periodic group-file refresh is disabled (Issuer.GroupSource is not 'file')")
+		return
+	}
 	interval := param.Issuer_GroupFileRefreshInterval.GetDuration()
 	if interval <= 0 {
 		log.Debug("Periodic group-file refresh is disabled (Issuer.GroupFileRefreshInterval is 0)")
@@ -97,10 +106,34 @@ func refreshGroupFileMemberships(ctx context.Context) {
 	if database.ServerDatabase == nil || ctx.Err() != nil {
 		return
 	}
+	// Checked here and not only at launch. This function walks EVERY
+	// account and records what the file says about each, so running it
+	// when the file is not the configured source is precisely the bug
+	// it caused: the file has no entry for an OIDC account, the empty
+	// answer gets recorded as an observation, and the account's admin
+	// latch is ruled out on groups that were never consulted.
+	if database.ConfiguredGroupSource() != database.GroupSourceFile {
+		return
+	}
 	users, err := database.ListUsers(database.ServerDatabase)
 	if err != nil {
 		if ctx.Err() == nil {
 			log.Warnf("Failed to list users for the periodic group-file refresh: %v", err)
+		}
+		return
+	}
+	// Read and parse the file ONCE. Per-user reads meant a file edited
+	// mid-pass could be seen half-old and half-new, and a read error
+	// partway through left earlier accounts reconciled against a file
+	// later accounts never saw.
+	table, err := readGroupFile()
+	if err != nil {
+		// A read or parse failure is about the file, not about any user.
+		// Critically it is NOT an assertion that everyone is in no
+		// groups: returning here leaves every mirrored membership alone
+		// rather than retracting them all.
+		if ctx.Err() == nil {
+			log.Warnf("Periodic group-file refresh aborted; memberships left as they were: %v", err)
 		}
 		return
 	}
@@ -109,16 +142,7 @@ func refreshGroupFileMemberships(ctx context.Context) {
 		if ctx.Err() != nil {
 			return
 		}
-		groups, err := generateGroupInfo(user.Username)
-		if err != nil {
-			// A read or parse failure is about the file, not this user;
-			// one complaint is enough.
-			if ctx.Err() == nil {
-				log.Warnf("Periodic group-file refresh aborted: %v", err)
-			}
-			return
-		}
-		RecordAssertedGroups(database.GroupSourceFile, user.ID, user.Username, groups)
+		RecordAssertedGroups(database.GroupSourceFile, user.ID, user.Username, table[user.Username])
 		refreshed++
 	}
 	if ctx.Err() == nil {

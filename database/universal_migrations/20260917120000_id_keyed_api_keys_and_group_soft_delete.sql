@@ -1,3 +1,19 @@
+-- +goose NO TRANSACTION
+--
+-- Required by step 2. `group_members.group_id` carries
+-- `REFERENCES groups(id) ON DELETE CASCADE`, and rebuilding `groups`
+-- necessarily drops the old table — which SQLite treats as deleting
+-- every row in it, firing that cascade and taking every group
+-- membership on the server with it.
+--
+-- The only pragma that prevents this is `foreign_keys=OFF`, and it is a
+-- no-op inside a transaction: `defer_foreign_keys` and
+-- `legacy_alter_table` were both measured to lose the rows anyway. So
+-- the migration runs unwrapped, which is what SQLite's own
+-- rebuild-the-table procedure prescribes. The cost is that a failure
+-- part-way leaves the schema half-migrated and the operator restores
+-- from backup; the alternative was silently emptying `group_members`.
+
 -- +goose Up
 -- +goose StatementBegin
 
@@ -68,6 +84,12 @@ WHERE created_by IS NOT NULL AND created_by <> '';
 -- 20250729143942 is an inline column constraint, which SQLite backs
 -- with an implicit sqlite_autoindex that DROP INDEX cannot touch. The
 -- column list below is the state after 20260916120000.
+--
+-- foreign_keys=OFF for the duration: see the NO TRANSACTION note at the
+-- top of this file. Without it the DROP TABLE below cascades through
+-- group_members.group_id and deletes every membership.
+PRAGMA foreign_keys = OFF;
+
 CREATE TABLE groups_new (
     id                        TEXT PRIMARY KEY,
     name                      TEXT NOT NULL,
@@ -105,6 +127,8 @@ CREATE INDEX idx_groups_deleted_at ON groups (deleted_at);
 CREATE UNIQUE INDEX idx_groups_name_live
     ON groups (name)
     WHERE deleted_at IS NULL;
+
+PRAGMA foreign_keys = ON;
 
 -- +goose StatementEnd
 

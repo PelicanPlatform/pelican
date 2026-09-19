@@ -5,6 +5,7 @@ import (
 	"embed"
 	"fmt"
 	"os"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -99,6 +100,25 @@ func InitServerDatabase(serverType server_structs.ServerType) error {
 		// brand-new install where bootstrap will be retried later
 		// (e.g. on the first admin login via init code).
 		log.Warnf("Post-migration bootstrap incomplete: %v", err)
+	}
+
+	// Reserve the group names the Server.*AdminGroups config lists
+	// confer authority on, so an unprivileged user cannot create a
+	// group that shadows one of them. Runs here, next to the admin
+	// bootstrap, because it must happen for every server type that has
+	// a database — the module launchers each call InitServerDatabase,
+	// but there is no single launcher that runs for all of them.
+	if err := EnsureConfiguredAuthorityGroups(ServerDatabase, ConfiguredGroupSource(),
+		slices.Concat(
+			param.Server_AdminGroups.GetStringSlice(),
+			param.Server_UserAdminGroups.GetStringSlice(),
+			param.Server_CollectionAdminGroups.GetStringSlice(),
+		)); err != nil {
+		// As above: a failure here must not stop the server from
+		// starting. It does leave the names unreserved, so say so at
+		// warning level rather than swallowing it.
+		log.Warnf("Could not reserve the groups named in the Server.*AdminGroups configuration; "+
+			"until this succeeds a user could create a group shadowing one of them: %v", err)
 	}
 
 	// Grant Server.NewUserDefaultScopes to every existing user, ONCE.
