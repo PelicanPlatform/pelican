@@ -154,7 +154,7 @@ func FilterAuthTemplateEligibleGroups(db *gorm.DB, names []string) []string {
 	var rows []row
 	if err := db.Table("groups").
 		Select("name").
-		Where("name IN ? AND auth_template_eligible = 0", names).
+		Where("name IN ? AND auth_template_eligible = 0 AND deleted_at IS NULL", names).
 		Scan(&rows).Error; err != nil {
 		return names
 	}
@@ -308,9 +308,12 @@ func ResolveCallerACLSubjects(db *gorm.DB, username, userID string, groupNames [
 	}
 	if len(groupNames) > 0 {
 		var rows []struct{ ID string }
+		// deleted_at is spelled out because this is a raw table query:
+		// GORM's soft-delete scope only applies to model-based queries,
+		// and a deleted group must not keep conferring ACL matches.
 		if err := db.Table("groups").
 			Select("id").
-			Where("name IN ?", groupNames).
+			Where("name IN ? AND deleted_at IS NULL", groupNames).
 			Scan(&rows).Error; err == nil {
 			for _, r := range rows {
 				add(r.ID)
@@ -367,7 +370,8 @@ func ResolveCallerACLSubjectsToleratingStale(db *gorm.DB, username, userID strin
 	var rows []struct{ GroupID string }
 	if err := db.Table("group_members").
 		Select("group_id").
-		Where("user_id = ?", out.UserID).
+		Joins("JOIN groups ON groups.id = group_members.group_id AND groups.deleted_at IS NULL").
+		Where("group_members.user_id = ?", out.UserID).
 		Scan(&rows).Error; err != nil {
 		return out
 	}
@@ -2883,6 +2887,25 @@ func freshAssertedMembershipCutoff() (time.Time, bool) {
 	return time.Now().Add(-ttl), true
 }
 
+// membershipQuery builds the base query over a user's group
+// memberships, joined to live groups only. `grantingOnly` selects
+// between the two views the rest of this file is careful to keep
+// apart: the granting view drops mirrored memberships whose last
+// assertion is older than the TTL, while the restricting view keeps
+// them.
+func membershipQuery(db *gorm.DB, userID string, grantingOnly bool) *gorm.DB {
+	q := db.Table("group_members").
+		Joins("JOIN groups ON groups.id = group_members.group_id AND groups.deleted_at IS NULL").
+		Where("group_members.user_id = ?", userID)
+	if !grantingOnly {
+		return q
+	}
+	if cutoff, mirroredMayGrant := freshAssertedMembershipCutoff(); mirroredMayGrant {
+		return q.Where("group_members.source = ? OR group_members.asserted_at > ?", GroupSourcePelican, cutoff)
+	}
+	return q.Where("group_members.source = ?", GroupSourcePelican)
+}
+
 // grantingMembershipsFor returns the group IDs a user holds that may
 // grant access right now: every Pelican-created membership, plus every
 // mirrored membership the provider has asserted within the TTL.
@@ -2890,16 +2913,9 @@ func grantingMembershipsFor(db *gorm.DB, userID string) ([]string, error) {
 	if db == nil || userID == "" {
 		return nil, nil
 	}
-	q := db.Table("group_members").
-		Select("group_id").
-		Where("user_id = ?", userID)
-	if cutoff, mirroredMayGrant := freshAssertedMembershipCutoff(); mirroredMayGrant {
-		q = q.Where("source = ? OR asserted_at > ?", GroupSourcePelican, cutoff)
-	} else {
-		q = q.Where("source = ?", GroupSourcePelican)
-	}
 	var rows []struct{ GroupID string }
-	if err := q.Scan(&rows).Error; err != nil {
+	if err := membershipQuery(db, userID, true).
+		Select("group_members.group_id").Scan(&rows).Error; err != nil {
 		return nil, err
 	}
 	out := make([]string, 0, len(rows))
@@ -2909,28 +2925,15 @@ func grantingMembershipsFor(db *gorm.DB, userID string) ([]string, error) {
 	return out, nil
 }
 
-// GroupNamesForRestrictionCheck returns the names of every group the
-// user belongs to, INCLUDING mirrored memberships that have gone stale.
-//
-// This is the deliberate counterpart to grantingMembershipsFor, and the
-// two must not be confused. Use this only where the answer RESTRICTS
-// what a caller may do — web_ui.IsSystemAdminUserID, which stops a
-// user-administrator from acting on a system administrator's account,
-// is the motivating case. There, "we last saw this account in an admin
-// group a month ago" must mean "refuse", not "go ahead": treating a
-// stale copy as absence is what opens the guard.
-//
-// Never use it to decide whether to hand out access.
-func GroupNamesForRestrictionCheck(db *gorm.DB, userID string) ([]string, error) {
+// groupNamesFor returns the names of the groups the user belongs to
+// under one of the two membership views.
+func groupNamesFor(db *gorm.DB, userID string, grantingOnly bool) ([]string, error) {
 	if db == nil || userID == "" {
 		return nil, nil
 	}
 	var rows []struct{ Name string }
-	if err := db.Table("group_members").
-		Joins("JOIN groups ON groups.id = group_members.group_id AND groups.deleted_at IS NULL").
-		Select("groups.name").
-		Where("group_members.user_id = ?", userID).
-		Scan(&rows).Error; err != nil {
+	if err := membershipQuery(db, userID, grantingOnly).
+		Select("groups.name").Scan(&rows).Error; err != nil {
 		return nil, err
 	}
 	out := make([]string, 0, len(rows))
@@ -2940,6 +2943,33 @@ func GroupNamesForRestrictionCheck(db *gorm.DB, userID string) ([]string, error)
 		}
 	}
 	return out, nil
+}
+
+// GroupNamesForGranting returns the names of every group the user
+// belongs to that may confer authority right now — the name-space
+// counterpart of grantingMembershipsFor.
+//
+// Use this wherever a true answer HANDS SOMETHING OUT. Its stale-
+// tolerant twin, GroupNamesForRestrictionCheck, is for the questions
+// where a true answer refuses something.
+func GroupNamesForGranting(db *gorm.DB, userID string) ([]string, error) {
+	return groupNamesFor(db, userID, true)
+}
+
+// GroupNamesForRestrictionCheck returns the names of every group the
+// user belongs to, INCLUDING mirrored memberships that have gone stale.
+//
+// This is the deliberate counterpart to GroupNamesForGranting, and the
+// two must not be confused. Use this only where the answer RESTRICTS
+// what a caller may do — web_ui.MustTreatAsSystemAdmin, which stops a
+// user-administrator from acting on a system administrator's account,
+// is the motivating case. There, "we last saw this account in an admin
+// group a month ago" must mean "refuse", not "go ahead": treating a
+// stale copy as absence is what opens the guard.
+//
+// Never use it to decide whether to hand out access.
+func GroupNamesForRestrictionCheck(db *gorm.DB, userID string) ([]string, error) {
+	return groupNamesFor(db, userID, false)
 }
 
 // RecordGroupAdminObservation latches what an observation of a user's
@@ -3119,10 +3149,12 @@ func isGroupOwnerOrAdmin(db *gorm.DB, group *Group, userID string, isSystemAdmin
 			return true
 		}
 		if group.AdminType == AdminTypeGroup {
-			// Check if the user is a member of the admin group
-			var count int64
-			db.Model(&GroupMember{}).Where("group_id = ? AND user_id = ?", group.AdminID, userID).Count(&count)
-			if count > 0 {
+			// Membership of the admin group is a GRANTING decision, so
+			// it goes through grantingMembershipsFor: a mirrored row the
+			// provider stopped asserting is kept for restricting
+			// questions, but it must not still confer authority over
+			// this group.
+			if ids, err := grantingMembershipsFor(db, userID); err == nil && slices.Contains(ids, group.AdminID) {
 				return true
 			}
 		}

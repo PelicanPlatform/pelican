@@ -859,7 +859,12 @@ func MustTreatAsSystemAdmin(db *gorm.DB, userID string) (bool, string) {
 	}
 
 	// (1) Positive evidence from whatever is evaluable right now.
-	if IsConfirmedSystemAdmin(db, userID) {
+	// Deliberately NOT IsConfirmedSystemAdmin: that one asks the
+	// granting-direction question and so ignores a mirrored membership
+	// the provider has stopped asserting. Here a stale observation is
+	// still an answer — "we last saw this account in an admin group a
+	// month ago" must mean refuse.
+	if adminFromGroupView(db, user, database.GroupNamesForRestrictionCheck) {
 		return true, "the target account holds administrator privileges"
 	}
 
@@ -908,12 +913,24 @@ func IsConfirmedSystemAdmin(db *gorm.DB, userID string) bool {
 	if err != nil {
 		return false
 	}
-	// Errors are logged rather than folded into the verdict: the
-	// config-derived username paths still answer, which is the
-	// pre-mirroring behavior.
-	groups, err := database.GroupNamesForRestrictionCheck(db, userID)
+	// GroupNamesForGranting, not GroupNamesForRestrictionCheck: a true
+	// answer here hands something out, so a mirrored membership the
+	// provider has stopped asserting must not count.
+	return adminFromGroupView(db, user, database.GroupNamesForGranting)
+}
+
+// adminFromGroupView runs the config-and-scope admin check over one of
+// the two group-membership views. Which view is the whole question —
+// see IsConfirmedSystemAdmin and MustTreatAsSystemAdmin — so it is the
+// caller's to choose, never defaulted here.
+//
+// A failure to load memberships is logged rather than folded into the
+// verdict: the config-derived username paths still answer, which is the
+// pre-mirroring behavior.
+func adminFromGroupView(db *gorm.DB, user *database.User, view func(*gorm.DB, string) ([]string, error)) bool {
+	groups, err := view(db, user.ID)
 	if err != nil {
-		log.Warningf("Failed to load group memberships while checking whether user %s is a system admin: %v", userID, err)
+		log.Warningf("Failed to load group memberships while checking whether user %s is a system admin: %v", user.ID, err)
 	}
 	isAdmin, _ := CheckAdmin(UserIdentity{
 		Username: user.Username,

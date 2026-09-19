@@ -270,6 +270,13 @@ func TestMustTreatAsSystemAdmin(t *testing.T) {
 
 		mustRefuse, _ := MustTreatAsSystemAdmin(db, other.ID)
 		assert.True(t, mustRefuse)
+
+		// ...and its granting-direction twin must take the same row the
+		// other way. This is the pair that has to stay split: one
+		// function answering both questions off one membership view
+		// necessarily gets one of them wrong.
+		assert.False(t, IsConfirmedSystemAdmin(db, other.ID),
+			"a membership the provider stopped asserting must not still hand out admin")
 	})
 
 	t.Run("no group can confer admin, so nothing needs observing", func(t *testing.T) {
@@ -291,6 +298,13 @@ func TestIsConfirmedSystemAdminTreatsUncertaintyAsNo(t *testing.T) {
 	require.NoError(t, param.Server_AdminGroups.Set([]string{"ops"}))
 	require.NoError(t, param.Issuer_GroupSource.Set(database.GroupSourceTypeOIDC))
 
+	// This check reads the GRANTING membership view, so it depends on
+	// the mirrored-membership TTL. ResetTestState clears the configured
+	// default (168h), and a zero TTL means "mirrored memberships never
+	// grant" — fail-closed, but it would make the final assertion below
+	// pass for the wrong reason.
+	require.NoError(t, param.Issuer_AssertedGroupMembershipTTL.Set(time.Hour))
+
 	unobserved := seedTestUser(t, db, "u-unobserved", "judy")
 	assert.False(t, IsConfirmedSystemAdmin(db, unobserved.ID),
 		"an account nothing is known about is not demonstrably an admin")
@@ -298,7 +312,8 @@ func TestIsConfirmedSystemAdminTreatsUncertaintyAsNo(t *testing.T) {
 	assert.True(t, mustRefuse, "...while the restricting guard refuses on the same account")
 
 	RecordAssertedGroups(database.GroupSourceOIDC, unobserved.ID, unobserved.Username, []string{"ops"})
-	assert.True(t, IsConfirmedSystemAdmin(db, unobserved.ID))
+	assert.True(t, IsConfirmedSystemAdmin(db, unobserved.ID),
+		"a membership the provider is currently asserting does demonstrate the privilege")
 }
 
 // The file source is the only one that can recover from an outage on
