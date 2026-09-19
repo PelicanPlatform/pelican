@@ -82,6 +82,32 @@ var slugShapePattern = regexp.MustCompile(`^[0-9a-f]{8}$`)
 // selection, CLI flags. Display names go through their own (laxer)
 // validator.
 func ValidateIdentifier(name string) error {
+	if err := validateIdentifierShape(name); err != nil {
+		return err
+	}
+	// Keep names a person CHOSE visually distinct from IDs. Hygiene
+	// only — see slugShapePattern for why nothing may depend on it, and
+	// validateIdentifierShape for why it is not applied to a name
+	// nobody here chose.
+	if slugShapePattern.MatchString(name) {
+		return ErrInvalidIdentifier
+	}
+	return nil
+}
+
+// validateIdentifierShape enforces the rules that exist because of what
+// an identifier is EMBEDDED IN — the character class and the '..'
+// guard. Every identifier must satisfy these, whatever its provenance.
+//
+// It is separate from ValidateIdentifier because the slug-shape rule is
+// not in this category. That rule is hygiene, and hygiene is only
+// enforceable against a name somebody here chose and can be asked to
+// change: a group name, a username an administrator typed. A username
+// derived from an identity provider's claim is neither. Applying it
+// there turned "your provider's subject happens to be eight hex
+// characters" into "you cannot log in", which is a denial of service
+// imposed for the sake of tidier log lines.
+func validateIdentifierShape(name string) error {
 	if !identifierPattern.MatchString(name) {
 		return ErrInvalidIdentifier
 	}
@@ -90,11 +116,6 @@ func ValidateIdentifier(name string) error {
 	// path-traversal marker and there is no legitimate reason a username
 	// or group name would contain it. Cheap, conservative.
 	if strings.Contains(name, "..") {
-		return ErrInvalidIdentifier
-	}
-	// Keep locally-created names visually distinct from IDs. Hygiene
-	// only — see slugShapePattern for why nothing may depend on it.
-	if slugShapePattern.MatchString(name) {
 		return ErrInvalidIdentifier
 	}
 	return nil
@@ -129,8 +150,8 @@ func ValidateDisplayName(name string) error {
 }
 
 // SanitizeIdentifier coerces a candidate identifier (typically a value
-// pulled from an OIDC claim) into a form that passes ValidateIdentifier,
-// or returns "" if no useful sanitisation exists.
+// pulled from an OIDC claim) into a form that satisfies the identifier
+// SHAPE rules, or returns "" if no useful sanitisation exists.
 //
 // The conservative substitution rules:
 //
@@ -184,7 +205,12 @@ func SanitizeIdentifier(s string) string {
 	}
 	// Ensure the trimmed result still satisfies the pattern (length floor
 	// of 2, etc.). If not, signal failure to the caller.
-	if ValidateIdentifier(out) != nil {
+	//
+	// validateIdentifierShape, not ValidateIdentifier: the caller is
+	// bootstrapping an account from a provider's claim, and the
+	// slug-shape rule must not turn an eight-hex-character subject into
+	// a failed login. See validateIdentifierShape.
+	if validateIdentifierShape(out) != nil {
 		return ""
 	}
 	return out

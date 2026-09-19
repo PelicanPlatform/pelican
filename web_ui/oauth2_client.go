@@ -652,12 +652,12 @@ func generateUserGroupInfo(userInfo map[string]interface{}, idToken map[string]i
 	}
 
 	// Record what this provider asserted — the group records and this
-	// user's memberships in them. `internal` is reading these rows in
-	// the first place, so it has nothing to record.
-	// Record under whichever source the operator configured. The switch
-	// above already refused any value ConfiguredGroupSource does not
-	// know, so a new provider added there without a case here records
-	// nothing rather than recording under the wrong name.
+	// user's memberships in them — under whichever source the operator
+	// configured. `internal` is reading those rows in the first place,
+	// so IsAsserted() skips it. The switch above already refused any
+	// value ConfiguredGroupSource does not know, so a provider added
+	// there without a case here records nothing rather than recording
+	// under the wrong name.
 	if source := database.ConfiguredGroupSource(); source.IsAsserted() {
 		RecordAssertedGroups(source, userRecord.ID, username, groups)
 	}
