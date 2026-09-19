@@ -342,6 +342,41 @@ type ACLSubject struct {
 	ID   string
 }
 
+// ResolveCallerACLSubjectsToleratingStale is ResolveCallerACLSubjects
+// with the mirrored-membership freshness cutoff lifted.
+//
+// It exists for exactly one caller: the share-token clamp, which asks
+// what a SHARE'S OWNER can currently do on the parent collection, at
+// mint time, with no session for that owner. Gating that on freshness
+// produces a false denial rather than a safe one — an owner who has not
+// signed in for longer than the TTL silently has every share they
+// created mint tokens with no storage scopes, while the provider still
+// lists them as a member the whole time, and nothing logs it. Weighed
+// against a bounded staleness window on a ceiling that only ever
+// NARROWS what a recipient already has an ACL for, the denial is worse.
+//
+// Do not reach for this anywhere else. Every other granting path uses
+// the gated form; this one is a deliberate, argued exception.
+func ResolveCallerACLSubjectsToleratingStale(db *gorm.DB, username, userID string) CallerACLSubjects {
+	out := ResolveCallerACLSubjects(db, username, userID, nil)
+	if db == nil || out.UserID == "" {
+		return out
+	}
+	var rows []struct{ GroupID string }
+	if err := db.Table("group_members").
+		Select("group_id").
+		Where("user_id = ?", out.UserID).
+		Scan(&rows).Error; err != nil {
+		return out
+	}
+	for _, r := range rows {
+		if r.GroupID != "" && !slices.Contains(out.GroupIDs, r.GroupID) {
+			out.GroupIDs = append(out.GroupIDs, r.GroupID)
+		}
+	}
+	return out
+}
+
 // ResolveACLSubjectRef turns a name-space reference into the stored
 // subject.
 //
@@ -795,6 +830,46 @@ const (
 	GroupSourceGitHub  GroupSource = "github"
 	GroupSourceUnknown GroupSource = "unknown"
 )
+
+// Group source types: the spellings Issuer.GroupSource accepts in the
+// configuration file. ConfiguredGroupSource maps them onto the
+// GroupSource values above.
+const (
+	GroupSourceTypeOIDC     string = "oidc"
+	GroupSourceTypeFile     string = "file"
+	GroupSourceTypeInternal string = "internal"
+	GroupSourceTypeGitHub   string = "github"
+)
+
+// ConfiguredGroupSource maps Issuer.GroupSource onto the GroupSource a
+// record is stamped with. It is the single answer to "who decides group
+// membership on this server", and every path that learns a caller's
+// groups must route through it.
+//
+// Single-valued, deliberately. The group file used to be read on the
+// password-login and init-code paths whatever Issuer.GroupSource said,
+// which made `file` an always-on second provider layered under `oidc`
+// or `github`. That asymmetry is what let a file with no entry for an
+// OIDC account be treated as an authoritative statement that the
+// account is in no groups — see RecordAssertedGroups and the latch in
+// RecordGroupAdminObservation.
+//
+// GroupSourcePelican is returned for the `internal` source: membership
+// is Pelican's own, held in group_members, and nothing needs mirroring.
+// The empty GroupSource means no provider decides groups here.
+func ConfiguredGroupSource() GroupSource {
+	switch strings.ToLower(param.Issuer_GroupSource.GetString()) {
+	case GroupSourceTypeOIDC:
+		return GroupSourceOIDC
+	case GroupSourceTypeFile:
+		return GroupSourceFile
+	case GroupSourceTypeGitHub:
+		return GroupSourceGitHub
+	case GroupSourceTypeInternal:
+		return GroupSourcePelican
+	}
+	return ""
+}
 
 // IsAsserted reports whether membership of a group from this source is
 // decided by an outside provider rather than by `group_members`. Such
@@ -1950,9 +2025,12 @@ func EffectiveCollectionRole(db *gorm.DB, coll *Collection, userID, username str
 	if coll == nil {
 		return ""
 	}
-	// Pass no asserted group names: this path deliberately answers
-	// "what does this user hold right now", independent of any session.
-	subjects := ResolveCallerACLSubjects(db, username, userID, nil)
+	// No asserted group names: this path deliberately answers "what does
+	// this user hold right now", independent of any session. Mirrored
+	// memberships count even when stale — see
+	// ResolveCallerACLSubjectsToleratingStale for why this one caller
+	// tolerates that and no other does.
+	subjects := ResolveCallerACLSubjectsToleratingStale(db, username, userID)
 
 	// Direct ownership — Owner takes precedence over everything else.
 	if subjects.UserID != "" && coll.OwnerID != "" && coll.OwnerID == subjects.UserID {
@@ -2656,64 +2734,35 @@ func BuiltinAdminUser(db *gorm.DB) (*User, error) {
 // Errors are returned but are not fatal to the caller's flow — a login
 // should still succeed if the bookkeeping write fails; the names just
 // stay unreconciled until the next observation.
-func EnsureAssertedGroups(db *gorm.DB, source GroupSource, names []string) error {
+func EnsureAssertedGroups(db *gorm.DB, source GroupSource, names []string) (accepted []string, err error) {
 	if db == nil || len(names) == 0 || !GroupAutoCreationEnabled() {
-		return nil
+		return nil, nil
 	}
 	if !source.IsAsserted() {
-		return fmt.Errorf("group source %q does not assert memberships", source)
+		return nil, fmt.Errorf("group source %q does not assert memberships", source)
 	}
 
-	wanted := make([]string, 0, len(names))
-	for _, raw := range names {
-		name := strings.TrimSpace(raw)
-		if name == "" || slices.Contains(wanted, name) {
-			continue
-		}
-		// Deliberately NOT ValidateIdentifier. That validator governs
-		// what a *user* may name a group they create — it bans `/`
-		// because a self-chosen name can end up as a path component in
-		// an authz template. Here we are recording a name the provider
-		// already asserts, and WLCG-style providers routinely assert
-		// `/cms/production`. Refusing those would leave exactly the
-		// groups an operator most wants to ACL without an ID.
-		//
-		// Two shapes are still excluded, because they would be
-		// indistinguishable from this server's own presentation forms
-		// for a NAME-space ACL target: the `user-` personal prefix and
-		// the `@` sentinel namespace. An asserted name of either keeps
-		// working for auth-template matching; it just doesn't get a
-		// record. An ID-shaped name is fine here — nothing resolves a
-		// name by its shape, so it cannot be mistaken for an ID.
-		if strings.HasPrefix(name, PersonalACLGroupPrefix) || strings.HasPrefix(name, "@") {
-			log.Debugf("Not recording group %q asserted by the %s source: the name collides with a reserved ACL-target form", name, source)
-			continue
-		}
-		if len(name) > maxAssertedGroupNameLen {
-			log.Debugf("Not recording group %q asserted by the %s source: name exceeds %d bytes", name, source, maxAssertedGroupNameLen)
-			continue
-		}
-		wanted = append(wanted, name)
-	}
+	wanted := recordableGroupNames(names, fmt.Sprintf("asserted by the %s source", source))
 	if len(wanted) == 0 {
-		return nil
+		return nil, nil
 	}
 
 	var existing []Group
 	if err := db.Select("id", "name", "source", "auth_template_eligible").
-		Where("name IN ?", wanted).Find(&existing).Error; err != nil {
-		return err
+		Where("name IN ? AND deleted_at IS NULL", wanted).Find(&existing).Error; err != nil {
+		return nil, err
 	}
 	known := make(map[string]Group, len(existing))
 	for _, g := range existing {
 		known[g.Name] = g
 	}
 
+	accepted = make([]string, 0, len(wanted))
 	var adminID, createdBy string
 	if len(known) < len(wanted) {
 		admin, err := BuiltinAdminUser(db)
 		if err != nil {
-			return err
+			return nil, err
 		}
 		if admin != nil {
 			adminID = admin.ID
@@ -2731,25 +2780,34 @@ func EnsureAssertedGroups(db *gorm.DB, source GroupSource, names []string) error
 		if ok {
 			if g.Source == GroupSourcePelican {
 				log.Warnf("Group %q asserted by the %s source collides with a Pelican-created group (id %s); "+
-					"the Pelican group's members and auth-template eligibility are unchanged, and the "+
-					"assertion will resolve to it", name, source, g.ID)
+					"the Pelican group is left alone and no membership will be mirrored into it", name, source, g.ID)
 				continue
 			}
-			// Re-observing an asserted group stamps the real provider
-			// onto a record the migration could only mark
-			// GroupSourceUnknown. AuthTemplateEligible is left alone —
-			// see the doc comment.
-			if g.Source != source {
+			switch g.Source {
+			case GroupSourceUnknown:
+				// Completing a record the migration could only mark
+				// unknown — not changing a source, recording the one it
+				// always had.
 				if err := db.Model(&Group{}).Where("id = ?", g.ID).
 					Update("source", source).Error; err != nil {
-					return err
+					return nil, err
 				}
+			case source:
+				// Nothing to do.
+			default:
+				// A group's source is a fact about where it came from,
+				// set once at bootstrap, so an operator who switches
+				// Issuer.GroupSource can still see which records predate
+				// the switch. Re-stamping would erase exactly that.
+				log.Warnf("Group %q was recorded from the %s source but is now asserted by %s; "+
+					"leaving its recorded source alone", name, g.Source, source)
 			}
+			accepted = append(accepted, name)
 			continue
 		}
 		slug, err := generateSlug()
 		if err != nil {
-			return err
+			return nil, err
 		}
 		grp := &Group{
 			ID:                   slug,
@@ -2763,13 +2821,15 @@ func EnsureAssertedGroups(db *gorm.DB, source GroupSource, names []string) error
 			// Another request observing the same assertion got there
 			// first; that is a success for our purposes.
 			if isUniqueConstraintError(err) {
+				accepted = append(accepted, name)
 				continue
 			}
-			return err
+			return nil, err
 		}
+		accepted = append(accepted, name)
 		log.Infof("Recorded group %q asserted by the %s source as group ID %s", name, source, slug)
 	}
-	return nil
+	return accepted, nil
 }
 
 // MirroredMembershipTTL is how long a mirrored membership may still
@@ -2894,23 +2954,28 @@ func RecordGroupAdminObservation(db *gorm.DB, userID string, sawAdminGroup bool)
 // MirrorAssertedGroupMemberships records, for one user, the memberships
 // `source` just asserted, and drops the ones it no longer asserts.
 //
-// Scope is deliberately narrow in two directions. It only ever touches
-// rows whose Source is `source`: a Pelican-created membership is
-// authoritative and is left alone (so an admin who adds a local member
-// to an asserted group keeps them), and a membership mirrored from a
-// DIFFERENT provider is left alone too, because this call knows nothing
-// about what that provider currently says. A server can genuinely have
-// two asserted sources in play — the password-login path reads
-// Issuer.GroupFile regardless of Issuer.GroupSource — and each must
-// only rewrite its own rows.
+// A Pelican-created membership is never touched: it is authoritative,
+// so an admin who adds a local member to an asserted group keeps them.
 //
-// Group records must already exist; EnsureAssertedGroups is the
-// companion that creates them, and a name it declined to record (a
-// reserved shape, or one already held by a Pelican group) simply has no
-// membership mirrored either. Passing an empty `assertedNames` is
-// meaningful, not a no-op: it means "this provider asserts nothing for
-// this user now", and drops every membership previously mirrored from it.
-func MirrorAssertedGroupMemberships(db *gorm.DB, source GroupSource, userID string, assertedNames []string) error {
+// Everything else IS in scope, not just rows already stamped `source`.
+// Issuer.GroupSource is single-valued, so at any moment exactly one
+// provider decides membership, and a row left behind by a previous one
+// is stale by definition. Retracting those here is what makes a change
+// of Issuer.GroupSource take effect: without it the old provider's rows
+// would linger, granting until their TTL expired, with nothing left to
+// retract them. The group RECORDS keep their original source either way
+// — that is a fact about where a group came from, and an operator can
+// still see which ones predate the switch.
+//
+// `acceptedNames` must be what EnsureAssertedGroups accepted, not the
+// raw assertion: a name it declined — one a Pelican-created group
+// already holds — must not get a membership mirrored into that group,
+// since nothing could then remove it.
+//
+// Passing an empty list is meaningful, not a no-op: it says the
+// provider asserts nothing for this user, and retracts accordingly. A
+// caller that merely FAILED to ask must not call this at all.
+func MirrorAssertedGroupMemberships(db *gorm.DB, source GroupSource, userID string, acceptedNames []string) error {
 	if db == nil || userID == "" || !GroupAutoCreationEnabled() {
 		return nil
 	}
@@ -2918,16 +2983,16 @@ func MirrorAssertedGroupMemberships(db *gorm.DB, source GroupSource, userID stri
 		return fmt.Errorf("group source %q does not assert memberships", source)
 	}
 
-	// Resolve the asserted names to the group records
-	// EnsureAssertedGroups keeps. A name with no record contributes
-	// nothing — there is no ID to key a membership on, which is the same
-	// reason an ACL cannot name it either.
+	// Resolve to the group records EnsureAssertedGroups accepted. The
+	// `source <> pelican` filter is the second half of that agreement:
+	// even if a caller passes a name it should not have, a membership
+	// never lands in a group Pelican owns.
 	assertedIDs := []string{}
-	if len(assertedNames) > 0 {
+	if len(acceptedNames) > 0 {
 		var rows []struct{ ID string }
 		if err := db.Table("groups").
 			Select("id").
-			Where("name IN ? AND deleted_at IS NULL", assertedNames).
+			Where("name IN ? AND deleted_at IS NULL AND source <> ?", acceptedNames, GroupSourcePelican).
 			Scan(&rows).Error; err != nil {
 			return err
 		}
@@ -2938,10 +3003,12 @@ func MirrorAssertedGroupMemberships(db *gorm.DB, source GroupSource, userID stri
 
 	now := time.Now()
 	return db.Transaction(func(tx *gorm.DB) error {
-		// Drop what this provider no longer asserts, before adding, so a
+		// Drop every mirrored membership this user has that the current
+		// provider does not assert — including ones stamped by a
+		// previous Issuer.GroupSource. Done before adding, so a
 		// membership that moved between groups cannot briefly appear in
 		// both.
-		stale := tx.Where("user_id = ? AND source = ?", userID, source)
+		stale := tx.Where("user_id = ? AND source <> ?", userID, GroupSourcePelican)
 		if len(assertedIDs) > 0 {
 			stale = stale.Where("group_id NOT IN ?", assertedIDs)
 		}
@@ -2964,6 +3031,11 @@ func MirrorAssertedGroupMemberships(db *gorm.DB, source GroupSource, userID stri
 				Source:     source,
 				AssertedAt: &now,
 			}
+			// Refresh any mirrored row for this pair, whatever source it
+			// carries, and restamp it to the current provider. Symmetric
+			// with the retraction above: both treat "mirrored" as one
+			// scope, so a provider change cannot leave a row that one
+			// half owns and the other does not.
 			res := tx.Model(&GroupMember{}).
 				Where("group_id = ? AND user_id = ? AND source <> ?", groupID, userID, GroupSourcePelican).
 				Updates(map[string]interface{}{"source": source, "asserted_at": now})

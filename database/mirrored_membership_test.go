@@ -72,7 +72,7 @@ func TestMirroredMembershipFreshnessGatesGranting(t *testing.T) {
 	owner := mkUser(t, db, "u-owner", "owner")
 	coll := mkCollection(t, db, "c1", "data", owner.ID)
 
-	require.NoError(t, EnsureAssertedGroups(db, GroupSourceOIDC, []string{"ops"}))
+	mustEnsureAssertedGroups(t, db, GroupSourceOIDC, []string{"ops"})
 	var ops Group
 	require.NoError(t, db.First(&ops, "name = ?", "ops").Error)
 	require.NoError(t, MirrorAssertedGroupMemberships(db, GroupSourceOIDC, alice.ID, []string{"ops"}))
@@ -149,7 +149,7 @@ func TestMirroredMembershipRestoresTheShareOwnerClamp(t *testing.T) {
 
 	// Alice's access to the parent is via an asserted group, and she is
 	// not the one asking — the mint path passes no group names.
-	require.NoError(t, EnsureAssertedGroups(db, GroupSourceOIDC, []string{"ops"}))
+	mustEnsureAssertedGroups(t, db, GroupSourceOIDC, []string{"ops"})
 	var ops Group
 	require.NoError(t, db.First(&ops, "name = ?", "ops").Error)
 	require.NoError(t, GrantCollectionAcl(db, parent.ID, parentOwner.Username, parentOwner.ID, nil,
@@ -162,9 +162,19 @@ func TestMirroredMembershipRestoresTheShareOwnerClamp(t *testing.T) {
 	assert.Equal(t, AclRoleWrite, EffectiveCollectionRole(db, reload(t, db, parent.ID), alice.ID, ""),
 		"a mirrored membership is what lets the clamp see asserted access")
 
-	ageMembership(t, db, ops.ID, alice.ID, 2*time.Hour)
-	assert.Equal(t, AclRole(""), EffectiveCollectionRole(db, reload(t, db, parent.ID), alice.ID, ""),
-		"and it stops counting once stale, rather than propping the share up forever")
+	// And it keeps counting once stale. This is the one granting path
+	// that tolerates staleness, deliberately: gating it produces a FALSE
+	// denial — an owner who has not signed in for a week silently has
+	// every share they created mint tokens with no storage scopes, with
+	// nothing logged, while the provider still lists them as a member.
+	ageMembership(t, db, ops.ID, alice.ID, 30*24*time.Hour)
+	assert.Equal(t, AclRoleWrite, EffectiveCollectionRole(db, reload(t, db, parent.ID), alice.ID, ""),
+		"the clamp must not silently strip a share owner's access because they have not logged in lately")
+
+	// The ordinary granting paths are unaffected and still refuse it.
+	assert.ErrorIs(t, validateACL(db, reload(t, db, parent.ID), alice.Username, alice.ID, nil,
+		token_scopes.Collection_Read), ErrForbidden,
+		"tolerating staleness in the clamp must not leak into the normal ACL check")
 }
 
 func TestMirroredMembershipCannotBeRemovedLocally(t *testing.T) {
@@ -172,7 +182,7 @@ func TestMirroredMembershipCannotBeRemovedLocally(t *testing.T) {
 	withExternalWebURL(t, db)
 	fx := seedGroupAuthzFixtures(t, db)
 
-	require.NoError(t, EnsureAssertedGroups(db, GroupSourceOIDC, []string{"asserted-team"}))
+	mustEnsureAssertedGroups(t, db, GroupSourceOIDC, []string{"asserted-team"})
 	var team Group
 	require.NoError(t, db.First(&team, "name = ?", "asserted-team").Error)
 	require.NoError(t, MirrorAssertedGroupMemberships(db, GroupSourceOIDC, fx.memberID, []string{"asserted-team"}))
@@ -222,7 +232,7 @@ func TestMirroredMembershipsSurviveRestart(t *testing.T) {
 	withExternalWebURL(t, db)
 	withMembershipTTL(t, time.Hour)
 	alice := mkUser(t, db, "u-alice", "alice")
-	require.NoError(t, EnsureAssertedGroups(db, GroupSourceOIDC, []string{"ops"}))
+	mustEnsureAssertedGroups(t, db, GroupSourceOIDC, []string{"ops"})
 	var ops Group
 	require.NoError(t, db.First(&ops, "name = ?", "ops").Error)
 	require.NoError(t, MirrorAssertedGroupMemberships(db, GroupSourceOIDC, alice.ID, []string{"ops"}))
@@ -261,16 +271,16 @@ func TestMirroredMembershipsSurviveRestart(t *testing.T) {
 	assert.Contains(t, granting, ops.ID)
 }
 
-// Nothing ages a mirrored membership out of existence. Retraction by the
-// provider is the only thing that removes one, which is what lets a
-// restricting check keep seeing a stale copy.
+// Nothing ages a mirrored membership out of existence. Only a provider
+// declining to assert it removes one, which is what lets a restricting
+// check keep seeing a stale copy.
 func TestStaleMirroredMembershipsAreNeverPruned(t *testing.T) {
 	db := setupCollectionTestDB(t)
 	withExternalWebURL(t, db)
 	withMembershipTTL(t, time.Hour)
 
 	alice := mkUser(t, db, "u-alice", "alice")
-	require.NoError(t, EnsureAssertedGroups(db, GroupSourceOIDC, []string{"ops"}))
+	mustEnsureAssertedGroups(t, db, GroupSourceOIDC, []string{"ops"})
 	var ops Group
 	require.NoError(t, db.First(&ops, "name = ?", "ops").Error)
 	require.NoError(t, MirrorAssertedGroupMemberships(db, GroupSourceOIDC, alice.ID, []string{"ops"}))
@@ -281,15 +291,63 @@ func TestStaleMirroredMembershipsAreNeverPruned(t *testing.T) {
 	require.NoError(t, db.Model(&GroupMember{}).Where("user_id = ?", alice.ID).Count(&n).Error)
 	assert.EqualValues(t, 1, n)
 
-	// Another provider's assertion does not sweep it either.
-	require.NoError(t, MirrorAssertedGroupMemberships(db, GroupSourceFile, alice.ID, nil))
-	require.NoError(t, db.Model(&GroupMember{}).Where("user_id = ?", alice.ID).Count(&n).Error)
-	assert.EqualValues(t, 1, n)
-
-	// Only the asserting provider retracting it does.
+	// The provider declining to assert it is what removes it.
 	require.NoError(t, MirrorAssertedGroupMemberships(db, GroupSourceOIDC, alice.ID, nil))
 	require.NoError(t, db.Model(&GroupMember{}).Where("user_id = ?", alice.ID).Count(&n).Error)
 	assert.Zero(t, n)
+}
+
+// Issuer.GroupSource is single-valued: exactly one provider decides
+// membership at a time. A row left behind by a PREVIOUS one is stale by
+// definition, so the current provider retracts it — otherwise switching
+// sources would leave the old provider's memberships granting until
+// their TTL expired, with nothing left that could ever retract them.
+//
+// The group RECORDS keep their original source through all of this. A
+// group's source says where it came from, which is what lets an operator
+// see which records predate the switch.
+func TestChangingTheGroupSourceRetractsThePreviousProvidersMemberships(t *testing.T) {
+	db := setupCollectionTestDB(t)
+	withExternalWebURL(t, db)
+	withMembershipTTL(t, time.Hour)
+	alice := mkUser(t, db, "u-alice", "alice")
+
+	// Yesterday's configuration: oidc asserts two groups.
+	oidcAccepted := mustEnsureAssertedGroups(t, db, GroupSourceOIDC, []string{"ops", "research"})
+	require.NoError(t, MirrorAssertedGroupMemberships(db, GroupSourceOIDC, alice.ID, oidcAccepted))
+	require.Len(t, memberGroupNames(t, db, alice.ID), 2)
+
+	// The operator switches to the group file, which lists only "ops".
+	fileAccepted := mustEnsureAssertedGroups(t, db, GroupSourceFile, []string{"ops"})
+	require.NoError(t, MirrorAssertedGroupMemberships(db, GroupSourceFile, alice.ID, fileAccepted))
+
+	assert.ElementsMatch(t, []string{"ops"}, memberGroupNames(t, db, alice.ID),
+		"the previous provider's memberships must not outlive the switch")
+
+	var member GroupMember
+	require.NoError(t, db.Where("user_id = ?", alice.ID).First(&member).Error)
+	assert.Equal(t, GroupSourceFile, member.Source, "the surviving row is now the file's")
+
+	// The group records keep the source they were bootstrapped with.
+	var ops Group
+	require.NoError(t, db.First(&ops, "name = ?", "ops").Error)
+	assert.Equal(t, GroupSourceOIDC, ops.Source,
+		"a group's source records where it came from and is not re-stamped")
+}
+
+// memberGroupNames returns the names of the groups a user belongs to.
+func memberGroupNames(t *testing.T, db *gorm.DB, userID string) []string {
+	t.Helper()
+	var rows []struct{ Name string }
+	require.NoError(t, db.Table("group_members").
+		Joins("JOIN groups ON groups.id = group_members.group_id").
+		Select("groups.name").Where("group_members.user_id = ?", userID).
+		Scan(&rows).Error)
+	out := make([]string, 0, len(rows))
+	for _, r := range rows {
+		out = append(out, r.Name)
+	}
+	return out
 }
 
 // The latch that decides whether a user-administrator may act on an

@@ -53,14 +53,6 @@ const (
 	oauthCallbackPath = "/api/v1.0/auth/oauth/callback"
 )
 
-// Group source types
-const (
-	GroupSourceTypeOIDC     string = "oidc"
-	GroupSourceTypeFile     string = "file"
-	GroupSourceTypeInternal string = "internal"
-	GroupSourceTypeGitHub   string = "github"
-)
-
 var (
 	oauthConfig      *oauth2.Config
 	oauthUserInfoUrl = "" // Value will be set at ConfigOAuthClientAPIs
@@ -234,6 +226,42 @@ func pickDisplayName(claims map[string]interface{}, fallback string) string {
 	return fallback
 }
 
+// GroupsForLogin returns the groups the CONFIGURED source asserts for a
+// user, on a login path that has no token to read them from — the
+// password and init-code handlers.
+//
+// The second return says whether the configured source was actually
+// consulted. It is not the same as "groups is empty": a file with no
+// entry for a user is an authoritative statement that they are in no
+// groups, whereas an `oidc` server reached through a password login has
+// simply not been asked. Only the first may be recorded, which is what
+// keeps a non-authoritative path from ruling an account out.
+func GroupsForLogin(user *database.User) (groups []string, consulted bool, err error) {
+	switch database.ConfiguredGroupSource() {
+	case database.GroupSourceFile:
+		groups, err = generateGroupInfo(user.Username)
+		// A read or parse failure is not an assertion of anything.
+		return groups, err == nil, err
+	case database.GroupSourcePelican:
+		// Membership already lives in group_members; nothing to mirror,
+		// but the cookie still needs the names.
+		var memberGroups []database.Group
+		memberGroups, err = database.GetMemberGroups(database.ServerDatabase, user.ID)
+		if err != nil {
+			return nil, false, err
+		}
+		groups = make([]string, 0, len(memberGroups))
+		for _, g := range memberGroups {
+			groups = append(groups, g.Name)
+		}
+		return groups, false, nil
+	}
+	// oidc / github decide membership from a token this path does not
+	// have, and "" means nothing decides it. Either way we have learned
+	// nothing about this account.
+	return nil, false, nil
+}
+
 // RecordAssertedGroups reconciles what a provider just asserted about
 // one user: the group names get `groups` records stamped with that
 // provider, and the user's memberships in them are mirrored into
@@ -268,16 +296,21 @@ func RecordAssertedGroups(source database.GroupSource, userID, who string, group
 	if database.ServerDatabase == nil {
 		return
 	}
-	if len(groups) > 0 {
-		if err := database.EnsureAssertedGroups(database.ServerDatabase, source, groups); err != nil {
-			log.Warnf("Failed to record groups asserted by the %s source for %s: %v", source, who, err)
-			return
-		}
+	accepted, err := database.EnsureAssertedGroups(database.ServerDatabase, source, groups)
+	if err != nil {
+		log.Warnf("Failed to record groups asserted by the %s source for %s: %v", source, who, err)
+		return
 	}
 	if userID == "" {
 		return
 	}
-	if err := database.MirrorAssertedGroupMemberships(database.ServerDatabase, source, userID, groups); err != nil {
+	// Mirror only the names that got a record. A name EnsureAssertedGroups
+	// declined — one a Pelican-created group already holds — must not
+	// receive a mirrored membership, because nothing could then remove
+	// it: RemoveGroupMember and LeaveGroup both refuse a mirrored row,
+	// and "remove it at the provider" is no answer for a group Pelican
+	// owns.
+	if err := database.MirrorAssertedGroupMemberships(database.ServerDatabase, source, userID, accepted); err != nil {
 		log.Warnf("Failed to mirror %s group memberships for %s: %v", source, who, err)
 		// Do not record an observation we did not complete: leaving the
 		// account GroupAdminUnknown keeps the restricting guard
@@ -286,9 +319,14 @@ func RecordAssertedGroups(source database.GroupSource, userID, who string, group
 	}
 	// This is the moment Pelican actually knows what groups the provider
 	// puts this account in, so it is the moment to latch what that
-	// implies about administrator privileges. The verdict is computed
-	// here rather than in the database layer because the
-	// Server.*AdminGroups matching lives in this package.
+	// implies about administrator privileges.
+	//
+	// The verdict is drawn from the ASSERTION, not from `accepted`: a
+	// name declined because a Pelican group holds it still tells us the
+	// provider puts this account in a group of that name, and if that
+	// name is in Server.AdminGroups the account may hold admin through
+	// it. Ruling the account out on a narrower list than the one that
+	// grants would be the wrong direction for a restricting check.
 	if err := database.RecordGroupAdminObservation(database.ServerDatabase, userID, assertsAdminGroup(groups)); err != nil {
 		log.Warnf("Failed to record the group-admin observation for %s: %v", who, err)
 	}
@@ -331,22 +369,36 @@ func assertsAdminGroup(groups []string) bool {
 // password-login and init-code paths as well as from
 // generateUserGroupInfo.
 func generateGroupInfo(user string) (groups []string, err error) {
+	table, err := readGroupFile()
+	if err != nil {
+		return nil, err
+	}
+	return table[user], nil
+}
+
+// readGroupFile parses Issuer.GroupFile into its username -> groups
+// table. An unset file yields an empty table and no error; the file is
+// then simply not a source of anything.
+//
+// Callers that reconcile MANY users should read the table once through
+// this and index it themselves, rather than calling generateGroupInfo
+// per user: a pass that re-reads the file for every account can observe
+// it half-edited, and a read error partway through would otherwise leave
+// earlier accounts reconciled against a file the later ones never saw.
+func readGroupFile() (map[string][]string, error) {
 	groupFile := param.Issuer_GroupFile.GetString()
 	if groupFile == "" {
-		return
+		return map[string][]string{}, nil
 	}
 	groupBytes, err := os.ReadFile(groupFile)
 	if err != nil {
-		err = errors.Wrap(err, "failed to read Issuer.GroupFile for group information")
-		return
+		return nil, errors.Wrap(err, "failed to read Issuer.GroupFile for group information")
 	}
 	var groupTable map[string][]string
 	if err = json.Unmarshal(groupBytes, &groupTable); err != nil {
-		err = errors.Wrapf(err, "failed to parse Issuer.GroupFile (%s) as JSON", groupFile)
-		return
+		return nil, errors.Wrapf(err, "failed to parse Issuer.GroupFile (%s) as JSON", groupFile)
 	}
-	groups = groupTable[user]
-	return
+	return groupTable, nil
 }
 
 // Given the maps for the UserInfo and ID token JSON objects, generate
@@ -543,7 +595,7 @@ func generateUserGroupInfo(userInfo map[string]interface{}, idToken map[string]i
 
 	groupSource := strings.ToLower(param.Issuer_GroupSource.GetString())
 	switch groupSource {
-	case GroupSourceTypeOIDC:
+	case database.GroupSourceTypeOIDC:
 		groupClaim := param.Issuer_OIDCGroupClaim.GetString()
 		groupList, ok := claimsSource[groupClaim]
 		if ok {
@@ -565,12 +617,12 @@ func generateUserGroupInfo(userInfo map[string]interface{}, idToken map[string]i
 				}
 			}
 		}
-	case GroupSourceTypeFile:
+	case database.GroupSourceTypeFile:
 		groups, err = generateGroupInfo(username)
 		if err != nil {
 			return nil, nil, err
 		}
-	case GroupSourceTypeInternal:
+	case database.GroupSourceTypeInternal:
 		log.Debugf("Getting groups for user %s (ID: %s)", username, userRecord.ID)
 		groupList, err := database.GetMemberGroups(database.ServerDatabase, userRecord.ID)
 		if err != nil {
@@ -580,7 +632,7 @@ func generateUserGroupInfo(userInfo map[string]interface{}, idToken map[string]i
 		for _, group := range groupList {
 			groups = append(groups, group.Name)
 		}
-	case GroupSourceTypeGitHub:
+	case database.GroupSourceTypeGitHub:
 		if accessToken == "" {
 			log.Errorf("GitHub group source requires an access token")
 			err = errors.New("GitHub group source requires an access token")
@@ -602,13 +654,12 @@ func generateUserGroupInfo(userInfo map[string]interface{}, idToken map[string]i
 	// Record what this provider asserted — the group records and this
 	// user's memberships in them. `internal` is reading these rows in
 	// the first place, so it has nothing to record.
-	switch groupSource {
-	case GroupSourceTypeOIDC:
-		RecordAssertedGroups(database.GroupSourceOIDC, userRecord.ID, username, groups)
-	case GroupSourceTypeFile:
-		RecordAssertedGroups(database.GroupSourceFile, userRecord.ID, username, groups)
-	case GroupSourceTypeGitHub:
-		RecordAssertedGroups(database.GroupSourceGitHub, userRecord.ID, username, groups)
+	// Record under whichever source the operator configured. The switch
+	// above already refused any value ConfiguredGroupSource does not
+	// know, so a new provider added there without a case here records
+	// nothing rather than recording under the wrong name.
+	if source := database.ConfiguredGroupSource(); source.IsAsserted() {
+		RecordAssertedGroups(source, userRecord.ID, username, groups)
 	}
 
 	log.Debugf("Groups for user %s (source=%s): %v", username, groupSource, groups)

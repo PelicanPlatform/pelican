@@ -64,7 +64,7 @@ func TestEnsureAssertedGroups(t *testing.T) {
 		db := setupCollectionTestDB(t)
 		admin := withExternalWebURL(t, db)
 
-		require.NoError(t, EnsureAssertedGroups(db, GroupSourceOIDC, []string{"cms-production", "atlas", "cms-production"}))
+		mustEnsureAssertedGroups(t, db, GroupSourceOIDC, []string{"cms-production", "atlas", "cms-production"})
 
 		var groups []Group
 		require.NoError(t, db.Where("source = ?", GroupSourceOIDC).Order("name").Find(&groups).Error)
@@ -85,7 +85,7 @@ func TestEnsureAssertedGroups(t *testing.T) {
 
 		// Idempotent: a second login asserting the same names changes
 		// nothing.
-		require.NoError(t, EnsureAssertedGroups(db, GroupSourceOIDC, []string{"cms-production", "atlas"}))
+		mustEnsureAssertedGroups(t, db, GroupSourceOIDC, []string{"cms-production", "atlas"})
 		var count int64
 		require.NoError(t, db.Model(&Group{}).Count(&count).Error)
 		assert.EqualValues(t, 2, count)
@@ -94,7 +94,7 @@ func TestEnsureAssertedGroups(t *testing.T) {
 	t.Run("reserves the name against local group creation", func(t *testing.T) {
 		db := setupCollectionTestDB(t)
 		withExternalWebURL(t, db)
-		require.NoError(t, EnsureAssertedGroups(db, GroupSourceOIDC, []string{"cms-production"}))
+		mustEnsureAssertedGroups(t, db, GroupSourceOIDC, []string{"cms-production"})
 
 		_, err := CreateGroup(db, "cms-production", "", "", Creator{UserID: "u-nobody"}, "", false)
 		assert.ErrorIs(t, err, ErrGroupNameConflict,
@@ -104,7 +104,7 @@ func TestEnsureAssertedGroups(t *testing.T) {
 	t.Run("refuses a source that does not assert memberships", func(t *testing.T) {
 		db := setupCollectionTestDB(t)
 		withExternalWebURL(t, db)
-		err := EnsureAssertedGroups(db, GroupSourcePelican, []string{"cms-production"})
+		_, err := EnsureAssertedGroups(db, GroupSourcePelican, []string{"cms-production"})
 		assert.Error(t, err, "Pelican-created groups come from CreateGroup, not from an assertion")
 		var count int64
 		require.NoError(t, db.Model(&Group{}).Count(&count).Error)
@@ -123,7 +123,7 @@ func TestEnsureAssertedGroups(t *testing.T) {
 			AuthTemplateEligible: true, Source: GroupSourceUnknown,
 		}).Error)
 
-		require.NoError(t, EnsureAssertedGroups(db, GroupSourceGitHub, []string{"cms-production"}))
+		mustEnsureAssertedGroups(t, db, GroupSourceGitHub, []string{"cms-production"})
 
 		var g Group
 		require.NoError(t, db.First(&g, "id = ?", "g-legacy").Error)
@@ -140,7 +140,7 @@ func TestEnsureAssertedGroups(t *testing.T) {
 		local, err := CreateGroup(db, "sysadmins", "", "", Creator{UserID: "u-eve"}, "", false)
 		require.NoError(t, err)
 
-		require.NoError(t, EnsureAssertedGroups(db, GroupSourceOIDC, []string{"sysadmins"}))
+		mustEnsureAssertedGroups(t, db, GroupSourceOIDC, []string{"sysadmins"})
 
 		var after Group
 		require.NoError(t, db.First(&after, "id = ?", local.ID).Error)
@@ -158,11 +158,11 @@ func TestEnsureAssertedGroups(t *testing.T) {
 		// of every member restored it, clearing it would be useless.
 		db := setupCollectionTestDB(t)
 		withExternalWebURL(t, db)
-		require.NoError(t, EnsureAssertedGroups(db, GroupSourceGitHub, []string{"atlas"}))
+		mustEnsureAssertedGroups(t, db, GroupSourceGitHub, []string{"atlas"})
 		require.NoError(t, db.Model(&Group{}).Where("name = ?", "atlas").
 			Update("auth_template_eligible", false).Error)
 
-		require.NoError(t, EnsureAssertedGroups(db, GroupSourceGitHub, []string{"atlas"}))
+		mustEnsureAssertedGroups(t, db, GroupSourceGitHub, []string{"atlas"})
 
 		var g Group
 		require.NoError(t, db.First(&g, "name = ?", "atlas").Error)
@@ -174,13 +174,13 @@ func TestEnsureAssertedGroups(t *testing.T) {
 		db := setupCollectionTestDB(t)
 		withExternalWebURL(t, db)
 
-		require.NoError(t, EnsureAssertedGroups(db, GroupSourceOIDC, []string{
+		mustEnsureAssertedGroups(t, db, GroupSourceOIDC, []string{
 			"/cms/production", // WLCG-style; ValidateIdentifier would reject the slash
 			"a1b2c3d4",        // ID-shaped; only a naming-hygiene rule, not a control
 			"",                // empty
 			"user-alice",      // reserved personal-group prefix
 			"@authenticated",  // the virtual ACL sentinel
-		}))
+		})
 
 		var names []string
 		require.NoError(t, db.Model(&Group{}).Order("name").Pluck("name", &names).Error)
@@ -195,7 +195,7 @@ func TestEnsureAssertedGroups(t *testing.T) {
 		withExternalWebURL(t, db)
 		require.NoError(t, param.Issuer_DisableGroupAutoCreation.Set(true))
 
-		require.NoError(t, EnsureAssertedGroups(db, GroupSourceOIDC, []string{"cms-production"}))
+		mustEnsureAssertedGroups(t, db, GroupSourceOIDC, []string{"cms-production"})
 		var count int64
 		require.NoError(t, db.Model(&Group{}).Count(&count).Error)
 		assert.Zero(t, count)
@@ -217,7 +217,7 @@ func TestAssertedGroupBecomesAnUsableACLTarget(t *testing.T) {
 	assert.ErrorIs(t, err, ErrUnknownACLSubject)
 
 	// A login asserting the group reconciles it...
-	require.NoError(t, EnsureAssertedGroups(db, GroupSourceOIDC, []string{"cms-production"}))
+	mustEnsureAssertedGroups(t, db, GroupSourceOIDC, []string{"cms-production"})
 	require.NoError(t, GrantCollectionAcl(db, coll.ID, owner.Username, owner.ID, nil,
 		ACLSubjectRef("cms-production"), AclRoleRead, nil, false))
 
@@ -227,4 +227,14 @@ func TestAssertedGroupBecomesAnUsableACLTarget(t *testing.T) {
 		[]string{"cms-production"}, token_scopes.Collection_Read))
 	assert.ErrorIs(t, validateACL(db, reload(t, db, coll.ID), member.Username, member.ID,
 		[]string{"some-other-group"}, token_scopes.Collection_Read), ErrForbidden)
+}
+
+// mustEnsureAssertedGroups records the names and returns the subset that
+// got a record, failing the test on error. The accepted list is what
+// MirrorAssertedGroupMemberships must be given — see its contract.
+func mustEnsureAssertedGroups(t *testing.T, db *gorm.DB, source GroupSource, names []string) []string {
+	t.Helper()
+	accepted, err := EnsureAssertedGroups(db, source, names)
+	require.NoError(t, err)
+	return accepted
 }

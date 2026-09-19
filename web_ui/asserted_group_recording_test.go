@@ -148,23 +148,21 @@ func TestMirroredMembershipsFollowTheProvider(t *testing.T) {
 			"an empty assertion is a statement, not a no-op")
 	})
 
-	t.Run("one provider does not retract another's memberships", func(t *testing.T) {
-		// A server can genuinely have two asserted sources in play: the
-		// password-login path reads the group file whatever
-		// Issuer.GroupSource says.
+	t.Run("switching provider retracts the previous one's memberships", func(t *testing.T) {
+		// Issuer.GroupSource is single-valued: exactly one provider
+		// decides membership at a time. The group file used to be read
+		// on the password path whatever the setting said, which made it
+		// an always-on second provider — and left each half of the
+		// mirror owning rows the other could not retract.
 		RecordAssertedGroups(database.GroupSourceOIDC, user.ID, user.Username, []string{"ops"})
+		require.Contains(t, memberships(t, db, user.ID), "ops")
+
 		RecordAssertedGroups(database.GroupSourceFile, user.ID, user.Username, []string{"local-team"})
 		mirrored := memberships(t, db, user.ID)
-		require.Len(t, mirrored, 2)
-		assert.Equal(t, database.GroupSourceOIDC, mirrored["ops"].Source)
+		require.Len(t, mirrored, 1,
+			"a membership the current provider does not assert is stale, whoever recorded it")
+		assert.Contains(t, mirrored, "local-team")
 		assert.Equal(t, database.GroupSourceFile, mirrored["local-team"].Source)
-
-		// The file source retracting its own membership leaves the OIDC
-		// one alone.
-		RecordAssertedGroups(database.GroupSourceFile, user.ID, user.Username, nil)
-		mirrored = memberships(t, db, user.ID)
-		require.Len(t, mirrored, 1)
-		assert.Contains(t, mirrored, "ops")
 	})
 
 	t.Run("an administrator's local membership outranks the assertion", func(t *testing.T) {
@@ -200,7 +198,7 @@ func TestMirroredMembershipsFollowTheProvider(t *testing.T) {
 func TestMustTreatAsSystemAdmin(t *testing.T) {
 	db := setupAssertedGroupTest(t, "")
 	require.NoError(t, param.Server_AdminGroups.Set([]string{"ops"}))
-	require.NoError(t, param.Issuer_GroupSource.Set(GroupSourceTypeOIDC))
+	require.NoError(t, param.Issuer_GroupSource.Set(database.GroupSourceTypeOIDC))
 
 	admin := seedTestUser(t, db, "u-admin-via-group", "grace")
 	ordinary := seedTestUser(t, db, "u-ordinary", "mallory")
@@ -291,7 +289,7 @@ func TestMustTreatAsSystemAdmin(t *testing.T) {
 func TestIsConfirmedSystemAdminTreatsUncertaintyAsNo(t *testing.T) {
 	db := setupAssertedGroupTest(t, "")
 	require.NoError(t, param.Server_AdminGroups.Set([]string{"ops"}))
-	require.NoError(t, param.Issuer_GroupSource.Set(GroupSourceTypeOIDC))
+	require.NoError(t, param.Issuer_GroupSource.Set(database.GroupSourceTypeOIDC))
 
 	unobserved := seedTestUser(t, db, "u-unobserved", "judy")
 	assert.False(t, IsConfirmedSystemAdmin(db, unobserved.ID),
@@ -310,6 +308,9 @@ func TestIsConfirmedSystemAdminTreatsUncertaintyAsNo(t *testing.T) {
 // serve stale memberships until each user happens to log in.
 func TestGroupFileRefreshReconcilesEveryKnownUser(t *testing.T) {
 	db := setupAssertedGroupTest(t, `{"alice": ["ops"], "bob": ["research"]}`)
+	// The refresher only runs when the file is THE configured source —
+	// see TestNonAuthoritativeSourceCannotRuleAnAccountOut for why.
+	require.NoError(t, param.Issuer_GroupSource.Set(database.GroupSourceTypeFile))
 	alice := seedTestUser(t, db, "u-alice", "alice")
 	bob := seedTestUser(t, db, "u-bob", "bob")
 	carol := seedTestUser(t, db, "u-carol", "carol")
@@ -365,5 +366,63 @@ func TestGroupFileRefreshReconcilesEveryKnownUser(t *testing.T) {
 
 		assert.Empty(t, memberships(t, db, alice.ID),
 			"a cancelled pass must do no work, not merely skip its logging")
+	})
+}
+
+// The latch hole the reviewer found live: with Issuer.GroupSource set to
+// oidc and a group file also present, the file used to be read on every
+// path and by the periodic refresher. For an OIDC account the file has
+// no entry, so the refresher asserted an empty list, concluded no admin
+// group, and moved the latch from `unknown` to `ruled-out` — having
+// never consulted the account's real groups at the IdP.
+//
+// The fix is structural rather than a special case: Issuer.GroupSource
+// is single-valued, so on an `oidc` server the file is not a source at
+// all and nothing about it is recorded.
+func TestNonAuthoritativeSourceCannotRuleAnAccountOut(t *testing.T) {
+	db := setupAssertedGroupTest(t, `{"someone-else": ["ops"]}`)
+	require.NoError(t, param.Server_AdminGroups.Set([]string{"ops"}))
+	require.NoError(t, param.Issuer_GroupSource.Set(database.GroupSourceTypeOIDC))
+
+	// An OIDC account the group file says nothing about.
+	oidcUser := seedTestUser(t, db, "u-oidc", "grace")
+
+	t.Run("the file refresher does not run at all", func(t *testing.T) {
+		refreshGroupFileMemberships(context.Background())
+		var after database.User
+		require.NoError(t, db.First(&after, "id = ?", oidcUser.ID).Error)
+		assert.Equal(t, database.GroupAdminUnknown, after.GroupAdminStatus,
+			"a source that does not decide membership here must not rule the account out")
+		assert.Nil(t, after.GroupsObservedAt, "and must not claim to have observed it")
+	})
+
+	t.Run("the guard therefore stays conservative", func(t *testing.T) {
+		mustRefuse, why := MustTreatAsSystemAdmin(db, oidcUser.ID)
+		assert.True(t, mustRefuse)
+		assert.Contains(t, why, "have not been observed")
+	})
+
+	t.Run("a password login on an oidc server observes nothing", func(t *testing.T) {
+		// It has no token to read groups from, so it has not asked the
+		// configured source — which is not the same as the source
+		// saying "no groups".
+		groups, consulted, err := GroupsForLogin(oidcUser)
+		require.NoError(t, err)
+		assert.Empty(t, groups)
+		assert.False(t, consulted,
+			"failing to ask must be distinguishable from an authoritative empty answer")
+	})
+
+	t.Run("with the file as THE source, its silence is authoritative", func(t *testing.T) {
+		require.NoError(t, param.Issuer_GroupSource.Set(database.GroupSourceTypeFile))
+		groups, consulted, err := GroupsForLogin(oidcUser)
+		require.NoError(t, err)
+		assert.Empty(t, groups)
+		assert.True(t, consulted, "the configured source answering 'no groups' IS an observation")
+
+		RecordAssertedGroups(database.GroupSourceFile, oidcUser.ID, oidcUser.Username, groups)
+		var after database.User
+		require.NoError(t, db.First(&after, "id = ?", oidcUser.ID).Error)
+		assert.Equal(t, database.GroupAdminRuledOut, after.GroupAdminStatus)
 	})
 }
