@@ -1415,55 +1415,33 @@ func GetCollectionAcls(db *gorm.DB, id, user, userID string, groups []string, is
 	return collection.ACLs, nil
 }
 
-// GrantCollectionAcl adds (or refreshes) a role grant on a collection.
+// loadCollectionForWrite fetches a collection with its ACLs preloaded
+// and authorizes the caller to change it, which every mutating entry
+// point in this file needs to do first and in the same way.
 //
-// `ref` is a NAME-space target: a group name, `user-<username>`, or the
-// `@authenticated` sentinel. Callers holding an ID use
-// GrantCollectionAclBySubject instead — the two spaces have separate
-// entry points so neither has to be guessed from the string. A
-// reference that matches nothing is rejected with ErrUnknownACLSubject
-// rather than persisted verbatim.
-func GrantCollectionAcl(db *gorm.DB, id, user, userID string, groups []string, ref ACLSubjectRef, role AclRole, expiresAt *time.Time, isAdmin bool) error {
+// A system admin skips the ACL check; everyone else must satisfy
+// `scope` on the collection. The read paths deliberately do NOT use
+// this: they short-circuit on public visibility, which a write must
+// never do.
+func loadCollectionForWrite(db *gorm.DB, id, user, userID string, groups []string, isAdmin bool, scope token_scopes.TokenScope) (*Collection, error) {
 	collection := &Collection{}
 	if result := db.Preload("ACLs").Where("id = ?", id).First(collection); result.Error != nil {
-		return result.Error
+		return nil, result.Error
 	}
-
-	if !isAdmin {
-		err := validateACL(db, collection, user, userID, groups, token_scopes.Collection_Delete)
-		if err != nil {
-			return err
-		}
+	if isAdmin {
+		return collection, nil
 	}
-
-	subject, err := ResolveACLSubjectRef(db, ref)
-	if err != nil {
-		return err
+	if err := validateACL(db, collection, user, userID, groups, scope); err != nil {
+		return nil, err
 	}
-	return GrantCollectionAclBySubject(db, id, user, userID, groups, subject, role, expiresAt, isAdmin)
+	return collection, nil
 }
 
-// GrantCollectionAclBySubject is the ID-space counterpart of
-// GrantCollectionAcl: the caller supplies the stored subject directly,
-// so there is no name to resolve and nothing to guess. This is the only
-// way to grant to a *user* by ID.
-func GrantCollectionAclBySubject(db *gorm.DB, id, user, userID string, groups []string, subject ACLSubject, role AclRole, expiresAt *time.Time, isAdmin bool) error {
-	collection := &Collection{}
-	if result := db.Preload("ACLs").Where("id = ?", id).First(collection); result.Error != nil {
-		return result.Error
-	}
-
-	if !isAdmin {
-		if err := validateACL(db, collection, user, userID, groups, token_scopes.Collection_Delete); err != nil {
-			return err
-		}
-	}
-
-	subject, err := LookupACLSubject(db, subject)
-	if err != nil {
-		return err
-	}
-
+// applyCollectionACLGrant writes the grant itself. Split out so the
+// NAME-space and ID-space entry points share it without one calling the
+// other — which used to mean loading the collection and running the
+// authorization check twice on every name-space grant.
+func applyCollectionACLGrant(db *gorm.DB, id, userID string, subject ACLSubject, role AclRole, expiresAt *time.Time) error {
 	return db.Transaction(func(tx *gorm.DB) error {
 		acl := CollectionACL{
 			CollectionID: id,
@@ -1473,7 +1451,6 @@ func GrantCollectionAclBySubject(db *gorm.DB, id, user, userID string, groups []
 			GrantedBy:    creatorOrUnknown(userID),
 			ExpiresAt:    expiresAt,
 		}
-		// Use OnConflict to either create or update the ACL
 		return tx.Clauses(clause.OnConflict{
 			Columns:   []clause.Column{{Name: "collection_id"}, {Name: "subject_type"}, {Name: "subject_id"}, {Name: "role"}},
 			DoUpdates: clause.AssignmentColumns([]string{"granted_by", "expires_at"}),
@@ -1481,28 +1458,74 @@ func GrantCollectionAclBySubject(db *gorm.DB, id, user, userID string, groups []
 	})
 }
 
+// applyCollectionACLRevoke is the revoke counterpart. It normalizes the
+// sentinel's empty ID and rejects an unknown subject type, then deletes
+// the row. Unlike the grant path it does not require the subject to
+// still exist — clearing a grant whose principal was deleted is the
+// whole reason the ID-space entry point exists.
+func applyCollectionACLRevoke(db *gorm.DB, id string, subject ACLSubject, role AclRole) error {
+	switch subject.Type {
+	case ACLSubjectGroup, ACLSubjectUser:
+	case ACLSubjectAuthenticated:
+		subject.ID = ""
+	default:
+		return fmt.Errorf("%w: unknown subject type %q", ErrUnknownACLSubject, subject.Type)
+	}
+	return db.Transaction(func(tx *gorm.DB) error {
+		return tx.Where("collection_id = ? AND subject_type = ? AND subject_id = ? AND role = ?",
+			id, subject.Type, subject.ID, role).Delete(&CollectionACL{}).Error
+	})
+}
+
+// GrantCollectionAcl adds (or refreshes) a role grant on a collection.
+//
+// `ref` is a NAME-space target: a group name, `user-<username>`, or the
+// `@authenticated` sentinel. Callers holding an ID use
+// GrantCollectionAclBySubject instead — the two spaces have separate
+// entry points so neither has to be guessed from the string. A
+// reference that matches nothing is rejected with ErrUnknownACLSubject
+// rather than persisted verbatim.
+func GrantCollectionAcl(db *gorm.DB, id, user, userID string, groups []string, ref ACLSubjectRef, role AclRole, expiresAt *time.Time, isAdmin bool) error {
+	if _, err := loadCollectionForWrite(db, id, user, userID, groups, isAdmin, token_scopes.Collection_Delete); err != nil {
+		return err
+	}
+	// ResolveACLSubjectRef already proves the target exists, so there is
+	// nothing for LookupACLSubject to add here.
+	subject, err := ResolveACLSubjectRef(db, ref)
+	if err != nil {
+		return err
+	}
+	return applyCollectionACLGrant(db, id, userID, subject, role, expiresAt)
+}
+
+// GrantCollectionAclBySubject is the ID-space counterpart of
+// GrantCollectionAcl: the caller supplies the stored subject directly,
+// so there is no name to resolve and nothing to guess. This is the only
+// way to grant to a *user* by ID.
+func GrantCollectionAclBySubject(db *gorm.DB, id, user, userID string, groups []string, subject ACLSubject, role AclRole, expiresAt *time.Time, isAdmin bool) error {
+	if _, err := loadCollectionForWrite(db, id, user, userID, groups, isAdmin, token_scopes.Collection_Delete); err != nil {
+		return err
+	}
+	subject, err := LookupACLSubject(db, subject)
+	if err != nil {
+		return err
+	}
+	return applyCollectionACLGrant(db, id, userID, subject, role, expiresAt)
+}
+
 // RevokeCollectionAcl removes a role grant named in the NAME space —
 // the same spellings GrantCollectionAcl accepts, including the `groupId`
 // value the API hands back on a listing, so a client can round-trip what
 // it read.
 func RevokeCollectionAcl(db *gorm.DB, id, user, userID string, groups []string, ref ACLSubjectRef, role AclRole, isAdmin bool) error {
-	collection := &Collection{}
-	if result := db.Preload("ACLs").Where("id = ?", id).First(collection); result.Error != nil {
-		return result.Error
+	if _, err := loadCollectionForWrite(db, id, user, userID, groups, isAdmin, token_scopes.Collection_Delete); err != nil {
+		return err
 	}
-
-	if !isAdmin {
-		err := validateACL(db, collection, user, userID, groups, token_scopes.Collection_Delete)
-		if err != nil {
-			return err
-		}
-	}
-
 	subject, err := ResolveACLSubjectRef(db, ref)
 	if err != nil {
 		return err
 	}
-	return RevokeCollectionAclBySubject(db, id, user, userID, groups, subject, role, isAdmin)
+	return applyCollectionACLRevoke(db, id, subject, role)
 }
 
 // RevokeCollectionAclBySubject is the ID-space counterpart of
@@ -1511,45 +1534,16 @@ func RevokeCollectionAcl(db *gorm.DB, id, user, userID string, groups []string, 
 // resolve — so unlike the grant path it does NOT require the subject to
 // still exist.
 func RevokeCollectionAclBySubject(db *gorm.DB, id, user, userID string, groups []string, subject ACLSubject, role AclRole, isAdmin bool) error {
-	collection := &Collection{}
-	if result := db.Preload("ACLs").Where("id = ?", id).First(collection); result.Error != nil {
-		return result.Error
+	if _, err := loadCollectionForWrite(db, id, user, userID, groups, isAdmin, token_scopes.Collection_Delete); err != nil {
+		return err
 	}
-
-	if !isAdmin {
-		if err := validateACL(db, collection, user, userID, groups, token_scopes.Collection_Delete); err != nil {
-			return err
-		}
-	}
-
-	switch subject.Type {
-	case ACLSubjectGroup, ACLSubjectUser:
-	case ACLSubjectAuthenticated:
-		subject.ID = ""
-	default:
-		return fmt.Errorf("%w: unknown subject type %q", ErrUnknownACLSubject, subject.Type)
-	}
-
-	return db.Transaction(func(tx *gorm.DB) error {
-		if result := tx.Where("collection_id = ? AND subject_type = ? AND subject_id = ? AND role = ?",
-			id, subject.Type, subject.ID, role).Delete(&CollectionACL{}); result.Error != nil {
-			return result.Error
-		}
-		return nil
-	})
+	return applyCollectionACLRevoke(db, id, subject, role)
 }
 
 func UpsertCollectionMetadata(db *gorm.DB, id, user, userID string, groups []string, key, value string, isAdmin bool) error {
-	collection := &Collection{}
-	if result := db.Preload("ACLs").Where("id = ?", id).First(collection); result.Error != nil {
-		return result.Error
-	}
-
-	if !isAdmin {
-		err := validateACL(db, collection, user, userID, groups, token_scopes.Collection_Modify)
-		if err != nil {
-			return err
-		}
+	_, err := loadCollectionForWrite(db, id, user, userID, groups, isAdmin, token_scopes.Collection_Modify)
+	if err != nil {
+		return err
 	}
 
 	return db.Transaction(func(tx *gorm.DB) error {
@@ -1567,16 +1561,9 @@ func UpsertCollectionMetadata(db *gorm.DB, id, user, userID string, groups []str
 }
 
 func DeleteCollectionMetadata(db *gorm.DB, id, user, userID string, groups []string, key string, isAdmin bool) error {
-	collection := &Collection{}
-	if result := db.Preload("ACLs").Where("id = ?", id).First(collection); result.Error != nil {
-		return result.Error
-	}
-
-	if !isAdmin {
-		err := validateACL(db, collection, user, userID, groups, token_scopes.Collection_Modify)
-		if err != nil {
-			return err
-		}
+	_, err := loadCollectionForWrite(db, id, user, userID, groups, isAdmin, token_scopes.Collection_Modify)
+	if err != nil {
+		return err
 	}
 
 	return db.Transaction(func(tx *gorm.DB) error {
@@ -1790,16 +1777,12 @@ func ListCollectionShares(db *gorm.DB, parentID, user, userID string, groups []s
 // owner can hand the collection to someone else, but a writer can't
 // elevate themselves).
 func UpdateCollection(db *gorm.DB, id, user, userID string, groups []string, name, description *string, visibility *Visibility, ownerID, adminID *string, enableSharing *bool, isAdmin bool) error {
-	collection := &Collection{}
-	if result := db.Preload("ACLs").Where("id = ?", id).First(collection); result.Error != nil {
-		return result.Error
+	collection, err := loadCollectionForWrite(db, id, user, userID, groups, isAdmin, token_scopes.Collection_Modify)
+	if err != nil {
+		return err
 	}
 
 	if !isAdmin {
-		err := validateACL(db, collection, user, userID, groups, token_scopes.Collection_Modify)
-		if err != nil {
-			return err
-		}
 		// Ownership transfer (ownerID) is owner-exclusive: an
 		// admin-group member must NOT be able to seize the
 		// collection by re-pointing OwnerID at themselves. The
@@ -1876,16 +1859,9 @@ func UpdateCollection(db *gorm.DB, id, user, userID string, groups []string, nam
 }
 
 func AddCollectionMembers(db *gorm.DB, id string, members []string, addedBy, addedByID string, groups []string, isAdmin bool) error {
-	collection := &Collection{}
-	if result := db.Preload("ACLs").Where("id = ?", id).First(collection); result.Error != nil {
-		return result.Error
-	}
-
-	if !isAdmin {
-		err := validateACL(db, collection, addedBy, addedByID, groups, token_scopes.Collection_Modify)
-		if err != nil {
-			return err
-		}
+	collection, err := loadCollectionForWrite(db, id, addedBy, addedByID, groups, isAdmin, token_scopes.Collection_Modify)
+	if err != nil {
+		return err
 	}
 
 	// Enforce that each member belongs to the collection's namespace
@@ -1913,7 +1889,7 @@ func AddCollectionMembers(db *gorm.DB, id string, members []string, addedBy, add
 			AddedBy:      creatorOrUnknown(addedByID),
 		})
 	}
-	err := db.Transaction(func(tx *gorm.DB) error {
+	err = db.Transaction(func(tx *gorm.DB) error {
 		if result := tx.Create(&records); result.Error != nil {
 			return result.Error
 		}
@@ -1926,16 +1902,9 @@ func AddCollectionMembers(db *gorm.DB, id string, members []string, addedBy, add
 }
 
 func RemoveCollectionMembers(db *gorm.DB, id string, members []string, user, userID string, groups []string, isAdmin bool) error {
-	collection := &Collection{}
-	if result := db.Preload("ACLs").Where("id = ?", id).First(collection); result.Error != nil {
-		return result.Error
-	}
-
-	if !isAdmin {
-		err := validateACL(db, collection, user, userID, groups, token_scopes.Collection_Modify)
-		if err != nil {
-			return err
-		}
+	_, err := loadCollectionForWrite(db, id, user, userID, groups, isAdmin, token_scopes.Collection_Modify)
+	if err != nil {
+		return err
 	}
 
 	return db.Transaction(func(tx *gorm.DB) error {
