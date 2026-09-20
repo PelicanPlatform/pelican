@@ -428,3 +428,161 @@ func TestStaleAdminGroupMembershipCannotManageAGroup(t *testing.T) {
 	assert.False(t, CanManageGroup(db, storage, deputy.ID, false),
 		"a mirrored membership past the TTL must not still confer authority over the group")
 }
+
+// TestRuleOutGroupAdminOnlyResolvesTheAbsenceOfEvidence covers the
+// escape hatch for accounts an external provider will never be asked
+// about again — and the line it must not cross.
+func TestRuleOutGroupAdminOnlyResolvesTheAbsenceOfEvidence(t *testing.T) {
+	db := setupCollectionTestDB(t)
+	withExternalWebURL(t, db)
+
+	t.Run("an unobserved account can be ruled out", func(t *testing.T) {
+		// Under oidc/github nothing but a login clears `unknown`, so a
+		// departed account would otherwise be untouchable forever.
+		u := mkUser(t, db, "u-departed", "departed")
+		require.NoError(t, db.Model(&User{}).Where("id = ?", u.ID).
+			Update("group_admin_status", GroupAdminUnknown).Error)
+
+		require.NoError(t, RuleOutGroupAdmin(db, u.ID))
+
+		var after User
+		require.NoError(t, db.First(&after, "id = ?", u.ID).Error)
+		assert.Equal(t, GroupAdminRuledOut, after.GroupAdminStatus)
+		assert.False(t, after.GroupAdminStatus.MayBeAdmin())
+		assert.NotNil(t, after.GroupsObservedAt, "the judgement is an observation and is timestamped")
+	})
+
+	t.Run("a latched account cannot be", func(t *testing.T) {
+		// The latch means Pelican has SEEN this account hold an
+		// administrative group. An API that erased that would be an API
+		// to defeat the guard it feeds.
+		u := mkUser(t, db, "u-latched", "latched")
+		require.NoError(t, RecordGroupAdminObservation(db, u.ID, true))
+
+		err := RuleOutGroupAdmin(db, u.ID)
+		require.ErrorIs(t, err, ErrGroupAdminLatched)
+
+		var after User
+		require.NoError(t, db.First(&after, "id = ?", u.ID).Error)
+		assert.Equal(t, GroupAdminPossible, after.GroupAdminStatus, "the latch is untouched")
+	})
+
+	t.Run("a later observation still wins", func(t *testing.T) {
+		// Ruling out is a judgement about the evidence available now,
+		// not a permanent exemption: if the provider later asserts an
+		// admin group, the latch must still fire.
+		u := mkUser(t, db, "u-returning", "returning")
+		require.NoError(t, RuleOutGroupAdmin(db, u.ID))
+		require.NoError(t, RecordGroupAdminObservation(db, u.ID, true))
+
+		var after User
+		require.NoError(t, db.First(&after, "id = ?", u.ID).Error)
+		assert.Equal(t, GroupAdminPossible, after.GroupAdminStatus)
+	})
+}
+
+// assertedAtOf returns the mirrored stamp for one (group, user) pair,
+// or nil when there is no row.
+func assertedAtOf(t *testing.T, db *gorm.DB, groupID, userID string) *time.Time {
+	t.Helper()
+	var rows []struct{ AssertedAt *time.Time }
+	require.NoError(t, db.Table("group_members").Select("asserted_at").
+		Where("group_id = ? AND user_id = ?", groupID, userID).Scan(&rows).Error)
+	if len(rows) == 0 {
+		return nil
+	}
+	return rows[0].AssertedAt
+}
+
+// TestRepeatedObservationsAreDebounced covers the write-amplification
+// fix and, more importantly, the line it must not cross. The group-file
+// refresher reconciles every known account every
+// Issuer.GroupFileRefreshInterval while rows stay valid for
+// Issuer.AssertedGroupMembershipTTL, so re-stamping on every pass is
+// hundreds of times more writing than expiry requires — but a change in
+// what the provider asserts must still take effect on the very next
+// pass.
+func TestRepeatedObservationsAreDebounced(t *testing.T) {
+	// debounce = TTL/8 = 3h.
+	withMembershipTTL(t, 24*time.Hour)
+
+	newFixture := func(t *testing.T) (*gorm.DB, *User, Group) {
+		db := setupCollectionTestDB(t)
+		withExternalWebURL(t, db)
+		u := mkUser(t, db, "u-obs", "obs")
+		mustEnsureAssertedGroups(t, db, GroupSourceOIDC, []string{"ops", "atlas"})
+		var ops Group
+		require.NoError(t, db.First(&ops, "name = ?", "ops").Error)
+		require.NoError(t, MirrorAssertedGroupMemberships(db, GroupSourceOIDC, u.ID, []string{"ops"}))
+		return db, u, ops
+	}
+
+	t.Run("an unchanged assertion does not rewrite the stamp", func(t *testing.T) {
+		db, u, ops := newFixture(t)
+		before := assertedAtOf(t, db, ops.ID, u.ID)
+		require.NotNil(t, before)
+
+		require.NoError(t, MirrorAssertedGroupMemberships(db, GroupSourceOIDC, u.ID, []string{"ops"}))
+
+		assert.Equal(t, before, assertedAtOf(t, db, ops.ID, u.ID),
+			"nothing changed, so the pass must not have opened a write transaction")
+	})
+
+	t.Run("a retraction is never debounced", func(t *testing.T) {
+		// The property that makes the fast path safe: revocation cannot
+		// wait for the window.
+		db, u, ops := newFixture(t)
+		require.NoError(t, MirrorAssertedGroupMemberships(db, GroupSourceOIDC, u.ID, nil))
+		assert.Nil(t, assertedAtOf(t, db, ops.ID, u.ID),
+			"a membership the provider stopped asserting must go on the very next pass")
+	})
+
+	t.Run("a new membership is never debounced", func(t *testing.T) {
+		db, u, _ := newFixture(t)
+		require.NoError(t, MirrorAssertedGroupMemberships(db, GroupSourceOIDC, u.ID, []string{"ops", "atlas"}))
+		assert.ElementsMatch(t, []string{"ops", "atlas"}, memberGroupNames(t, db, u.ID))
+	})
+
+	t.Run("a change of provider is never debounced", func(t *testing.T) {
+		db, u, ops := newFixture(t)
+		require.NoError(t, MirrorAssertedGroupMemberships(db, GroupSourceGitHub, u.ID, []string{"ops"}))
+		var src GroupSource
+		require.NoError(t, db.Table("group_members").Select("source").
+			Where("group_id = ? AND user_id = ?", ops.ID, u.ID).Scan(&src).Error)
+		assert.Equal(t, GroupSourceGitHub, src, "a reconfigured source must re-stamp immediately")
+	})
+
+	t.Run("the stamp is refreshed once the window has passed", func(t *testing.T) {
+		db, u, ops := newFixture(t)
+		ageMembership(t, db, ops.ID, u.ID, 4*time.Hour) // past debounce, inside the TTL
+		before := assertedAtOf(t, db, ops.ID, u.ID)
+
+		require.NoError(t, MirrorAssertedGroupMemberships(db, GroupSourceOIDC, u.ID, []string{"ops"}))
+
+		after := assertedAtOf(t, db, ops.ID, u.ID)
+		require.NotNil(t, after)
+		assert.True(t, after.After(*before),
+			"a row approaching expiry must still be renewed, or debouncing would cause the expiry it exists to prevent")
+	})
+
+	t.Run("the admin-group latch is evaluated on every pass", func(t *testing.T) {
+		db, u, _ := newFixture(t)
+		require.NoError(t, RecordGroupAdminObservation(db, u.ID, false))
+		var before User
+		require.NoError(t, db.First(&before, "id = ?", u.ID).Error)
+		require.Equal(t, GroupAdminRuledOut, before.GroupAdminStatus)
+
+		// Debounced: same verdict, nothing rewritten.
+		require.NoError(t, RecordGroupAdminObservation(db, u.ID, false))
+		var same User
+		require.NoError(t, db.First(&same, "id = ?", u.ID).Error)
+		assert.Equal(t, before.GroupsObservedAt, same.GroupsObservedAt)
+
+		// Not debounced: the verdict changed.
+		require.NoError(t, RecordGroupAdminObservation(db, u.ID, true))
+		var after User
+		require.NoError(t, db.First(&after, "id = ?", u.ID).Error)
+		assert.Equal(t, GroupAdminPossible, after.GroupAdminStatus,
+			"an account that has just been seen in an admin group must latch immediately")
+	})
+}

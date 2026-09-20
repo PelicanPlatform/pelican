@@ -6557,11 +6557,15 @@ paths:
         - users
       summary: Update an existing user
       description: >-
-        `Admin privilege Required`. Only `username` and `displayName`
-        are mutable here. The user's primary OIDC identity (`sub`,
-        `issuer`) is managed via `/users/{id}/identities`, never inline
-        — and a username rename of a local-issuer account also rotates
-        the primary `sub` so password login keeps working.
+        `Admin privilege Required`. Only `username`, `displayName` and
+        `groupAdminRuledOut` are mutable here. The user's primary OIDC
+        identity (`sub`, `issuer`) is managed via
+        `/users/{id}/identities`, never inline — and a username rename
+        of a local-issuer account also rotates the primary `sub` so
+        password login keeps working.
+
+        `username` and `displayName` accept a user-admin caller;
+        `groupAdminRuledOut` requires a full system administrator.
       consumes:
         - application/json
       produces:
@@ -6574,7 +6578,9 @@ paths:
           type: string
         - in: body
           name: user
-          description: At least one of `username` or `displayName` must be set.
+          description: >-
+            At least one of `username`, `displayName` or
+            `groupAdminRuledOut` must be set.
           required: true
           schema:
             type: object
@@ -6585,11 +6591,28 @@ paths:
               displayName:
                 type: string
                 description: New human-readable display name.
+              groupAdminRuledOut:
+                type: boolean
+                description: >-
+                  Records that a system administrator has checked and
+                  this account does not hold a group conferring an
+                  administrator scope, which lets a user-administrator
+                  act on it. Only `true` is accepted, and only from a
+                  full system administrator. Needed because the state is
+                  otherwise only reached by the account signing in, so
+                  under an external group source an account that never
+                  signs in again can never be acted on. It cannot
+                  override an account already observed holding an
+                  administrative group; that returns 409.
       responses:
         "204":
           description: User updated successfully
         "400":
-          description: Bad request (no field set, invalid identifier, or uniqueness violation)
+          description: Bad request (no field set, invalid identifier, uniqueness violation, or groupAdminRuledOut set to false)
+        "409":
+          description: >-
+            The account has been observed holding an administrative
+            group, so `groupAdminRuledOut` cannot be recorded for it.
           schema:
             $ref: "#/definitions/ErrorModelV2"
         "401":

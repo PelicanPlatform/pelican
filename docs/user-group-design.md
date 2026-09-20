@@ -58,13 +58,13 @@ A group has the following properties:
 
 A group record names the provider it came from, using the same vocabulary as the `Issuer.GroupSource` configuration value. There is deliberately no "internal vs external" split: Pelican reads membership from several providers, they behave differently from each other, and an operator debugging "why is this user in this group" needs to know which one to go look at.
 
-| Source    | Membership decided by               | Notes                                                                                                                                   |
-| --------- | ----------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------- |
-| `pelican` | `group_members` in this database    | The only source a user can create a group in.                                                                                           |
-| `oidc`    | the identity provider's group claim |                                                                                                                                         |
-| `file`    | `Issuer.GroupFile`                  |                                                                                                                                         |
-| `github`  | GitHub organization membership      |                                                                                                                                         |
-| `unknown` | some provider, unrecorded           | Backfilled by migration from a collection ACL that named a group Pelican had no record of. The next assertion stamps the real provider. |
+| Source    | Membership decided by               | Notes                                                                                                                                                                                      |
+| --------- | ----------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `pelican` | `group_members` in this database    | The only source a user can create a group in.                                                                                                                                              |
+| `oidc`    | the identity provider's group claim |                                                                                                                                                                                            |
+| `file`    | `Issuer.GroupFile`                  |                                                                                                                                                                                            |
+| `github`  | GitHub organization membership      |                                                                                                                                                                                            |
+| `unknown` | some provider, unrecorded           | Reserved at startup from `Server.*AdminGroups`, or backfilled by migration from a collection ACL that named a group Pelican had no record of. The next assertion stamps the real provider. |
 
 Every source but `pelican` is *asserted*: the named provider, not this server, decides who is in the group.
 
@@ -76,11 +76,27 @@ An asserted group cannot be renamed — its name is the link to the provider's a
 
 Operators who do not want Pelican writing groups it did not create can set `Issuer.DisableGroupAutoCreation`. The cost is that an asserted group has no ID, so it cannot be named in a collection ACL, and its name stays available for any authenticated user to claim.
 
+## Reserved administrator group names
+
+A group name listed in `Server.AdminGroups`, `Server.UserAdminGroups` or `Server.CollectionAdminGroups` confers a scope on whoever holds it, so the server takes those names at startup: any that has no record gets one, owned by the built-in `admin` user and auth-template eligible.
+
+Without that, an unprivileged user could take one. Group creation is open, a non-admin creator's group is not auth-template eligible, and the eligibility filter matches on the **name** and applies globally — so one ineligible group called `ops` removes `ops` from *every* caller's group list, revoking `server.admin` from every administrator who held it through the provider's assertion. Reserving the name first makes `CreateGroup` refuse it.
+
+The reservation is stamped `unknown`, never the configured source. Nothing has been observed asserting the name — the server is holding a name an operator typed — so naming a provider would invent provenance the first real assertion is supposed to supply. It also has to be a source that counts as *asserted*, or the reservation fails at its job: under `Issuer.GroupSource: internal`, which maps to `pelican`, the name would be held but the provider could never mirror its members into the group that confers admin.
+
+Two consequences follow from the name being load-bearing. A configured name the server cannot record — one carrying the `user-` personal prefix, a leading `@`, or over the length limit — fails startup rather than being skipped, because such a name still matches an assertion carrying it while having no record to hold it and no eligibility bit to revoke it with. And a reserved group cannot be deleted while the configuration still names it: deletion releases the name, which would let a user claim it before the next startup reserved it again. Removing the configuration entry is the step that makes the group ordinary.
+
+This happens regardless of `Issuer.DisableGroupAutoCreation`. That knob governs names the server merely *observes* from a provider; these are names the operator typed, and with auto-creation off nothing else would reserve them — which is precisely when it matters most.
+
 ## Mirrored memberships
 
 Recording the group is not enough on its own. Membership still lives at the provider, which works for the caller in front of us — their asserted names are resolved to group IDs on each request — and fails for every decision made *about* a user who is not in front of us: whether the owner of a share still has access to its parent collection (computed at token-mint time, with no session for that owner), whether an account a user-administrator is about to act on is itself a system administrator, or simply who is in this group.
 
 So Pelican also mirrors the memberships, into `group_members` alongside the ones administrators create. A row's `source` says which it is: `pelican` for a membership created through the group API — authoritative, never expires, and an assertion never overwrites or retracts one — or the provider that asserted it, with `asserted_at` recording when it last did so.
+
+Membership can therefore be mixed, but only in one direction. An asserted group holds mirrored rows *and* any local members an administrator added alongside them; a `pelican` group holds only local ones, because an assertion never reaches it — the reconciliation step refuses to accept a name a `pelican` group already holds, and the mirror independently filters those groups out of its lookup. An operator who wants to add a collaborator that the identity provider does not carry can do so; an identity provider cannot quietly add anyone to a group this server owns.
+
+That asymmetry is why the source is recorded in two places, on the group and again on each membership, and the two are not redundant. The group's source says **who decides its membership by default**; the row's source says **how that particular row got there, and whether it may expire**. Collapsing them would leave the retraction pass unable to tell an administrator's deliberate membership from a provider's — and since retraction runs on every login, it would delete the administrator's on the member's next sign-in.
 
 A mirrored membership is a **cached authorization fact**, and a cache that outlives the fact is the same bug as a name that outlives its principal. One rule keeps it honest:
 
@@ -88,7 +104,7 @@ A mirrored membership is a **cached authorization fact**, and a cache that outli
 >
 > And, more generally: **which direction is safe depends on what a true answer does.**
 
-A mirrored row may hand out access only while the provider has asserted it within `Issuer.AssertedGroupMembershipTTL`. Past that it is *kept*, not deleted — because a check that asks whether an account might *hold* a privilege has to keep seeing it. For `IsSystemAdminUserID`, "we last saw this account in an admin group a month ago" must mean *refuse*; treating a stale copy as absence is exactly what opens that guard. Consumers therefore declare which direction is safe for them: granting paths filter on freshness, restricting paths do not. Rows go away only when the provider stops asserting them.
+A mirrored row may hand out access only while the provider has asserted it within `Issuer.AssertedGroupMembershipTTL`. Past that it is *kept*, not deleted — because a check that asks whether an account might *hold* a privilege has to keep seeing it. For `MustTreatAsSystemAdmin`, "we last saw this account in an admin group a month ago" must mean *refuse*; treating a stale copy as absence is exactly what opens that guard. Consumers therefore declare which direction is safe for them: granting paths filter on freshness, restricting paths do not. Rows go away only when the provider stops asserting them.
 
 The caller's own live assertion is never gated by the TTL — that is the provider speaking directly, not a cache.
 
@@ -108,7 +124,9 @@ So the question is inverted: not "have we proved this account **is** an administ
 
 Nothing ever leaves `possible`. A provider retracting an administrative membership removes the evidence, not the history, and an account that could once administer this server should not become manageable because a group assignment changed. Recourse is a full `server.admin`, who bypasses these guards entirely; there is deliberately no API to clear the latch, since that would be an API to defeat it.
 
-`unknown` is conservative by design: on upgrade every account carries it, so a user-administrator can act on none until each has signed in once. Where `Server.AdminGroups` is unset no group can confer admin, so the evidence alone rules an account out and nothing changes.
+`unknown` is conservative by design: on upgrade every account carries it, so a user-administrator can act on none until each has signed in once. Where `Server.AdminGroups` is unset no group can confer admin, so the evidence alone rules an account out and nothing changes. The same is true where membership is Pelican's own, since `group_members` is then complete and there is nothing a provider could be hiding.
+
+Under `oidc` or `github`, though, only that account signing in clears `unknown` — so an account that never signs in again would stay untouchable forever, and departed or never-activated accounts are exactly what a user-administrator exists to clean up. A full `server.admin` may therefore record the judgement directly, with `groupAdminRuledOut` on `PATCH /users/{id}`. It moves an account from `unknown` to `ruled-out` and nothing else: an account already latched `possible` is refused, because that state means the server has *seen* it hold an administrative group and an API to erase that observation would be an API to defeat the guard. Nor is it permanent — a later observation still latches `possible`. It grants the caller nothing they did not already have, since a full administrator bypasses these guards anyway; it lets them delegate the cleanup.
 
 The two predicates are `MustTreatAsSystemAdmin` (restricting — uncertainty refuses) and `IsConfirmedSystemAdmin` (granting — uncertainty declines). They are not interchangeable: `transfer.registerOAuthClient` marks an administrator's client *shared*, so using the restricting one there would quietly share the clients of accounts nobody has established anything about.
 

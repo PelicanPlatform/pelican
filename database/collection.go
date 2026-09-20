@@ -2060,12 +2060,6 @@ func EffectiveCollectionRole(db *gorm.DB, coll *Collection, userID, username str
 // the caller skips the ACL check entirely — they have full management
 // authority.
 //
-// There is deliberately no username path. Matching the caller's
-// username against a username stored on the row is what let a
-// previous owner keep authority after a PATCH transfer and let a
-// reclaimed username inherit a deleted account's collections
-// (issue #3753); the `owner` column backing it is gone.
-//
 // `db` may be nil during in-memory unit tests of the ACL filter; in
 // that case only the caller-supplied User.ID is available, and the
 // function still answers correctly for the owner case.
@@ -2149,8 +2143,7 @@ func CallerIsCollectionOwner(db *gorm.DB, collection *Collection, username, user
 // admin-group bypass works.
 func validateACL(db *gorm.DB, collection *Collection, user, userID string, groups []string, scope token_scopes.TokenScope) error {
 	// Resolve the caller once; both the ownership check and the ACL
-	// scan below match against the same ID-keyed subject set. See
-	// ResolveCallerACLSubjects for the contract.
+	// scan below match against the same ID-keyed subject set.
 	subjects := ResolveCallerACLSubjects(db, user, userID, groups)
 	if subjects.IsOwnerOrAdmin(collection) {
 		return nil
@@ -2601,11 +2594,7 @@ func CreateGroup(db *gorm.DB, name, displayName, description string, creator Cre
 	}
 
 	// A name an identity provider already asserts is off-limits:
-	// EnsureAssertedGroups has minted an admin-owned record for it, and
-	// letting a user take the name would let them stand in for the
-	// provider's group in every ACL keyed on it. The unique index on
-	// groups.name would reject this anyway; the explicit check exists so
-	// the caller gets an explanation instead of a constraint violation.
+	// otherwise, the user may be able to shadow a privileged group.
 	var clash Group
 	if err := db.Select("id", "name", "source").Where("name = ?", name).First(&clash).Error; err == nil {
 		if clash.Source.IsAsserted() {
@@ -2663,8 +2652,7 @@ func GroupAutoCreationEnabled() bool {
 // BuiltinAdminUser returns the built-in "admin" account — the user
 // whose username is "admin" on the server's own issuer
 // (Server.ExternalWebUrl). Returns (nil, nil) when the URL isn't
-// configured yet or the row hasn't been bootstrapped, so callers can
-// treat "no admin yet" as a soft condition rather than an error.
+// configured yet or the row hasn't been bootstrapped.
 // See BootstrapAdminAndBackfillOwners, which creates the row.
 func BuiltinAdminUser(db *gorm.DB) (*User, error) {
 	externalURL := param.Server_ExternalWebUrl.GetString()
@@ -2711,19 +2699,13 @@ func BuiltinAdminUser(db *gorm.DB) (*User, error) {
 // recording it with the bit clear would silently revoke that.
 //
 // Re-observation deliberately does NOT touch the bit. An admin who
-// clears it has made a decision — often precisely because the name is
-// attacker-influenced, e.g. a GitHub org anyone may register — and
-// restoring it on the next login of any member would undo that
-// decision silently and leave the operator no lever at all.
+// clears it has made a decision and we don't second guess it.
 //
 // A record that already exists with source GroupSourcePelican is left
-// completely alone: a user-created group must never be promoted to
-// template eligibility by an assertion.
+// alone.
 //
 // `source` must be the provider that actually asserted the names, and
-// must be one an operator configured via Issuer.GroupSource. Do NOT feed
-// this group names out of arbitrary federation bearer tokens: a foreign
-// issuer could then reserve names on this server.
+// must be one an operator configured via Issuer.GroupSource.
 //
 // Errors are returned but are not fatal to the caller's flow — a login
 // should still succeed if the bookkeeping write fails; the names just
@@ -2871,6 +2853,80 @@ func membershipQuery(db *gorm.DB, userID string, grantingOnly bool) *gorm.DB {
 	return q.Where("group_members.source = ?", GroupSourcePelican)
 }
 
+// observationDebounce is how long a freshness stamp may go un-rewritten
+// when nothing else about an observation has changed.
+//
+// The group-file refresher reconciles every known account on
+// Issuer.GroupFileRefreshInterval (15m by default) while mirrored rows
+// stay valid for Issuer.AssertedGroupMembershipTTL (168h) — so in the
+// steady state it rewrites `asserted_at` and `groups_observed_at`
+// roughly 672 times more often than expiry requires, at two write
+// commits per account per pass.
+//
+// Deriving the window from the TTL keeps the margin automatic: an eighth
+// of it leaves a row re-stamped about eight times over before it could
+// expire, whatever the operator set. A TTL of zero means mirrored rows
+// never grant at all, so the stamp is decorative and an hour is plenty.
+//
+// This bounds only the rewriting of timestamps. Whether the provider's
+// group SET changed is evaluated on every pass, never debounced — see
+// mirroredStateIsCurrent.
+func observationDebounce() time.Duration {
+	ttl := MirroredMembershipTTL()
+	if ttl <= 0 {
+		return time.Hour
+	}
+	return ttl / 8
+}
+
+// mirroredStateIsCurrent reports whether this user's mirrored
+// memberships already say exactly what the current assertion says, with
+// stamps recent enough to leave alone — in which case the caller can
+// skip the write transaction entirely.
+//
+// It answers false for any real difference: a mirrored row the provider
+// no longer asserts (which must be retracted NOW, not after the
+// debounce window), an asserted group with no row at all, or a row
+// carrying a previous provider's source. Only the timestamp is allowed
+// to be stale, and only inside the window.
+func mirroredStateIsCurrent(db *gorm.DB, source GroupSource, userID string, assertedIDs []string) (bool, error) {
+	var rows []struct {
+		GroupID    string
+		Source     GroupSource
+		AssertedAt *time.Time
+	}
+	if err := db.Table("group_members").
+		Select("group_id", "source", "asserted_at").
+		Where("user_id = ?", userID).
+		Scan(&rows).Error; err != nil {
+		return false, err
+	}
+
+	cutoff := time.Now().Add(-observationDebounce())
+	covered := make(map[string]struct{}, len(rows))
+	for _, r := range rows {
+		covered[r.GroupID] = struct{}{}
+		if r.Source == GroupSourcePelican {
+			// An administrator's own membership. It is never retracted
+			// or re-stamped, and it covers the group for insert
+			// purposes, so it can never be a reason to do work.
+			continue
+		}
+		if !slices.Contains(assertedIDs, r.GroupID) {
+			return false, nil // a retraction is due
+		}
+		if r.Source != source || r.AssertedAt == nil || r.AssertedAt.Before(cutoff) {
+			return false, nil // needs re-stamping
+		}
+	}
+	for _, id := range assertedIDs {
+		if _, ok := covered[id]; !ok {
+			return false, nil // a membership is missing
+		}
+	}
+	return true, nil
+}
+
 // grantingMembershipsFor returns the group IDs a user holds that may
 // grant access right now: every Pelican-created membership, plus every
 // mirrored membership the provider has asserted within the TTL.
@@ -2908,6 +2964,48 @@ func groupNamesFor(db *gorm.DB, userID string, grantingOnly bool) ([]string, err
 		}
 	}
 	return out, nil
+}
+
+// ErrGroupAdminLatched is returned when a caller tries to rule out an
+// account that has already been observed holding an administrative
+// group. The latch is deliberately one-way — see GroupAdminStatus — so
+// this is refused rather than honored.
+var ErrGroupAdminLatched = errors.New("account has been observed holding an administrative group")
+
+// RuleOutGroupAdmin records a full administrator's judgement that an
+// account does not hold an administrative group, moving it from
+// GroupAdminUnknown to GroupAdminRuledOut.
+//
+// This exists because `unknown` is otherwise only cleared by the
+// account itself signing in. Under an `oidc` or `github` group source
+// nothing else ever observes it, so an account that never signs in
+// again — a departed user, an invite never redeemed — stays `unknown`
+// forever and no user-administrator can act on it. Those are exactly
+// the accounts that need cleaning up.
+//
+// It is NOT an escape hatch for the latch. An account already recorded
+// GroupAdminPossible is refused with ErrGroupAdminLatched: that state
+// means Pelican has SEEN the account hold an administrative group, and
+// an API to erase that observation would be an API to defeat the guard
+// it feeds. Only the absence of evidence can be resolved this way, and
+// only by a caller who already bypasses the guard entirely.
+func RuleOutGroupAdmin(db *gorm.DB, userID string) error {
+	if db == nil || userID == "" {
+		return nil
+	}
+	var user User
+	if err := db.Select("id", "group_admin_status").First(&user, "id = ?", userID).Error; err != nil {
+		return err
+	}
+	if user.GroupAdminStatus == GroupAdminPossible {
+		return ErrGroupAdminLatched
+	}
+	return db.Model(&User{}).
+		Where("id = ? AND group_admin_status <> ?", userID, GroupAdminPossible).
+		Updates(map[string]interface{}{
+			"group_admin_status": GroupAdminRuledOut,
+			"groups_observed_at": time.Now(),
+		}).Error
 }
 
 // GroupNamesForGranting returns the names of every group the user
@@ -2958,6 +3056,31 @@ func RecordGroupAdminObservation(db *gorm.DB, userID string, sawAdminGroup bool)
 	if db == nil || userID == "" {
 		return nil
 	}
+	// Skip the write when it would change nothing. The refresher calls
+	// this for every account on every pass, so in the steady state this
+	// is the difference between one read and one fsyncing commit per
+	// account. Only the observed-at timestamp is allowed to drift, and
+	// only inside observationDebounce; the latch itself is evaluated
+	// every time.
+	var user User
+	if err := db.Select("id", "group_admin_status", "groups_observed_at").
+		First(&user, "id = ?", userID).Error; err != nil {
+		return err
+	}
+	target := GroupAdminRuledOut
+	if sawAdminGroup {
+		target = GroupAdminPossible
+	}
+	if user.GroupAdminStatus == GroupAdminPossible && !sawAdminGroup {
+		// The latch holds and nothing is recorded, matching the
+		// never-downgrade clause below.
+		return nil
+	}
+	if user.GroupAdminStatus == target && user.GroupsObservedAt != nil &&
+		user.GroupsObservedAt.After(time.Now().Add(-observationDebounce())) {
+		return nil
+	}
+
 	now := time.Now()
 	updates := map[string]interface{}{"groups_observed_at": now}
 	if sawAdminGroup {
@@ -3019,6 +3142,15 @@ func MirrorAssertedGroupMemberships(db *gorm.DB, source GroupSource, userID stri
 		for _, r := range rows {
 			assertedIDs = append(assertedIDs, r.ID)
 		}
+	}
+
+	// Fast path: if the stored state already matches the assertion, do
+	// not open a write transaction at all. One WAL read replaces two
+	// fsyncing commits, per account, on every refresh pass.
+	if current, err := mirroredStateIsCurrent(db, source, userID, assertedIDs); err != nil {
+		return err
+	} else if current {
+		return nil
 	}
 
 	now := time.Now()
