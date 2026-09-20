@@ -310,20 +310,10 @@ func TestNameSpaceAndIDSpaceAreDisjoint(t *testing.T) {
 	victim := mkUser(t, db, "a1b2c3d4", "victim")
 	coll := mkCollection(t, db, "c1", "data", fx.ownerID)
 
-	// Hygiene, not a control: nothing resolves a handle by its shape any
-	// more (see the subtests below), but keeping names and IDs visually
-	// distinct removes a class of human error in logs and config.
-	t.Run("a group cannot be named like an ID", func(t *testing.T) {
-		_, err := CreateGroup(db, victim.ID, "", "", Creator{UserID: fx.strangerID}, "", false)
-		assert.ErrorIs(t, err, ErrInvalidIdentifier)
-		// Nor can an admin rename an existing group into the ID space.
-		slugName := "0badf00d"
-		assert.ErrorIs(t, UpdateGroup(db, fx.opsID, &slugName, nil, nil, nil, fx.ownerID, true, true),
-			ErrInvalidIdentifier)
-		// Nor can a user be renamed into it.
-		assert.ErrorIs(t, RenameUser(db, victim.ID, "0badf00d", localIssuerForTests), ErrInvalidIdentifier)
-	})
-
+	// `victim` deliberately carries an ID-shaped handle. Naming a group
+	// that is allowed — nothing resolves a handle by its shape — so the
+	// subtests below show why that is safe: the two spaces are never
+	// compared against each other at all.
 	t.Run("the name space never consults IDs", func(t *testing.T) {
 		// This is the property that replaced deciding by shape: an ID
 		// handed to the name-space resolver does not resolve, because no

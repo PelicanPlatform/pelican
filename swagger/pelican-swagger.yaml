@@ -1688,12 +1688,11 @@ definitions:
   GrantACLRequest:
     type: object
     description: >-
-      Grants a role on a collection. `groupId` accepts a group name, a
-      group ID, `user-<username>` for a personal grant, or the
-      `@authenticated` sentinel; the server resolves it to a stored
-      (subjectType, subjectId) pair. A bare user ID is NOT accepted —
-      name a user with `user-<username>`, or address either kind of
-      principal unambiguously with `subjectType` + `subjectId`. A target
+      Grants a role on a collection. `groupId` is a NAME: a group name,
+      `user-<username>` for a personal grant, or the `@authenticated`
+      sentinel; the server resolves it to a stored (subjectType,
+      subjectId) pair. An ID of either kind is NOT accepted here —
+      address a principal by ID with `subjectType` + `subjectId`. A target
       that matches nothing is rejected with 400: grants are keyed on IDs,
       so there is nothing to store for a name this server does not know.
       To pre-grant access to a group your identity provider asserts but

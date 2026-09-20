@@ -53,61 +53,30 @@ var ErrInvalidIdentifier = errors.New("invalid identifier: must be 2-64 characte
 // compact.
 var identifierPattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._@-]{1,63}$`)
 
-// slugShapePattern matches the shape generateSlug produces for a
-// User.ID / Group.ID: eight lowercase hex characters. Locally-created
-// names of that shape are refused.
-//
-// This is HYGIENE, not a security control, and the distinction matters.
-// Nothing decides which identifier space a value belongs to by looking
-// at it: ACL targets carry their space in the type (see
-// database.ACLSubjectRef versus database.ACLSubject) and in which API
-// fields the caller populates, and every other lookup names its column
-// outright. An earlier version of this branch did decide by shape, and
-// that was wrong — "looks like an ID" is a guess, and a guess at a
-// security boundary is a vulnerability waiting for someone to find the
-// input that fools it.
-//
-// What the rule buys, then, is only this: a group called `a1b2c3d4` is
-// genuinely confusing in a log line, a config file, or a bug report,
-// and eight hex characters is not a plausible thing to want to call a
-// person or a team. Keeping the spaces visually distinct costs nothing
-// and removes a class of human error. Do not add code that relies on
-// it.
-var slugShapePattern = regexp.MustCompile(`^[0-9a-f]{8}$`)
-
 // ValidateIdentifier returns nil if name is a well-formed user/group
 // machine identifier per the design contract on the User/Group structs,
 // or ErrInvalidIdentifier otherwise. Apply at every point a name enters
 // the system: HTTP create/rename handlers, OIDC bootstrap candidate
 // selection, CLI flags. Display names go through their own (laxer)
 // validator.
-func ValidateIdentifier(name string) error {
-	if err := validateIdentifierShape(name); err != nil {
-		return err
-	}
-	// Keep names a person CHOSE visually distinct from IDs. Hygiene
-	// only — see slugShapePattern for why nothing may depend on it, and
-	// validateIdentifierShape for why it is not applied to a name
-	// nobody here chose.
-	if slugShapePattern.MatchString(name) {
-		return ErrInvalidIdentifier
-	}
-	return nil
-}
-
-// validateIdentifierShape enforces the rules that exist because of what
-// an identifier is EMBEDDED IN — the character class and the '..'
-// guard. Every identifier must satisfy these, whatever its provenance.
 //
-// It is separate from ValidateIdentifier because the slug-shape rule is
-// not in this category. That rule is hygiene, and hygiene is only
-// enforceable against a name somebody here chose and can be asked to
-// change: a group name, a username an administrator typed. A username
-// derived from an identity provider's claim is neither. Applying it
-// there turned "your provider's subject happens to be eight hex
-// characters" into "you cannot log in", which is a denial of service
-// imposed for the sake of tidier log lines.
-func validateIdentifierShape(name string) error {
+// The rules here exist because of what an identifier is EMBEDDED IN —
+// the character class and the '..' guard — so they apply to every
+// identifier whatever its provenance.
+//
+// There is deliberately no rule against a name that looks like an ID.
+// An earlier version refused eight lowercase hex characters, on the
+// theory that keeping the two spaces visually distinct was cheap
+// hygiene. It was not: nothing decides which space a value belongs to
+// by looking at it — ACL targets carry the space in the type
+// (ACLSubjectRef versus ACLSubject) and in which API fields the caller
+// populates, and every other lookup names its column outright — so the
+// rule protected nothing while confiscating a legitimate slice of the
+// namespace and, through SanitizeIdentifier, turning "your identity
+// provider's subject happens to be eight hex characters" into "you
+// cannot log in". Type safety is the control; do not reintroduce a
+// shape heuristic beside it.
+func ValidateIdentifier(name string) error {
 	if !identifierPattern.MatchString(name) {
 		return ErrInvalidIdentifier
 	}
@@ -205,12 +174,7 @@ func SanitizeIdentifier(s string) string {
 	}
 	// Ensure the trimmed result still satisfies the pattern (length floor
 	// of 2, etc.). If not, signal failure to the caller.
-	//
-	// validateIdentifierShape, not ValidateIdentifier: the caller is
-	// bootstrapping an account from a provider's claim, and the
-	// slug-shape rule must not turn an eight-hex-character subject into
-	// a failed login. See validateIdentifierShape.
-	if validateIdentifierShape(out) != nil {
+	if ValidateIdentifier(out) != nil {
 		return ""
 	}
 	return out
