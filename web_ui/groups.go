@@ -954,6 +954,16 @@ type UpdateUserReq struct {
 	//     /users/:id/identities, never directly here.
 	Username    *string `json:"username"`
 	DisplayName *string `json:"displayName"`
+	// GroupAdminRuledOut records that a full administrator has checked
+	// and this account does not hold an administrative group. It exists
+	// because that state is otherwise only reached by the account
+	// signing in, so under an external group source an account that
+	// never signs in again can never be acted on by a user-admin.
+	//
+	// Only `true` is accepted, and only from a full system admin. It
+	// cannot clear the latch on an account already observed holding an
+	// administrative group; see database.RuleOutGroupAdmin.
+	GroupAdminRuledOut *bool `json:"groupAdminRuledOut"`
 }
 
 func handleUpdateUser(ctx *gin.Context) {
@@ -988,10 +998,19 @@ func handleUpdateUser(ctx *gin.Context) {
 		})
 		return
 	}
-	if req.Username == nil && req.DisplayName == nil {
+	if req.Username == nil && req.DisplayName == nil && req.GroupAdminRuledOut == nil {
 		ctx.JSON(http.StatusBadRequest, server_structs.SimpleApiResp{
 			Status: server_structs.RespFailed,
-			Msg:    "request must specify at least one of: username, displayName",
+			Msg:    "request must specify at least one of: username, displayName, groupAdminRuledOut",
+		})
+		return
+	}
+	if req.GroupAdminRuledOut != nil && !*req.GroupAdminRuledOut {
+		// Un-ruling-out would only ever restrict the caller, and
+		// accepting it would imply the reverse is possible too.
+		ctx.JSON(http.StatusBadRequest, server_structs.SimpleApiResp{
+			Status: server_structs.RespFailed,
+			Msg:    "groupAdminRuledOut may only be set to true",
 		})
 		return
 	}
@@ -1065,6 +1084,34 @@ func handleUpdateUser(ctx *gin.Context) {
 					Msg:    fmt.Sprintf("Failed to update user: %v", err),
 				})
 			}
+			return
+		}
+	}
+	if req.GroupAdminRuledOut != nil {
+		// System admin only. A user-admin recording "this account is
+		// not an administrator" would be marking its own homework:
+		// the whole point of the guard is to stop a user-admin acting
+		// on an account that might outrank it.
+		if !isSystemAdmin {
+			ctx.JSON(http.StatusForbidden, server_structs.SimpleApiResp{
+				Status: server_structs.RespFailed,
+				Msg:    "only a system administrator may record that an account is not an administrator",
+			})
+			return
+		}
+		if err := database.RuleOutGroupAdmin(database.ServerDatabase, id); err != nil {
+			if errors.Is(err, database.ErrGroupAdminLatched) {
+				ctx.JSON(http.StatusConflict, server_structs.SimpleApiResp{
+					Status: server_structs.RespFailed,
+					Msg: "this account has been observed holding an administrative group and cannot be " +
+						"marked otherwise; remove it from that group at the identity provider first",
+				})
+				return
+			}
+			ctx.JSON(http.StatusInternalServerError, server_structs.SimpleApiResp{
+				Status: server_structs.RespFailed,
+				Msg:    fmt.Sprintf("Failed to update administrator status: %v", err),
+			})
 			return
 		}
 	}

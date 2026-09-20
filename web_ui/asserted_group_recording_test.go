@@ -441,3 +441,39 @@ func TestNonAuthoritativeSourceCannotRuleAnAccountOut(t *testing.T) {
 		assert.Equal(t, database.GroupAdminRuledOut, after.GroupAdminStatus)
 	})
 }
+
+// TestALeftoverGroupFileDoesNotDisableUserAdmin pins the single-source
+// model at the guard that decides whether user administration works at
+// all.
+//
+// Issuer.GroupFile used to be an always-on second provider. It is not
+// any more, so on a server running Issuer.GroupSource: internal a
+// leftover GroupFile line must not make MustTreatAsSystemAdmin believe
+// an external provider decides group membership. When it did, every
+// account that had not been observed looked like a possible
+// administrator — and nothing would ever observe them, because the
+// group-file refresher only runs when the file IS the configured
+// source. The result was a server where server.user_admin could act on
+// nobody, permanently, because of a stale config line.
+func TestALeftoverGroupFileDoesNotDisableUserAdmin(t *testing.T) {
+	db := setupAssertedGroupTest(t, `{"alice": ["ops"]}`)
+	require.NoError(t, param.Server_AdminGroups.Set([]string{"ops"}))
+	// Membership is Pelican's own; the group file is vestigial config.
+	require.NoError(t, param.Issuer_GroupSource.Set(database.GroupSourceTypeInternal))
+
+	unobserved := seedTestUser(t, db, "u-never-seen", "karl")
+	var u database.User
+	require.NoError(t, db.First(&u, "id = ?", unobserved.ID).Error)
+	require.Equal(t, database.GroupAdminUnknown, u.GroupAdminStatus,
+		"precondition: the account has never been observed")
+
+	mustRefuse, why := MustTreatAsSystemAdmin(db, unobserved.ID)
+	assert.False(t, mustRefuse,
+		"group_members is complete under an internal source, so an unobserved account is ruled out on the evidence: %s", why)
+
+	// And the gate does still fire when a provider really is configured.
+	require.NoError(t, param.Issuer_GroupSource.Set(database.GroupSourceTypeOIDC))
+	mustRefuse, _ = MustTreatAsSystemAdmin(db, unobserved.ID)
+	assert.True(t, mustRefuse,
+		"under oidc the account's groups live at the provider and have not been observed")
+}

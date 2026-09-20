@@ -949,14 +949,15 @@ func adminFromGroupView(db *gorm.DB, user *database.User, view func(*gorm.DB, st
 // The group file counts whatever Issuer.GroupSource says, because the
 // password-login path reads it unconditionally.
 func assertedGroupSourceConfigured() bool {
-	if param.Issuer_GroupFile.GetString() != "" {
-		return true
-	}
-	switch strings.ToLower(param.Issuer_GroupSource.GetString()) {
-	case database.GroupSourceTypeOIDC, database.GroupSourceTypeFile, database.GroupSourceTypeGitHub:
-		return true
-	}
-	return false
+	// Deliberately the single configured source, not "is a group file
+	// set anywhere". Issuer.GroupFile used to be an always-on second
+	// provider; it is not any more, so a leftover GroupFile line on a
+	// server running Issuer.GroupSource: internal must not make this
+	// report an asserted source. It did, and the effect was severe:
+	// every unobserved account then looked like a possible admin, and
+	// nothing would ever observe them, because the group-file refresher
+	// only runs when the file IS the configured source.
+	return database.ConfiguredGroupSource().IsAsserted()
 }
 
 // UserAdminAuthHandler accepts callers whose effective scope set
