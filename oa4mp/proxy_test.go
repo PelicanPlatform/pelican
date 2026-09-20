@@ -29,6 +29,7 @@ import (
 	"gorm.io/gorm"
 
 	"github.com/pelicanplatform/pelican/database"
+	dbutils "github.com/pelicanplatform/pelican/database/utils"
 )
 
 // newCollectionTestDB spins up an in-memory sqlite database with just the
@@ -39,12 +40,16 @@ func newCollectionTestDB(t *testing.T) *gorm.DB {
 	t.Helper()
 	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
 	require.NoError(t, err)
-	require.NoError(t, db.AutoMigrate(&database.Collection{}))
-	require.NoError(t, db.AutoMigrate(&database.CollectionACL{}))
-	// ACL rows are keyed on group / user IDs, so the resolver needs
-	// the tables those IDs live in.
-	require.NoError(t, db.AutoMigrate(&database.User{}, &database.Group{}, &database.GroupMember{}))
-	require.NoError(t, database.AutoMigrateCredentialsForTests(db))
+	// The production migrations, not AutoMigrate: GORM can only emit a
+	// FULL unique index from struct tags, so a hand-rolled schema lacks
+	// the partial indexes that let a soft-deleted group or account
+	// release its name — and this package's tests turn on exactly those
+	// paths.
+	sqlDB, err := db.DB()
+	require.NoError(t, err)
+	// ":memory:" is per-connection, so the pool must be pinned to one.
+	sqlDB.SetMaxOpenConns(1)
+	require.NoError(t, dbutils.MigrateDB(sqlDB, database.EmbedUniversalMigrations, "universal_migrations"))
 	return db
 }
 

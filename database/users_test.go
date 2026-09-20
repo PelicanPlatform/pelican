@@ -47,7 +47,7 @@ import (
 //
 // Tests reuse setupCollectionTestDB from collection_test.go, which both
 // AutoMigrates the schema and adds the password_hash column via the
-// AutoMigrateCredentialsForTests bridge — see database/credentials.go
+// userCredential bridge — see database/credentials.go
 // for why that bridge exists.
 
 const localIssuerForTests = "https://example.test"
