@@ -4,7 +4,7 @@
 -- A latch recording what Pelican has observed about an account's
 -- group-derived administrator privileges, so that "we have not
 -- established that this account is safe to touch" is a state the
--- user-admin guard can see rather than a silence it has to interpret.
+-- user-admin guard can see.
 --
 --   'unknown'   — never established. Treated as a possible
 --                 administrator, so the guard refuses. The default, and
@@ -28,5 +28,4 @@ ALTER TABLE users ADD COLUMN groups_observed_at DATETIME;
 -- +goose Down
 -- +goose StatementBegin
 -- SQLite cannot DROP COLUMN cleanly; both columns are left in place.
--- Reverting the guard's behavior is a code change, not a schema one.
 -- +goose StatementEnd

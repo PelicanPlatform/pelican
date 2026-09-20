@@ -33,15 +33,13 @@ var (
 	// target names no group and no user on this server. ACL rows are
 	// keyed on immutable IDs, so there is nothing to store for an
 	// unknown name; the pre-ID code path that silently persisted the
-	// raw string is what let a later claimant of that name inherit the
-	// grant (issue #3752).
+	// raw string.
 	ErrUnknownACLSubject = errors.New("unknown collection ACL subject")
 	// ErrMembershipNotLocal is returned when a caller tries to remove a
 	// group membership that came from a provider's assertion rather than
 	// from the group-management API. Deleting the row would not remove
 	// the person from the group — the provider still asserts it, and the
-	// next login mirrors it straight back — so the operation is refused
-	// rather than quietly appearing to work.
+	// next login mirrors it straight back.
 	ErrMembershipNotLocal = errors.New("membership is asserted by a group source and cannot be removed here")
 	// ErrGroupNameConflict is returned when a Pelican-created group
 	// would take — or an admin would rename a group to — a name that an
@@ -194,9 +192,7 @@ type CallerACLSubjects struct {
 }
 
 // Matches reports whether the supplied ACL row grants its role to this
-// caller. Expiry is NOT considered here — callers filter expired rows
-// themselves, because several of them want to keep scanning for a
-// second, still-valid grant.
+// caller. Expiry is NOT considered here.
 func (s CallerACLSubjects) Matches(acl CollectionACL) bool {
 	switch acl.SubjectType {
 	case ACLSubjectAuthenticated:
@@ -242,9 +238,7 @@ func (s CallerACLSubjects) ACLWhere() (string, []any) {
 //
 // Resolving a *caller's* name to an ID is safe in a way that storing a
 // name in an ACL row is not: it answers "who is this name right now",
-// and the answer is a single live row. The vulnerability closed by the
-// ID-keyed model was the reverse direction — a stored grant naming a
-// principal that had since been renamed or deleted.
+// and the answer is a single live row.
 //
 // Group IDs come from two sources, unioned:
 //
@@ -338,8 +332,7 @@ func ResolveCallerACLSubjects(db *gorm.DB, username, userID string, groupNames [
 type ACLSubjectRef string
 
 // ACLSubject is the stored, ID-space identity of an ACL target: what
-// actually lands in `collection_acls`. Kind and ID together, never a
-// bare string, because an ID alone does not say which table it is in.
+// actually lands in `collection_acls`.
 type ACLSubject struct {
 	Type ACLSubjectType
 	ID   string
@@ -593,8 +586,7 @@ type CollectionMember struct {
 }
 
 // CollectionACL is one role grant on a collection. The grant target is
-// the (SubjectType, SubjectID) pair — always an immutable ID, never a
-// name. See ACLSubjectType for why.
+// the (SubjectType, SubjectID) pair — always an immutable ID.
 //
 // SubjectName and GroupID are NOT stored; AnnotateACLSubjects fills
 // them in on the way out so the API can render a human-readable target
@@ -615,10 +607,8 @@ type CollectionACL struct {
 	// name, a username, or the `@authenticated` sentinel. Empty when the
 	// subject row no longer exists.
 	SubjectName string `gorm:"-" json:"subjectName"`
-	// GroupID is the legacy wire spelling of the target — the group
-	// name, `user-<username>`, or `@authenticated` — kept so existing
-	// API clients (the web UI's revoke button, the CLI) keep working
-	// unchanged. It is derived from SubjectName; nothing reads it back.
+	// GroupID is the legacy wire spelling of the target, derived from
+	// SubjectName; nothing reads it back.
 	GroupID string `gorm:"-" json:"groupId"`
 }
 
@@ -2619,7 +2609,7 @@ func CreateGroup(db *gorm.DB, name, displayName, description string, creator Cre
 	var clash Group
 	if err := db.Select("id", "name", "source").Where("name = ?", name).First(&clash).Error; err == nil {
 		if clash.Source.IsAsserted() {
-			return nil, fmt.Errorf("%w: %q is asserted by the %s group source", ErrGroupNameConflict, name, clash.Source)
+			return nil, fmt.Errorf("%w: %q %s", ErrGroupNameConflict, name, describeGroupNameHold(&clash))
 		}
 		return nil, fmt.Errorf("a group named %q already exists", name)
 	} else if !errors.Is(err, gorm.ErrRecordNotFound) {
@@ -3331,8 +3321,8 @@ func UpdateGroup(db *gorm.DB, id string, name, displayName, description *string,
 		// would mint a second record under the original name. The
 		// display name is still editable.
 		if _, renaming := updates["name"]; renaming && group.Source.IsAsserted() {
-			return fmt.Errorf("%w: %q is asserted by the %s group source and cannot be renamed",
-				ErrGroupNameConflict, group.Name, group.Source)
+			return fmt.Errorf("%w: %q %s and cannot be renamed",
+				ErrGroupNameConflict, group.Name, describeGroupNameHold(&group))
 		}
 
 		return tx.Model(&Group{}).Where("id = ?", id).Updates(updates).Error
@@ -3730,6 +3720,17 @@ func DeleteGroup(db *gorm.DB, groupID, requestorUserID string, isAdmin bool) err
 
 		if !isGroupOwnerOnly(&group, requestorUserID, isAdmin) {
 			return ErrForbidden
+		}
+
+		// Deleting releases the name (the live-rows-only unique index),
+		// which for a name the configuration says confers administrator
+		// authority would hand an unprivileged user the chance to claim
+		// it before the next startup reserves it again. Refuse while the
+		// configuration still names it; removing the config entry is the
+		// step that makes the group ordinary.
+		if isConfiguredAuthorityGroupName(group.Name) {
+			return fmt.Errorf("%w: %q confers administrator authority via Server.*AdminGroups; "+
+				"remove it from the configuration first", ErrForbidden, group.Name)
 		}
 
 		// Remove any invite links referencing the group.

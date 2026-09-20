@@ -30,18 +30,11 @@
 -- legacy username could itself be shaped like one. A value that matches
 -- neither becomes the empty string, which intersectWithUserScopes
 -- treats as "cannot attribute this key to any current authority" and
--- fails closed on every user-grantable scope. Data-plane and
--- inter-server scopes are unaffected: those are bearer authority.
+-- fails closed on every user-grantable scope.
 --
--- The `created_at` clause keeps this migration from performing the very
--- rebinding it exists to prevent. Resolving a username against the live
--- users table asks "who is called alice NOW", which is the wrong
--- question once the name has been reused. Nothing links a key back to
--- its original account, so the migration uses the one fact it has: an
--- account created after the key was minted cannot have minted it.
--- (`users.created_at` is NOT NULL since the table was created in
--- 20250929190630, so this is real data. A NULL `api_keys.created_at`
--- makes the comparison NULL, which also fails closed.)
+-- The `created_at` clause keeps this migration from rebinding the key
+-- against an account created *after* the key (which should be
+-- impossible).
 UPDATE api_keys
 SET created_by = COALESCE(
     (SELECT u.id FROM users u WHERE u.id = api_keys.created_by),
@@ -57,16 +50,14 @@ WHERE created_by IS NOT NULL AND created_by <> '';
 -- 2. Groups become soft-deletable.
 ------------------------------------------------------------------
 --
--- Group.ID was the one authorization handle here that could be REUSED:
+-- Group.ID was the one authorization primitive that could be reused:
 -- DeleteGroup physically removed the row, and generateSlug picks 8 hex
 -- characters with no uniqueness check, so a later group could be minted
--- with a dead group's ID and inherit whatever still referenced it. Same
--- shape as #3752, one table over.
+-- with a dead group's ID and inherit whatever still referenced it.
 --
 -- Soft delete closes it the way the users table already does: the row
 -- stays, so the ID is permanently spent and historical references stay
--- resolvable, while GORM's default scope hides it from ordinary queries
--- so it confers nothing. NULL means live.
+-- resolvable.
 --
 -- The NAME, unlike the ID, IS released, matching the users table
 -- (20260503120000): nothing keys on a group name any more, and refusing
@@ -126,8 +117,7 @@ PRAGMA foreign_keys = ON;
 -- +goose Down
 -- +goose StatementBegin
 
--- Reverting would let a dead group's name be taken while its rows are
--- still soft-deleted, and the api_keys.created_by values are not
--- recoverable as usernames. Roll back by restoring a backup instead.
+-- The api_keys.created_by values are not recoverable as usernames.
+-- Roll back by restoring a backup instead.
 
 -- +goose StatementEnd

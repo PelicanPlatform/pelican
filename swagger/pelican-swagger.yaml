@@ -211,15 +211,12 @@ definitions:
               description: >-
                 Username of whoever created the token, resolved
                 server-side from the stored creator ID. Empty when that
-                account no longer exists — such a token no longer carries
-                any user-derived authority.
+                account no longer exists.
             createdById:
               type: string
               description: >-
-                The creator's User.ID, which is what the row stores. The
-                token's scopes are re-intersected against this user's
-                current effective scopes on every use, so a creator who
-                loses a privilege loses it on every token they minted.
+                The creator's immutable user ID.  The token's scopes are limited
+                to the active scopes of the creator.
             expiration:
               type: string
               description: The expiration time of the token. If it is empty or "never", the token will never expire. The token should be in the RFC3339 format.
@@ -842,9 +839,7 @@ definitions:
       owner:
         type: string
         description: >-
-          Username of the collection's owner, resolved server-side from
-          `ownerId` for display. Not stored on the collection and not an
-          authorization handle — `ownerId` is. Empty when the owning
+          Username of the collection's owner. Empty when the owning
           account no longer exists.
         example: "alice"
       namespace:
@@ -908,10 +903,7 @@ definitions:
     description: >-
       One role grant on a collection. The grant target is the
       (`subjectType`, `subjectId`) pair, and `subjectId` is always an
-      immutable ID — a Group.ID, a User.ID, or empty for
-      `authenticated`. Names are never stored, so renaming or deleting
-      a principal cannot leave a grant behind for whoever claims the
-      name next.
+      immutable ID — a group, user, or empty for all authenticated users
     properties:
       collectionId:
         type: string
@@ -928,16 +920,16 @@ definitions:
       subjectId:
         type: string
         description: >-
-          The granted principal's immutable ID: a Group.ID when
-          subjectType is `group`, a User.ID when it is `user`, empty
+          The granted principal's immutable ID: a group ID when
+          subjectType is `group`, a user ID when it is `user`, empty
           when it is `authenticated`.
         example: "abc12345"
       subjectName:
         type: string
         description: >-
           Current display handle for `subjectId` — a group name, a
-          username, or `@authenticated`. Resolved server-side; empty
-          when the principal's row has been deleted.
+          username, or `@authenticated`. Empty when the principal's
+          row has been deleted.
         example: "research-team"
       groupId:
         type: string
@@ -1057,12 +1049,11 @@ definitions:
         type: string
         description: >-
           Which provider this group came from. `pelican` groups were
-          created through this API and their membership lives in
-          `group_members`. Every other value names a provider that
-          asserts the group (matching the `Issuer.GroupSource` config
-          vocabulary): those records are created automatically the first
-          time the name is observed (see
-          `Issuer.DisableGroupAutoCreation`), are owned by the built-in
+          created through this API and their membership lives in the
+          internal database. Every other value names a provider that
+          asserts the group (matching the `Issuer.GroupSource` config): those
+          records are created automatically the first time the name is observed
+          (see `Issuer.DisableGroupAutoCreation`), are owned by the built-in
           admin user, cannot be renamed, and their membership is
           whatever the provider asserts. `unknown` marks a record
           backfilled by migration from a pre-existing collection ACL
@@ -1226,8 +1217,8 @@ definitions:
     type: object
     description: >-
       One user's membership in one group. There is at most one row per
-      (group, user) however the membership arose; `source` says which
-      kind it is.
+      (group, user) regardless of how the membership arose; `source` says
+      which kind it is.
     properties:
       groupId:
         type: string
@@ -1634,8 +1625,9 @@ definitions:
       so there is nothing to store for a name this server does not know.
       To pre-grant access to a group your identity provider asserts but
       nobody has logged in with yet, create the group first.
+      Supply either `groupId` or `subjectType`; OpenAPI 2.0 cannot
+      express that either/or, so only `role` is listed as required.
     required:
-      - groupId
       - role
     properties:
       groupId:
@@ -1678,8 +1670,9 @@ definitions:
       listing. Supplying `subjectType` + `subjectId` skips name
       resolution entirely, which is the only way to clear a grant whose
       group or user row has already been deleted.
+      Supply either `groupId` or `subjectType`; OpenAPI 2.0 cannot
+      express that either/or, so only `role` is listed as required.
     required:
-      - groupId
       - role
     properties:
       groupId:
