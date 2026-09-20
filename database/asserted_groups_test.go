@@ -174,7 +174,7 @@ func TestEnsureAssertedGroups(t *testing.T) {
 
 		mustEnsureAssertedGroups(t, db, GroupSourceOIDC, []string{
 			"/cms/production", // WLCG-style; ValidateIdentifier would reject the slash
-			"a1b2c3d4",        // ID-shaped; only a naming-hygiene rule, not a control
+			"a1b2c3d4",        // ID-shaped, which is simply a valid name
 			"",                // empty
 			"user-alice",      // reserved personal-group prefix
 			"@authenticated",  // the virtual ACL sentinel
@@ -184,7 +184,7 @@ func TestEnsureAssertedGroups(t *testing.T) {
 		require.NoError(t, db.Model(&Group{}).Order("name").Pluck("name", &names).Error)
 		assert.Equal(t, []string{"/cms/production", "a1b2c3d4"}, names,
 			"the identifier rules govern what a USER may name a group, not what a provider may assert; "+
-				"an ID-shaped asserted name is harmless because nothing resolves a handle by its shape. "+
+				"an ID-shaped name is harmless because nothing resolves a handle by its shape. "+
 				"Only names indistinguishable from this server's own NAME-space ACL-target forms are skipped")
 	})
 

@@ -40,16 +40,13 @@ func TestValidateIdentifier(t *testing.T) {
 		{"User2026", true},
 		{strings.Repeat("a", 64), true},
 
-		// The ID shape is reserved so names and IDs stay disjoint —
-		// otherwise a group could be named after another principal's
-		// slug and intercept references addressed to it.
-		{"a1b2c3d4", false},
-		{"0badf00d", false},
-		{"deadbeef", false},
-		{"A1B2C3D4", true},  // uppercase is not the slug shape
-		{"a1b2c3d", true},   // seven characters is not the slug shape
-		{"a1b2c3d45", true}, // nine characters is not the slug shape
-		{"a1b2c3dg", true},  // 'g' is not a hex digit
+		// A name that happens to look like a generated ID is an
+		// ordinary name. The spaces are kept apart by type, not by
+		// shape — see ValidateIdentifier.
+		{"a1b2c3d4", true},
+		{"0badf00d", true},
+		{"deadbeef", true},
+		{"A1B2C3D4", true},
 
 		// banned characters — '/' is the most important
 		{"alice/admin", false},
@@ -230,20 +227,20 @@ func TestValidateDisplayName(t *testing.T) {
 	}
 }
 
-// The slug-shape rule is hygiene, and hygiene is only enforceable
-// against a name somebody here chose. A username derived from an
-// identity provider's claim is not such a name: applying the rule there
-// turned "your provider's subject happens to be eight hex characters"
-// into "you cannot log in".
-func TestSlugShapeRuleAppliesOnlyToChosenNames(t *testing.T) {
-	assert.Error(t, ValidateIdentifier("a1b2c3d4"),
-		"a name a person types is still held to the hygiene rule")
-
+// An identifier that happens to look like a generated ID is an ordinary
+// identifier. The two spaces are kept apart by type (ACLSubjectRef
+// versus ACLSubject) and by which API fields a caller populates, never
+// by inspecting the string — so refusing the shape protected nothing
+// while confiscating a usable slice of the namespace.
+func TestIDShapedNamesAreOrdinaryNames(t *testing.T) {
+	assert.NoError(t, ValidateIdentifier("a1b2c3d4"))
+	assert.NoError(t, ValidateIdentifier("deadbeef"))
 	assert.Equal(t, "a1b2c3d4", SanitizeIdentifier("a1b2c3d4"),
-		"a claim from an identity provider must survive sanitisation, not be refused for its shape")
+		"and a provider asserting one must still be able to log in")
 
 	// The rules that exist because of what an identifier is embedded in
-	// still apply to both.
+	// still apply.
 	assert.Equal(t, "", SanitizeIdentifier("/"), "nothing salvageable")
 	assert.Equal(t, "a.b", SanitizeIdentifier("a..b"), "the path-traversal guard still applies")
+	assert.Error(t, ValidateIdentifier("a/b"))
 }

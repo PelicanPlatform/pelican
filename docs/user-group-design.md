@@ -149,7 +149,7 @@ This matters because the alternative is a guess. An earlier draft of this work d
 
 A bare user ID is therefore not an accepted `groupId` spelling at all. Naming a user goes through `user-<username>` in the name space or `subjectType`/`subjectId` in the ID space; a third, inferred form would put the two spaces back together.
 
-Separately, `ValidateIdentifier` refuses a *locally created* name shaped like an ID (eight lowercase hex characters). That is **hygiene, not a control** — a group called `a1b2c3d4` is confusing in a log line or a bug report, and nothing is allowed to depend on the rule. A name a provider asserts is exempt, because it is a record of what the provider says rather than something a user chose.
+There is deliberately no rule against a name that *looks* like an ID. An earlier version refused eight lowercase hex characters as cheap hygiene, which it was not: nothing decides which space a value belongs to by looking at it, so the rule protected nothing while confiscating a usable slice of the namespace and — through the OIDC bootstrap path — turning "your identity provider's subject happens to be eight hex characters" into "you cannot log in". Type safety is the control.
 
 This is what makes renaming safe. A rename changes one row in `users` or `groups`; nothing else references the old value, so there is nothing to migrate and nothing left behind for a later claimant of that name. It is also why granting an ACL to a name this server has no record of is an error rather than a stored string: a stored name would be matched by whoever holds it next.
 
