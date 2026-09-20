@@ -30,8 +30,8 @@ import (
 	"github.com/pelicanplatform/pelican/param"
 )
 
-// TestConfiguredAdminGroupNameCannotBeShadowed is the reason this code
-// exists, so it is written as the attack rather than as a property.
+// TestConfiguredAdminGroupNameCannotBeShadowed sees if we can shadow
+// an admin group as a user.
 //
 // Group creation is open to every authenticated user and clamps
 // auth_template_eligible off for a non-admin creator.
@@ -40,22 +40,29 @@ import (
 // group list. Absent a reservation, then, any user can create a group
 // named after a Server.AdminGroups entry and thereby revoke server.admin
 // from every administrator who holds it through the issuer's assertion.
-//
-// Delete the EnsureConfiguredAuthorityGroups call below and this test
-// fails on both assertions: the create succeeds and the admin's group is
-// filtered away.
 func TestConfiguredAdminGroupNameCannotBeShadowed(t *testing.T) {
 	db := setupCollectionTestDB(t)
 	withExternalWebURL(t, db)
 
 	// The operator's config: Server.AdminGroups: [ops]
-	require.NoError(t, EnsureConfiguredAuthorityGroups(db, GroupSourceOIDC, []string{"ops"}))
+	require.NoError(t, EnsureConfiguredAuthorityGroups(db, []string{"ops"}))
 
 	// Mallory, an ordinary authenticated user, goes after the name.
 	mkUser(t, db, "u-mallory", "mallory")
 	_, err := CreateGroup(db, "ops", "", "", Creator{UserID: "u-mallory"}, "", false)
 	assert.ErrorIs(t, err, ErrGroupNameConflict,
 		"a name that confers server.admin must already be held by the server")
+
+	// The refusal must be the explicit conflict, not an incidental
+	// unique-index violation: CreateGroup only explains itself for an
+	// ASSERTED source, which is why the reservation is stamped unknown
+	// rather than with the configured source. Under
+	// Issuer.GroupSource: internal that would map to GroupSourcePelican,
+	// which is not asserted — the name would still be taken, but
+	// MirrorAssertedGroupMemberships would then refuse to mirror the
+	// provider's members into the very group that confers admin.
+	assert.ErrorContains(t, err, "asserted",
+		"the reserved group must read as provider-asserted, not Pelican-owned")
 
 	// An administrator whose token asserts "ops" still matches the
 	// config entry.
@@ -64,11 +71,11 @@ func TestConfiguredAdminGroupNameCannotBeShadowed(t *testing.T) {
 }
 
 func TestEnsureConfiguredAuthorityGroups(t *testing.T) {
-	t.Run("mints an admin-owned, eligible record under the configured source", func(t *testing.T) {
+	t.Run("mints an admin-owned, eligible record stamped unknown", func(t *testing.T) {
 		db := setupCollectionTestDB(t)
 		admin := withExternalWebURL(t, db)
 
-		require.NoError(t, EnsureConfiguredAuthorityGroups(db, GroupSourceOIDC,
+		require.NoError(t, EnsureConfiguredAuthorityGroups(db,
 			[]string{"ops", "  ops  ", "storage-admins", ""}))
 
 		var groups []Group
@@ -78,13 +85,15 @@ func TestEnsureConfiguredAuthorityGroups(t *testing.T) {
 			assert.Equal(t, admin.ID, g.OwnerID, "a reserved name belongs to the built-in admin, not to a user")
 			assert.True(t, g.AuthTemplateEligible,
 				"the record must not make the operator's own config entry stop matching")
-			assert.Equal(t, GroupSourceOIDC, g.Source,
-				"stamping the configured source is what lets the provider mirror memberships into it")
+			assert.Equal(t, GroupSourceUnknown, g.Source,
+				"the name has not been observed from any provider yet, so claiming one would invent provenance")
+			assert.True(t, g.Source.IsAsserted(),
+				"it must still count as asserted, or CreateGroup would not refuse the name")
 			assert.Len(t, g.ID, 8)
 		}
 
 		// Idempotent across restarts.
-		require.NoError(t, EnsureConfiguredAuthorityGroups(db, GroupSourceOIDC, []string{"ops", "storage-admins"}))
+		require.NoError(t, EnsureConfiguredAuthorityGroups(db, []string{"ops", "storage-admins"}))
 		var count int64
 		require.NoError(t, db.Model(&Group{}).Count(&count).Error)
 		assert.EqualValues(t, 2, count)
@@ -100,7 +109,7 @@ func TestEnsureConfiguredAuthorityGroups(t *testing.T) {
 		withExternalWebURL(t, db)
 		require.NoError(t, param.Issuer_DisableGroupAutoCreation.Set(true))
 
-		require.NoError(t, EnsureConfiguredAuthorityGroups(db, GroupSourceOIDC, []string{"ops"}))
+		require.NoError(t, EnsureConfiguredAuthorityGroups(db, []string{"ops"}))
 
 		var count int64
 		require.NoError(t, db.Model(&Group{}).Where("name = ?", "ops").Count(&count).Error)
@@ -118,7 +127,7 @@ func TestEnsureConfiguredAuthorityGroups(t *testing.T) {
 		local, err := CreateGroup(db, "ops", "", "", Creator{UserID: "u-eve"}, "", false)
 		require.NoError(t, err)
 
-		require.NoError(t, EnsureConfiguredAuthorityGroups(db, GroupSourceOIDC, []string{"ops"}))
+		require.NoError(t, EnsureConfiguredAuthorityGroups(db, []string{"ops"}))
 
 		var after Group
 		require.NoError(t, db.First(&after, "id = ?", local.ID).Error)
@@ -131,16 +140,15 @@ func TestEnsureConfiguredAuthorityGroups(t *testing.T) {
 		assert.EqualValues(t, 1, count, "no second record may be minted for a name already held")
 	})
 
-	t.Run("an unconfigured source lands as unknown and is completed by the first assertion", func(t *testing.T) {
-		// Reserving the name must not depend on Issuer.GroupSource
-		// being set yet. Stamping `pelican` would be wrong — a
-		// Pelican-created group is one this server owns the membership
-		// of, and nothing would mirror into it once a provider is
-		// configured.
+	t.Run("the reservation is completed by the first real assertion", func(t *testing.T) {
+		// The reservation is a placeholder: it holds the name until a
+		// provider actually asserts it, and that assertion stamps the
+		// real source. Reserving must not depend on Issuer.GroupSource
+		// being set, or even being correct, at startup.
 		db := setupCollectionTestDB(t)
 		withExternalWebURL(t, db)
 
-		require.NoError(t, EnsureConfiguredAuthorityGroups(db, "", []string{"ops"}))
+		require.NoError(t, EnsureConfiguredAuthorityGroups(db, []string{"ops"}))
 		var g Group
 		require.NoError(t, db.First(&g, "name = ?", "ops").Error)
 		require.Equal(t, GroupSourceUnknown, g.Source)
@@ -152,17 +160,20 @@ func TestEnsureConfiguredAuthorityGroups(t *testing.T) {
 		assert.Equal(t, GroupSourceOIDC, g.Source)
 	})
 
-	t.Run("an internally-sourced reservation stays locally manageable", func(t *testing.T) {
-		// With Issuer.GroupSource: internal there is no provider to
-		// mirror from, so the reserved group has to behave like any
-		// other Pelican group: the admin puts people in it by hand.
+	t.Run("a reservation stays locally manageable", func(t *testing.T) {
+		// `unknown` is an asserted source, but membership is still
+		// Pelican's until a provider claims the name: no group-source
+		// guard sits on AddGroupMember, so an admin can put people in
+		// the reserved group by hand. That matters most under
+		// Issuer.GroupSource: internal, where no provider will ever
+		// assert it.
 		db := setupCollectionTestDB(t)
 		admin := withExternalWebURL(t, db)
-		require.NoError(t, EnsureConfiguredAuthorityGroups(db, GroupSourcePelican, []string{"ops"}))
+		require.NoError(t, EnsureConfiguredAuthorityGroups(db, []string{"ops"}))
 
 		var g Group
 		require.NoError(t, db.First(&g, "name = ?", "ops").Error)
-		require.Equal(t, GroupSourcePelican, g.Source)
+		require.Equal(t, GroupSourceUnknown, g.Source)
 
 		member := mkUser(t, db, "u-bob", "bob")
 		require.NoError(t, AddGroupMember(db, g.ID, member.ID, admin.ID, true))
@@ -170,18 +181,116 @@ func TestEnsureConfiguredAuthorityGroups(t *testing.T) {
 			"a locally-sourced reservation must not be frozen the way a mirrored membership is")
 	})
 
-	t.Run("skips names that collide with a reserved ACL-target form", func(t *testing.T) {
+	t.Run("refuses to start on a configured name it cannot reserve", func(t *testing.T) {
+		// A silently-skipped entry is not harmless.
+		// FilterAuthTemplateEligibleGroups passes through names with no
+		// group record, so an assertion carrying "user-alice" would
+		// still confer the scope — with nothing holding the name and no
+		// eligibility bit to revoke it with. Failing startup is the
+		// only outcome that leaves the operator in control.
 		db := setupCollectionTestDB(t)
 		withExternalWebURL(t, db)
 
-		require.NoError(t, EnsureConfiguredAuthorityGroups(db, GroupSourceOIDC, []string{
+		err := EnsureConfiguredAuthorityGroups(db, []string{
 			"user-alice",      // personal-group prefix
 			"@authenticated",  // virtual ACL sentinel
-			"/cms/production", // WLCG-style; legitimate, must be kept
-		}))
+			"/cms/production", // WLCG-style; legitimate
+		})
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "user-alice")
+		assert.Contains(t, err.Error(), "@authenticated",
+			"a second bad entry must not be hidden behind the first")
+
+		var count int64
+		require.NoError(t, db.Model(&Group{}).Count(&count).Error)
+		assert.Zero(t, count,
+			"validation happens before any write, so a rejected config leaves no half-applied state")
+	})
+
+	t.Run("accepts a name only a provider could assert", func(t *testing.T) {
+		// The legitimate entry from the case above, on its own: a
+		// WLCG-style name ValidateIdentifier would reject is still a
+		// perfectly good thing to put in Server.AdminGroups.
+		db := setupCollectionTestDB(t)
+		withExternalWebURL(t, db)
+
+		require.NoError(t, EnsureConfiguredAuthorityGroups(db,
+			[]string{"/cms/production", "  ", "/cms/production"}))
 
 		var names []string
-		require.NoError(t, db.Model(&Group{}).Order("name").Pluck("name", &names).Error)
-		assert.Equal(t, []string{"/cms/production"}, names)
+		require.NoError(t, db.Model(&Group{}).Pluck("name", &names).Error)
+		assert.Equal(t, []string{"/cms/production"}, names,
+			"blank and duplicate entries are dropped silently; neither can grant anything")
 	})
+}
+
+// withConfiguredAdminGroups points Server.AdminGroups at `names` for the
+// duration of one test. The delete guard and the reservation both read
+// this list, so a test that exercises either has to set it.
+func withConfiguredAdminGroups(t *testing.T, names ...string) {
+	t.Helper()
+	prev := param.Server_AdminGroups.GetStringSlice()
+	t.Cleanup(func() { require.NoError(t, param.Server_AdminGroups.Set(prev)) })
+	require.NoError(t, param.Server_AdminGroups.Set(names))
+}
+
+// A reserved name must not become claimable just because an admin
+// deleted the group holding it. Soft delete releases the name, so
+// without this the sequence "admin deletes ops" -> "user creates ops"
+// -> restart leaves the config entry granting nothing, which is the
+// one user-reachable route into that state on a server that was never
+// vulnerable to the original bug.
+func TestAnAuthorityGroupCannotBeDeletedWhileConfigured(t *testing.T) {
+	db := setupCollectionTestDB(t)
+	admin := withExternalWebURL(t, db)
+	withConfiguredAdminGroups(t, "ops")
+	require.NoError(t, EnsureConfiguredAuthorityGroups(db, configuredAuthorityGroupNames()))
+
+	var g Group
+	require.NoError(t, db.First(&g, "name = ?", "ops").Error)
+
+	err := DeleteGroup(db, g.ID, admin.ID, true)
+	require.ErrorIs(t, err, ErrForbidden, "even a system admin may not release the name")
+	assert.Contains(t, err.Error(), "Server.*AdminGroups",
+		"the refusal has to say which configuration is holding the name")
+
+	var count int64
+	require.NoError(t, db.Model(&Group{}).Where("name = ?", "ops").Count(&count).Error)
+	assert.EqualValues(t, 1, count, "the group must survive the refused delete")
+
+	// Dropping the config entry is what makes the group ordinary again.
+	withConfiguredAdminGroups(t)
+	assert.NoError(t, DeleteGroup(db, g.ID, admin.ID, true))
+}
+
+// The refusal an operator actually sees when they try to create their
+// own admin group must not blame a provider that was never involved.
+func TestReservedNameIsNotReportedAsProviderAsserted(t *testing.T) {
+	db := setupCollectionTestDB(t)
+	admin := withExternalWebURL(t, db)
+	withConfiguredAdminGroups(t, "ops")
+	require.NoError(t, EnsureConfiguredAuthorityGroups(db, configuredAuthorityGroupNames()))
+
+	_, err := CreateGroup(db, "ops", "", "", Creator{UserID: admin.ID}, "", true)
+	require.ErrorIs(t, err, ErrGroupNameConflict)
+	assert.NotContains(t, err.Error(), "unknown group source",
+		"nothing asserted this record; it was reserved from the configuration")
+	assert.Contains(t, err.Error(), "Server.*AdminGroups",
+		"the operator should be told which configuration reserved it")
+
+	// A record the migration backfilled is also unasserted, but has no
+	// config entry behind it, so it gets the other phrasing.
+	require.NoError(t, db.Create(&Group{
+		ID: "g-legacy", Name: "cms-prod", CreatedBy: CreatorUnknown,
+		AuthTemplateEligible: true, Source: GroupSourceUnknown,
+	}).Error)
+	_, err = CreateGroup(db, "cms-prod", "", "", Creator{UserID: admin.ID}, "", true)
+	require.ErrorIs(t, err, ErrGroupNameConflict)
+	assert.Contains(t, err.Error(), "no provider has claimed it yet")
+
+	// A genuinely asserted group still names its provider.
+	mustEnsureAssertedGroups(t, db, GroupSourceOIDC, []string{"atlas"})
+	_, err = CreateGroup(db, "atlas", "", "", Creator{UserID: admin.ID}, "", true)
+	require.ErrorIs(t, err, ErrGroupNameConflict)
+	assert.Contains(t, err.Error(), "asserted by the oidc group source")
 }

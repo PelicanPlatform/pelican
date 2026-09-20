@@ -5,23 +5,22 @@
 -- existence (20260916120000 did the latter).
 --
 -- When Issuer.GroupSource names an outside provider, membership lives
--- there and `group_members` has no row. That works for the caller in
--- front of us, whose asserted names are resolved per request, and fails
--- for every decision made about a user who is not: the share-token
--- clamp asking what the share OWNER may do, the guard asking whether a
--- TARGET account is an administrator, the UI listing a group's members.
+-- there and `group_members` has no row. That works for the immediate
+-- caller, whose asserted names are resolved via the request, and fails
+-- for decisions made about a user who is not the requestor.  For example,
+-- the share-token logic is based on what the share OWNER may do, not
+-- the current requester.
 --
--- A mirrored row is a CACHED authorization fact, and two rules enforced
+-- A mirrored row is a CACHED membership fact, and two rules enforced
 -- in Go keep it honest: a row may only GRANT while the provider has
--- asserted it within Issuer.AssertedGroupMembershipTTL, but freshness
--- gates granting and NOT existence — a stale row is kept, because a
--- restricting question ("might this account be an admin?") must still
--- see it. Rows go away only when the provider stops asserting them.
+-- asserted it within Issuer.AssertedGroupMembershipTTL, but the stale
+-- row is kept in case if we want to determine possible membership
+-- ("might this account be an admin?").  Rows go away only if the
+-- provider doesn't assert them in the next login.
 
 -- 'pelican' rows are memberships an administrator created through the
 -- group API: authoritative, never expire, and an assertion never
--- overwrites one. Any other value names the provider that asserted it,
--- using the same vocabulary as groups.source.
+-- overwrites one. Any other value is the provider that asserted it.
 ALTER TABLE group_members ADD COLUMN source TEXT NOT NULL DEFAULT 'pelican';
 
 -- NULL on 'pelican' rows — they do not expire. Non-NULL only on

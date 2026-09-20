@@ -5,7 +5,6 @@ import (
 	"embed"
 	"fmt"
 	"os"
-	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -108,17 +107,12 @@ func InitServerDatabase(serverType server_structs.ServerType) error {
 	// bootstrap, because it must happen for every server type that has
 	// a database — the module launchers each call InitServerDatabase,
 	// but there is no single launcher that runs for all of them.
-	if err := EnsureConfiguredAuthorityGroups(ServerDatabase, ConfiguredGroupSource(),
-		slices.Concat(
-			param.Server_AdminGroups.GetStringSlice(),
-			param.Server_UserAdminGroups.GetStringSlice(),
-			param.Server_CollectionAdminGroups.GetStringSlice(),
-		)); err != nil {
-		// As above: a failure here must not stop the server from
-		// starting. It does leave the names unreserved, so say so at
-		// warning level rather than swallowing it.
-		log.Warnf("Could not reserve the groups named in the Server.*AdminGroups configuration; "+
-			"until this succeeds a user could create a group shadowing one of them: %v", err)
+	if err := EnsureConfiguredAuthorityGroups(ServerDatabase, configuredAuthorityGroupNames()); err != nil {
+		// Unlike the admin bootstrap above, this DOES stop startup. A
+		// name that confers administrator authority which this server
+		// could not reserve is a configuration that does not mean what
+		// the operator wrote, and running anyway is the unsafe outcome.
+		return errors.Wrap(err, "refusing to start")
 	}
 
 	// Grant Server.NewUserDefaultScopes to every existing user, ONCE.

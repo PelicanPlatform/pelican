@@ -38,9 +38,7 @@ const testExternalWebURL = "https://origin.example.test"
 
 // withExternalWebURL points Server.ExternalWebUrl at a fixed value and
 // bootstraps the built-in admin account, which is who asserted groups
-// end up owned by. Values go through param.Set (not viper directly)
-// because the param package memoizes a decoded Config; a bare
-// viper.Set would not be observed by the getters.
+// end up owned by.
 func withExternalWebURL(t *testing.T, db *gorm.DB) *User {
 	t.Helper()
 	prevURL := param.Server_ExternalWebUrl.GetString()
