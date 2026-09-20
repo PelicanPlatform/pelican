@@ -761,9 +761,8 @@ func TestApiToken(t *testing.T) {
 	mockDB, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
 	database.ServerDatabase = mockDB
 	require.NoError(t, err, "Error setting up mock origin DB")
-	err = database.ServerDatabase.AutoMigrate(&server_structs.ApiKey{})
-	require.NoError(t, err, "Failed to migrate DB for API key table")
 
+	// api_keys comes from the migrations now, like every other table.
 	migrateTestDB(t)
 	// AuthHandler now revalidates the user record on every cookie
 	// read; the synthetic admin cookie above points at user_id

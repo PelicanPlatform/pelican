@@ -41,6 +41,7 @@ import (
 
 	"github.com/pelicanplatform/pelican/config"
 	"github.com/pelicanplatform/pelican/database"
+	dbutils "github.com/pelicanplatform/pelican/database/utils"
 	"github.com/pelicanplatform/pelican/param"
 	"github.com/pelicanplatform/pelican/server_structs"
 	"github.com/pelicanplatform/pelican/server_utils"
@@ -50,39 +51,31 @@ import (
 )
 
 func migrateTestDB(t *testing.T) {
-	err := database.ServerDatabase.AutoMigrate(&database.Collection{})
-	require.NoError(t, err, "Failed to migrate DB for collections table")
-	err = database.ServerDatabase.AutoMigrate(&database.CollectionMember{})
-	require.NoError(t, err, "Failed to migrate DB for collection members table")
-	err = database.ServerDatabase.AutoMigrate(&database.CollectionMetadata{})
-	require.NoError(t, err, "Failed to migrate DB for collection metadata table")
-	err = database.ServerDatabase.AutoMigrate(&database.CollectionACL{})
-	require.NoError(t, err, "Failed to migrate DB for collection ACLs table")
-	err = database.ServerDatabase.AutoMigrate(&database.Group{})
-	require.NoError(t, err, "Failed to migrate DB for groups table")
-	err = database.ServerDatabase.AutoMigrate(&database.GroupMember{})
-	require.NoError(t, err, "Failed to migrate DB for group members table")
-	err = database.ServerDatabase.AutoMigrate(&database.User{})
-	require.NoError(t, err, "Failed to migrate DB for users table")
-	// User struct intentionally has no PasswordHash field; this helper
-	// adds the password_hash column so password-based login tests work.
-	require.NoError(t, database.AutoMigrateCredentialsForTests(database.ServerDatabase),
-		"Failed to migrate DB for user credentials column")
-	// Production scopes several uniqueness indexes to live rows; GORM
-	// can only emit full ones from struct tags, which would make every
-	// name-reuse path in this package untestable.
-	require.NoError(t, database.ApplyPartialIndexesForTests(database.ServerDatabase),
-		"Failed to apply the production partial indexes")
-	err = database.ServerDatabase.AutoMigrate(&database.GroupInviteLink{})
-	require.NoError(t, err, "Failed to migrate DB for group invite links table")
-	err = database.ServerDatabase.AutoMigrate(&database.UserIdentity{})
-	require.NoError(t, err, "Failed to migrate DB for user identities table")
-	err = database.ServerDatabase.AutoMigrate(&database.AUPDocument{})
-	require.NoError(t, err, "Failed to migrate DB for AUP documents table")
-	err = database.ServerDatabase.AutoMigrate(&database.UserScope{})
-	require.NoError(t, err, "Failed to migrate DB for user_scopes table")
-	err = database.ServerDatabase.AutoMigrate(&database.GroupScope{})
-	require.NoError(t, err, "Failed to migrate DB for group_scopes table")
+	t.Helper()
+	migrateTestDBHandle(t, database.ServerDatabase)
+}
+
+// migrateTestDBHandle brings one handle up to the production schema,
+// for the setups that keep their own DB rather than using
+// database.ServerDatabase.
+func migrateTestDBHandle(t *testing.T, db *gorm.DB) {
+	t.Helper()
+	sqlDB, err := db.DB()
+	require.NoError(t, err)
+	// Each CONNECTION to ":memory:" gets its own database, so the pool
+	// is pinned to one. Without it goose could migrate a database the
+	// queries never see.
+	sqlDB.SetMaxOpenConns(1)
+	// The production migrations, not AutoMigrate. GORM can only emit a
+	// FULL unique index from struct tags, so a hand-rolled schema silently
+	// lacks the partial indexes that let a soft-deleted account release
+	// its username — which is exactly the behavior the tests in this
+	// package exist to check, and which they would otherwise pass
+	// vacuously. Running the real thing also means the schema under test
+	// is the schema that ships.
+	require.NoError(t,
+		dbutils.MigrateDB(sqlDB, database.EmbedUniversalMigrations, "universal_migrations"),
+		"failed to run the production migrations against the test database")
 }
 
 func TestWaitUntilLogin(t *testing.T) {
@@ -1044,13 +1037,7 @@ func TestUserAdminAuthHandler(t *testing.T) {
 		prev := database.ServerDatabase
 		db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
 		require.NoError(t, err)
-		require.NoError(t, db.AutoMigrate(
-			&database.User{},
-			&database.Group{},
-			&database.GroupMember{},
-			&database.UserScope{},
-			&database.GroupScope{},
-		))
+		migrateTestDBHandle(t, db)
 		database.ServerDatabase = db
 		t.Cleanup(func() { database.ServerDatabase = prev })
 	}
@@ -1200,17 +1187,7 @@ func setupUserStatusTestDB(t *testing.T) {
 	prev := database.ServerDatabase
 	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
 	require.NoError(t, err)
-	// User is the row userRecordIsActive looks up; the rest are
-	// here because DeleteUser (used in the soft-delete subtest)
-	// also cleans up CollectionACL rows referencing the user's
-	// personal-group name and GroupMember rows referencing the
-	// user.
-	require.NoError(t, db.AutoMigrate(
-		&database.User{},
-		&database.GroupMember{},
-		&database.CollectionACL{},
-	))
-	require.NoError(t, database.AutoMigrateCredentialsForTests(db))
+	migrateTestDBHandle(t, db)
 	database.ServerDatabase = db
 	t.Cleanup(func() { database.ServerDatabase = prev })
 }

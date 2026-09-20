@@ -56,8 +56,8 @@ func setupCollectionTestDB(t *testing.T) *gorm.DB {
 	// Production scopes several uniqueness indexes to live rows; GORM
 	// can only emit full ones from struct tags. Without this the
 	// account- and group-reuse paths are unreachable and any test of
-	// them passes vacuously. See ApplyPartialIndexesForTests.
-	require.NoError(t, ApplyPartialIndexesForTests(db))
+	// them passes vacuously. See applyPartialIndexesForTests.
+	require.NoError(t, applyPartialIndexesForTests(db))
 	err = db.Exec("PRAGMA foreign_keys = ON").Error
 	require.NoError(t, err)
 	return db
