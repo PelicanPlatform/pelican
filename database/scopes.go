@@ -376,9 +376,11 @@ func EffectiveScopes(db *gorm.DB, userID string, externalGroupNames []string) ([
 	// "external assertions only count when they map to a known group").
 	//
 	// Deliberately NOT filtered on `source`; see the matching note in
-	// ResolveCallerACLSubjects. Excluding Pelican-created groups here
-	// would also stop an administrator from creating a group through
-	// the API and letting the identity provider decide who is in it.
+	// ResolveCallerACLSubjects. The provider is trusted to say who the
+	// caller is, so it is trusted to say which groups they are in;
+	// excluding Pelican-created groups would buy nothing and would stop
+	// an administrator creating a group through the API and letting the
+	// provider decide who is in it.
 	if len(externalGroupNames) > 0 {
 		var extRows []struct {
 			Scope string
