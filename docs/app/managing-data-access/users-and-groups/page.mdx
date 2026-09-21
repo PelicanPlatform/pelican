@@ -4,33 +4,40 @@ import { Callout } from 'nextra/components'
 
 The origin grants access to [**collections**](/managing-data-access/collections-and-shares) based on **group membership**; so, to provide an individual with
 access to data, the origin's administrator - or the delegated [user administrator](/managing-data-access/permissions-reference#user-administration) - must configure
-user accounts and manage group membership.  This page provides short guides for the administrator to
+user accounts and manage group membership.
 
-* Adding a user to the origin: Creating the account and (optionally) setting a password.
-* Deactivating a user: Removing their access to the origin and its data
-* Creating a group and managing membership: Adding, inviting, or removing users from a group
-* Delegating group management: Controlling who has permission to make membership changes
-* Authorizing other access beyond data: Allowing users or groups to view monitoring data or become user administrators themselves.
+This page covers:
 
-Additionally, there is a guide, applicable to any user, on managing their own account.
-For the model behind these tasks (what a user is, what a group is, and how a scope reaches a caller) read [How Access Control Works](/managing-data-access/access-control-model).
-For more details, read the [Permissions Reference](/managing-data-access/permissions-reference).
+* Adding a user to the origin
+* Deactivating a user
+* Creating a group and managing membership
+* Delegating group management
+* Authorizing other access beyond data
+
+There is also a section covering how a user may manage their own account.
+
+<Callout type="info">
+* For the model behind these tasks (what a user is, what a group is, and how a scope reaches a caller) read [How Access Control Works](/managing-data-access/access-control-model).
+* For more details on what can be granted, and to whom, read the [Permissions Reference](/managing-data-access/permissions-reference).
+</Callout>
 
 ## Before you start
 
 Each guide below uses the origin's **web interface**; to follow along, you must know the origin's URL and have an existing account with the user administrator
 privilege (`server.admin` or `server.user_admin`; see [User administration](/managing-data-access/permissions-reference#user-administration)).
-Most of these tasks can also be driven from the **command line**, with the `pelican-server server user` and `pelican-server server group` commands.
-Those assume you are logged into the origin's host or container and have read access to the origin's keys (typically in `/etc/pelican/issuer-keys/`) to authorize the action.
-Flags and syntax live in the generated reference for [`server user`](/commands-reference/pelican-server/server/user) and [`server group`](/commands-reference/pelican-server/server/group); this page repeats them only where the web interface cannot do the job at all.
 
-Additionally, one can use direct **API** access to invoke the same operations over the REST interface; the documentation at [`/api-docs`](/api-docs) carries every request and response shape but
-API access is not otherwise covered here.
+<Callout>
+Most of these tasks can also be driven from the **command line**, via
 
-<Callout type="info">
-Several tasks below produce an invite link.
-Pelican creates the link and displays it exactly once; it is the administrator's responsibility to send it securely to the target user.
-Pelican does not send email.
+* `pelican-server server user` ([reference page](/commands-reference/pelican-server/server/user))
+* `pelican-server server group` ([reference page](/commands-reference/pelican-server/server/group))
+
+These operations are also available via the **REST API interface**; see [API docs](/api-docs).
+</Callout>
+
+<Callout type="warning">
+In several tasks below, Pelican **creates an invite link and displays it exactly once (!)**.
+Furthermore, it is the administrator's responsibility to send it securely to the target user, as *Pelican does not send email.*
 </Callout>
 
 ## Add a user
@@ -42,7 +49,8 @@ Pre-creating allows one to add the person to groups or grant permissions before 
 
 1. In the browser, go to **Settings** → **Users** and click **ADD USER**.
 2. Choose **Local (username + password)** or **External (OIDC)**.  The latter only appears if the origin has SSO enabled.
-3. Fill in **Username** and, optionally, **Display name**. For a SSO-based user, also fill in **Sub** ("subject"; typically, it's the SSO username) and **Issuer** (URL of the SSO) from your identity provider.
+3. Fill in **Username** and, optionally, **Display name**. 
+    * For a SSO-based user, also fill in **Sub** ("subject"; typically, it's the SSO username) and **Issuer** (URL of the SSO) from your identity provider.
 4. Click **CREATE USER**.
 5. For a local account, the page offers **GENERATE PASSWORD-SET INVITE**. Click it and copy the URL, or click **SKIP FOR NOW** and mint the invite later.
 
@@ -76,14 +84,19 @@ After clicking on the link, the recipient signs in through the identity provider
 
 ## Delete a user
 
-Deleting is not reversible.
-Along with the account, Pelican removes group memberships.  There is no "undelete" functionality.
+<Callout type="important">
+  **Deleting a user is *not* reversible.**
+  There is no "undelete" functionality.
+</Callout>
 
+To delete:
+
+1. Go to **Settings** → **Users**.
+2. Find the user's row in the listing.
+3. Use the **Delete** control on that user's row.
 
 The account's status is rechecked on every request to the origin's web interface and management API, so a signed-in session stops working on its next request rather than when its cookie expires.
 An access token the user already holds for *data* is not re-checked, and keeps working until it expires; see [Revoke access](/managing-data-access/collections-and-shares#revoke-access).
-
-To delete, go to **Settings** → **Users** and use the **Delete** control on the user's row.
 
 ## Create a group
 
@@ -160,6 +173,14 @@ You can set the flag at creation time if you are a server administrator.
 
 - **At creation:** in the **Create New Group** dialog, tick **Auth-template eligible**. The checkbox is rendered only for callers who can set it.
 - **Afterwards:** open the group's detail page and flip the **Auth template** switch. Everyone else sees the current state as a read-only `eligible` or `ineligible` chip.
+
+## Delete a group
+
+*Requires **TODO**.*
+
+To delete a group, 
+
+1. TODO
 
 ## Grant a scope to a user or group
 
