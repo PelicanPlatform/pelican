@@ -98,11 +98,11 @@ export interface CollectionAcl {
 }
 
 export interface CollectionAclGrant {
-  // Accepts a group name, a group ID, `user-<username>`, or the
-  // '@authenticated' sentinel; the server resolves it to a stored
-  // (subjectType, subjectId) pair and rejects anything that matches
-  // nothing. A bare user ID is NOT a spelling here — pass
-  // subjectType/subjectId to address a principal by ID.
+  // A NAME, despite the field name: a group name, `user-<username>`,
+  // or the '@authenticated' sentinel. The server resolves it to a
+  // stored (subjectType, subjectId) pair and rejects anything that
+  // matches nothing. An ID of either kind is NOT a spelling here —
+  // pass subjectType/subjectId to address a principal by ID.
   groupId: string;
   role: CollectionAclRole;
   expiresAt?: string;

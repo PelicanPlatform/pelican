@@ -71,8 +71,14 @@ func seedUser(t *testing.T, db *gorm.DB, username string) string {
 func seedGroup(t *testing.T, db *gorm.DB, name string) string {
 	t.Helper()
 	var g database.Group
+	// Provider-asserted: these fixtures hand group NAMES to the scope
+	// resolver the way a cookie's wlcg.groups claim does, and a name
+	// only resolves to a group the provider is allowed to speak for. A
+	// `pelican` group's membership is this server's own and reaches a
+	// caller by ID instead — see proxy_db_membership_test.go.
 	require.NoError(t, db.Where(database.Group{Name: name}).Attrs(database.Group{
 		ID: "g-" + name, CreatedBy: "owner-user-id", OwnerID: "owner-user-id",
+		Source: database.GroupSourceOIDC,
 	}).FirstOrCreate(&g).Error)
 	return g.ID
 }

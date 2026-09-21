@@ -84,11 +84,13 @@ A configured name the server cannot record — one carrying the `user-` personal
 
 The admin group reservation happens regardless of `Issuer.DisableGroupAutoCreation` setting.
 
+Upgrading from a release before this one, a group you created through Pelican stops being reachable by assertion. If you made a local group purely as a handle for a name your provider asserts, delete it and let Pelican record the asserted group itself at the next login; the collision is logged either way.
+
 ## Mirrored memberships
 
 Authoritative membership information lives at the provider but is mirrored in the database for when authorization decisions need to be made based on a user other than the one making the requestion. For example, whether the owner of a share still has access to its parent collection (computed at token-mint time, with no session for that owner) or whether an account a user-administrator is about to act on is itself a system administrator.
 
-Membership can be mixed, but only in one direction. An asserted group holds mirrored rows *and* any local members an administrator added alongside them; a `pelican` group holds only local ones, because an assertion never reaches it — the reconciliation step refuses to accept a name a `pelican` group already holds, and the mirror independently filters those groups out of its lookup. An operator who wants to add a collaborator that the identity provider does not carry can do so; an identity provider cannot quietly add anyone to a group this server owns.
+Membership can be mixed, but only in one direction. An asserted group holds mirrored rows *and* any local members an administrator added alongside them; a `pelican` group holds only local ones, because an assertion never reaches it: the reconciliation step refuses to accept a name a `pelican` group already holds, the mirror independently filters those groups out of its lookup, and — the part that actually closes it — the per-request name lookups do too, so an asserted name resolves to a group's ID only when that group's source says the provider speaks for it. An operator who wants to add a collaborator that the identity provider does not carry can do so; an identity provider cannot quietly add anyone to a group this server owns.
 
 That asymmetry is why the source is recorded in two places, on the group and again on each membership. The group's source says **who decides its membership by default**; the row's source says **how that particular row got there, and whether it may expire**. Collapsing them would leave the retraction pass unable to distinguish an administrator's decision from a provider's. Since retraction runs on every login, it would delete the administrator's on the member's next sign-in.
 

@@ -370,10 +370,15 @@ func EffectiveScopes(db *gorm.DB, userID string, externalGroupNames []string) ([
 		}
 	}
 
-	// 3. group_scopes for OIDC-asserted group names. Filter at SQL time
-	// so an asserted name that doesn't correspond to a real group
+	// 3. group_scopes for provider-asserted group names. Filter at SQL
+	// time so an asserted name that doesn't correspond to a real group
 	// produces no rows (mirrors ListGroupsVisibleToUser's stance:
 	// "external assertions only count when they map to a known group").
+	//
+	// `source <> pelican` for the same reason as the ACL-subject
+	// resolver: a provider must not be able to hand itself the scopes of
+	// a group whose membership this server owns. Step 2 already gave the
+	// caller the scopes of every Pelican group they genuinely belong to.
 	if len(externalGroupNames) > 0 {
 		var extRows []struct {
 			Scope string
@@ -381,7 +386,7 @@ func EffectiveScopes(db *gorm.DB, userID string, externalGroupNames []string) ([
 		if err := db.Table("group_scopes").
 			Select("group_scopes.scope").
 			Joins("JOIN groups ON groups.id = group_scopes.group_id AND groups.deleted_at IS NULL").
-			Where("groups.name IN ?", externalGroupNames).
+			Where("groups.name IN ? AND groups.source <> ?", externalGroupNames, GroupSourcePelican).
 			Scan(&extRows).Error; err != nil {
 			return nil, err
 		}

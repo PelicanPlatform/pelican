@@ -867,7 +867,7 @@ func MustTreatAsSystemAdmin(db *gorm.DB, userID string) (bool, string) {
 	// (3) No evidence either way. If no group can confer admin here,
 	// there is nothing a group could be hiding and the account is ruled
 	// out by (1) alone.
-	if !param.Server_AdminGroups.IsSet() || len(param.Server_AdminGroups.GetStringSlice()) == 0 {
+	if !aGroupCouldConferAdmin(db) {
 		return false, ""
 	}
 	// If group membership is Pelican's own, `group_members` is complete
@@ -881,6 +881,36 @@ func MustTreatAsSystemAdmin(db *gorm.DB, userID string) (bool, string) {
 			"Ask the account to sign in, or perform this action as a full administrator"
 	}
 	return false, ""
+}
+
+// aGroupCouldConferAdmin reports whether membership of SOME group could
+// make an account a system administrator here. It is the precondition
+// for MustTreatAsSystemAdmin's conservative default: where no group can
+// confer admin, an unobserved account is ruled out on the evidence
+// alone and ordinary user administration is unaffected.
+//
+// It must stay in step with assertsAdminGroup, which decides what gets
+// latched. That one asks the full scope evaluator, so it recognizes
+// BOTH ways a group confers the scope: a name listed in
+// Server.AdminGroups, and a scope granted to the group itself through
+// group_scopes. Checking only the configuration here would leave the
+// second kind unguarded — an account holding admin through a scoped
+// group, not yet observed, would look like an ordinary user and a
+// user-administrator could act on it before its first login.
+//
+// A database error answers true. This gates whether the caller may stop
+// being careful, so "could not tell" has to mean "keep being careful".
+func aGroupCouldConferAdmin(db *gorm.DB) bool {
+	if param.Server_AdminGroups.IsSet() && len(param.Server_AdminGroups.GetStringSlice()) > 0 {
+		return true
+	}
+	scoped, err := database.AnyGroupCanConferAdminScope(db, []string{token_scopes.Server_Admin.String()})
+	if err != nil {
+		log.Warningf("Could not determine whether any group grants %s; treating the account as a possible administrator: %v",
+			token_scopes.Server_Admin, err)
+		return true
+	}
+	return scoped
 }
 
 // IsConfirmedSystemAdmin reports whether an account can be shown, from

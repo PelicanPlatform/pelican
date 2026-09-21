@@ -28,6 +28,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/pelicanplatform/pelican/param"
+	"github.com/pelicanplatform/pelican/token_scopes"
 )
 
 // TestConfiguredAdminGroupNameCannotBeShadowed sees if we can shadow
@@ -250,7 +251,7 @@ func TestAnAuthorityGroupCannotBeDeletedWhileConfigured(t *testing.T) {
 	require.NoError(t, db.First(&g, "name = ?", "ops").Error)
 
 	err := DeleteGroup(db, g.ID, admin.ID, true)
-	require.ErrorIs(t, err, ErrForbidden, "even a system admin may not release the name")
+	require.ErrorIs(t, err, ErrConfiguredAuthorityGroup, "even a system admin may not release the name")
 	assert.Contains(t, err.Error(), "Server.*AdminGroups",
 		"the refusal has to say which configuration is holding the name")
 
@@ -332,4 +333,77 @@ func TestConfiguredGroupSourceMapping(t *testing.T) {
 		_, ok := groupSourcesByConfigValue[spelling]
 		assert.True(t, ok, "config spelling %q has no GroupSource mapping", spelling)
 	}
+}
+
+// TestAnAssertionCannotClaimAPelicanGroup is the other half of the
+// agreement EnsureAssertedGroups makes when it declines to mirror an
+// asserted name into a Pelican-created group.
+//
+// Without it that refusal is cosmetic: no membership row is written,
+// but the caller's asserted NAME still resolves to the group's ID on
+// every request, so the provider gets everything granted to a group
+// whose member list this server curates.
+func TestAnAssertionCannotClaimAPelicanGroup(t *testing.T) {
+	db := setupCollectionTestDB(t)
+	admin := withExternalWebURL(t, db)
+	curated, err := CreateGroup(db, "finance", "", "", Creator{UserID: admin.ID}, "", true)
+	require.NoError(t, err)
+	require.Equal(t, GroupSourcePelican, curated.Source)
+	require.NoError(t, GrantGroupScope(db, curated.ID, token_scopes.Server_CollectionAdmin, CreatorSelf()))
+
+	// Mallory is not in the group; her identity provider merely says
+	// the name.
+	mallory := mkUser(t, db, "u-mallory", "mallory")
+
+	subjects := ResolveCallerACLSubjects(db, mallory.Username, mallory.ID, []string{"finance"})
+	assert.NotContains(t, subjects.GroupIDs, curated.ID,
+		"an assertion must not resolve to a group whose membership this server owns")
+
+	scopes, err := EffectiveScopes(db, mallory.ID, []string{"finance"})
+	require.NoError(t, err)
+	assert.NotContains(t, scopes, token_scopes.Server_CollectionAdmin,
+		"nor collect that group's scopes")
+
+	// A real member still gets both, by ID rather than by name.
+	member := mkUser(t, db, "u-insider", "insider")
+	require.NoError(t, AddGroupMember(db, curated.ID, member.ID, admin.ID, true))
+	subjects = ResolveCallerACLSubjects(db, member.Username, member.ID, nil)
+	assert.Contains(t, subjects.GroupIDs, curated.ID,
+		"local membership reaches the caller by ID and must be unaffected")
+	scopes, err = EffectiveScopes(db, member.ID, nil)
+	require.NoError(t, err)
+	assert.Contains(t, scopes, token_scopes.Server_CollectionAdmin)
+
+	// And a genuinely asserted group still resolves by name.
+	mustEnsureAssertedGroups(t, db, GroupSourceOIDC, []string{"ops"})
+	var ops Group
+	require.NoError(t, db.First(&ops, "name = ?", "ops").Error)
+	subjects = ResolveCallerACLSubjects(db, mallory.Username, mallory.ID, []string{"ops"})
+	assert.Contains(t, subjects.GroupIDs, ops.ID,
+		"a provider-asserted group must still resolve by the name the provider says")
+}
+
+// A PATCH that echoes an asserted group's current name is not a rename,
+// and must not take the rest of the update down with it — UIs routinely
+// send the whole object back.
+func TestEchoingAnAssertedGroupsNameIsNotARename(t *testing.T) {
+	db := setupCollectionTestDB(t)
+	admin := withExternalWebURL(t, db)
+	mustEnsureAssertedGroups(t, db, GroupSourceOIDC, []string{"ops"})
+	var ops Group
+	require.NoError(t, db.First(&ops, "name = ?", "ops").Error)
+
+	sameName, desc := "ops", "CMS operations"
+	require.NoError(t, UpdateGroup(db, ops.ID, &sameName, nil, &desc, nil, admin.ID, true, true),
+		"echoing the current name must not be refused as a rename")
+
+	var after Group
+	require.NoError(t, db.First(&after, "id = ?", ops.ID).Error)
+	assert.Equal(t, "ops", after.Name)
+	assert.Equal(t, desc, after.Description, "the edit alongside it must survive")
+
+	// An actual rename is still refused.
+	other := "ops-renamed"
+	assert.ErrorIs(t, UpdateGroup(db, ops.ID, &other, nil, nil, nil, admin.ID, true, true),
+		ErrGroupNameConflict)
 }
