@@ -302,18 +302,20 @@ func ResolveCallerACLSubjects(db *gorm.DB, username, userID string, groupNames [
 	}
 	if len(groupNames) > 0 {
 		var rows []struct{ ID string }
-		// NOTE: deliberately NOT filtered on `source`. An assertion
-		// resolving to a Pelican-created group is a known weakness —
-		// EnsureAssertedGroups refuses to MIRROR into such a group, so
-		// a provider can pick up its ACL grants without ever appearing
-		// in its member list. Filtering here closes that, but it also
-		// breaks a supported workflow: an administrator creates a group
-		// through the groups API, points a collection's admin_id at it,
-		// and lets the identity provider decide who is in it (see
+		// Deliberately NOT filtered on `source`: an asserted name
+		// resolves to a Pelican-created group just as it does to any
+		// other. EnsureAssertedGroups refuses to MIRROR into such a
+		// group, which can read like an inconsistency, but the two
+		// answer different questions. Membership is a list this server
+		// keeps, and a provider does not get to edit it. Authorization
+		// asks who the caller is, and the provider is what tells us —
+		// including the username. A provider that wanted this group's
+		// access could simply assert a member's identity instead, so
+		// refusing the name buys nothing while breaking a supported
+		// workflow: create a group through the groups API, point a
+		// collection's admin_id at it, and let the provider decide who
+		// is in it (see
 		// TestCollectionsAPI/admin-group-grants-full-management-authority).
-		// The two are indistinguishable by source alone, so closing it
-		// needs a way to say which one a group is. Tracked for the next
-		// release; the collision is logged loudly meanwhile.
 		//
 		// deleted_at is spelled out because this is a raw table query:
 		// GORM's soft-delete scope only applies to model-based queries,

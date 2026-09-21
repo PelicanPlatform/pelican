@@ -335,23 +335,19 @@ func TestConfiguredGroupSourceMapping(t *testing.T) {
 	}
 }
 
-// TestAnAssertionResolvesToAPelicanGroup pins current, deliberate
-// behavior that is NOT what you might expect from EnsureAssertedGroups'
-// refusal to mirror into a Pelican-created group.
+// TestAnAssertionResolvesToAPelicanGroup pins behavior that looks
+// inconsistent with EnsureAssertedGroups' refusal to mirror into a
+// Pelican-created group, and is not.
 //
-// The refusal covers membership only. A caller's asserted NAME still
-// resolves to such a group's ID, so the provider decides who gets its
-// ACL grants and scopes without anyone appearing in its member list.
-// That is a known weakness, and it is also the mechanism behind a
-// supported workflow: an administrator creates a group through the
-// groups API, points a collection's admin_id at it, and lets the
-// identity provider decide who is in it — see
-// TestCollectionsAPI/admin-group-grants-full-management-authority.
-//
-// Closing the weakness without breaking the workflow needs a way to say
-// which of the two a group is; source alone does not distinguish them.
-// Until then this test exists so the behavior is chosen rather than
-// accidental, and so anyone who changes it sees what else moves.
+// The refusal covers MEMBERSHIP: the member list is this server's, and
+// a provider does not get to edit it. AUTHORIZATION is a different
+// question — it asks who the caller is, and the provider is what tells
+// us, including the username. A provider that wanted this group's
+// access could assert one of its members' identities instead, so
+// refusing the name would buy nothing. It is also what makes a useful
+// arrangement work: create a group through the groups API, point a
+// collection's admin_id at it, and let the provider decide who is in it
+// — see TestCollectionsAPI/admin-group-grants-full-management-authority.
 func TestAnAssertionResolvesToAPelicanGroup(t *testing.T) {
 	db := setupCollectionTestDB(t)
 	admin := withExternalWebURL(t, db)
