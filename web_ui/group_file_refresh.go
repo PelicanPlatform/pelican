@@ -33,15 +33,10 @@ import (
 // interval and refreshes the group memberships mirrored from it.
 //
 // This exists because `file` is the only group source Pelican can
-// consult without the user present: it is a local file keyed by
-// username, so membership for every known account can be recomputed at
-// any time. `oidc` and `github` need that user's own token, so their
-// mirrored memberships are only ever as fresh as the user's last login
-// — which is exactly what Issuer.AssertedGroupMembershipTTL exists to
-// bound. Refreshing the file source keeps it out of that bind
-// altogether: its memberships stay continuously fresh, and an operator
-// removing someone from the file sees it take effect within one
-// interval rather than at that person's next login.
+// consult without the user present. `oidc` and `github` need that
+// user's own token, so their mirrored memberships are only ever as
+// fresh as the user's last login.  Refreshing the file source keeps
+// it out of guesswork.
 //
 // A pass is a no-op when the file is unset, and errors are logged
 // rather than returned — a malformed group file must not take the
@@ -91,17 +86,11 @@ func LaunchPeriodicGroupFileRefresh(ctx context.Context, egrp *errgroup.Group) {
 // It walks users rather than the file's own keys deliberately: a file
 // entry for a username with no account is not something to act on (there
 // is no user to attach a membership to), while an account that has been
-// REMOVED from the file must have its mirrored memberships retracted —
-// and that only happens if we ask about the account. Passing an empty
-// group list for such a user is the retraction.
+// REMOVED from the file must have its mirrored memberships retracted.
 //
 // Every step re-checks ctx, and the function goes silent once it is
 // cancelled. Both matter more than the wasted work they save: a pass
-// over every account can outlive the server it belongs to, and under
-// `go test` the logging hooks route through t.Log, which panics when a
-// goroutine writes after its test has completed. Shutting up promptly
-// is what keeps this routine from turning a slow pass into a test
-// failure somewhere else in the suite.
+// over every account can outlive the server it belongs to.
 func refreshGroupFileMemberships(ctx context.Context) {
 	if database.ServerDatabase == nil || ctx.Err() != nil {
 		return

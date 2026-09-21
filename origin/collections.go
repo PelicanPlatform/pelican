@@ -406,8 +406,7 @@ type MetadataValue struct {
 // GrantAclReq names the ACL target and the role to grant.
 //
 // The two ways to name a target correspond to the two identifier spaces,
-// and the caller says which they mean by choosing fields — the server
-// never infers it from the string.
+// and the caller says which they mean by choosing fields.
 //
 // `groupId` is the NAME space: a group name, `user-<name>` for a
 // personal grant, or the `@authenticated` sentinel. `group_id` is the
@@ -416,12 +415,7 @@ type MetadataValue struct {
 // 400, since ACL rows are keyed on IDs and there is nothing to store.
 //
 // `subjectType` + `subjectId` is the ID space, and is the only way to
-// name a principal by ID — a bare ID is NOT a `groupId` spelling. It
-// used to be, and the server told the two apart by the shape of the
-// string, which is not a distinction that can be made safely: group
-// creation is open to any authenticated user, so a group NAMED after
-// another principal's ID was enough to intercept grants addressed to
-// that ID. See database.ACLSubjectRef.
+// name a principal by ID.
 type GrantAclReq struct {
 	GroupID         string     `json:"groupId"`
 	GroupIDSnakeAlt string     `json:"group_id"`
@@ -535,11 +529,9 @@ type GetCollectionRes struct {
 }
 
 // ownerUsernameFor resolves a collection's owner User.ID to the
-// username the `owner` response field has always carried. The
-// collections table no longer stores a username — it was an
-// authorization fallback that survived ownership transfers and account
-// deletions (issue #3753) — so the value is now looked up from the
-// users table at render time and is empty when the owner row is gone.
+// username the `owner` response field carries. The collections table
+// no longer stores a username — it was an authorization fallback that
+// survived ownership transfers and account deletions (issue #3753).
 func ownerUsernameFor(cards map[string]database.UserCard, ownerID string) string {
 	if c, ok := cards[ownerID]; ok {
 		return c.Username
@@ -549,10 +541,10 @@ func ownerUsernameFor(cards map[string]database.UserCard, ownerID string) string
 
 // collectionSummary renders a single freshly-written collection in the
 // same shape the listing endpoint returns. The owner's username is
-// looked up rather than read off the row — the row holds only
-// `owner_id` — and stays empty when there is no owner to resolve (a
-// bearer-token caller with no user record). The caller is the owner on
-// both create paths, so CanEdit is true by construction.
+// looked up rather than read off the row and stays empty when there is
+// no owner to resolve (e.g., a bearer-token caller with no user record).
+// The caller is the owner on both create paths, so CanEdit is true by
+// construction.
 func collectionSummary(c database.Collection) ListCollectionRes {
 	row := ListCollectionRes{
 		ID:                 c.ID,
@@ -1467,8 +1459,8 @@ func handleGetCollection(ctx *gin.Context) {
 	}
 
 	// ACL rows come back keyed on IDs; fill in the display fields
-	// (subjectName / the legacy groupId spelling) so existing clients
-	// keep rendering a human-readable target.
+	// (subjectName / the legacy groupId spelling) so clients keep
+	// rendering a human-readable target.
 	if err := database.AnnotateACLSubjects(database.ServerDatabase, coll.ACLs); err != nil {
 		ctx.JSON(http.StatusInternalServerError, server_structs.SimpleApiResp{
 			Status: server_structs.RespFailed,

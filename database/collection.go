@@ -837,6 +837,17 @@ const (
 	GroupSourceTypeGitHub   string = "github"
 )
 
+// groupSourcesByConfigValue maps what an operator writes in
+// Issuer.GroupSource onto the GroupSource a record is stamped with.
+// A new provider needs an entry here as well as a constant above;
+// ConfiguredGroupSource warns when it meets a value it cannot map.
+var groupSourcesByConfigValue = map[string]GroupSource{
+	GroupSourceTypeOIDC:     GroupSourceOIDC,
+	GroupSourceTypeFile:     GroupSourceFile,
+	GroupSourceTypeGitHub:   GroupSourceGitHub,
+	GroupSourceTypeInternal: GroupSourcePelican,
+}
+
 // ConfiguredGroupSource maps Issuer.GroupSource onto the GroupSource a
 // record is stamped with. It is the single answer to "who decides group
 // membership on this server", and every path that learns a caller's
@@ -854,16 +865,22 @@ const (
 // is Pelican's own, held in group_members, and nothing needs mirroring.
 // The empty GroupSource means no provider decides groups here.
 func ConfiguredGroupSource() GroupSource {
-	switch strings.ToLower(param.Issuer_GroupSource.GetString()) {
-	case GroupSourceTypeOIDC:
-		return GroupSourceOIDC
-	case GroupSourceTypeFile:
-		return GroupSourceFile
-	case GroupSourceTypeGitHub:
-		return GroupSourceGitHub
-	case GroupSourceTypeInternal:
-		return GroupSourcePelican
+	raw := strings.ToLower(strings.TrimSpace(param.Issuer_GroupSource.GetString()))
+	if raw == "" || raw == "none" {
+		return ""
 	}
+	if source, ok := groupSourcesByConfigValue[raw]; ok {
+		return source
+	}
+	// Not a value this build knows. Almost always a typo in the
+	// configuration, but it is also what a new provider looks like if
+	// someone adds a GroupSourceType constant and forgets the table
+	// above. Say so rather than returning "" silently: "" means NO
+	// provider decides group membership here, which switches off
+	// mirroring, the group-file refresher, and the guard that stops a
+	// user-administrator acting on an unobserved account.
+	log.Warnf("Issuer.GroupSource is set to %q, which this server does not recognize; "+
+		"no provider will decide group membership", raw)
 	return ""
 }
 

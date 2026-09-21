@@ -4890,38 +4890,27 @@ components: ["origin"]
 ---
 name: Issuer.DisableGroupAutoCreation
 description: |+
-  Disable recording a group for every group name observed from the
-  provider named by `Issuer.GroupSource` (the OIDC group claim, the
-  group file, or GitHub organizations).
+  Disable recording a group in the internal database for every group
+  name observed from the provider named by `Issuer.GroupSource`
+  (e.g., the OIDC group claim, the group file, or GitHub organizations).
 
   By default, the first time a user logs in asserting membership in a
   group Pelican has no record of, Pelican creates one owned by the
   built-in `admin` user and stamped with the source that asserted it.
-  The record exists so the group has a stable, immutable ID: collection
-  ACLs and group scopes are keyed on IDs, never on names, so a group
-  that only ever exists in a token has nothing for a grant to point at.
-  It also holds the name — without it, an unprivileged user could create
-  a group whose name matches one the provider asserts, and thereby step
-  into the grants held by the provider's group.
+  The record exists so other users cannot create an overlapping group
+  within the database.
 
-  Membership of these records is NOT stored locally; the asserting
-  provider remains the source of truth for who belongs to them.
-  Administrators can see them in the group listing and use them as ACL
-  targets, but there is nothing to add or remove members from, and they
-  cannot be renamed.
+  Membership of these records is cached locally; the asserting
+  provider is the source of truth for who belongs to them.
 
   Set this to `true` only if you do not want Pelican writing groups it
-  did not create. With it set, an asserted group has no ID, so it cannot
-  be named in a collection ACL, and its name remains available for any
-  authenticated user to claim.
+  did not create. With auto-creation disabled, these groups cannot be
+  named in a collection ACL.
 
   This knob does not affect the group names listed in
-  `Server.AdminGroups`, `Server.UserAdminGroups` or
-  `Server.CollectionAdminGroups`. Those are names the operator chose,
-  not names observed from a provider, and Pelican always records them at
-  startup so that no user can create a group shadowing one of them. With
-  auto-creation disabled nothing else would reserve them, which is
-  precisely when that matters most.
+  `Server.AdminGroups`, `Server.UserAdminGroups`, or
+  `Server.CollectionAdminGroups`. Pelican always records them at
+  startup.
 type: bool
 default: false
 components: ["origin", "registry", "director", "cache"]
@@ -4929,34 +4918,25 @@ components: ["origin", "registry", "director", "cache"]
 name: Issuer.AssertedGroupMembershipTTL
 description: |+
   How long a group membership mirrored from `Issuer.GroupSource` may
-  still grant access after the provider last asserted it.
+  still grant access after the last observation.
 
-  When group membership comes from an outside provider, Pelican records
-  a copy of it each time the user logs in. The copy is what lets Pelican
-  answer questions about a user who is not currently making a request —
-  whether the owner of a share still has access to the parent
-  collection, or whether an account a user-administrator is about to act
-  on is itself a system administrator — and what populates an asserted
-  group's member list in the web UI.
+  When group membership comes from an outside provider, Pelican caches
+  the information for authorization lookups (e.g., whether the owner of
+  a share still has access to the parent collection).
 
-  A mirrored membership is a cached fact, so it expires. Past this
-  window Pelican will no longer grant access on the strength of the
-  copy; the user's own requests are unaffected, because those carry the
-  provider's assertion directly and are never gated by this setting.
-  Logging in refreshes the copy.
+  Past this window Pelican will no longer grant access based on the cached
+  information. Logging in refreshes the copy again.
 
-  Expiry governs *granting*, not retention: a stale copy is kept, so a
-  check that asks whether an account might hold a privilege — rather
-  than whether to hand one out — still sees it and answers
-  conservatively. Copies are removed when the provider stops asserting
-  the membership.
+  Expiry governs *authorization*, not retention: a stale copy is kept so a
+  check that asks whether an account might hold a privilege (such as
+  determining whether a user could possibly be an administrator).
 
   Only the `file` group source can be refreshed without the user
   present, and Pelican re-reads it on `Issuer.GroupFileRefreshInterval`;
-  `oidc` and `github` memberships refresh only at login, which is what
-  this window exists to bound. Set to 0 to disable mirrored memberships
-  as an authorization input entirely — the copies are still recorded and
-  still shown in the UI, they simply never grant.
+  `oidc` and `github` memberships refresh only at login.
+
+  Set to 0 to disable mirrored memberships as an authorization input —
+  the copies are still recorded and shown in the UI but aren't used.
 type: duration
 default: 168h
 components: ["origin", "registry", "director", "cache"]
@@ -4967,14 +4947,12 @@ description: |+
   memberships mirrored from it.
 
   Unlike the `oidc` and `github` group sources, the group file is local
-  and keyed by username, so Pelican can refresh it for every known user
-  without any of them being present. That keeps mirrored memberships
-  from this source continuously fresh rather than only as fresh as each
-  user's last login.
+  so Pelican can refresh it. That keeps mirrored memberships from this
+  source continuously fresh.
 
   Only takes effect when `Issuer.GroupSource` is `file` and
   `Issuer.GroupFile` is set. Set to 0 to disable the periodic refresh,
-  in which case file-derived memberships refresh at login instead.
+  in which case file-derived memberships only refresh at login.
 type: duration
 default: 15m
 components: ["origin", "registry", "director", "cache"]
@@ -5011,10 +4989,7 @@ description: |+
   keys corresponding to the "user" name and the value a list of strings that are interpreted as the user's
   groups.
 
-  Only consulted when `Issuer.GroupSource` is set to `file`. The file is
-  not a second source layered under another one: on a server configured
-  for `oidc` or `github` it is never read, so a user missing from it has
-  no effect on their group membership.
+  Only consulted when `Issuer.GroupSource` is set to `file`.
 type: string
 default: none
 components: ["origin"]

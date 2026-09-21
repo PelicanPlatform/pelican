@@ -1089,9 +1089,8 @@ func handleUpdateUser(ctx *gin.Context) {
 	}
 	if req.GroupAdminRuledOut != nil {
 		// System admin only. A user-admin recording "this account is
-		// not an administrator" would be marking its own homework:
-		// the whole point of the guard is to stop a user-admin acting
-		// on an account that might outrank it.
+		// not an administrator" would be changing something about an
+		// account that might outrank it.
 		if !isSystemAdmin {
 			ctx.JSON(http.StatusForbidden, server_structs.SimpleApiResp{
 				Status: server_structs.RespFailed,

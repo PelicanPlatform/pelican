@@ -67,11 +67,9 @@ func migrateTestDBHandle(t *testing.T, db *gorm.DB) {
 	// queries never see.
 	sqlDB.SetMaxOpenConns(1)
 	// The production migrations, not AutoMigrate. GORM can only emit a
-	// FULL unique index from struct tags, so a hand-rolled schema silently
+	// FULL unique index from struct tags, so a hand-rolled schema
 	// lacks the partial indexes that let a soft-deleted account release
-	// its username — which is exactly the behavior the tests in this
-	// package exist to check, and which they would otherwise pass
-	// vacuously. Running the real thing also means the schema under test
+	// its username. Running the real thing also means the schema under test
 	// is the schema that ships.
 	require.NoError(t,
 		dbutils.MigrateDB(sqlDB, database.EmbedUniversalMigrations, "universal_migrations"),

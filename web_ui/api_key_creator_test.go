@@ -1,8 +1,3 @@
-// Matches authentication_test.go, which is where the shared schema
-// helper (migrateTestDB) lives. Without the constraint the Windows
-// build of this package's tests references a helper that is not
-// compiled there, and golangci-lint's typecheck fails the build before
-// any test runs.
 //go:build !windows
 
 /***************************************************************
@@ -27,10 +22,7 @@ package web_ui
 
 // api_keys.created_by is an authorization input, not an audit string:
 // api_token.Verify re-intersects a key's persisted scopes against that
-// user's CURRENT effective scopes on every call. Keying it on a
-// username meant the column named something reusable — so a released
-// username handed a dead key's authority to whoever was onboarded under
-// the name next.
+// user's current effective scopes on every call.
 
 import (
 	"testing"

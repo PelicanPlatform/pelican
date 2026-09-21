@@ -110,11 +110,8 @@ func init() {
 		// which the caller already treats as "cannot attribute this key"
 		// and fails closed on every user-grantable scope.
 		//
-		// There is deliberately no username fallback. Usernames are
-		// released when an account is soft-deleted, so falling back
-		// meant a dead key's dormant management scopes came back to
-		// life the moment someone new was onboarded under the old
-		// name — for whoever still held the key's secret.
+		// There is deliberately no username fallback as usernames are
+		// released when an account is soft-deleted.
 		if database.ServerDatabase == nil {
 			return nil
 		}

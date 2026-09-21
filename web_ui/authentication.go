@@ -818,11 +818,8 @@ func CheckCollectionAdmin(identity UserIdentity) (bool, string) {
 // It replaces a predicate that asked "is this user an admin?" and
 // answered false whenever it could not tell. That default was the bug:
 // a system administrator whose authority comes from Server.AdminGroups
-// plus a group an outside provider asserts may have nothing on this
-// server to evaluate, because membership lives at the provider. Every
-// guard built on it — rename, delete, clear-password, mint a
-// password-set invite, clear an AUP acceptance — then opened on exactly
-// the accounts it existed to protect.
+// plus a group an outside provider asserts may appear to not be an admin
+// because membership lives at the provider.
 //
 // The question is now the safe one: not "have we proved this account IS
 // an administrator", but "have we proved it is NOT one". Three things
@@ -842,15 +839,14 @@ func CheckCollectionAdmin(identity UserIdentity) (bool, string) {
 //     from somewhere Pelican cannot enumerate on demand.
 //
 // Case 3 is the conservative default, and it is deliberately broad: on
-// upgrade every account is GroupAdminUnknown, so a user-administrator
-// can act on none of them until each has signed in once. In a
-// deployment where no group confers admin (Server.AdminGroups unset)
-// nothing changes at all, and elsewhere it self-heals one login at a
+// upgrade to the user/group code, every account is GroupAdminUnknown,
+// so a user-administrator can act on none of them until each has signed
+// in once. In a deployment where no group confers admin (Server.AdminGroups
+// unset) nothing changes at all, and elsewhere it self-heals one login at a
 // time.
 //
 // Recourse is a full server.admin, who bypasses every one of these
-// guards (they all test `!isAdmin && ...`). There is deliberately no
-// API to clear the latch, because that would be an API to defeat this.
+// guards.
 func MustTreatAsSystemAdmin(db *gorm.DB, userID string) (bool, string) {
 	user, err := database.GetUserByID(db, userID)
 	if err != nil {
@@ -895,19 +891,14 @@ func MustTreatAsSystemAdmin(db *gorm.DB, userID string) (bool, string) {
 // IsConfirmedSystemAdmin reports whether an account can be shown, from
 // what this server currently knows, to hold server.admin.
 //
-// This is the GRANTING-direction counterpart of MustTreatAsSystemAdmin,
-// and the two are not interchangeable — picking the wrong one inverts
-// the failure mode. Use this one where a true answer hands out
-// something (transfer.registerOAuthClient marks an admin's client
-// shared, so an uncertain answer must mean "private"). Use
+// This is the GRANTING-direction counterpart of MustTreatAsSystemAdmin.
+// Use this one where a true answer hands out something. Use
 // MustTreatAsSystemAdmin where a true answer refuses something, so an
 // uncertain answer must mean "refuse".
 //
 // Uncertainty resolves to FALSE here. Unlike the restricting guard this
 // consults no latch and makes no inference from silence: it reports
-// only what is demonstrable. Mirrored group memberships DO count, stale
-// ones included, because this asks whether the account holds the
-// privilege rather than whether to hand one out on the strength of it.
+// only what is demonstrable.
 func IsConfirmedSystemAdmin(db *gorm.DB, userID string) bool {
 	user, err := database.GetUserByID(db, userID)
 	if err != nil {
@@ -921,8 +912,7 @@ func IsConfirmedSystemAdmin(db *gorm.DB, userID string) bool {
 
 // adminFromGroupView runs the config-and-scope admin check over one of
 // the two group-membership views. Which view is the whole question —
-// see IsConfirmedSystemAdmin and MustTreatAsSystemAdmin — so it is the
-// caller's to choose, never defaulted here.
+// see IsConfirmedSystemAdmin and MustTreatAsSystemAdmin.
 //
 // A failure to load memberships is logged rather than folded into the
 // verdict: the config-derived username paths still answer, which is the
@@ -949,14 +939,8 @@ func adminFromGroupView(db *gorm.DB, user *database.User, view func(*gorm.DB, st
 // The group file counts whatever Issuer.GroupSource says, because the
 // password-login path reads it unconditionally.
 func assertedGroupSourceConfigured() bool {
-	// Deliberately the single configured source, not "is a group file
-	// set anywhere". Issuer.GroupFile used to be an always-on second
-	// provider; it is not any more, so a leftover GroupFile line on a
-	// server running Issuer.GroupSource: internal must not make this
-	// report an asserted source. It did, and the effect was severe:
-	// every unobserved account then looked like a possible admin, and
-	// nothing would ever observe them, because the group-file refresher
-	// only runs when the file IS the configured source.
+	// Deliberately the single configured source. Issuer.GroupFile
+	// used to be an always-on second provider; it is not any more.
 	return database.ConfiguredGroupSource().IsAsserted()
 }
 
