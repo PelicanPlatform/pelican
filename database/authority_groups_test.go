@@ -335,52 +335,53 @@ func TestConfiguredGroupSourceMapping(t *testing.T) {
 	}
 }
 
-// TestAnAssertionCannotClaimAPelicanGroup is the other half of the
-// agreement EnsureAssertedGroups makes when it declines to mirror an
-// asserted name into a Pelican-created group.
+// TestAnAssertionResolvesToAPelicanGroup pins current, deliberate
+// behavior that is NOT what you might expect from EnsureAssertedGroups'
+// refusal to mirror into a Pelican-created group.
 //
-// Without it that refusal is cosmetic: no membership row is written,
-// but the caller's asserted NAME still resolves to the group's ID on
-// every request, so the provider gets everything granted to a group
-// whose member list this server curates.
-func TestAnAssertionCannotClaimAPelicanGroup(t *testing.T) {
+// The refusal covers membership only. A caller's asserted NAME still
+// resolves to such a group's ID, so the provider decides who gets its
+// ACL grants and scopes without anyone appearing in its member list.
+// That is a known weakness, and it is also the mechanism behind a
+// supported workflow: an administrator creates a group through the
+// groups API, points a collection's admin_id at it, and lets the
+// identity provider decide who is in it — see
+// TestCollectionsAPI/admin-group-grants-full-management-authority.
+//
+// Closing the weakness without breaking the workflow needs a way to say
+// which of the two a group is; source alone does not distinguish them.
+// Until then this test exists so the behavior is chosen rather than
+// accidental, and so anyone who changes it sees what else moves.
+func TestAnAssertionResolvesToAPelicanGroup(t *testing.T) {
 	db := setupCollectionTestDB(t)
 	admin := withExternalWebURL(t, db)
-	curated, err := CreateGroup(db, "finance", "", "", Creator{UserID: admin.ID}, "", true)
+	grp, err := CreateGroup(db, "finance", "", "", Creator{UserID: admin.ID}, "", true)
 	require.NoError(t, err)
-	require.Equal(t, GroupSourcePelican, curated.Source)
-	require.NoError(t, GrantGroupScope(db, curated.ID, token_scopes.Server_CollectionAdmin, CreatorSelf()))
+	require.Equal(t, GroupSourcePelican, grp.Source)
+	require.NoError(t, GrantGroupScope(db, grp.ID, token_scopes.Server_CollectionAdmin, CreatorSelf()))
 
-	// Mallory is not in the group; her identity provider merely says
-	// the name.
-	mallory := mkUser(t, db, "u-mallory", "mallory")
+	// Nobody is a local member; the identity provider merely says the name.
+	outsider := mkUser(t, db, "u-outsider", "outsider")
 
-	subjects := ResolveCallerACLSubjects(db, mallory.Username, mallory.ID, []string{"finance"})
-	assert.NotContains(t, subjects.GroupIDs, curated.ID,
-		"an assertion must not resolve to a group whose membership this server owns")
+	subjects := ResolveCallerACLSubjects(db, outsider.Username, outsider.ID, []string{"finance"})
+	assert.Contains(t, subjects.GroupIDs, grp.ID,
+		"an asserted name resolves to a Pelican group; this is what makes the admin-group workflow work")
 
-	scopes, err := EffectiveScopes(db, mallory.ID, []string{"finance"})
+	scopes, err := EffectiveScopes(db, outsider.ID, []string{"finance"})
 	require.NoError(t, err)
-	assert.NotContains(t, scopes, token_scopes.Server_CollectionAdmin,
-		"nor collect that group's scopes")
+	assert.Contains(t, scopes, token_scopes.Server_CollectionAdmin,
+		"and carries its scopes with it")
 
-	// A real member still gets both, by ID rather than by name.
-	member := mkUser(t, db, "u-insider", "insider")
-	require.NoError(t, AddGroupMember(db, curated.ID, member.ID, admin.ID, true))
-	subjects = ResolveCallerACLSubjects(db, member.Username, member.ID, nil)
-	assert.Contains(t, subjects.GroupIDs, curated.ID,
-		"local membership reaches the caller by ID and must be unaffected")
-	scopes, err = EffectiveScopes(db, member.ID, nil)
+	// Membership, by contrast, is genuinely refused: nothing is mirrored
+	// in, so the member list stays the administrator's own.
+	accepted, err := EnsureAssertedGroups(db, GroupSourceOIDC, []string{"finance"})
 	require.NoError(t, err)
-	assert.Contains(t, scopes, token_scopes.Server_CollectionAdmin)
-
-	// And a genuinely asserted group still resolves by name.
-	mustEnsureAssertedGroups(t, db, GroupSourceOIDC, []string{"ops"})
-	var ops Group
-	require.NoError(t, db.First(&ops, "name = ?", "ops").Error)
-	subjects = ResolveCallerACLSubjects(db, mallory.Username, mallory.ID, []string{"ops"})
-	assert.Contains(t, subjects.GroupIDs, ops.ID,
-		"a provider-asserted group must still resolve by the name the provider says")
+	assert.NotContains(t, accepted, "finance",
+		"the reconciliation step still declines to adopt a Pelican-held name")
+	require.NoError(t, MirrorAssertedGroupMemberships(db, GroupSourceOIDC, outsider.ID, accepted))
+	var members int64
+	require.NoError(t, db.Model(&GroupMember{}).Where("group_id = ?", grp.ID).Count(&members).Error)
+	assert.Zero(t, members, "no membership row is written for an asserted Pelican-held name")
 }
 
 // A PATCH that echoes an asserted group's current name is not a rename,
