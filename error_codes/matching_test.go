@@ -93,20 +93,20 @@ func TestErrPelican(t *testing.T) {
 	}
 }
 
-// Exactly opts out of hierarchical matching, for the parent codes that carry a
-// meaning their children do not share.
-func TestExactly(t *testing.T) {
+// IsExactly opts out of hierarchical matching, for the parent codes that carry
+// a meaning their children do not share.
+func TestIsExactly(t *testing.T) {
 	cause := errors.New("nothing serves this path")
 
-	assert.True(t, errors.Is(NewSpecificationError(cause), Exactly(ErrSpecification)))
-	assert.False(t, errors.Is(NewSpecification_FileNotFoundError(cause), Exactly(ErrSpecification)),
-		"Exactly must not match a descendant")
-	assert.False(t, errors.Is(NewSpecification_FileAlreadyExistsError(cause), Exactly(ErrSpecification)),
+	assert.True(t, IsExactly(NewSpecificationError(cause), ErrSpecification))
+	assert.False(t, IsExactly(NewSpecification_FileNotFoundError(cause), ErrSpecification),
+		"IsExactly must not match a descendant")
+	assert.False(t, IsExactly(NewSpecification_FileAlreadyExistsError(cause), ErrSpecification),
 		"the write-path members must not read as a bare Specification")
 
 	// Still reached through wrapping.
 	wrapped := pkgerrors.Wrap(error(NewSpecificationError(cause)), "failed download")
-	assert.True(t, errors.Is(wrapped, Exactly(ErrSpecification)))
+	assert.True(t, IsExactly(wrapped, ErrSpecification))
 }
 
 func TestExitCodeFor(t *testing.T) {

@@ -28,6 +28,11 @@ import (
 // which is what the CLI exit paths ask before choosing an exit code.
 var ErrPelican = &PelicanError{}
 
+// Is reports whether e satisfies target, so that errors.Is can compare an
+// error against the sentinels. Two kinds of target are recognised: a
+// *PelicanError matches hierarchically; an exactMatch matches that one
+// classification only. Any other target is not a Pelican sentinel and
+// never matches.
 func (e *PelicanError) Is(target error) bool {
 	if exact, ok := target.(exactMatch); ok {
 		return e.errorType == exact.errorType
@@ -45,22 +50,26 @@ func (e *PelicanError) Is(target error) bool {
 	return e.errorType == t.errorType || strings.HasPrefix(e.errorType, t.errorType+".")
 }
 
-// exactMatch is a sentinel wrapper that opts out of hierarchical matching. It
-// is comparable, as errors.Is requires of a target.
+// exactMatch marks a target as wanting one classification and none of its
+// descendants. errors.Is hands the target to Is unchanged, so the only way to
+// ask Is for a different kind of match is to hand it a different type of
+// target; exactMatch is that type. Embedding the sentinel is what lets it
+// satisfy error, which errors.Is requires of every target, with no code of
+// its own. It is comparable, as errors.Is also requires.
 type exactMatch struct{ *PelicanError }
 
-// Exactly narrows a sentinel so that errors.Is matches that classification
-// alone and none of its descendants:
+// IsExactly reports whether err carries this classification itself, and not
+// one of its descendants:
 //
 //	errors.Is(err, error_codes.ErrSpecification)             // any Specification.*
-//	errors.Is(err, Exactly(error_codes.ErrSpecification))    // the bare code only
+//	error_codes.IsExactly(err, error_codes.ErrSpecification) // the bare code only
 //
 // Needed where a parent code carries a meaning its children do not share. A
-// bare Specification says the object is not there, while its
-// FileNotCreated and FileAlreadyExists descendants are write-path answers
-// that must not be read as "absent".
-func Exactly(sentinel *PelicanError) error {
-	return exactMatch{sentinel}
+// bare Specification says the object is not there, while its FileNotCreated
+// and FileAlreadyExists descendants are write-path answers that must not be
+// read as "absent".
+func IsExactly(err error, sentinel *PelicanError) bool {
+	return errors.Is(err, exactMatch{sentinel})
 }
 
 // ExitCodeFor returns the documented client exit code for the classification in
