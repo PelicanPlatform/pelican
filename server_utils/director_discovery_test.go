@@ -175,15 +175,12 @@ func TestDoDiscoveryFiltersExpiredPeerEntries(t *testing.T) {
 
 // TestDoDiscoveryIsNotSerializedByAnUnresponsiveSeed pins the property
 // that motivated making the per-endpoint queries concurrent and bounded:
-// discovery runs synchronously on the server startup path, so its cost is
-// paid before a local cache's socket exists at all.
+// discovery runs synchronously on the server startup path.  This is a
+// regression test.
 //
-// The regression it guards against is not hypothetical. A federation only
-// has to advertise one director that has stopped accepting connections for
-// every server in it to spend a full dial timeout (Transport.DialerTimeout,
-// 10s by default) starting up — which is what took `pelican serve --module
-// localcache` past the six seconds github_scripts/citests.sh allows, on
-// every branch at once.
+// Otherwise, a federation only has to advertise one director that has
+// stopped accepting connections for every server in it to spend a full
+// dial timeout (Transport.DialerTimeout) starting up.
 func TestDoDiscoveryIsNotSerializedByAnUnresponsiveSeed(t *testing.T) {
 	ResetTestState()
 	t.Cleanup(ResetTestState)

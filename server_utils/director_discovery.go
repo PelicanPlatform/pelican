@@ -129,27 +129,20 @@ func doDiscovery(ctx context.Context, isDirector bool) (endpoints []server_struc
 		}
 	}
 
-	// Query every statically-defined endpoint for the directors IT knows
-	// about, CONCURRENTLY and with a bounded per-query timeout.
+	// Query every statically-defined endpoint for the directors it knows
+	// about, concurrently and with a bounded per-query timeout.
 	//
-	// Both of those matter, and neither is a micro-optimisation. This
-	// function is called synchronously from LaunchPeriodicDirectorDiscovery,
-	// which is called synchronously from launchers.LaunchModules — so
-	// every second spent here is a second before the server finishes
-	// starting and, for a local cache, before its socket exists at all.
+	// This function is called synchronously from LaunchPeriodicDirectorDiscovery,
+	// which is called synchronously from launchers.LaunchModules so
+	// every second spent here blocks the server from finishing starting and,
+	// for a local cache, before its socket exists.
 	//
 	// Serially, N endpoints cost the SUM of their latencies, and an
 	// endpoint that is simply unreachable costs a full dial timeout
-	// (Transport.DialerTimeout, 10s by default) on its own. A federation
-	// only has to advertise one dead director for every server in it to
-	// take ten extra seconds to start — which is exactly what happened
-	// when the OSDF's discovery document listed a director that had
-	// stopped accepting connections: `pelican serve --module localcache`
-	// stopped reaching its listener inside the six seconds the CI
-	// integration test allows, on every branch at once.
+	// (Transport.DialerTimeout, 10s by default) on its own.
 	//
 	// The explicit client timeout is the other half. The shared transport
-	// bounds the DIAL, but nothing bounded the request as a whole, so an
+	// bounds the dial, but nothing else bounded the request.  An
 	// endpoint that accepted a connection and then went quiet would block
 	// startup indefinitely. Discovery is a best-effort, periodically
 	// repeated operation: a director too slow to answer within the
