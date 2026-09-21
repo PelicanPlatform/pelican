@@ -223,7 +223,7 @@ func onlyThrottled(err error) bool {
 // Two classifications qualify. Specification.FileNotFound is the direct answer.
 // The bare Specification code is how a director reports that nothing in the
 // federation serves the requested path, which on a read is the same answer --
-// hence Exactly, since the family's other members (FileNotCreated,
+// hence IsExactly, since the family's other members (FileNotCreated,
 // FileAlreadyExists) are write-path answers and never mean "absent".
 //
 // This only ranks not-found above the *unclassified* remainder. A status code
@@ -231,7 +231,7 @@ func onlyThrottled(err error) bool {
 // something about the object that a sibling's 404 does not.
 func anyAttemptNotFound(err error) bool {
 	return errors.Is(err, error_codes.ErrSpecification_FileNotFound) ||
-		errors.Is(err, error_codes.Exactly(error_codes.ErrSpecification))
+		error_codes.IsExactly(err, error_codes.ErrSpecification)
 }
 
 // validShedReason returns reason if it is one of the known shed reasons, and
