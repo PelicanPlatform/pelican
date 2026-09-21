@@ -764,8 +764,7 @@ const OnboardForm: React.FC = () => {
         }
       } else {
         // ACL rows are keyed on the group's ID (see
-        // GrantCollectionAcl); address it by ID explicitly rather than
-        // handing the server a string to classify.
+        // GrantCollectionAcl).
         const aclOk = await alertOnError(
           () =>
             CollectionService.grantAcl(collection.id, {

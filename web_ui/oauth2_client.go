@@ -46,6 +46,7 @@ import (
 	pelican_oauth2 "github.com/pelicanplatform/pelican/oauth2"
 	"github.com/pelicanplatform/pelican/param"
 	"github.com/pelicanplatform/pelican/server_structs"
+	"github.com/pelicanplatform/pelican/token_scopes"
 )
 
 const (
@@ -307,9 +308,7 @@ func RecordAssertedGroups(source database.GroupSource, userID, who string, group
 	// Mirror only the names that got a record. A name EnsureAssertedGroups
 	// declined — one a Pelican-created group already holds — must not
 	// receive a mirrored membership, because nothing could then remove
-	// it: RemoveGroupMember and LeaveGroup both refuse a mirrored row,
-	// and "remove it at the provider" is no answer for a group Pelican
-	// owns.
+	// it: RemoveGroupMember and LeaveGroup both refuse a mirrored row.
 	if err := database.MirrorAssertedGroupMemberships(database.ServerDatabase, source, userID, accepted); err != nil {
 		log.Warnf("Failed to mirror %s group memberships for %s: %v", source, who, err)
 		// Do not record an observation we did not complete: leaving the
@@ -321,7 +320,7 @@ func RecordAssertedGroups(source database.GroupSource, userID, who string, group
 	// puts this account in, so it is the moment to latch what that
 	// implies about administrator privileges.
 	//
-	// The verdict is drawn from the ASSERTION, not from `accepted`: a
+	// This is drawn from the ASSERTED groups, not from `accepted`: a
 	// name declined because a Pelican group holds it still tells us the
 	// provider puts this account in a group of that name, and if that
 	// name is in Server.AdminGroups the account may hold admin through
@@ -338,31 +337,36 @@ func RecordAssertedGroups(source database.GroupSource, userID, who string, group
 //
 // It applies the same auth-template-eligibility filter the scope
 // evaluator does, so a group a user created for themselves cannot latch
-// their own account (which would be a self-inflicted denial of service,
-// not an escalation, but is still wrong).
+// their own account.
 func assertsAdminGroup(groups []string) bool {
-	if len(groups) == 0 || !param.Server_AdminGroups.IsSet() {
+	if len(groups) == 0 {
 		return false
 	}
-	configured := param.Server_AdminGroups.GetStringSlice()
-	if len(configured) == 0 {
-		return false
-	}
-	eligible := database.FilterAuthTemplateEligibleGroups(database.ServerDatabase, groups)
-	for _, want := range configured {
-		for _, got := range eligible {
-			if want == got {
-				return true
-			}
-		}
-	}
-	return false
+	// Ask the real scope evaluator rather than re-implementing the
+	// Server.AdminGroups match. Duplicating it meant missing the other
+	// way a group confers administrator privilege: a scope granted to
+	// the group directly through group_scopes. That gap was invisible
+	// while the provider still asserted the membership, because the
+	// restricting guard's first test evaluates the account's current
+	// privileges and would see it — and it opened exactly when the latch
+	// is supposed to matter, once the provider retracted the membership
+	// and that evidence was gone.
+	//
+	// The identity deliberately carries ONLY the groups: no ID and no
+	// username, so nothing the ACCOUNT holds in its own right can
+	// contribute. database.EffectiveScopes skips user_scopes entirely
+	// for an empty ID, and the username matchers return early, which is
+	// what keeps this a question about groups — as group_admin_status
+	// claims to be.
+	return slices.Contains(
+		EffectiveScopesForIdentity(UserIdentity{Groups: groups}),
+		token_scopes.Server_Admin)
 }
 
 // Given a user name, return the list of groups they belong to according
 // to Issuer.GroupFile.
 //
-// Pure: it reads the file and nothing else. Recording what it found is
+// It reads the file and nothing else. Recording what it found is
 // the caller's job via RecordAssertedGroups, because mirroring a
 // membership needs the user's ID and this function only has a name.
 // Every caller must do so — the file provider is reached from the
@@ -596,6 +600,22 @@ func generateUserGroupInfo(userInfo map[string]interface{}, idToken map[string]i
 	groupSource := strings.ToLower(param.Issuer_GroupSource.GetString())
 	switch groupSource {
 	case database.GroupSourceTypeOIDC:
+		// A token with no group claim at all counts as "this account is
+		// in no groups", not as "we could not ask" — so the mirrored
+		// memberships are retracted, same as for a claim that is present
+		// and empty. This is a deliberate choice: the alternative,
+		// treating an absent claim as unanswered, leaves a retracted
+		// membership alive until its TTL on every IdP that simply omits
+		// the claim rather than sending an empty one.
+		//
+		// The cost is that mistyping Issuer.OIDCGroupClaim silently
+		// strips mirrored memberships at each login instead of failing
+		// loudly. It fails toward less access, and those memberships
+		// only existed because that same claim put them there.
+		//
+		// The login paths that hold no token are different, and must
+		// stay different: they report `consulted` false rather than an
+		// empty answer. See GroupsForLogin.
 		groupClaim := param.Issuer_OIDCGroupClaim.GetString()
 		groupList, ok := claimsSource[groupClaim]
 		if ok {

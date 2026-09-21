@@ -108,10 +108,7 @@ func InitServerDatabase(serverType server_structs.ServerType) error {
 	// a database — the module launchers each call InitServerDatabase,
 	// but there is no single launcher that runs for all of them.
 	if err := EnsureConfiguredAuthorityGroups(ServerDatabase, configuredAuthorityGroupNames()); err != nil {
-		// Unlike the admin bootstrap above, this DOES stop startup. A
-		// name that confers administrator authority which this server
-		// could not reserve is a configuration that does not mean what
-		// the operator wrote, and running anyway is the unsafe outcome.
+		// Unlike the admin bootstrap above, this DOES stop startup.
 		return errors.Wrap(err, "refusing to start")
 	}
 

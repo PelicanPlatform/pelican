@@ -517,13 +517,9 @@ func createApiToken(ctx *gin.Context) {
 		expirationTime = expirationTime.UTC()
 	}
 	scopes := strings.Join(req.Scopes, ",")
-	// api_keys.created_by records the creator's User.ID, not their
-	// username. The key's persisted scopes are re-intersected against
-	// that user's CURRENT effective scopes on every call, so the column
-	// is an authorization input, not an audit string — and a username
-	// there means a renamed creator silently bricks their own keys while
-	// a reused username hands a dead key's authority to whoever holds
-	// the name next.
+	// api_keys.created_by records the creator's User.ID. The key's persisted
+	// scopes are re-intersected against that user's current effective scopes,
+	// so the column is an authorization input.
 	_, userID, _, err := GetUserGroups(ctx)
 	if err != nil || userID == "" {
 		log.Warn("Failed to identify the calling user when creating an API key")
@@ -604,10 +600,10 @@ func listApiTokens(ctx *gin.Context) {
 		return
 	}
 
-	// created_by is a User.ID; resolve it so the listing can keep
-	// showing a username. A key whose creator has been deleted — or one
-	// minted before the column existed — resolves to nothing, which is
-	// honest: that key no longer carries any user-derived authority.
+	// created_by is a User.ID; resolve it so the listing can show
+	// a username. A key whose creator has been deleted — or one minted
+	// before the column existed — resolves to nothing: that key no
+	// longer carries any user-derived authority.
 	creatorIDs := make([]string, 0, len(apiKeys))
 	for _, apiKey := range apiKeys {
 		if apiKey.CreatedBy != "" {

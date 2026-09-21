@@ -18,16 +18,14 @@
 
 package database
 
-// A mirrored membership is a CACHED authorization fact, which is the
-// same shape as the bug this branch exists to remove — authority
-// outliving what it was derived from. What keeps it honest is a single
-// asymmetry, and these tests pin it:
+// A mirrored membership is a CACHED authorization fact (typically from a
+// authorization method that we can't periodically query).  The rule for
+// caching is:
 //
 //	freshness gates GRANTING, not existence.
 //
-// A stale copy must not hand out access, and must still be visible to a
-// check that asks whether an account might HOLD a privilege — because
-// there, treating a stale copy as absence is what opens the guard.
+// A stale authorization must not grant access, but must still be visible
+// to a check that asks whether an account might HOLD a privilege.
 
 import (
 	"path/filepath"
@@ -298,14 +296,12 @@ func TestStaleMirroredMembershipsAreNeverPruned(t *testing.T) {
 }
 
 // Issuer.GroupSource is single-valued: exactly one provider decides
-// membership at a time. A row left behind by a PREVIOUS one is stale by
-// definition, so the current provider retracts it — otherwise switching
+// membership at a time. A row left behind by a previous source is considered
+// stale so the current provider retracts it. Otherwise switching
 // sources would leave the old provider's memberships granting until
 // their TTL expired, with nothing left that could ever retract them.
 //
-// The group RECORDS keep their original source through all of this. A
-// group's source says where it came from, which is what lets an operator
-// see which records predate the switch.
+// The group records keep the original source from creation.
 func TestChangingTheGroupSourceRetractsThePreviousProvidersMemberships(t *testing.T) {
 	db := setupCollectionTestDB(t)
 	withExternalWebURL(t, db)

@@ -59,23 +59,6 @@ var identifierPattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._@-]{1,63}$`)
 // the system: HTTP create/rename handlers, OIDC bootstrap candidate
 // selection, CLI flags. Display names go through their own (laxer)
 // validator.
-//
-// The rules here exist because of what an identifier is EMBEDDED IN —
-// the character class and the '..' guard — so they apply to every
-// identifier whatever its provenance.
-//
-// There is deliberately no rule against a name that looks like an ID.
-// An earlier version refused eight lowercase hex characters, on the
-// theory that keeping the two spaces visually distinct was cheap
-// hygiene. It was not: nothing decides which space a value belongs to
-// by looking at it — ACL targets carry the space in the type
-// (ACLSubjectRef versus ACLSubject) and in which API fields the caller
-// populates, and every other lookup names its column outright — so the
-// rule protected nothing while confiscating a legitimate slice of the
-// namespace and, through SanitizeIdentifier, turning "your identity
-// provider's subject happens to be eight hex characters" into "you
-// cannot log in". Type safety is the control; do not reintroduce a
-// shape heuristic beside it.
 func ValidateIdentifier(name string) error {
 	if !identifierPattern.MatchString(name) {
 		return ErrInvalidIdentifier
@@ -120,7 +103,7 @@ func ValidateDisplayName(name string) error {
 
 // SanitizeIdentifier coerces a candidate identifier (typically a value
 // pulled from an OIDC claim) into a form that satisfies the identifier
-// SHAPE rules, or returns "" if no useful sanitisation exists.
+// rules, or returns "" if no useful sanitisation exists.
 //
 // The conservative substitution rules:
 //

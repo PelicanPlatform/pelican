@@ -294,3 +294,42 @@ func TestReservedNameIsNotReportedAsProviderAsserted(t *testing.T) {
 	require.ErrorIs(t, err, ErrGroupNameConflict)
 	assert.Contains(t, err.Error(), "asserted by the oidc group source")
 }
+
+// A GroupSource this build cannot map must not look like "no provider
+// configured". "" switches off mirroring, the group-file refresher and
+// the guard that stops a user-administrator acting on an unobserved
+// account — so a typo, or a provider someone added without extending
+// groupSourcesByConfigValue, has to be visible rather than silently
+// disabling all three.
+func TestConfiguredGroupSourceMapping(t *testing.T) {
+	prev := param.Issuer_GroupSource.GetString()
+	t.Cleanup(func() { require.NoError(t, param.Issuer_GroupSource.Set(prev)) })
+
+	for _, tc := range []struct {
+		configured string
+		want       GroupSource
+	}{
+		{GroupSourceTypeOIDC, GroupSourceOIDC},
+		{GroupSourceTypeFile, GroupSourceFile},
+		{GroupSourceTypeGitHub, GroupSourceGitHub},
+		{GroupSourceTypeInternal, GroupSourcePelican},
+		{"OIDC", GroupSourceOIDC}, // case-insensitive
+		{"  file  ", GroupSourceFile},
+		{"", ""},
+		{"none", ""},
+		{"nosuchprovider", ""}, // unmapped: warned about, not silently accepted
+	} {
+		require.NoError(t, param.Issuer_GroupSource.Set(tc.configured))
+		assert.Equal(t, tc.want, ConfiguredGroupSource(), "Issuer.GroupSource = %q", tc.configured)
+	}
+
+	// Every declared config spelling must be mappable — this is the
+	// check that fails when a provider is added without a table entry.
+	for _, spelling := range []string{
+		GroupSourceTypeOIDC, GroupSourceTypeFile,
+		GroupSourceTypeGitHub, GroupSourceTypeInternal,
+	} {
+		_, ok := groupSourcesByConfigValue[spelling]
+		assert.True(t, ok, "config spelling %q has no GroupSource mapping", spelling)
+	}
+}

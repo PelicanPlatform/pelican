@@ -1,8 +1,3 @@
-// Matches authentication_test.go, which is where the shared schema
-// helper (migrateTestDB) lives. Without the constraint the Windows build
-// of this package's tests references a helper that is not compiled
-// there, and golangci-lint's typecheck fails the build before any test
-// runs.
 //go:build !windows
 
 /***************************************************************
@@ -42,6 +37,7 @@ import (
 	"github.com/pelicanplatform/pelican/param"
 	"github.com/pelicanplatform/pelican/server_utils"
 	"github.com/pelicanplatform/pelican/test_utils"
+	"github.com/pelicanplatform/pelican/token_scopes"
 )
 
 func setupAssertedGroupTest(t *testing.T, groupFileJSON string) *gorm.DB {
@@ -368,10 +364,6 @@ func TestGroupFileRefreshReconcilesEveryKnownUser(t *testing.T) {
 	})
 
 	t.Run("a cancelled context stops the pass and silences it", func(t *testing.T) {
-		// Under `go test` the logging hooks route through t.Log, which
-		// panics if a goroutine writes after its test completes — a
-		// background pass that keeps talking during teardown turns into
-		// a failure somewhere else in the suite.
 		cancelled, cancel := context.WithCancel(context.Background())
 		cancel()
 		require.NoError(t, os.WriteFile(param.Issuer_GroupFile.GetString(),
@@ -384,16 +376,14 @@ func TestGroupFileRefreshReconcilesEveryKnownUser(t *testing.T) {
 	})
 }
 
-// The latch hole the reviewer found live: with Issuer.GroupSource set to
-// oidc and a group file also present, the file used to be read on every
-// path and by the periodic refresher. For an OIDC account the file has
-// no entry, so the refresher asserted an empty list, concluded no admin
-// group, and moved the latch from `unknown` to `ruled-out` — having
-// never consulted the account's real groups at the IdP.
+// With Issuer.GroupSource set to oidc and a group file also present, the
+// file used to be read on every path and by the periodic refresher. For an
+// OIDC account the file has no entry, so the refresher asserted an empty list,
+// concluded no admin group, and moved the latch from `unknown` to `ruled-out`,
+// having never consulted the account's real groups at the IdP.
 //
-// The fix is structural rather than a special case: Issuer.GroupSource
-// is single-valued, so on an `oidc` server the file is not a source at
-// all and nothing about it is recorded.
+// Accordingly, Issuer.GroupSource is single-valued, so on an `oidc` server the
+// file is not a source at all and nothing about it is recorded.
 func TestNonAuthoritativeSourceCannotRuleAnAccountOut(t *testing.T) {
 	db := setupAssertedGroupTest(t, `{"someone-else": ["ops"]}`)
 	require.NoError(t, param.Server_AdminGroups.Set([]string{"ops"}))
@@ -443,18 +433,15 @@ func TestNonAuthoritativeSourceCannotRuleAnAccountOut(t *testing.T) {
 }
 
 // TestALeftoverGroupFileDoesNotDisableUserAdmin pins the single-source
-// model at the guard that decides whether user administration works at
-// all.
+// model.
 //
 // Issuer.GroupFile used to be an always-on second provider. It is not
 // any more, so on a server running Issuer.GroupSource: internal a
 // leftover GroupFile line must not make MustTreatAsSystemAdmin believe
 // an external provider decides group membership. When it did, every
 // account that had not been observed looked like a possible
-// administrator — and nothing would ever observe them, because the
-// group-file refresher only runs when the file IS the configured
-// source. The result was a server where server.user_admin could act on
-// nobody, permanently, because of a stale config line.
+// administrator. The result was a server where server.user_admin could
+// act on nobody.
 func TestALeftoverGroupFileDoesNotDisableUserAdmin(t *testing.T) {
 	db := setupAssertedGroupTest(t, `{"alice": ["ops"]}`)
 	require.NoError(t, param.Server_AdminGroups.Set([]string{"ops"}))
@@ -476,4 +463,47 @@ func TestALeftoverGroupFileDoesNotDisableUserAdmin(t *testing.T) {
 	mustRefuse, _ = MustTreatAsSystemAdmin(db, unobserved.ID)
 	assert.True(t, mustRefuse,
 		"under oidc the account's groups live at the provider and have not been observed")
+}
+
+// TestAGroupGrantedAdminDirectlyStillLatches covers the way a group can
+// confer administrator privilege WITHOUT being named in
+// Server.AdminGroups: an admin granted the scope to the group itself,
+// through group_scopes.
+//
+// The latch used to re-implement the Server.AdminGroups match and so
+// missed this entirely. That was invisible while the provider still
+// asserted the membership — MustTreatAsSystemAdmin's first test
+// evaluates the account's current privileges and would see it — and it
+// opened at precisely the moment the latch exists for: once the
+// provider retracted the membership, the evidence was gone and nothing
+// had recorded that the account ever held it.
+func TestAGroupGrantedAdminDirectlyStillLatches(t *testing.T) {
+	db := setupAssertedGroupTest(t, "")
+	// Deliberately EMPTY: the group confers admin through its own scope
+	// grant, not by being configured here.
+	require.NoError(t, param.Server_AdminGroups.Set([]string{}))
+	require.NoError(t, param.Issuer_GroupSource.Set(database.GroupSourceTypeOIDC))
+
+	admin := seedTestUser(t, db, "u-scoped", "scoped")
+	RecordAssertedGroups(database.GroupSourceOIDC, admin.ID, admin.Username, []string{"ops"})
+
+	var ops database.Group
+	require.NoError(t, db.First(&ops, "name = ?", "ops").Error)
+	require.NoError(t, db.Exec(
+		"INSERT INTO group_scopes (group_id, scope, granted_by) VALUES (?, ?, ?)",
+		ops.ID, token_scopes.Server_Admin.String(), "admin").Error)
+
+	// Observed again now that the group carries the scope.
+	RecordAssertedGroups(database.GroupSourceOIDC, admin.ID, admin.Username, []string{"ops"})
+
+	var after database.User
+	require.NoError(t, db.First(&after, "id = ?", admin.ID).Error)
+	assert.Equal(t, database.GroupAdminPossible, after.GroupAdminStatus,
+		"a group holding server.admin via group_scopes must latch just as one named in Server.AdminGroups does")
+
+	// And the latch survives the provider dropping the membership,
+	// which is the case it exists for.
+	RecordAssertedGroups(database.GroupSourceOIDC, admin.ID, admin.Username, nil)
+	mustRefuse, why := MustTreatAsSystemAdmin(db, admin.ID)
+	assert.True(t, mustRefuse, "a user-admin must still be refused: %s", why)
 }
