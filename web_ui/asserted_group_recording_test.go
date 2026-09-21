@@ -507,3 +507,38 @@ func TestAGroupGrantedAdminDirectlyStillLatches(t *testing.T) {
 	mustRefuse, why := MustTreatAsSystemAdmin(db, admin.ID)
 	assert.True(t, mustRefuse, "a user-admin must still be refused: %s", why)
 }
+
+// TestAnUnobservedScopedAdminIsStillRefused covers the gate on
+// MustTreatAsSystemAdmin's conservative default.
+//
+// That default only engages when a group could make someone an
+// administrator. Asking only whether Server.AdminGroups is set missed
+// the other way a group does it — a scope granted to the group itself
+// — so on a server that confers admin that way, an account nobody has
+// observed looked like an ordinary user and a user-administrator could
+// delete or hijack it before it ever signed in.
+func TestAnUnobservedScopedAdminIsStillRefused(t *testing.T) {
+	db := setupAssertedGroupTest(t, "")
+	// Deliberately EMPTY: admin is conferred by the group's own scope.
+	require.NoError(t, param.Server_AdminGroups.Set([]string{}))
+	require.NoError(t, param.Issuer_GroupSource.Set(database.GroupSourceTypeOIDC))
+
+	ordinary := seedTestUser(t, db, "u-nobody", "nobody")
+	mustRefuse, _ := MustTreatAsSystemAdmin(db, ordinary.ID)
+	require.False(t, mustRefuse,
+		"precondition: with no group able to confer admin, an unobserved account is ruled out")
+
+	// An admin grants server.admin to a provider-asserted group. Nobody
+	// has signed in, so no account has been observed.
+	_, err := database.EnsureAssertedGroups(db, database.GroupSourceOIDC, []string{"ops"})
+	require.NoError(t, err)
+	var ops database.Group
+	require.NoError(t, db.First(&ops, "name = ?", "ops").Error)
+	require.NoError(t, db.Exec(
+		"INSERT INTO group_scopes (group_id, scope, granted_by) VALUES (?, ?, ?)",
+		ops.ID, token_scopes.Server_Admin.String(), "admin").Error)
+
+	mustRefuse, why := MustTreatAsSystemAdmin(db, ordinary.ID)
+	assert.True(t, mustRefuse,
+		"a group now confers admin, so an unobserved account might hold it: %s", why)
+}

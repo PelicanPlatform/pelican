@@ -90,9 +90,9 @@ const CollectionService = {
     return await r.json();
   },
 
-  // Grant a single (group, role) ACL on a collection. The backend
-  // accepts either group slug OR group name and canonicalises to the
-  // name on write — pass either, the resulting row will store the name.
+  // Grant a single (group, role) ACL on a collection. `groupId` is a
+  // NAME despite the field name; a group ID is not accepted there. To
+  // address a principal by ID, send subjectType + subjectId instead.
   grantAcl: async (
     collectionId: string,
     grant: CollectionAclGrant | CollectionAclGrantBySubject

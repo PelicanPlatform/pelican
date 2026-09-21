@@ -140,6 +140,9 @@ func TestOIDCAssertedGroupPropagation(t *testing.T) {
 		ID:        "g-research",
 		Name:      "research",
 		CreatedBy: "u-other",
+		// The provider asserts this group; a `pelican` one could not be
+		// claimed by an assertion.
+		Source: database.GroupSourceOIDC,
 	}
 	require.NoError(t, database.ServerDatabase.Create(research).Error)
 

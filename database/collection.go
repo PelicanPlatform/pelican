@@ -302,12 +302,21 @@ func ResolveCallerACLSubjects(db *gorm.DB, username, userID string, groupNames [
 	}
 	if len(groupNames) > 0 {
 		var rows []struct{ ID string }
+		// `source <> pelican` is the other half of the agreement
+		// EnsureAssertedGroups makes when it refuses to mirror an
+		// asserted name into a Pelican-created group. Without it the
+		// refusal is cosmetic: membership never lands in the group, but
+		// the caller's asserted NAME still resolves to its ID here and
+		// confers every ACL granted to it. A Pelican group's membership
+		// is this server's own, so it reaches a caller by ID through
+		// grantingMembershipsFor above and needs no name lookup.
+		//
 		// deleted_at is spelled out because this is a raw table query:
 		// GORM's soft-delete scope only applies to model-based queries,
 		// and a deleted group must not keep conferring ACL matches.
 		if err := db.Table("groups").
 			Select("id").
-			Where("name IN ? AND deleted_at IS NULL", groupNames).
+			Where("name IN ? AND deleted_at IS NULL AND source <> ?", groupNames, GroupSourcePelican).
 			Scan(&rows).Error; err == nil {
 			for _, r := range rows {
 				add(r.ID)
@@ -2977,11 +2986,45 @@ func groupNamesFor(db *gorm.DB, userID string, grantingOnly bool) ([]string, err
 	return out, nil
 }
 
+// ErrConfiguredAuthorityGroup is returned when an operation is refused
+// because the group's name is listed in Server.AdminGroups,
+// Server.UserAdminGroups or Server.CollectionAdminGroups. It is
+// distinct from ErrForbidden because it is not about the caller's
+// privileges — a full system administrator is refused too — and the
+// remedy is a configuration change, which the message carries.
+var ErrConfiguredAuthorityGroup = errors.New("group name confers administrator authority via configuration")
+
 // ErrGroupAdminLatched is returned when a caller tries to rule out an
 // account that has already been observed holding an administrative
 // group. The latch is deliberately one-way — see GroupAdminStatus — so
 // this is refused rather than honored.
 var ErrGroupAdminLatched = errors.New("account has been observed holding an administrative group")
+
+// AnyGroupCanConferAdminScope reports whether some group on this server
+// carries a directly granted administrator scope, i.e. a group_scopes
+// row for one of `scopes`.
+//
+// It is the database half of "could a group make this account an
+// administrator". The other half is the Server.*AdminGroups
+// configuration, which this package does not read; callers combine the
+// two — see web_ui.MustTreatAsSystemAdmin.
+//
+// Errors are reported rather than swallowed: the only caller uses this
+// to decide whether it may stop being cautious, so failing to answer
+// must not read as "no".
+func AnyGroupCanConferAdminScope(db *gorm.DB, scopes []string) (bool, error) {
+	if db == nil || len(scopes) == 0 {
+		return false, nil
+	}
+	var count int64
+	if err := db.Table("group_scopes").
+		Joins("JOIN groups ON groups.id = group_scopes.group_id AND groups.deleted_at IS NULL").
+		Where("group_scopes.scope IN ?", scopes).
+		Count(&count).Error; err != nil {
+		return false, err
+	}
+	return count > 0, nil
+}
 
 // RuleOutGroupAdmin records a full administrator's judgement that an
 // account does not hold an administrative group, moving it from
@@ -3463,6 +3506,13 @@ func UpdateGroup(db *gorm.DB, id string, name, displayName, description *string,
 		// member (their assertion no longer resolves) and the next login
 		// would mint a second record under the original name. The
 		// display name is still editable.
+		// A PATCH that echoes the current name is not a rename. UIs
+		// routinely send the whole object back, and treating that as an
+		// attempted rename refused the request outright and lost the
+		// edits alongside it.
+		if newName, ok := updates["name"].(string); ok && newName == group.Name {
+			delete(updates, "name")
+		}
 		if _, renaming := updates["name"]; renaming && group.Source.IsAsserted() {
 			return fmt.Errorf("%w: %q %s and cannot be renamed",
 				ErrGroupNameConflict, group.Name, describeGroupNameHold(&group))
@@ -3872,8 +3922,13 @@ func DeleteGroup(db *gorm.DB, groupID, requestorUserID string, isAdmin bool) err
 		// configuration still names it; removing the config entry is the
 		// step that makes the group ordinary.
 		if isConfiguredAuthorityGroupName(group.Name) {
+			// Deliberately NOT ErrForbidden: this is not about who the
+			// caller is — a full system admin is refused too — and the
+			// handler collapses ErrForbidden into a generic "you do not
+			// have permission", which would hide the one thing the
+			// operator needs to know.
 			return fmt.Errorf("%w: %q confers administrator authority via Server.*AdminGroups; "+
-				"remove it from the configuration first", ErrForbidden, group.Name)
+				"remove it from the configuration first", ErrConfiguredAuthorityGroup, group.Name)
 		}
 
 		// Remove any invite links referencing the group.

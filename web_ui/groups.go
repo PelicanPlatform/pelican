@@ -1172,6 +1172,14 @@ func handleDeleteGroup(ctx *gin.Context) {
 				Status: server_structs.RespFailed,
 				Msg:    "group not found",
 			})
+		} else if errors.Is(err, database.ErrConfiguredAuthorityGroup) {
+			// Not a permissions problem — a full administrator is
+			// refused too — so the remedy travels with the message
+			// rather than being flattened into a generic 403.
+			ctx.JSON(http.StatusConflict, server_structs.SimpleApiResp{
+				Status: server_structs.RespFailed,
+				Msg:    err.Error(),
+			})
 		} else if errors.Is(err, database.ErrForbidden) {
 			ctx.JSON(http.StatusForbidden, server_structs.SimpleApiResp{
 				Status: server_structs.RespFailed,
