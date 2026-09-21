@@ -78,6 +78,7 @@ func GetDeprecated() map[string][]string {
         "Logging.DisableProgressBars": {"Logging.Client.DisableProgressBars"},
         "Lotman.DbLocation": {"Lotman.LotHome"},
         "MinimumDownloadSpeed": {"Client.MinimumDownloadSpeed"},
+        "Origin.DbLocation": {"Server.DbLocation"},
         "Origin.EnableDirListing": {"Origin.EnableListings"},
         "Origin.EnableFallbackRead": {"Origin.EnableDirectReads"},
         "Origin.EnableWrite": {"Origin.EnableWrites"},
