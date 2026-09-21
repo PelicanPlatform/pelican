@@ -302,21 +302,25 @@ func ResolveCallerACLSubjects(db *gorm.DB, username, userID string, groupNames [
 	}
 	if len(groupNames) > 0 {
 		var rows []struct{ ID string }
-		// `source <> pelican` is the other half of the agreement
-		// EnsureAssertedGroups makes when it refuses to mirror an
-		// asserted name into a Pelican-created group. Without it the
-		// refusal is cosmetic: membership never lands in the group, but
-		// the caller's asserted NAME still resolves to its ID here and
-		// confers every ACL granted to it. A Pelican group's membership
-		// is this server's own, so it reaches a caller by ID through
-		// grantingMembershipsFor above and needs no name lookup.
+		// NOTE: deliberately NOT filtered on `source`. An assertion
+		// resolving to a Pelican-created group is a known weakness —
+		// EnsureAssertedGroups refuses to MIRROR into such a group, so
+		// a provider can pick up its ACL grants without ever appearing
+		// in its member list. Filtering here closes that, but it also
+		// breaks a supported workflow: an administrator creates a group
+		// through the groups API, points a collection's admin_id at it,
+		// and lets the identity provider decide who is in it (see
+		// TestCollectionsAPI/admin-group-grants-full-management-authority).
+		// The two are indistinguishable by source alone, so closing it
+		// needs a way to say which one a group is. Tracked for the next
+		// release; the collision is logged loudly meanwhile.
 		//
 		// deleted_at is spelled out because this is a raw table query:
 		// GORM's soft-delete scope only applies to model-based queries,
 		// and a deleted group must not keep conferring ACL matches.
 		if err := db.Table("groups").
 			Select("id").
-			Where("name IN ? AND deleted_at IS NULL AND source <> ?", groupNames, GroupSourcePelican).
+			Where("name IN ? AND deleted_at IS NULL", groupNames).
 			Scan(&rows).Error; err == nil {
 			for _, r := range rows {
 				add(r.ID)

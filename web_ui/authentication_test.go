@@ -41,7 +41,6 @@ import (
 
 	"github.com/pelicanplatform/pelican/config"
 	"github.com/pelicanplatform/pelican/database"
-	dbutils "github.com/pelicanplatform/pelican/database/utils"
 	"github.com/pelicanplatform/pelican/param"
 	"github.com/pelicanplatform/pelican/server_structs"
 	"github.com/pelicanplatform/pelican/server_utils"
@@ -49,32 +48,6 @@ import (
 	"github.com/pelicanplatform/pelican/token"
 	"github.com/pelicanplatform/pelican/token_scopes"
 )
-
-func migrateTestDB(t *testing.T) {
-	t.Helper()
-	migrateTestDBHandle(t, database.ServerDatabase)
-}
-
-// migrateTestDBHandle brings one handle up to the production schema,
-// for the setups that keep their own DB rather than using
-// database.ServerDatabase.
-func migrateTestDBHandle(t *testing.T, db *gorm.DB) {
-	t.Helper()
-	sqlDB, err := db.DB()
-	require.NoError(t, err)
-	// Each CONNECTION to ":memory:" gets its own database, so the pool
-	// is pinned to one. Without it goose could migrate a database the
-	// queries never see.
-	sqlDB.SetMaxOpenConns(1)
-	// The production migrations, not AutoMigrate. GORM can only emit a
-	// FULL unique index from struct tags, so a hand-rolled schema
-	// lacks the partial indexes that let a soft-deleted account release
-	// its username. Running the real thing also means the schema under test
-	// is the schema that ships.
-	require.NoError(t,
-		dbutils.MigrateDB(sqlDB, database.EmbedUniversalMigrations, "universal_migrations"),
-		"failed to run the production migrations against the test database")
-}
 
 func TestWaitUntilLogin(t *testing.T) {
 	t.Cleanup(test_utils.SetupTestLogging(t))
