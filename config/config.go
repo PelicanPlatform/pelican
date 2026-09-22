@@ -2340,6 +2340,10 @@ func InitServer(ctx context.Context, currentServers server_structs.ServerType) e
 	// Register callback for runtime log level changes
 	RegisterLoggingCallback()
 
+	if err := validateGroupSource(); err != nil {
+		return err
+	}
+
 	// Sets (or resets) the federation info. Unlike in clients, we do this at startup
 	// instead of deferring it.
 	fedDiscoveryOnce = &sync.Once{}
@@ -2348,6 +2352,33 @@ func InitServer(ctx context.Context, currentServers server_structs.ServerType) e
 	}
 
 	return nil
+}
+
+// validateGroupSource refuses to start on an Issuer.GroupSource this
+// build does not recognize.
+//
+// It has to be an error rather than a warning because of what the
+// unrecognized case degrades to: no provider decides group membership,
+// which silently switches off mirroring of asserted memberships, the
+// periodic group-file refresh, and the guard that stops a
+// user-administrator acting on an account nobody has observed. A
+// server misconfigured this way starts cleanly and behaves plausibly
+// until someone notices that group-derived access has quietly stopped
+// working.
+//
+// The issuer already rejects the same values, but only on the paths
+// that construct an issuer; this runs for every server type. The
+// spellings are duplicated from the database package rather than
+// imported because database imports this one.
+func validateGroupSource() error {
+	switch strings.ToLower(strings.TrimSpace(param.Issuer_GroupSource.GetString())) {
+	case "", "none", "oidc", "file", "github", "internal":
+		return nil
+	default:
+		return errors.Errorf(
+			"%s is set to %q, which is not a recognized group source; valid values are oidc, file, github, internal, or none",
+			param.Issuer_GroupSource.GetName(), param.Issuer_GroupSource.GetString())
+	}
 }
 
 // This function checks if initClient has been called
