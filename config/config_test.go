@@ -28,6 +28,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"sort"
 	"strings"
 	"testing"
@@ -237,6 +238,68 @@ func TestInitConfig(t *testing.T) {
 	require.NoError(t, param.SetRaw("config", tempCfgFile.Name()))
 	InitConfigInternal(logrus.DebugLevel)
 	assert.Equal(t, "", param.Federation_DiscoveryUrl.GetString())
+}
+
+// TestDefaultTierContext checks that GetPreferredPrefix alone selects
+// the OSDF default tier. TestInitConfig covers the tier's effect on the
+// generated defaults.
+func TestDefaultTierContext(t *testing.T) {
+	tests := []struct {
+		name             string
+		tier             ConfigPrefix
+		stashUseTopology bool
+		rootExec         bool
+		wantOSDF         bool
+	}{
+		{
+			name: "pelican-tier/is-not-osdf",
+			tier: PelicanPrefix,
+		},
+		{
+			name:     "osdf-tier/is-osdf",
+			tier:     OsdfPrefix,
+			wantOSDF: true,
+		},
+		{
+			name:             "pelican-tier/stash-use-topology-is-inert",
+			tier:             PelicanPrefix,
+			stashUseTopology: true,
+		},
+		{
+			name:             "osdf-tier/stash-use-topology-is-inert",
+			tier:             OsdfPrefix,
+			stashUseTopology: true,
+			wantOSDF:         true,
+		},
+		{
+			name: "unrecognized-tier/is-not-osdf",
+			tier: ConfigPrefix("STASH"),
+		},
+		{
+			name:     "root-execution-is-reported",
+			tier:     PelicanPrefix,
+			rootExec: true,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			scrubConfigEnv(t)
+			if tc.stashUseTopology {
+				t.Setenv("STASH_USE_TOPOLOGY", "1")
+			}
+
+			setTestTier(t, tc.tier)
+			previousRootExec := isRootExec
+			t.Cleanup(func() { isRootExec = previousRootExec })
+			isRootExec = tc.rootExec
+
+			isRoot, isOSDF := defaultTierContext()
+
+			assert.Equal(t, tc.rootExec, isRoot)
+			assert.Equal(t, tc.wantOSDF, isOSDF)
+		})
+	}
 }
 
 func TestHomeDir(t *testing.T) {
@@ -1191,9 +1254,10 @@ func TestDiscoverFederationImpl(t *testing.T) {
 	}
 }
 
-// TestEnvVarConfigMapping tests that environment variables are correctly mapped into
-// Pelican config structs for both client and server initialization paths.
-// This addresses issue #2819 where PELICAN_* env vars were ignored in certain modes.
+// TestEnvVarConfigMapping tests that environment variables are correctly
+// mapped into Pelican config structs for both the client and server
+// initialization paths. In particular, the PELICAN env var prefix should
+// always be recognized, and other historical prefixes should not.
 func TestEnvVarConfigMapping(t *testing.T) {
 	type initMode string
 	const (
@@ -1202,26 +1266,24 @@ func TestEnvVarConfigMapping(t *testing.T) {
 	)
 
 	type testCase struct {
-		name              string
-		binaryPrefix      ConfigPrefix // PELICAN or OSDF
-		envVarPrefix      string       // PELICAN, OSDF, or other
-		envVarSuffix      string       // e.g., CLIENT_PREFERREDCACHES, SERVER_WEBPORT
-		configValue       string       // the value to set for the env var
-		mode              initMode     // client or server
-		configShouldApply bool         // whether the config should be picked up
-		validateFunc      func(t *testing.T)
+		name         string
+		binaryPrefix ConfigPrefix // PELICAN or OSDF
+		envVarPrefix string       // PELICAN, OSDF, or other
+		envVarSuffix string       // e.g., CLIENT_PREFERREDCACHES, SERVER_WEBPORT
+		configValue  string       // the value to set for the env var
+		mode         initMode     // client or server
+		validateFunc func(t *testing.T)
 	}
 
 	tests := []testCase{
 		// Client mode tests
 		{
-			name:              "pelican-binary-pelican-env-client",
-			binaryPrefix:      PelicanPrefix,
-			envVarPrefix:      "PELICAN",
-			envVarSuffix:      "CLIENT_PREFERREDCACHES",
-			configValue:       "https://cache.example.com:8443",
-			mode:              clientMode,
-			configShouldApply: true,
+			name:         "pelican-binary-pelican-env-client",
+			binaryPrefix: PelicanPrefix,
+			envVarPrefix: "PELICAN",
+			envVarSuffix: "CLIENT_PREFERREDCACHES",
+			configValue:  "https://cache.example.com:8443",
+			mode:         clientMode,
 			validateFunc: func(t *testing.T) {
 				caches := param.Client_PreferredCaches.GetStringSlice()
 				require.Len(t, caches, 1)
@@ -1229,13 +1291,12 @@ func TestEnvVarConfigMapping(t *testing.T) {
 			},
 		},
 		{
-			name:              "osdf-binary-pelican-env-client",
-			binaryPrefix:      OsdfPrefix,
-			envVarPrefix:      "PELICAN",
-			envVarSuffix:      "CLIENT_PREFERREDCACHES",
-			configValue:       "https://cache.example.com:8443",
-			mode:              clientMode,
-			configShouldApply: true,
+			name:         "osdf-binary-pelican-env-client",
+			binaryPrefix: OsdfPrefix,
+			envVarPrefix: "PELICAN",
+			envVarSuffix: "CLIENT_PREFERREDCACHES",
+			configValue:  "https://cache.example.com:8443",
+			mode:         clientMode,
 			validateFunc: func(t *testing.T) {
 				caches := param.Client_PreferredCaches.GetStringSlice()
 				require.Len(t, caches, 1)
@@ -1244,29 +1305,57 @@ func TestEnvVarConfigMapping(t *testing.T) {
 		},
 		// Server mode tests - verify env vars work for server initialization too
 		{
-			name:              "pelican-binary-pelican-env-server",
-			binaryPrefix:      PelicanPrefix,
-			envVarPrefix:      "PELICAN",
-			envVarSuffix:      "SERVER_WEBPORT",
-			configValue:       "9999",
-			mode:              serverMode,
-			configShouldApply: true,
+			name:         "pelican-binary-pelican-env-server",
+			binaryPrefix: PelicanPrefix,
+			envVarPrefix: "PELICAN",
+			envVarSuffix: "SERVER_WEBPORT",
+			configValue:  "9999",
+			mode:         serverMode,
 			validateFunc: func(t *testing.T) {
 				assert.Equal(t, 9999, param.Server_WebPort.GetInt())
 			},
 		},
 		{
-			name:              "osdf-binary-pelican-env-server",
-			binaryPrefix:      OsdfPrefix,
-			envVarPrefix:      "PELICAN",
-			envVarSuffix:      "SERVER_WEBPORT",
-			configValue:       "9999",
-			mode:              serverMode,
-			configShouldApply: true,
+			name:         "osdf-binary-pelican-env-server",
+			binaryPrefix: OsdfPrefix,
+			envVarPrefix: "PELICAN",
+			envVarSuffix: "SERVER_WEBPORT",
+			configValue:  "9999",
+			mode:         serverMode,
 			validateFunc: func(t *testing.T) {
 				assert.Equal(t, 9999, param.Server_WebPort.GetInt())
 			},
 		},
+	}
+
+	// This list is every prefix OSDF and Stash tools have used, not
+	// just the ones Pelican once honored: only OSDF_ was mapped before,
+	// and the rest guard against a new wholesale mapping.
+	for _, envPrefix := range []string{"OSDF", "STASH", "OSDFCP", "STASHCP"} {
+		tests = append(tests,
+			testCase{
+				name:         "osdf-binary-" + strings.ToLower(envPrefix) + "-env-client-is-ignored",
+				binaryPrefix: OsdfPrefix,
+				envVarPrefix: envPrefix,
+				envVarSuffix: "CLIENT_PREFERREDCACHES",
+				configValue:  "https://cache.example.com:8443",
+				mode:         clientMode,
+				validateFunc: func(t *testing.T) {
+					assert.Empty(t, param.Client_PreferredCaches.GetStringSlice())
+				},
+			},
+			testCase{
+				name:         "osdf-binary-" + strings.ToLower(envPrefix) + "-env-server-is-ignored",
+				binaryPrefix: OsdfPrefix,
+				envVarPrefix: envPrefix,
+				envVarSuffix: "SERVER_WEBPORT",
+				configValue:  "9999",
+				mode:         serverMode,
+				validateFunc: func(t *testing.T) {
+					assert.Equal(t, 8444, param.Server_WebPort.GetInt())
+				},
+			},
+		)
 	}
 
 	for _, tc := range tests {
@@ -1275,6 +1364,12 @@ func TestEnvVarConfigMapping(t *testing.T) {
 			t.Cleanup(func() {
 				ResetConfig()
 			})
+
+			// SetServerDefaults needs a writable ConfigBase, and
+			// an ambient pelican.yaml could override Server.WebPort's
+			// default.
+			scrubConfigEnv(t)
+			scrubConfigDirs(t)
 
 			// Set the binary prefix (ResetConfig already clears this)
 			_, err := SetPreferredPrefix(tc.binaryPrefix)
@@ -1296,10 +1391,8 @@ func TestEnvVarConfigMapping(t *testing.T) {
 				require.NoError(t, err)
 			}
 
-			// Validate the config was applied (or not) as expected
-			if tc.configShouldApply {
-				tc.validateFunc(t)
-			}
+			// Validate the config was applied (or ignored) as expected
+			tc.validateFunc(t)
 		})
 	}
 }
@@ -1525,6 +1618,100 @@ func TestConfigFileBootstrapping(t *testing.T) {
 			for p, expected := range tc.expectedConfig {
 				assert.Equal(t, expected, p.GetString(),
 					"param %s: expected %q but got %q", p.GetName(), expected, p.GetString())
+			}
+		})
+	}
+}
+
+// TestConfigFileFromEnv checks that PELICAN_CONFIG_FILE, and no other
+// variable, names an extra config file to merge.
+//
+// Server.WebHost is the key under test because nothing else sets it:
+// it has a fixed default, does not depend on the tier, and is not derived.
+func TestConfigFileFromEnv(t *testing.T) {
+	const envConfigHost = "env-config-host"
+
+	tests := []struct {
+		name        string
+		tier        ConfigPrefix
+		envVar      string
+		missingPath bool
+		wantMerged  bool
+		wantWarning string
+	}{
+		{
+			name:       "pelican-config-file/is-merged",
+			tier:       PelicanPrefix,
+			envVar:     "PELICAN_CONFIG_FILE",
+			wantMerged: true,
+		},
+		{
+			name:       "pelican-config-file/is-merged-under-osdf-binary",
+			tier:       OsdfPrefix,
+			envVar:     "PELICAN_CONFIG_FILE",
+			wantMerged: true,
+		},
+		{
+			name:        "osdf-config-file/is-ignored-under-osdf-binary",
+			tier:        OsdfPrefix,
+			envVar:      "OSDF_CONFIG_FILE",
+			wantWarning: "OSDF_CONFIG_FILE",
+		},
+		{
+			// A missing file is not an error. Other failures exit via
+			// cobra.CheckErr, so they cannot be tested in-process.
+			name:        "pelican-config-file/missing-path-is-not-fatal",
+			tier:        PelicanPrefix,
+			envVar:      "PELICAN_CONFIG_FILE",
+			missingPath: true,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			ResetConfig()
+			t.Cleanup(ResetConfig)
+
+			setTestLogLevel(t, logrus.DebugLevel)
+			hook := newGlobalHook(t)
+
+			scrubConfigEnv(t)
+			scrubConfigDirs(t)
+
+			_, err := SetPreferredPrefix(tc.tier)
+			require.NoError(t, err)
+
+			cfgPath := filepath.Join(t.TempDir(), "from-env.yaml")
+			if !tc.missingPath {
+				require.NoError(t, os.WriteFile(cfgPath,
+					[]byte(buildYAMLFromMap(map[configParam]string{
+						param.Server_WebHost: envConfigHost,
+					})), 0600))
+			}
+			t.Setenv(tc.envVar, cfgPath)
+
+			hook.Reset()
+			InitConfigInternal(logrus.WarnLevel)
+
+			src, ok := GetSourceTracker().Get("server.webhost")
+			require.True(t, ok)
+			if tc.wantMerged {
+				assert.Equal(t, envConfigHost, param.Server_WebHost.GetString())
+				assert.Equal(t, SourceConfigFile, src.Type)
+				assert.Equal(t, cfgPath, src.Detail)
+			} else {
+				assert.Equal(t, "0.0.0.0", param.Server_WebHost.GetString())
+				assert.Equal(t, SourceDefault, src.Type)
+			}
+
+			if tc.wantWarning != "" {
+				// Match rather than count: initialization logs other
+				// warnings.
+				assert.True(t, slices.ContainsFunc(hook.AllEntries(), func(entry *logrus.Entry) bool {
+					return entry.Level == logrus.WarnLevel &&
+						strings.Contains(entry.Message, "Ignoring environment variable(s)") &&
+						strings.Contains(entry.Message, tc.wantWarning)
+				}), "expected a warning naming %s; got %v", tc.wantWarning, hook.AllEntries())
 			}
 		})
 	}
