@@ -36,7 +36,6 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"regexp"
 	"strconv"
 	"strings"
 	"testing"
@@ -202,9 +201,17 @@ type FedTest struct {
 	ErrGroup  *errgroup.Group
 }
 
+// Spinup starts the federation and registers Teardown with t.Cleanup,
+// so that a failure partway through still stops whatever was started.
 func (f *FedTest) Spinup() {
 	//////////////////////////////Setup our test federation//////////////////////////////////////////
-	ctx, cancel, egrp := test_utils.TestContext(context.Background(), f.T)
+	// Create the test's temp dir before registering Teardown, so that
+	// its removal runs after Teardown has stopped the servers using it.
+	dataDir := f.T.TempDir()
+
+	var ctx context.Context
+	ctx, f.Cancel, f.ErrGroup = test_utils.TestContext(context.Background(), f.T)
+	f.T.Cleanup(f.Teardown)
 
 	modules := server_structs.ServerType(0)
 	modules.Set(server_structs.OriginType)
@@ -227,7 +234,7 @@ func (f *FedTest) Spinup() {
 	require.NoError(f.T, param.RuntimeDir.Set(tmpPath))
 
 	// Create a file to capture output from commands
-	output, err := os.CreateTemp(f.T.TempDir(), "output")
+	output, err := os.CreateTemp(dataDir, "output")
 	assert.NoError(f.T, err)
 	f.Output = output
 	require.NoError(f.T, param.Logging_LogLocation.Set(output.Name()))
@@ -252,13 +259,13 @@ func (f *FedTest) Spinup() {
 	require.NoError(f.T, param.Origin_EnableWrites.Set(true))
 	require.NoError(f.T, param.TLSSkipVerify.Set(true))
 	require.NoError(f.T, param.Server_EnableUI.Set(false))
-	require.NoError(f.T, param.Server_DbLocation.Set(filepath.Join(f.T.TempDir(), "ns-registry.sqlite")))
+	require.NoError(f.T, param.Server_DbLocation.Set(filepath.Join(dataDir, "ns-registry.sqlite")))
 	require.NoError(f.T, param.Origin_Port.Set(0))
 	require.NoError(f.T, param.Server_WebPort.Set(0))
 	require.NoError(f.T, param.Origin_RunLocation.Set(tmpPath))
-	require.NoError(f.T, param.Director_DbLocation.Set(filepath.Join(f.T.TempDir(), "director.sqlite")))
-	require.NoError(f.T, param.Origin_DbLocation.Set(filepath.Join(f.T.TempDir(), "origin.sqlite")))
-	require.NoError(f.T, param.Cache_DbLocation.Set(filepath.Join(f.T.TempDir(), "cache.sqlite")))
+	require.NoError(f.T, param.Director_DbLocation.Set(filepath.Join(dataDir, "director.sqlite")))
+	require.NoError(f.T, param.Origin_DbLocation.Set(filepath.Join(dataDir, "origin.sqlite")))
+	require.NoError(f.T, param.Cache_DbLocation.Set(filepath.Join(dataDir, "cache.sqlite")))
 	// Set up OIDC client configuration for registry OAuth functionality
 	oidcClientIDFile := filepath.Join(tmpPath, "oidc-client-id")
 	oidcClientSecretFile := filepath.Join(tmpPath, "oidc-client-secret")
@@ -298,69 +305,112 @@ func (f *FedTest) Spinup() {
 	}{}
 	err = json.Unmarshal(responseBody, &expectedResponse)
 	require.NoError(f.T, err)
-
-	f.Cancel = cancel
-	f.ErrGroup = egrp
 }
 
+// Teardown stops the federation, then removes its directories and resets
+// global state. It tolerates a partial Spinup.
 func (f *FedTest) Teardown() {
+	f.Cancel()
+	// FedCancel is unset if Spinup failed before LaunchModules returned.
+	if f.FedCancel != nil {
+		f.FedCancel()
+	}
+	assert.NoError(f.T, f.ErrGroup.Wait())
+	// Remove the directories only once the servers have stopped using them.
 	os.RemoveAll(f.TmpPath)
 	os.RemoveAll(f.OriginDir)
 	server_utils.ResetOriginExports()
-	f.Cancel()
-	f.FedCancel()
-	assert.NoError(f.T, f.ErrGroup.Wait())
 	server_utils.ResetTestState()
 	director.ResetState()
+}
+
+// pluginChildEnv returns the environment for a re-exec'd plugin test,
+// followed by extra.
+// It isolates the child from the runner's Pelican configuration.
+func pluginChildEnv(t *testing.T, extra ...string) []string {
+	configDir := t.TempDir()
+	configFile := filepath.Join(configDir, "pelican.yaml")
+	require.NoError(t, os.WriteFile(configFile, nil, 0600))
+
+	var env []string
+	for _, kv := range os.Environ() {
+		// _CONDOR_JOB_AD supplies config from the job's ClassAd
+		// when the tests run inside an HTCondor job.
+		if strings.HasPrefix(kv, "PELICAN_") || strings.HasPrefix(kv, "_CONDOR_JOB_AD=") {
+			continue
+		}
+		env = append(env, kv)
+	}
+	env = append(env, "PELICAN_CONFIG="+configFile, "PELICAN_CONFIGBASE="+configDir)
+	return append(env, extra...)
 }
 
 // Test the main function for the pelican plugin
 func TestStashPluginMain(t *testing.T) {
 	t.Cleanup(test_utils.SetupTestLogging(t))
 	server_utils.ResetTestState()
-
-	// Temp dir for downloads
-	tempDir := os.TempDir()
-	defer os.Remove(tempDir)
+	t.Cleanup(func() {
+		server_utils.ResetTestState()
+	})
 
 	// Parts of test adapted from: https://stackoverflow.com/questions/26225513/how-to-test-os-exit-scenarios-in-go
 	// Basically, we need to run the test like this since StashPluginMain calls os.Exit() which is not good for our tests
 	// and leaves xrootd running. To work with this, we wrap the test in its own command and parse the output for successful run
+	//
+	// The federation runs in this (parent) process, since the child
+	// exits without running cleanups.
 	if os.Getenv("RUN_STASHPLUGIN") == "1" {
-		require.NoError(t, param.Origin_EnablePublicReads.Set(true))
-		// Unset various osg-htc.org URLs to avoid real web lookups.
-		require.NoError(t, param.Federation_DiscoveryUrl.Set(""))
-		require.NoError(t, param.Xrootd_SummaryMonitoringHost.Set(""))
-		require.NoError(t, param.Xrootd_DetailedMonitoringHost.Set(""))
+		// Use the tier that the real stash_plugin resolves to.
+		// No restore is needed because stashPluginMain always exits
+		// via os.Exit.
+		_, err := config.SetPreferredPrefix(config.OsdfPrefix)
+		require.NoError(t, err)
+
 		require.NoError(t, param.Logging_Level.Set("debug"))
-		fed := FedTest{T: t}
-		fed.Spinup()
-		defer fed.Teardown()
-
-		testFileContent := "test file content"
-		// Drop the testFileContent into the origin directory
-		tempFile, err := os.Create(filepath.Join(fed.OriginDir, "test.txt"))
-		assert.NoError(t, err, "Error creating temp file")
-		_, err = tempFile.WriteString(testFileContent)
-		assert.NoError(t, err, "Error writing to temp file")
-		defer tempFile.Close()
-
 		require.NoError(t, param.Logging_Client_DisableProgressBars.Set(true))
+		// The federation's certificate is self-signed and lives
+		// under the parent's ConfigBase, which this process cannot
+		// see.
+		require.NoError(t, param.TLSSkipVerify.Set(true))
+		// Keep the OSDF-tier defaults from reaching osg-htc.org or
+		// the real ~/.config/osdf-client.
+		require.NoError(t, param.Federation_DiscoveryUrl.Set(""))
+		require.NoError(t, param.Client_CredentialFile.Set(os.Getenv("TEMP_CREDENTIAL_FILE")))
 
-		// Set path for object to upload/download
-		tempPath := tempFile.Name()
-		fileName := filepath.Base(tempPath)
-		uploadURL := fmt.Sprintf("pelican://%s:%d/test/%s", param.Server_Hostname.GetString(), param.Server_WebPort.GetInt(), fileName)
-
-		// Download a test file
-		args := []string{uploadURL, tempDir}
+		// Download the test file the parent staged in its origin
+		args := []string{os.Getenv("TEMP_DOWNLOAD_URL"), os.Getenv("TEMP_DOWNLOAD_DIR")}
 		stashPluginMain(args)
 		return
 	}
 
+	// Public reads let the plugin download without a token.
+	require.NoError(t, param.Origin_EnablePublicReads.Set(true))
+	require.NoError(t, param.Logging_Level.Set("debug"))
+	fed := FedTest{T: t}
+	fed.Spinup()
+
+	testFileContent := "test file content"
+	// Drop the testFileContent into the origin directory
+	tempFile, err := os.Create(filepath.Join(fed.OriginDir, "test.txt"))
+	require.NoError(t, err, "Error creating temp file")
+	_, err = tempFile.WriteString(testFileContent)
+	require.NoError(t, err, "Error writing to temp file")
+	require.NoError(t, tempFile.Close())
+
+	// Set path for object to download. Server.WebPort resolves to the bound
+	// port only after Spinup.
+	fileName := filepath.Base(tempFile.Name())
+	downloadURL := fmt.Sprintf("pelican://%s:%d/test/%s", param.Server_Hostname.GetString(), param.Server_WebPort.GetInt(), fileName)
+	downloadDir := t.TempDir()
+	// The child exits without running cleanups, so this process owns
+	// the directory for its credential file.
+	credentialFile := filepath.Join(t.TempDir(), "client-credentials.pem")
+
 	// Create a process to run the command (since stashPluginMain calls os.Exit(0))
 	cmd := exec.Command(os.Args[0], "-test.run=TestStashPluginMain")
-	cmd.Env = append(os.Environ(), "RUN_STASHPLUGIN=1")
+	cmd.Env = pluginChildEnv(t, "RUN_STASHPLUGIN=1",
+		"TEMP_DOWNLOAD_URL="+downloadURL, "TEMP_DOWNLOAD_DIR="+downloadDir,
+		"TEMP_CREDENTIAL_FILE="+credentialFile)
 
 	// Create buffers for stderr (the output we want for test)
 	var stderr bytes.Buffer
@@ -368,21 +418,23 @@ func TestStashPluginMain(t *testing.T) {
 	var stdout bytes.Buffer
 	cmd.Stdout = &stdout
 
-	err := cmd.Run()
+	err = cmd.Run()
 	assert.NoError(t, err, stderr.String()+"\n=====\n"+stdout.String())
 
 	// changing output for "\\" since in windows there are excess "\" printed in debug logs
 	output := strings.Replace(stderr.String(), "\\\\", "\\", -1)
 
 	// Check captured output for successful download
-	expectedPattern := `Downloading object from pelican://[^/]+/test/test.txt to ` + regexp.QuoteMeta(tempDir)
-	matched, err := regexp.MatchString(expectedPattern, output)
-	assert.NoError(t, err)
-	assert.True(t, matched, "Output does not match expected pattern")
+	assert.Contains(t, output, fmt.Sprintf("Downloading object from %s to %s", downloadURL, downloadDir))
 	successfulDownloadMsg := "HTTP Transfer was successful"
 	assert.Contains(t, output, successfulDownloadMsg)
 	amountDownloaded := "Downloaded bytes: 17"
 	assert.Contains(t, output, amountDownloaded)
+
+	// Confirm the object landed on disk
+	downloaded, err := os.ReadFile(filepath.Join(downloadDir, "test.txt"))
+	require.NoError(t, err, "Error reading downloaded file")
+	assert.Equal(t, testFileContent, string(downloaded))
 }
 
 // This test creates a directory containing two files, adds the paths of both files and the directory itself (without any recursive option) to the infile, and then passes it to the plugin for upload.
@@ -400,8 +452,21 @@ func TestInfileUploadWithDirAndFiles(t *testing.T) {
 	})
 
 	if os.Getenv("RUN_STASHPLUGIN") == "1" {
+		// Use the tier that the real stash_plugin resolves to.
+		// No restore is needed because stashPluginMain always exits
+		// via os.Exit.
+		_, err := config.SetPreferredPrefix(config.OsdfPrefix)
+		require.NoError(t, err)
+
 		require.NoError(t, param.Logging_Level.Set("debug"))
+		// The federation's certificate is self-signed and lives
+		// under the parent's ConfigBase, which this process cannot
+		// see.
 		require.NoError(t, param.TLSSkipVerify.Set(true))
+		// Keep the OSDF-tier defaults from reaching osg-htc.org or
+		// the real ~/.config/osdf-client.
+		require.NoError(t, param.Federation_DiscoveryUrl.Set(""))
+		require.NoError(t, param.Client_CredentialFile.Set(os.Getenv("TEMP_CREDENTIAL_FILE")))
 
 		if err := config.PrintConfig(); err != nil {
 			return
@@ -410,6 +475,7 @@ func TestInfileUploadWithDirAndFiles(t *testing.T) {
 		outfile := os.Getenv("TEMP_OUTFILE")
 		args := []string{"-upload", "-infile", infile, "-outfile", outfile}
 		stashPluginMain(args)
+		return
 	}
 
 	tempUploadDir, err := os.MkdirTemp("", "TempUploadDir")
@@ -435,14 +501,9 @@ func TestInfileUploadWithDirAndFiles(t *testing.T) {
 
 	require.NoError(t, param.Origin_EnablePublicReads.Set(true))
 	require.NoError(t, param.TLSSkipVerify.Set(true))
-	// Unset various osg-htc.org URLs to avoid real web lookups.
-	require.NoError(t, param.Federation_DiscoveryUrl.Set(""))
-	require.NoError(t, param.Xrootd_SummaryMonitoringHost.Set(""))
-	require.NoError(t, param.Xrootd_DetailedMonitoringHost.Set(""))
 	require.NoError(t, param.Logging_Level.Set("debug"))
 	fed := FedTest{T: t}
 	fed.Spinup()
-	defer fed.Teardown()
 
 	issuer, err := config.GetServerIssuerURL()
 	require.NoError(t, err)
@@ -494,10 +555,14 @@ func TestInfileUploadWithDirAndFiles(t *testing.T) {
 	t.Logf("Infile contents for testing:\n%s", infileContent)
 
 	tempOutfilePath := filepath.Join(tempDir, "tempOutfile")
+	// The child exits without running cleanups, so this process owns
+	// the directory for its credential file.
+	credentialFile := filepath.Join(t.TempDir(), "client-credentials.pem")
 
 	// Create a process to run the command (since stashPluginMain calls os.Exit(0))
 	cmd := exec.Command(os.Args[0], "-test.run=TestInfileUploadWithDirAndFiles")
-	cmd.Env = append(os.Environ(), "RUN_STASHPLUGIN=1", "TEMP_INFILE="+tempInfile.Name(), "TEMP_OUTFILE="+tempOutfilePath, "BEARER_TOKEN="+token)
+	cmd.Env = pluginChildEnv(t, "RUN_STASHPLUGIN=1", "TEMP_INFILE="+tempInfile.Name(), "TEMP_OUTFILE="+tempOutfilePath, "BEARER_TOKEN="+token,
+		"TEMP_CREDENTIAL_FILE="+credentialFile)
 
 	var stderr bytes.Buffer
 	cmd.Stderr = &stderr
