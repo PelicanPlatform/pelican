@@ -105,7 +105,7 @@ func init() {
 		// working) on the next call.
 		//
 		// api_keys.created_by holds a User.ID and nothing else.
-		// Migration 20260917120000 converted the rows that held a
+		// Migration 20260917110000 converted the rows that held a
 		// username; anything that resolved to no user became empty,
 		// which the caller already treats as "cannot attribute this key"
 		// and fails closed on every user-grantable scope.

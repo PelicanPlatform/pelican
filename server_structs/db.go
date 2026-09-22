@@ -31,7 +31,7 @@ type (
 		// input, not an audit string: the key's persisted scopes are
 		// re-intersected against this user's CURRENT effective scopes on
 		// every call (see api_token.Verify). It held a username until
-		// migration 20260917120000 — which meant a rename bricked the
+		// migration 20260917110000 — which meant a rename bricked the
 		// key and a reused username revived it for whoever still had the
 		// secret. Empty for rows minted before the column existed, which
 		// fails closed on every user-grantable scope.
