@@ -64,6 +64,9 @@ import (
 var ErrNoDiscoveryEndpoint = stderrors.New("no discovery endpoint was resolved")
 
 type (
+	// ConfigPrefix identifies a behavior tier, OSDF or Pelican, which
+	// GetPreferredPrefix derives from the name of the binary. Despite its
+	// name, it does not select an environment variable prefix.
 	ConfigPrefix string
 
 	TokenEntry struct {
@@ -176,7 +179,6 @@ type (
 const (
 	PelicanPrefix ConfigPrefix = "PELICAN"
 	OsdfPrefix    ConfigPrefix = "OSDF"
-	StashPrefix   ConfigPrefix = "STASH"
 )
 
 const (
@@ -442,7 +444,6 @@ var (
 	validPrefixes = map[ConfigPrefix]bool{
 		PelicanPrefix: true,
 		OsdfPrefix:    true,
-		StashPrefix:   true,
 		"":            true,
 	}
 
@@ -613,24 +614,24 @@ func ValidateServerType(allowedServerTypes []server_structs.ServerType) bool {
 	return false
 }
 
-// Based on the name of the current binary, determine the preferred "style"
-// of behavior.  For example, a binary with the "osdf_" prefix should utilize
-// the known URLs for OSDF.  For "pelican"-style commands, the user will
-// need to manually configure the location of the director endpoint.
+// Based on the name of the current binary, determine the preferred
+// "style" of behavior. Binaries whose names start with "osdf" or "stash"
+// (e.g., osdf, stashcp, and stash_plugin) utilize the known URLs for OSDF.
+// For "pelican"-style commands, the user will need to manually configure
+// the location of the director endpoint.
 func GetPreferredPrefix() ConfigPrefix {
 	// Testing override to programmatically force different behaviors.
 	if testingPreferredPrefix != "" {
 		return ConfigPrefix(testingPreferredPrefix)
 	}
-	arg0 := strings.ToUpper(filepath.Base(os.Args[0]))
-	underscore_idx := strings.Index(arg0, "_")
-	if underscore_idx != -1 {
-		prefix := string(ConfigPrefix(arg0[0:underscore_idx]))
-		if prefix == "STASH" {
-			return OsdfPrefix
-		}
-	}
-	if strings.HasPrefix(arg0, "STASH") || strings.HasPrefix(arg0, "OSDF") {
+	return tierForBinary(filepath.Base(os.Args[0]))
+}
+
+// tierForBinary maps the base name of a binary onto the behavior tier
+// that name selects.
+func tierForBinary(name string) ConfigPrefix {
+	upper := strings.ToUpper(name)
+	if strings.HasPrefix(upper, "STASH") || strings.HasPrefix(upper, "OSDF") {
 		return OsdfPrefix
 	}
 	return PelicanPrefix
@@ -2821,8 +2822,7 @@ func SetClientDefaults(v *viper.Viper) error {
 	// Deprecated param defaults: excluded from generated SetParameterDefaults.
 	v.SetDefault(param.IssuerKey.GetName(), filepath.Join(configDir, "issuer.jwk"))
 
-	upperPrefix := GetPreferredPrefix()
-	if upperPrefix == OsdfPrefix || upperPrefix == StashPrefix {
+	if GetPreferredPrefix() == OsdfPrefix {
 		v.SetDefault("Federation.TopologyNamespaceURL", "https://topology.opensciencegrid.org/osdf/namespaces")
 	}
 
