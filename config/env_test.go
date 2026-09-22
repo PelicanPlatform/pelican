@@ -21,9 +21,12 @@ package config
 import (
 	"os"
 	"path/filepath"
+	"slices"
+	"strings"
 	"testing"
 
 	log "github.com/sirupsen/logrus"
+	"github.com/sirupsen/logrus/hooks/test"
 	"github.com/spf13/viper"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -31,11 +34,71 @@ import (
 	"github.com/pelicanplatform/pelican/param"
 )
 
+// newGlobalHook installs a logrus hook that captures every entry emitted
+// during the test and restores the logger's previous hooks afterwards.
+func newGlobalHook(t *testing.T) *test.Hook {
+	t.Helper()
+
+	// Copy the per-level slices: test.NewGlobal() appends to the live
+	// map, so saving the map alone would save the new hook along with
+	// it.
+	saved := make(log.LevelHooks, len(log.StandardLogger().Hooks))
+	for level, hooks := range log.StandardLogger().Hooks {
+		saved[level] = slices.Clone(hooks)
+	}
+	t.Cleanup(func() { log.StandardLogger().ReplaceHooks(saved) })
+
+	return test.NewGlobal()
+}
+
+// setTestLogLevel sets the process log level for the duration of the
+// test. ResetConfig does not restore the level, and InitConfigInternal
+// changes it, so a bare SetLogging would leak into later tests.
+func setTestLogLevel(t *testing.T, level log.Level) {
+	t.Helper()
+
+	previous := GetEffectiveLogLevel()
+	t.Cleanup(func() { SetLogging(previous) })
+	SetLogging(level)
+}
+
+// setTestTier overrides the behavior tier that GetPreferredPrefix
+// reports for the duration of the test.
+func setTestTier(t *testing.T, tier ConfigPrefix) {
+	t.Helper()
+
+	previous := testingPreferredPrefix
+	t.Cleanup(func() { testingPreferredPrefix = previous })
+	testingPreferredPrefix = tier
+}
+
+// scrubConfigEnv unsets every PELICAN_ variable and every variable that
+// warnRemovedEnv reports on, for the duration of the test, so that the ambient
+// environment cannot affect it.
+func scrubConfigEnv(t *testing.T) {
+	t.Helper()
+
+	for _, env := range os.Environ() {
+		name, value, _ := strings.Cut(env, "=")
+		// isOsdf is true so that the OSDF-branded names are always
+		// scrubbed regardless of the (effective) binary name.
+		if !strings.HasPrefix(name, "PELICAN_") && !isRemovedEnv(name, true) {
+			continue
+		}
+		require.NoError(t, os.Unsetenv(name))
+		// assert, not require: FailNow in a cleanup skips
+		// the remaining cleanups.
+		t.Cleanup(func() { assert.NoError(t, os.Setenv(name, value)) })
+	}
+}
+
 func TestBindClassAdConfig(t *testing.T) {
-	SetLogging(log.DebugLevel)
+	setTestLogLevel(t, log.DebugLevel)
 
 	t.Run("no-job-ad-file", func(t *testing.T) {
 		ResetConfig()
+		t.Cleanup(ResetConfig)
+		scrubConfigEnv(t)
 
 		// Ensure no job ad environment variable is set
 		os.Unsetenv("_CONDOR_JOB_AD")
@@ -51,6 +114,8 @@ func TestBindClassAdConfig(t *testing.T) {
 
 	t.Run("job-ad-with-pelican-cfg-attributes", func(t *testing.T) {
 		ResetConfig()
+		t.Cleanup(ResetConfig)
+		scrubConfigEnv(t)
 
 		// Create a temporary job ad file
 		tmpDir := t.TempDir()
@@ -91,6 +156,8 @@ GlobalJobId = "12345"
 
 	t.Run("job-ad-with-empty-list", func(t *testing.T) {
 		ResetConfig()
+		t.Cleanup(ResetConfig)
+		scrubConfigEnv(t)
 
 		tmpDir := t.TempDir()
 		jobAdFile := filepath.Join(tmpDir, "test.job.ad")
@@ -115,6 +182,8 @@ GlobalJobId = "12345"
 
 	t.Run("job-ad-with-type-mismatch-string-to-int", func(t *testing.T) {
 		ResetConfig()
+		t.Cleanup(ResetConfig)
+		scrubConfigEnv(t)
 
 		tmpDir := t.TempDir()
 		jobAdFile := filepath.Join(tmpDir, "test.job.ad")
@@ -139,6 +208,8 @@ GlobalJobId = "12345"
 
 	t.Run("job-ad-with-int-where-bool-expected", func(t *testing.T) {
 		ResetConfig()
+		t.Cleanup(ResetConfig)
+		scrubConfigEnv(t)
 
 		tmpDir := t.TempDir()
 		jobAdFile := filepath.Join(tmpDir, "test.job.ad")
@@ -164,6 +235,8 @@ GlobalJobId = "12345"
 
 	t.Run("job-ad-with-real-where-bool-expected", func(t *testing.T) {
 		ResetConfig()
+		t.Cleanup(ResetConfig)
+		scrubConfigEnv(t)
 
 		tmpDir := t.TempDir()
 		jobAdFile := filepath.Join(tmpDir, "test.job.ad")
@@ -189,6 +262,8 @@ GlobalJobId = "12345"
 
 	t.Run("job-ad-with-nested-classad", func(t *testing.T) {
 		ResetConfig()
+		t.Cleanup(ResetConfig)
+		scrubConfigEnv(t)
 
 		tmpDir := t.TempDir()
 		jobAdFile := filepath.Join(tmpDir, "test.job.ad")
@@ -232,6 +307,8 @@ GlobalJobId = "12345"
 
 	t.Run("invalid-job-ad-file", func(t *testing.T) {
 		ResetConfig()
+		t.Cleanup(ResetConfig)
+		scrubConfigEnv(t)
 
 		// Create a temporary job ad file with invalid content
 		tmpDir := t.TempDir()
@@ -256,29 +333,50 @@ GlobalJobId = "12345"
 }
 
 func TestBindLegacyServerEnv(t *testing.T) {
-	ResetConfig()
-	t.Cleanup(func() {
+	setTestLogLevel(t, log.DebugLevel)
+	hook := newGlobalHook(t)
+
+	t.Run("pelican-maxmindkey-is-honored", func(t *testing.T) {
 		ResetConfig()
-	})
+		t.Cleanup(ResetConfig)
+		scrubConfigEnv(t)
+		t.Setenv("PELICAN_MAXMINDKEY", "/path/to/keyfile")
+		hook.Reset()
 
-	t.Setenv("PELICAN_MAXMINDKEY", "/path/to/keyfile")
-
-	// Two things to test here:
-	// 1. That the legacy env var PELICAN_MAXMINDKEY correctly binds to Director.MaxMindKeyFile
-	// 2. Director.MaxMindKeyFile takes precedence over the legacy env var when both are set
-
-	// Test 1
-	t.Run("binds-legacy-env-var", func(t *testing.T) {
-		assert.Empty(t, viper.GetString(param.Director_MaxMindKeyFile.GetName()))
 		bindLegacyServerEnv()
+
 		assert.Equal(t, "/path/to/keyfile", viper.GetString(param.Director_MaxMindKeyFile.GetName()))
+
+		// The variable is deprecated, so honoring it must also say so.
+		entries := hook.AllEntries()
+		require.Len(t, entries, 1)
+		assert.Equal(t, log.WarnLevel, entries[0].Level)
+		assert.Contains(t, entries[0].Message, "PELICAN_MAXMINDKEY")
+		assert.Contains(t, entries[0].Message, param.Director_MaxMindKeyFile.GetName())
 	})
 
-	// Test 2
-	t.Run("does-not-overwrite-existing-config", func(t *testing.T) {
+	t.Run("config-wins-over-legacy-env", func(t *testing.T) {
+		ResetConfig()
+		t.Cleanup(ResetConfig)
+		scrubConfigEnv(t)
+		t.Setenv("PELICAN_MAXMINDKEY", "/path/to/keyfile")
 		viper.Set(param.Director_MaxMindKeyFile.GetName(), "/existing/config/keyfile")
+
 		bindLegacyServerEnv()
-		assert.Equal(t, "/path/to/keyfile", os.Getenv("PELICAN_MAXMINDKEY")) // env var is still set
+
 		assert.Equal(t, "/existing/config/keyfile", viper.GetString(param.Director_MaxMindKeyFile.GetName()))
+	})
+
+	t.Run("osdf-maxmindkey-is-ignored", func(t *testing.T) {
+		ResetConfig()
+		t.Cleanup(ResetConfig)
+		scrubConfigEnv(t)
+		setTestTier(t, OsdfPrefix)
+		t.Setenv("OSDF_MAXMINDKEY", "/path/to/keyfile")
+		t.Setenv("STASH_MAXMINDKEY", "/path/to/keyfile")
+
+		bindLegacyServerEnv()
+
+		assert.False(t, viper.IsSet(param.Director_MaxMindKeyFile.GetName()))
 	})
 }
