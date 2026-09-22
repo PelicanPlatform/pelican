@@ -1958,3 +1958,27 @@ func TestLotmanScopedFilesSizeDefaults(t *testing.T) {
 		assert.Equal(t, "3g", param.Cache_FilesMaxSize.GetString())
 	})
 }
+
+// An Issuer.GroupSource this build does not recognize must stop the
+// server rather than degrade quietly. The unrecognized case means "no
+// provider decides group membership", which switches off mirroring of
+// asserted memberships, the group-file refresh, and the guard that
+// stops a user-administrator acting on an unobserved account — none of
+// which is visible from the outside until group-derived access has
+// already stopped working.
+func TestValidateGroupSource(t *testing.T) {
+	prev := param.Issuer_GroupSource.GetString()
+	t.Cleanup(func() { require.NoError(t, param.Issuer_GroupSource.Set(prev)) })
+
+	for _, ok := range []string{"", "none", "oidc", "file", "github", "internal", "OIDC", "  file  "} {
+		require.NoError(t, param.Issuer_GroupSource.Set(ok))
+		assert.NoError(t, validateGroupSource(), "Issuer.GroupSource = %q must be accepted", ok)
+	}
+
+	for _, bad := range []string{"oid", "ldap", "nosuchprovider"} {
+		require.NoError(t, param.Issuer_GroupSource.Set(bad))
+		err := validateGroupSource()
+		require.Error(t, err, "Issuer.GroupSource = %q must be refused", bad)
+		assert.Contains(t, err.Error(), bad, "the message must name the offending value")
+	}
+}
