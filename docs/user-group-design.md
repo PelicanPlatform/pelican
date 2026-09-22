@@ -106,6 +106,8 @@ The caller's own live assertion (from the request token) is never gated by the T
 
 Currently, only `file` can be refreshed without the user present since it is a local file keyed by username. `Issuer.GroupFileRefreshInterval` re-reads it and reconciles every known account, so removing someone from the file takes effect relatively quickly. `oidc` and `github` need that user's own token and so refresh at login.
 
+Changing `Issuer.GroupSource` leaves the previous provider's rows behind, and nothing in the ordinary flow removes them: reconciliation happens when an account is observed through the *current* source, which a password-only account under `oidc` or `github` never is. Those rows are swept separately, once they are past the TTL — the delay is a grace period in which the account can sign in through the new source and have them re-stamped. Rows from the source that *is* configured are left alone however stale, because stale there means "this account has not signed in lately", which is exactly what the share-owner clamp needs to keep reading.
+
 ## Establishing that an account is *not* an administrator
 
 `Server.AdminGroups` confers the `server.admin` privilege by group membership, so when membership comes from a provider, we may have to work from the cache. Any code that asks "is this account an administrator?" must be conservative about allowing access. For example, a caller holding only `server.user_admin` could rename, delete, or mint a password-set invite for an administrator's account if this was calculated incorrectly.
