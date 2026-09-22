@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	log "github.com/sirupsen/logrus"
 	"golang.org/x/crypto/bcrypt"
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
@@ -29,6 +30,24 @@ var (
 	// ErrInvalidPassword is returned by VerifyLocalUserPassword when the user
 	// exists but has no local password configured or the password doesn't match.
 	ErrInvalidPassword = errors.New("invalid username or password")
+	// ErrUnknownACLSubject is returned by ResolveACLSubject (and so by
+	// GrantCollectionAcl / RevokeCollectionAcl) when the requested ACL
+	// target names no group and no user on this server. ACL rows are
+	// keyed on immutable IDs, so there is nothing to store for an
+	// unknown name; the pre-ID code path that silently persisted the
+	// raw string.
+	ErrUnknownACLSubject = errors.New("unknown collection ACL subject")
+	// ErrMembershipNotLocal is returned when a caller tries to remove a
+	// group membership that came from a provider's assertion rather than
+	// from the group-management API. Deleting the row would not remove
+	// the person from the group — the provider still asserts it, and the
+	// next login mirrors it straight back.
+	ErrMembershipNotLocal = errors.New("membership is asserted by a group source and cannot be removed here")
+	// ErrGroupNameConflict is returned when a Pelican-created group
+	// would take — or an admin would rename a group to — a name that an
+	// identity provider is already known to assert. See
+	// EnsureAssertedGroups.
+	ErrGroupNameConflict = errors.New("group name is already claimed by a group source")
 )
 
 type Visibility string
@@ -46,17 +65,24 @@ const (
 	AclRoleOwner AclRole = "owner"
 )
 
-// AllAuthenticatedUsersACLGroup is the sentinel value that may appear
-// in CollectionACL.GroupID to grant the row's role to every
-// authenticated caller, regardless of group membership. The string
-// begins with `@`, which `ValidateIdentifier` rejects (identifiers
-// must start with an alphanumeric), so this sentinel can never collide
-// with a real Group.Name. Treat it like a group: callers add it to
-// their effective-groups list when authenticated, and the existing
-// ACL evaluator matches it the same way it would match any other
-// group name. See validateACL / ListCollections /
-// GetUserCollectionScopes for the injection points.
+// AllAuthenticatedUsersACLGroup is the wire-format sentinel that a
+// caller may pass (and that the API echoes back) to mean "every
+// authenticated caller, regardless of group membership". In the
+// database this is stored as a CollectionACL row whose SubjectType is
+// ACLSubjectAuthenticated and whose SubjectID is empty — the sentinel
+// string never reaches a column. It begins with `@`, which
+// `ValidateIdentifier` rejects (identifiers must start with an
+// alphanumeric), so it can never collide with a real Group.Name.
 const AllAuthenticatedUsersACLGroup = "@authenticated"
+
+// PersonalACLGroupPrefix is the wire-format prefix that names a single
+// user as an ACL target: `user-alice` means "the user currently named
+// alice". Like AllAuthenticatedUsersACLGroup this is a *presentation*
+// form only — the stored row carries SubjectType ACLSubjectUser and
+// the user's immutable User.ID, so renaming or deleting the account
+// does not leave a grant behind for whoever claims the name next.
+// CreateGroup reserves the prefix so no real group can shadow it.
+const PersonalACLGroupPrefix = "user-"
 
 // IsACLGroupVirtual reports whether `name` is a known virtual ACL
 // target — currently only the all-authenticated-users sentinel.
@@ -66,6 +92,28 @@ const AllAuthenticatedUsersACLGroup = "@authenticated"
 func IsACLGroupVirtual(name string) bool {
 	return name == AllAuthenticatedUsersACLGroup
 }
+
+// ACLSubjectType discriminates what kind of principal a CollectionACL
+// row grants its role to. It exists so every ACL row can be keyed on
+// an immutable ID instead of a mutable name: before this, a single
+// `group_id` TEXT column held a group name, a synthesized
+// `user-<username>`, or the `@authenticated` sentinel, and a rename or
+// a soft-delete left the grant dangling under a name anybody could
+// reclaim (issue #3752).
+//
+//   - ACLSubjectGroup — SubjectID is a Group.ID.
+//   - ACLSubjectUser — SubjectID is a User.ID. This replaces the
+//     `user-<username>` personal-group synthesis.
+//   - ACLSubjectAuthenticated — SubjectID is empty; the row matches
+//     any caller with an identity. Modelled as its own type rather
+//     than a magic ID value so no ID has to be reserved.
+type ACLSubjectType string
+
+const (
+	ACLSubjectGroup         ACLSubjectType = "group"
+	ACLSubjectUser          ACLSubjectType = "user"
+	ACLSubjectAuthenticated ACLSubjectType = "authenticated"
+)
 
 var (
 	ScopeToRole map[token_scopes.TokenScope][]AclRole = map[token_scopes.TokenScope][]AclRole{
@@ -104,7 +152,7 @@ func FilterAuthTemplateEligibleGroups(db *gorm.DB, names []string) []string {
 	var rows []row
 	if err := db.Table("groups").
 		Select("name").
-		Where("name IN ? AND auth_template_eligible = 0", names).
+		Where("name IN ? AND auth_template_eligible = 0 AND deleted_at IS NULL", names).
 		Scan(&rows).Error; err != nil {
 		return names
 	}
@@ -125,72 +173,371 @@ func FilterAuthTemplateEligibleGroups(db *gorm.DB, names []string) []string {
 	return out
 }
 
-// ExpandCallerACLGroups returns the effective list of "groups" used
-// when matching collection ACL rows for a single caller. It augments
-// the caller-supplied cookie-asserted list with three additional
-// sources, in this order:
+// CallerACLSubjects is the ID-keyed identity of one caller, as used by
+// every collection authorization decision. It is the replacement for
+// the old "list of group names" the ACL evaluator used to match on:
+// names are mutable and reusable, IDs are neither.
 //
-//   - DB-stored memberships from `group_members` joined to `groups`
-//     for the user's own User.ID. This makes the listing / ACL gates
-//     work for callers whose cookie carries no wlcg.groups (htpasswd
-//     login, or OIDC with `Issuer.GroupSource: none`) but who have
-//     been added to a group via the management UI. Without this, a
-//     user added to "alpha-writers" wouldn't see "alpha" in their
-//     collection listing until a re-login on a properly-configured
-//     issuer — which is broken from the user's perspective.
-//   - `user-<username>` — the personal group every user implicitly
-//     belongs to; carries per-user ACL grants.
-//   - `@authenticated` — the all-authenticated-users sentinel; only
-//     added when the caller has any identity (username or User.ID).
-//     A bearer-token call with neither set is treated as anonymous
-//     and does NOT inherit the sentinel.
+//   - UserID is the caller's live User.ID, or "" when the caller has
+//     no user row (a bearer token minted for a federation identity
+//     this server has never seen).
+//   - GroupIDs are Group.IDs, gathered from BOTH the `group_members`
+//     table (membership recorded in this server) and the caller's
+//     provider-asserted group names resolved through `groups.name`.
+//   - Authenticated is true whenever the caller presented any
+//     identity at all; it is what makes an `@authenticated` ACL row
+//     match. An anonymous request leaves it false.
+type CallerACLSubjects struct {
+	UserID        string
+	GroupIDs      []string
+	Authenticated bool
+}
+
+// Matches reports whether the supplied ACL row grants its role to this
+// caller. Expiry is NOT considered here.
+func (s CallerACLSubjects) Matches(acl CollectionACL) bool {
+	switch acl.SubjectType {
+	case ACLSubjectAuthenticated:
+		return s.Authenticated
+	case ACLSubjectUser:
+		return s.UserID != "" && acl.SubjectID == s.UserID
+	case ACLSubjectGroup:
+		return acl.SubjectID != "" && slices.Contains(s.GroupIDs, acl.SubjectID)
+	}
+	return false
+}
+
+// ACLWhere returns a SQL fragment (plus its arguments) selecting the
+// `collection_acls` rows that match this caller, for use with an
+// already-joined `collection_acls` table. Returns ("", nil) when the
+// caller can match nothing at all, so callers can skip the query
+// entirely rather than emitting a `WHERE false`.
+func (s CallerACLSubjects) ACLWhere() (string, []any) {
+	clauses := []string{}
+	args := []any{}
+	if s.Authenticated {
+		clauses = append(clauses, "collection_acls.subject_type = ?")
+		args = append(args, ACLSubjectAuthenticated)
+	}
+	if s.UserID != "" {
+		clauses = append(clauses, "(collection_acls.subject_type = ? AND collection_acls.subject_id = ?)")
+		args = append(args, ACLSubjectUser, s.UserID)
+	}
+	if len(s.GroupIDs) > 0 {
+		clauses = append(clauses, "(collection_acls.subject_type = ? AND collection_acls.subject_id IN ?)")
+		args = append(args, ACLSubjectGroup, s.GroupIDs)
+	}
+	if len(clauses) == 0 {
+		return "", nil
+	}
+	return "(" + strings.Join(clauses, " OR ") + ")", args
+}
+
+// ResolveCallerACLSubjects turns the three identity fragments the HTTP
+// layer carries — username, User.ID, and the provider-asserted group
+// NAMES from the caller's cookie or token — into the ID-keyed subject
+// set the ACL evaluator matches on.
 //
-// `db` may be nil for in-memory unit tests; in that case only the
-// synthetic `user-` / `@authenticated` entries are added (the DB
-// branch is silently skipped). Errors on the membership query are
-// also tolerated — the listing falls back to the cookie-asserted
-// view rather than failing the whole request.
-func ExpandCallerACLGroups(db *gorm.DB, user, userID string, groups []string) []string {
-	out := groups
-	if db != nil && userID != "" {
-		var rows []struct{ Name string }
-		if err := db.Table("group_members").
-			Joins("JOIN groups ON groups.id = group_members.group_id").
-			Select("groups.name").
-			Where("group_members.user_id = ?", userID).
-			Scan(&rows).Error; err == nil {
-			for _, r := range rows {
-				if r.Name == "" {
-					continue
-				}
-				if !slices.Contains(out, r.Name) {
-					out = append(out, r.Name)
-				}
+// Resolving a *caller's* name to an ID is safe in a way that storing a
+// name in an ACL row is not: it answers "who is this name right now",
+// and the answer is a single live row.
+//
+// Group IDs come from two sources, unioned:
+//
+//   - `group_members` joined on the caller's User.ID — both the
+//     memberships an administrator created and the ones mirrored from a
+//     provider's assertion, the latter only while still fresh. This is
+//     what makes the management UI work for callers whose cookie carries
+//     no group claim at all (htpasswd login, or OIDC with
+//     `Issuer.GroupSource: none`), and what lets a decision be made
+//     about a user who is not currently making a request.
+//   - The caller-supplied names, resolved through `groups.name`. With
+//     group auto-creation on (the default, see EnsureAssertedGroups)
+//     every name a provider asserts has a record, so this resolves; a
+//     name with no record simply contributes nothing, exactly as an
+//     unmatched name did before.
+//
+// `db` may be nil for in-memory unit tests, in which case only the
+// caller's own User.ID and the authenticated flag are populated. Query
+// errors are tolerated the same way: the caller falls back to a
+// narrower view rather than failing the whole request.
+func ResolveCallerACLSubjects(db *gorm.DB, username, userID string, groupNames []string) CallerACLSubjects {
+	out := CallerACLSubjects{
+		UserID:        userID,
+		Authenticated: username != "" || userID != "",
+	}
+	if db == nil {
+		return out
+	}
+	// A caller identified only by username (legacy call sites, and
+	// bearer tokens that carry no user_id claim) still needs their
+	// User.ID for the personal-grant match.
+	if out.UserID == "" && username != "" {
+		var u User
+		if err := db.Select("id").Where("username = ?", username).First(&u).Error; err == nil {
+			out.UserID = u.ID
+		}
+	}
+	seen := map[string]struct{}{}
+	add := func(id string) {
+		if id == "" {
+			return
+		}
+		if _, ok := seen[id]; ok {
+			return
+		}
+		seen[id] = struct{}{}
+		out.GroupIDs = append(out.GroupIDs, id)
+	}
+	if out.UserID != "" {
+		// Pelican-created memberships, plus mirrored ones the provider
+		// has asserted recently enough to still grant. A stale mirrored
+		// row is deliberately excluded here: this path decides what to
+		// hand out. See grantingMembershipsFor.
+		if ids, err := grantingMembershipsFor(db, out.UserID); err == nil {
+			for _, id := range ids {
+				add(id)
 			}
 		}
 	}
-	if user != "" {
-		userGroup := "user-" + user
-		if !slices.Contains(out, userGroup) {
-			out = append(out, userGroup)
-		}
-	}
-	if user != "" || userID != "" {
-		if !slices.Contains(out, AllAuthenticatedUsersACLGroup) {
-			out = append(out, AllAuthenticatedUsersACLGroup)
+	if len(groupNames) > 0 {
+		var rows []struct{ ID string }
+		// Deliberately NOT filtered on `source`: an asserted name
+		// resolves to a Pelican-created group just as it does to any
+		// other. EnsureAssertedGroups refuses to MIRROR into such a
+		// group, which can read like an inconsistency, but the two
+		// answer different questions. Membership is a list this server
+		// keeps, and a provider does not get to edit it. Authorization
+		// asks who the caller is, and the provider is what tells us —
+		// including the username. A provider that wanted this group's
+		// access could simply assert a member's identity instead, so
+		// refusing the name buys nothing while breaking a supported
+		// workflow: create a group through the groups API, point a
+		// collection's admin_id at it, and let the provider decide who
+		// is in it (see
+		// TestCollectionsAPI/admin-group-grants-full-management-authority).
+		//
+		// deleted_at is spelled out because this is a raw table query:
+		// GORM's soft-delete scope only applies to model-based queries,
+		// and a deleted group must not keep conferring ACL matches.
+		if err := db.Table("groups").
+			Select("id").
+			Where("name IN ? AND deleted_at IS NULL", groupNames).
+			Scan(&rows).Error; err == nil {
+			for _, r := range rows {
+				add(r.ID)
+			}
 		}
 	}
 	return out
 }
 
+// ACLSubjectRef is a NAME-space reference to an ACL target: a group
+// name, `user-<username>`, or the `@authenticated` sentinel. It is what
+// a human writes and what a provider asserts.
+//
+// It is a distinct type from a plain string on purpose. The name space
+// and the ID space are different things that happen to share a Go
+// representation, and a function that accepts "either" has to guess
+// which one it was handed — which is not a guess that can be made
+// safely. Group creation is open to any authenticated user, so if a
+// resolver ever consults names and IDs together, creating a group NAMED
+// after another principal's ID is enough to intercept every grant
+// addressed to that ID. Making the two spaces separate types means the
+// resolver never has to ask, and a caller that has an ID cannot reach a
+// name lookup by accident: converting is an explicit, greppable act.
+type ACLSubjectRef string
+
+// ACLSubject is the stored, ID-space identity of an ACL target: what
+// actually lands in `collection_acls`.
+type ACLSubject struct {
+	Type ACLSubjectType
+	ID   string
+}
+
+// ResolveCallerACLSubjectsToleratingStale is ResolveCallerACLSubjects
+// with the mirrored-membership freshness cutoff lifted.
+//
+// It exists for exactly one caller: the share-token clamp, which asks
+// what a SHARE'S OWNER can currently do on the parent collection, at
+// mint time, with no session for that owner. Gating that on freshness
+// produces a false denial rather than a safe one — an owner who has not
+// signed in for longer than the TTL silently has every share they
+// created mint tokens with no storage scopes, while the provider still
+// lists them as a member the whole time, and nothing logs it. Weighed
+// against a bounded staleness window on a ceiling that only ever
+// NARROWS what a recipient already has an ACL for, the denial is worse.
+//
+// Do not reach for this anywhere else. Every other granting path uses
+// the gated form; this one is a deliberate, argued exception.
+func ResolveCallerACLSubjectsToleratingStale(db *gorm.DB, username, userID string) CallerACLSubjects {
+	out := ResolveCallerACLSubjects(db, username, userID, nil)
+	if db == nil || out.UserID == "" {
+		return out
+	}
+	var rows []struct{ GroupID string }
+	if err := db.Table("group_members").
+		Select("group_id").
+		Joins("JOIN groups ON groups.id = group_members.group_id AND groups.deleted_at IS NULL").
+		Where("group_members.user_id = ?", out.UserID).
+		Scan(&rows).Error; err != nil {
+		return out
+	}
+	for _, r := range rows {
+		if r.GroupID != "" && !slices.Contains(out.GroupIDs, r.GroupID) {
+			out.GroupIDs = append(out.GroupIDs, r.GroupID)
+		}
+	}
+	return out
+}
+
+// ResolveACLSubjectRef turns a name-space reference into the stored
+// subject.
+//
+// Name space ONLY. A group ID handed to this function does not resolve,
+// because no group is *named* that — which is the correct outcome, not a
+// limitation: callers holding an ID use LookupACLSubject and say so.
+//
+// It NEVER falls back to "trust the caller and store the string" the way
+// the pre-ID model did: an unresolvable reference is an error, because
+// storing it would recreate the dangling-name grant of issue #3752.
+// Operators who want to pre-grant access to a provider-asserted group
+// that nobody has logged in with yet create the group first
+// (`POST /api/v1.0/groups`), which is also where the
+// auth-template-eligibility decision belongs.
+func ResolveACLSubjectRef(db *gorm.DB, ref ACLSubjectRef) (ACLSubject, error) {
+	target := strings.TrimSpace(string(ref))
+	if target == "" {
+		return ACLSubject{}, errors.New("ACL subject is required")
+	}
+	if IsACLGroupVirtual(target) {
+		return ACLSubject{Type: ACLSubjectAuthenticated}, nil
+	}
+	if db == nil {
+		return ACLSubject{}, errors.New("database is required to resolve an ACL subject")
+	}
+	if name, ok := strings.CutPrefix(target, PersonalACLGroupPrefix); ok {
+		var u User
+		if err := db.Select("id").Where("username = ?", name).First(&u).Error; err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				return ACLSubject{}, fmt.Errorf("%w: no such user %q", ErrUnknownACLSubject, name)
+			}
+			return ACLSubject{}, err
+		}
+		return ACLSubject{Type: ACLSubjectUser, ID: u.ID}, nil
+	}
+	var grp Group
+	if err := db.Select("id").Where("name = ?", target).First(&grp).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return ACLSubject{}, fmt.Errorf(
+				"%w: no group is named %q (name a user as %s<username>, or address either by subjectType/subjectId)",
+				ErrUnknownACLSubject, target, PersonalACLGroupPrefix)
+		}
+		return ACLSubject{}, err
+	}
+	return ACLSubject{Type: ACLSubjectGroup, ID: grp.ID}, nil
+}
+
+// LookupACLSubject validates an ID-space reference: that the kind is one
+// we know and that the row it names exists.
+//
+// Granting to an ID with no row would leave a dangling reference, and
+// IDs are never reused, so such a reference can only ever be a mistake.
+func LookupACLSubject(db *gorm.DB, subject ACLSubject) (ACLSubject, error) {
+	switch subject.Type {
+	case ACLSubjectAuthenticated:
+		// The sentinel names no row; an ID on it is meaningless, so
+		// normalise it away rather than storing something that would
+		// never be matched.
+		return ACLSubject{Type: ACLSubjectAuthenticated}, nil
+	case ACLSubjectGroup, ACLSubjectUser:
+	default:
+		return ACLSubject{}, fmt.Errorf("%w: unknown subject type %q", ErrUnknownACLSubject, subject.Type)
+	}
+	if db == nil {
+		return ACLSubject{}, errors.New("database is required to resolve an ACL subject")
+	}
+	if subject.ID == "" {
+		return ACLSubject{}, fmt.Errorf("%w: a %s subject needs an ID", ErrUnknownACLSubject, subject.Type)
+	}
+	var err error
+	if subject.Type == ACLSubjectGroup {
+		err = db.Select("id").Where("id = ?", subject.ID).First(&Group{}).Error
+	} else {
+		err = db.Select("id").Where("id = ?", subject.ID).First(&User{}).Error
+	}
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return ACLSubject{}, fmt.Errorf("%w: no %s with ID %q", ErrUnknownACLSubject, subject.Type, subject.ID)
+		}
+		return ACLSubject{}, err
+	}
+	return subject, nil
+}
+
+// AnnotateACLSubjects fills the display-only SubjectName / GroupID
+// fields on ACL rows read out of the database, resolving each row's
+// SubjectID through the `users` / `groups` tables in two batched
+// queries. The stored row carries IDs only; these fields exist so the
+// API can render a human-readable target (and so the legacy `groupId`
+// wire field keeps its historical meaning for existing clients).
+//
+// A subject whose row has since been deleted resolves to an empty
+// name — the grant no longer matches anybody either, so showing a
+// blank target is honest.
+func AnnotateACLSubjects(db *gorm.DB, acls []CollectionACL) error {
+	if db == nil || len(acls) == 0 {
+		return nil
+	}
+	userIDs := []string{}
+	groupIDs := []string{}
+	for _, a := range acls {
+		switch a.SubjectType {
+		case ACLSubjectUser:
+			userIDs = append(userIDs, a.SubjectID)
+		case ACLSubjectGroup:
+			groupIDs = append(groupIDs, a.SubjectID)
+		}
+	}
+	userCards, err := GetUserCards(db, userIDs)
+	if err != nil {
+		return err
+	}
+	groupCards, err := GetGroupCards(db, groupIDs)
+	if err != nil {
+		return err
+	}
+	for i := range acls {
+		switch acls[i].SubjectType {
+		case ACLSubjectAuthenticated:
+			acls[i].SubjectName = AllAuthenticatedUsersACLGroup
+			acls[i].GroupID = AllAuthenticatedUsersACLGroup
+		case ACLSubjectUser:
+			if c, ok := userCards[acls[i].SubjectID]; ok {
+				acls[i].SubjectName = c.Username
+				acls[i].GroupID = PersonalACLGroupPrefix + c.Username
+			}
+		case ACLSubjectGroup:
+			if c, ok := groupCards[acls[i].SubjectID]; ok {
+				acls[i].SubjectName = c.Name
+				acls[i].GroupID = c.Name
+			}
+		}
+	}
+	return nil
+}
+
 // Collection — origin-local record of a curated namespace. Ownership
 // model (per the user/group-design rewrite):
 //
-//   - Owner / OwnerID — exactly one user owns the collection. Owner
-//     is the legacy username field (kept for audit + back-compat
-//     uniqueness on `(owner, name)`); OwnerID is the immutable User.ID
-//     slug used for authorization. Authorization checks should compare
-//     OwnerID against the caller's User.ID.
+//   - OwnerID — the immutable User.ID of the collection's single
+//     owner, and the ONLY ownership handle. The `owner` username
+//     column this row used to carry was removed in migration
+//     20260916120000: it was consulted as an authorization fallback,
+//     so a PATCH transfer (which wrote owner_id alone) left the
+//     previous owner in control, and a renamed or deleted account left
+//     a claimable username behind (issue #3753). The owner's username
+//     for display comes from the `users` row via GetUserCards.
 //   - AdminID — the Group.ID of an OPTIONAL admin group whose members
 //     can manage the collection day-to-day: edit metadata, manage
 //     read/write ACLs, manage members, and reassign the admin group
@@ -206,14 +553,19 @@ func ExpandCallerACLGroups(db *gorm.DB, user, userID string, groups []string) []
 // Visibility=public collections are readable by anyone; private ones
 // require Owner / admin-group / ACL membership / collection_admin scope.
 type Collection struct {
-	ID          string     `gorm:"primaryKey" json:"id"`
-	Name        string     `gorm:"not null;uniqueIndex:idx_owner_name" json:"name"`
-	Description string     `json:"description"`
-	Owner       string     `gorm:"not null;uniqueIndex:idx_owner_name" json:"owner"`
-	OwnerID     string     `gorm:"not null;default:''" json:"ownerId"`
-	AdminID     string     `gorm:"not null;default:''" json:"adminId"`
-	Namespace   string     `gorm:"not null" json:"namespace"`
-	Visibility  Visibility `gorm:"not null;default:private" json:"visibility"`
+	ID          string `gorm:"primaryKey" json:"id"`
+	Name        string `gorm:"not null;uniqueIndex:idx_owner_name" json:"name"`
+	Description string `json:"description"`
+	// OwnerID pairs with Name in the unique index: one owner may not
+	// have two collections of the same name. The production index is
+	// PARTIAL (`WHERE owner_id <> ''`) so the legacy rows whose owner
+	// never resolved to a user don't collide with each other; GORM's
+	// AutoMigrate (tests only) can't express that, which is harmless
+	// because fixtures always set an owner.
+	OwnerID    string     `gorm:"not null;default:'';uniqueIndex:idx_owner_name" json:"ownerId"`
+	AdminID    string     `gorm:"not null;default:''" json:"adminId"`
+	Namespace  string     `gorm:"not null" json:"namespace"`
+	Visibility Visibility `gorm:"not null;default:private" json:"visibility"`
 	// EnableSharing is the operator-set opt-in that lets read-access
 	// holders mint a "share" — a child collection that delegates a
 	// subset of this collection's access. Defaults false; flipped only
@@ -242,19 +594,39 @@ type Collection struct {
 }
 
 type CollectionMember struct {
-	CollectionID string    `gorm:"primaryKey" json:"collectionId"`
-	ObjectURL    string    `gorm:"primaryKey" json:"objectUrl"` // full pelican:// URL
-	AddedBy      string    `gorm:"not null" json:"createdBy"`
-	AddedAt      time.Time `gorm:"not null;default:CURRENT_TIMESTAMP" json:"createdAt"`
+	CollectionID string `gorm:"primaryKey" json:"collectionId"`
+	ObjectURL    string `gorm:"primaryKey" json:"objectUrl"` // full pelican:// URL
+	// AddedBy is a User.ID (or the 'unknown' audit sentinel), not a
+	// username — see the note on CollectionACL.GrantedBy.
+	AddedBy string    `gorm:"not null" json:"createdBy"`
+	AddedAt time.Time `gorm:"not null;default:CURRENT_TIMESTAMP" json:"createdAt"`
 }
 
+// CollectionACL is one role grant on a collection. The grant target is
+// the (SubjectType, SubjectID) pair — always an immutable ID.
+//
+// SubjectName and GroupID are NOT stored; AnnotateACLSubjects fills
+// them in on the way out so the API can render a human-readable target
+// without every consumer joining the users/groups tables itself.
 type CollectionACL struct {
-	CollectionID string     `gorm:"primaryKey" json:"collectionId"`
-	GroupID      string     `gorm:"primaryKey" json:"groupId"`
-	Role         AclRole    `gorm:"primaryKey;not null" json:"role"`
-	GrantedBy    string     `gorm:"not null" json:"createdBy"`
-	GrantedAt    time.Time  `gorm:"not null;default:CURRENT_TIMESTAMP" json:"createdAt"`
-	ExpiresAt    *time.Time `json:"expiresAt"`
+	CollectionID string         `gorm:"primaryKey" json:"collectionId"`
+	SubjectType  ACLSubjectType `gorm:"primaryKey;not null" json:"subjectType"`
+	SubjectID    string         `gorm:"primaryKey;not null;default:''" json:"subjectId"`
+	Role         AclRole        `gorm:"primaryKey;not null" json:"role"`
+	// GrantedBy is a User.ID (or the 'unknown' audit sentinel). It used
+	// to hold a username; migration 20260916120000 converted it so that
+	// no column in these tables mixes the two kinds of handle.
+	GrantedBy string     `gorm:"not null" json:"createdBy"`
+	GrantedAt time.Time  `gorm:"not null;default:CURRENT_TIMESTAMP" json:"createdAt"`
+	ExpiresAt *time.Time `json:"expiresAt"`
+
+	// SubjectName is the current display handle of the subject: a group
+	// name, a username, or the `@authenticated` sentinel. Empty when the
+	// subject row no longer exists.
+	SubjectName string `gorm:"-" json:"subjectName"`
+	// GroupID is the legacy wire spelling of the target, derived from
+	// SubjectName; nothing reads it back.
+	GroupID string `gorm:"-" json:"groupId"`
 }
 
 type CollectionMetadata struct {
@@ -269,6 +641,38 @@ const (
 	UserStatusActive   UserStatus = "active"
 	UserStatusInactive UserStatus = "inactive"
 )
+
+// GroupAdminStatus latches what Pelican has established about an
+// account's group-derived administrator privileges. It exists so that
+// "we have not checked" is a state a guard can see, rather than a
+// silence it has to interpret as "not an administrator" — which is how
+// a server.user_admin came to be able to act on an administrator whose
+// authority arrived in a provider's group assertion.
+//
+// The three states are ordered by how much they let a caller do, and
+// only one transition is forbidden: nothing ever leaves
+// GroupAdminPossible. See RecordGroupAdminObservation.
+type GroupAdminStatus string
+
+const (
+	// GroupAdminUnknown — never established. Treated as a possible
+	// administrator: refuse. The default, and what every account
+	// carries until it is first observed.
+	GroupAdminUnknown GroupAdminStatus = "unknown"
+	// GroupAdminPossible — observed holding a group that confers an
+	// administrator scope. Sticky: a provider retracting the membership
+	// removes the evidence, not the history.
+	GroupAdminPossible GroupAdminStatus = "possible"
+	// GroupAdminRuledOut — groups observed, none of them administrative.
+	GroupAdminRuledOut GroupAdminStatus = "ruled-out"
+)
+
+// MayBeAdmin reports whether this status requires treating the account
+// as a possible administrator. Both "we saw one" and "we have not
+// looked" do.
+func (s GroupAdminStatus) MayBeAdmin() bool {
+	return s != GroupAdminRuledOut
+}
 
 // User is the canonical user record. Four concepts live on this row and
 // they are intentionally distinct — code that conflates them is a bug.
@@ -339,6 +743,15 @@ type User struct {
 	DisplayName string     `gorm:"not null;default:''" json:"displayName"`
 	AUPVersion  string     `gorm:"not null;default:''" json:"aupVersion"`
 	AUPAgreedAt *time.Time `json:"aupAgreedAt"`
+	// GroupAdminStatus latches what has been established about this
+	// account's group-derived administrator privileges; see the type.
+	// Consulted only by the guard that stops a user-administrator from
+	// acting on an administrator's account — never to GRANT anything.
+	GroupAdminStatus GroupAdminStatus `gorm:"not null;default:'unknown'" json:"groupAdminStatus"`
+	// GroupsObservedAt is when this account's provider-asserted group
+	// set was last reconciled, or NULL if it never has been. Says when
+	// the observation happened; GroupAdminStatus says what it concluded.
+	GroupsObservedAt *time.Time `json:"groupsObservedAt,omitempty"`
 	// HasPassword is a derived JSON-only field — populated in AfterFind
 	// via a side query that reads only a boolean projection of the
 	// password_hash column. The hash itself never lives on this struct;
@@ -397,6 +810,104 @@ const (
 	AdminTypeGroup AdminType = "group"
 )
 
+// GroupSource names *which* provider a Group record came from. There is
+// no "internal vs external" split: Pelican reads group membership from
+// several providers, they behave differently from each other, and an
+// operator debugging "why is this user in this group" needs to know
+// which one to go look at. The values line up one-for-one with
+// `Issuer.GroupSource` so the config value and the recorded provenance
+// read the same.
+//
+//   - GroupSourcePelican — created through Pelican's own group-management
+//     API. `group_members` is authoritative for its membership. This is
+//     the only source a user can create a group in.
+//   - GroupSourceOIDC — asserted in the identity provider's group claim.
+//   - GroupSourceFile — listed in `Issuer.GroupFile`.
+//   - GroupSourceGitHub — a GitHub organization.
+//   - GroupSourceUnknown — the record was backfilled by migration
+//     20260916120000 from a collection ACL that named a group Pelican
+//     had no record of. Some provider asserts the name, but which one is
+//     not recoverable from the old schema; the next assertion stamps the
+//     real provider.
+//
+// Every value but GroupSourcePelican is *asserted*: the named provider,
+// not this server, decides who is in the group. See IsAsserted.
+type GroupSource string
+
+const (
+	GroupSourcePelican GroupSource = "pelican"
+	GroupSourceOIDC    GroupSource = "oidc"
+	GroupSourceFile    GroupSource = "file"
+	GroupSourceGitHub  GroupSource = "github"
+	GroupSourceUnknown GroupSource = "unknown"
+)
+
+// Group source types: the spellings Issuer.GroupSource accepts in the
+// configuration file. ConfiguredGroupSource maps them onto the
+// GroupSource values above.
+const (
+	GroupSourceTypeOIDC     string = "oidc"
+	GroupSourceTypeFile     string = "file"
+	GroupSourceTypeInternal string = "internal"
+	GroupSourceTypeGitHub   string = "github"
+)
+
+// groupSourcesByConfigValue maps what an operator writes in
+// Issuer.GroupSource onto the GroupSource a record is stamped with.
+// A new provider needs an entry here as well as a constant above;
+// ConfiguredGroupSource warns when it meets a value it cannot map.
+var groupSourcesByConfigValue = map[string]GroupSource{
+	GroupSourceTypeOIDC:     GroupSourceOIDC,
+	GroupSourceTypeFile:     GroupSourceFile,
+	GroupSourceTypeGitHub:   GroupSourceGitHub,
+	GroupSourceTypeInternal: GroupSourcePelican,
+}
+
+// ConfiguredGroupSource maps Issuer.GroupSource onto the GroupSource a
+// record is stamped with. It is the single answer to "who decides group
+// membership on this server", and every path that learns a caller's
+// groups must route through it.
+//
+// Single-valued, deliberately. The group file used to be read on the
+// password-login and init-code paths whatever Issuer.GroupSource said,
+// which made `file` an always-on second provider layered under `oidc`
+// or `github`. That asymmetry is what let a file with no entry for an
+// OIDC account be treated as an authoritative statement that the
+// account is in no groups — see RecordAssertedGroups and the latch in
+// RecordGroupAdminObservation.
+//
+// GroupSourcePelican is returned for the `internal` source: membership
+// is Pelican's own, held in group_members, and nothing needs mirroring.
+// The empty GroupSource means no provider decides groups here.
+func ConfiguredGroupSource() GroupSource {
+	raw := strings.ToLower(strings.TrimSpace(param.Issuer_GroupSource.GetString()))
+	if raw == "" || raw == "none" {
+		return ""
+	}
+	if source, ok := groupSourcesByConfigValue[raw]; ok {
+		return source
+	}
+	// Not a value this build knows. Almost always a typo in the
+	// configuration, but it is also what a new provider looks like if
+	// someone adds a GroupSourceType constant and forgets the table
+	// above. Say so rather than returning "" silently: "" means NO
+	// provider decides group membership here, which switches off
+	// mirroring, the group-file refresher, and the guard that stops a
+	// user-administrator acting on an unobserved account.
+	log.Warnf("Issuer.GroupSource is set to %q, which this server does not recognize; "+
+		"no provider will decide group membership", raw)
+	return ""
+}
+
+// IsAsserted reports whether membership of a group from this source is
+// decided by an outside provider rather than by `group_members`. Such
+// groups are owned by the built-in admin, cannot be renamed (the name is
+// what the provider's assertion is matched against), and hold their name
+// against a would-be local group of the same name.
+func (s GroupSource) IsAsserted() bool {
+	return s != "" && s != GroupSourcePelican
+}
+
 // Group mirrors the User contract for the four-concept model:
 //
 //   - Name is the *machine-readable* handle: admin-controlled, used in
@@ -407,8 +918,15 @@ const (
 // See ValidateIdentifier for the character class enforced on Name.
 // DisplayName has the laxer ValidateDisplayName ruleset.
 type Group struct {
-	ID                  string     `gorm:"primaryKey" json:"id"`
-	Name                string     `gorm:"not null;unique" json:"name"`
+	ID string `gorm:"primaryKey" json:"id"`
+	// The production uniqueness index is PARTIAL (`WHERE deleted_at IS
+	// NULL`), created by migration 20260917120000 so a deleted group
+	// releases its name. Declared as a named uniqueIndex rather than
+	// `unique` so AutoMigrate (tests only) emits a droppable index
+	// instead of an inline column constraint, which SQLite backs with an
+	// undroppable implicit index — setupCollectionTestDB replaces it
+	// with the partial shape.
+	Name                string     `gorm:"not null;uniqueIndex:idx_groups_name_live" json:"name"`
 	DisplayName         string     `gorm:"not null;default:''" json:"displayName"`
 	Description         string     `json:"description"`
 	CreatedBy           string     `gorm:"not null" json:"createdBy"`
@@ -434,6 +952,15 @@ type Group struct {
 	// non-admin clamp ("AuthTemplateEligible: false" would round-trip
 	// as true).
 	AuthTemplateEligible bool `gorm:"not null" json:"authTemplateEligible"`
+	// Source names which provider this record came from —
+	// GroupSourcePelican for one created through the group-management
+	// API, or the identity provider that asserted the name (see
+	// EnsureAssertedGroups and the GroupSource doc comment). An asserted
+	// record is minted automatically on first observation and owned by
+	// the built-in admin user; it exists to give the name a stable ID
+	// that ACLs can key on, and to hold the name against an
+	// unprivileged user creating a group that shadows it.
+	Source GroupSource `gorm:"not null;default:'pelican'" json:"source"`
 	// CreatedForCollectionID marks groups minted alongside a specific
 	// collection during the onboarding flow. The redemption path of a
 	// collection-ownership invite cascades the transfer to every group
@@ -445,14 +972,49 @@ type Group struct {
 	CreatedAt              time.Time     `gorm:"not null;default:CURRENT_TIMESTAMP" json:"createdAt"`
 	UpdatedAt              time.Time     `gorm:"not null;default:CURRENT_TIMESTAMP" json:"updatedAt"`
 	Members                []GroupMember `gorm:"foreignKey:GroupID" json:"members"`
+	// DeletedAt is the soft-delete tombstone, mirroring User.DeletedAt.
+	// A Group.ID is an authorization handle, so it must never be reused:
+	// generateSlug picks 8 hex characters with no uniqueness check, and
+	// a hard delete freed the ID for a later group to be minted with,
+	// silently inheriting whatever still referenced it. Keeping the row
+	// spends the ID permanently and leaves historical references
+	// (created_by, audit trails) resolvable, while GORM's default scope
+	// hides it from every ordinary query so it confers nothing. The
+	// NAME is released — see the migration — because nothing keys on a
+	// group name any more.
+	DeletedAt gorm.DeletedAt `gorm:"index" json:"-"`
 }
 
+// GroupMember is one user's membership in one group. There is at most
+// one row per (group, user) regardless of how the membership arose; see
+// Source for how the two kinds interact.
 type GroupMember struct {
 	GroupID string    `gorm:"primaryKey" json:"groupId"`
-	UserID  string    `gorm:"primaryKey" json:"userId"`
+	UserID  string    `gorm:"primaryKey;index" json:"userId"`
 	User    User      `gorm:"foreignKey:UserID" json:"user"`
 	AddedBy string    `gorm:"not null" json:"createdBy"`
 	AddedAt time.Time `gorm:"not null;default:CURRENT_TIMESTAMP" json:"createdAt"`
+	// Source distinguishes a membership an administrator created through
+	// the group API (GroupSourcePelican — authoritative, never expires)
+	// from one mirrored out of a provider's assertion (any other value,
+	// naming that provider). A Pelican membership always wins: an
+	// assertion never overwrites or expires one, so an admin who adds a
+	// local member to an asserted group keeps them.
+	Source GroupSource `gorm:"not null;default:'pelican'" json:"source"`
+	// AssertedAt is when the provider last asserted this membership, and
+	// is NULL on Pelican-created rows. A mirrored row may only GRANT
+	// while it is fresh — see MirroredMembershipTTL and
+	// freshAssertedMembershipCutoff — but it is KEPT once stale, because
+	// a consumer asking a restricting question ("might this account be an
+	// admin?") must still see it. Rows disappear only when the provider
+	// stops asserting the membership.
+	AssertedAt *time.Time `json:"assertedAt,omitempty"`
+}
+
+// IsMirrored reports whether this membership came from a provider's
+// assertion rather than from the group-management API.
+func (m GroupMember) IsMirrored() bool {
+	return m.Source.IsAsserted()
 }
 
 // InviteKind discriminates what an invite link grants when redeemed.
@@ -604,18 +1166,17 @@ func generateSlug() (string, error) {
 	return slugStr, nil
 }
 
-// CreateCollection persists a new collection row owned by `owner`
-// (username, audit field) / `ownerID` (User.ID slug, the
-// authorization handle). Per the ownership-model rewrite the row's
-// own Owner/OwnerID/AdminID fields encode authority — the function
-// no longer auto-mints a `user-<owner>` AclRoleOwner ACL row, so
-// existing ACL listings are not polluted with an owner pseudo-grant.
+// CreateCollection persists a new collection row owned by `ownerID`
+// (a User.ID slug — the only ownership handle; see the Collection
+// doc comment). The row's own OwnerID/AdminID fields encode
+// authority — the function does not auto-mint an AclRoleOwner ACL
+// row, so ACL listings are not polluted with an owner pseudo-grant.
 //
 // `ownerID` may be empty for legacy/test paths that don't have a
 // User record handy; in that case the collection has an empty
 // OwnerID and ownership-checks fall through to admin-group / ACL /
 // admin-scope paths. New code SHOULD always supply a real User.ID.
-func CreateCollection(db *gorm.DB, name, description, owner, ownerID, namespace string, visibility Visibility) (*Collection, error) {
+func CreateCollection(db *gorm.DB, name, description, ownerID, namespace string, visibility Visibility) (*Collection, error) {
 	slug, err := generateSlug()
 	if err != nil {
 		return nil, err
@@ -625,7 +1186,6 @@ func CreateCollection(db *gorm.DB, name, description, owner, ownerID, namespace 
 		ID:          slug,
 		Name:        name,
 		Description: description,
-		Owner:       owner,
 		OwnerID:     ownerID,
 		Namespace:   namespace,
 		Visibility:  visibility,
@@ -646,11 +1206,11 @@ func CreateCollection(db *gorm.DB, name, description, owner, ownerID, namespace 
 }
 
 // CreateCollectionWithMetadata is the create path used by the HTTP
-// handlers — accepts the same `ownerID` posture as CreateCollection
+// handlers — takes the same `ownerID` as CreateCollection
 // plus an optional metadata map persisted in the same transaction.
 // `enableSharing` opts the collection in to user-driven shares; the
 // flag can also be flipped after creation via UpdateCollection.
-func CreateCollectionWithMetadata(db *gorm.DB, name, description, owner, ownerID, namespace string, visibility Visibility, enableSharing bool, metadata map[string]string) (*Collection, error) {
+func CreateCollectionWithMetadata(db *gorm.DB, name, description, ownerID, namespace string, visibility Visibility, enableSharing bool, metadata map[string]string) (*Collection, error) {
 	slug, err := generateSlug()
 	if err != nil {
 		return nil, err
@@ -660,7 +1220,6 @@ func CreateCollectionWithMetadata(db *gorm.DB, name, description, owner, ownerID
 		ID:            slug,
 		Name:          name,
 		Description:   description,
-		Owner:         owner,
 		OwnerID:       ownerID,
 		Namespace:     namespace,
 		Visibility:    visibility,
@@ -700,20 +1259,18 @@ func CreateCollectionWithMetadata(db *gorm.DB, name, description, owner, ownerID
 // visibility set is the union of:
 //
 //  1. Public collections (visibility=public).
-//  2. Collections the caller owns — by OwnerID (canonical) or by
-//     legacy Owner username. Without this branch a freshly-transferred
-//     owner's listing comes up empty: the row carries no read ACL for
-//     them, and the auto-owner ACL is gone per the ownership-model
-//     rewrite, so OwnerID is the *only* link between the user and
-//     the row.
-//  3. Collections whose admin-group the caller is a member of, where
-//     "member" means: a row in group_members (DB-driven membership)
-//     OR a name in the caller's `groups` slice that resolves to the
-//     admin group (cookie/IdP-asserted membership). Mirrors the same
-//     two-path admin-group check that CallerIsCollectionOwnerOrAdmin
-//     uses on the management side.
-//  4. Collections with a read-eligible ACL for one of the caller's
-//     groups (the existing path).
+//  2. Collections the caller owns, matched on OwnerID. Without this
+//     branch a freshly-transferred owner's listing comes up empty: the
+//     row carries no read ACL for them, and the auto-owner ACL is gone
+//     per the ownership-model rewrite, so OwnerID is the *only* link
+//     between the user and the row.
+//  3. Collections whose admin-group the caller belongs to. Membership
+//     is resolved to Group.IDs by ResolveCallerACLSubjects, which
+//     unions `group_members` rows with the caller's provider-asserted
+//     group names, so both sources are covered by one `admin_id IN ?`.
+//  4. Collections with a read-eligible ACL row naming one of the
+//     caller's subjects (their user, one of their groups, or the
+//     all-authenticated sentinel).
 //
 // Admins (server.admin / server.collection_admin) bypass and get
 // global visibility — the management endpoints already do this and the
@@ -727,10 +1284,10 @@ func ListCollections(db *gorm.DB, user, userID string, groups []string, isAdmin 
 		return all, nil
 	}
 
-	// Augment with the personal `user-<name>` group and (when
-	// authenticated) the all-authenticated-users sentinel. Mirrors
-	// the same convention used by validateACL / GetUserCollectionScopes.
-	groups = ExpandCallerACLGroups(db, user, userID, groups)
+	// Resolve the caller to their ID-keyed subject set once; every
+	// branch below matches on IDs. Mirrors validateACL /
+	// GetUserCollectionScopes.
+	subjects := ResolveCallerACLSubjects(db, user, userID, groups)
 
 	out := []Collection{}
 	seen := make(map[string]struct{})
@@ -751,63 +1308,37 @@ func ListCollections(db *gorm.DB, user, userID string, groups []string, isAdmin 
 	}
 	addAll(pub)
 
-	// (2) Owned collections. Match either OwnerID (the immutable User.ID
-	// path used by post-rewrite code) or the legacy username field
-	// (back-compat for rows pre-dating OwnerID).
-	var owned []Collection
-	switch {
-	case userID != "" && user != "":
-		if err := db.Where("owner_id = ? OR owner = ?", userID, user).Find(&owned).Error; err != nil {
+	// (2) Owned collections, matched on the immutable User.ID.
+	if subjects.UserID != "" {
+		var owned []Collection
+		if err := db.Where("owner_id = ?", subjects.UserID).Find(&owned).Error; err != nil {
 			return nil, err
 		}
-	case userID != "":
-		if err := db.Where("owner_id = ?", userID).Find(&owned).Error; err != nil {
-			return nil, err
-		}
-	case user != "":
-		if err := db.Where("owner = ?", user).Find(&owned).Error; err != nil {
-			return nil, err
-		}
-	}
-	addAll(owned)
-
-	// (3a) Admin-group membership via the GroupMember table — the
-	// canonical "user has been added to this group" record.
-	if userID != "" {
-		var adminViaMember []Collection
-		if err := db.Table("collections").
-			Joins("JOIN group_members ON group_members.group_id = collections.admin_id").
-			Where("collections.admin_id <> '' AND group_members.user_id = ?", userID).
-			Find(&adminViaMember).Error; err != nil {
-			return nil, err
-		}
-		addAll(adminViaMember)
+		addAll(owned)
 	}
 
-	// (3b) Admin-group membership via cookie-asserted group names. The
-	// `groups` slice carries names; admin_id is a group ID slug. We
-	// join groups to translate one to the other and match against the
-	// caller's set.
-	if len(groups) > 0 {
-		var adminViaName []Collection
-		if err := db.Table("collections").
-			Joins("JOIN groups ON groups.id = collections.admin_id").
-			Where("collections.admin_id <> '' AND groups.name IN ?", groups).
-			Find(&adminViaName).Error; err != nil {
+	// (3) Admin-group membership. subjects.GroupIDs already unions the
+	// `group_members` rows with the caller's asserted group names.
+	if len(subjects.GroupIDs) > 0 {
+		var viaAdminGroup []Collection
+		if err := db.Where("admin_id IN ?", subjects.GroupIDs).Find(&viaAdminGroup).Error; err != nil {
 			return nil, err
 		}
-		addAll(adminViaName)
+		addAll(viaAdminGroup)
 	}
 
 	// (4) ACL-granted read access.
-	var aclCollections []Collection
-	if err := db.
-		Joins("JOIN collection_acls ON collections.id = collection_acls.collection_id").
-		Where("collection_acls.group_id IN ? AND collection_acls.role IN ?", groups, ScopeToRole[token_scopes.Collection_Read]).
-		Find(&aclCollections).Error; err != nil {
-		return nil, err
+	if where, args := subjects.ACLWhere(); where != "" {
+		var aclCollections []Collection
+		if err := db.
+			Joins("JOIN collection_acls ON collections.id = collection_acls.collection_id").
+			Where(where, args...).
+			Where("collection_acls.role IN ?", ScopeToRole[token_scopes.Collection_Read]).
+			Find(&aclCollections).Error; err != nil {
+			return nil, err
+		}
+		addAll(aclCollections)
 	}
-	addAll(aclCollections)
 
 	return out, nil
 }
@@ -897,6 +1428,9 @@ func GetCollectionAcls(db *gorm.DB, id, user, userID string, groups []string, is
 	// match against — would get a misleading "collection not found"
 	// 404 on every expand / edit-page open.
 	if isAdmin {
+		if err := AnnotateACLSubjects(db, collection.ACLs); err != nil {
+			return nil, err
+		}
 		return collection.ACLs, nil
 	}
 
@@ -907,89 +1441,141 @@ func GetCollectionAcls(db *gorm.DB, id, user, userID string, groups []string, is
 		return nil, err
 	}
 
+	if err := AnnotateACLSubjects(db, collection.ACLs); err != nil {
+		return nil, err
+	}
 	return collection.ACLs, nil
 }
 
-func GrantCollectionAcl(db *gorm.DB, id, user, userID string, groups []string, groupId string, role AclRole, expiresAt *time.Time, isAdmin bool) error {
+// loadCollectionForWrite fetches a collection with its ACLs preloaded
+// and authorizes the caller to change it, which every mutating entry
+// point in this file needs to do first and in the same way.
+//
+// A system admin skips the ACL check; everyone else must satisfy
+// `scope` on the collection. The read paths deliberately do NOT use
+// this: they short-circuit on public visibility, which a write must
+// never do.
+func loadCollectionForWrite(db *gorm.DB, id, user, userID string, groups []string, isAdmin bool, scope token_scopes.TokenScope) (*Collection, error) {
 	collection := &Collection{}
 	if result := db.Preload("ACLs").Where("id = ?", id).First(collection); result.Error != nil {
-		return result.Error
+		return nil, result.Error
 	}
-
-	if !isAdmin {
-		err := validateACL(db, collection, user, userID, groups, token_scopes.Collection_Delete)
-		if err != nil {
-			return err
-		}
+	if isAdmin {
+		return collection, nil
 	}
-
-	// Resolve the provided group identifier (which may be the internal slug returned
-	// by the create-group endpoint) to the human-readable group *name*.  The group
-	// *name* is what’s shipped in the `wlcg.groups` claim of the JWT and therefore
-	// what we should persist in the ACL for later comparisons during authorization.
-	var grp Group
-	if err := db.First(&grp, "id = ?", groupId).Error; err == nil {
-		// We found the group by its slug; switch to using the group name.
-		groupId = grp.Name
-	} else if errors.Is(err, gorm.ErrRecordNotFound) {
-		// It's possible the caller already provided the group *name*; try to look
-		// it up by name to verify it exists (and to ensure a consistent casing).
-		if err2 := db.First(&grp, "name = ?", groupId).Error; err2 == nil {
-			groupId = grp.Name // Adopt the canonical name from the DB.
-		} // else: leave groupId unchanged – we’ll trust the caller.
-	} else {
-		// Unexpected database error.
-		return err
+	if err := validateACL(db, collection, user, userID, groups, scope); err != nil {
+		return nil, err
 	}
+	return collection, nil
+}
 
+// applyCollectionACLGrant writes the grant itself. Split out so the
+// NAME-space and ID-space entry points share it without one calling the
+// other — which used to mean loading the collection and running the
+// authorization check twice on every name-space grant.
+func applyCollectionACLGrant(db *gorm.DB, id, userID string, subject ACLSubject, role AclRole, expiresAt *time.Time) error {
 	return db.Transaction(func(tx *gorm.DB) error {
 		acl := CollectionACL{
 			CollectionID: id,
-			GroupID:      groupId,
+			SubjectType:  subject.Type,
+			SubjectID:    subject.ID,
 			Role:         role,
-			GrantedBy:    user,
+			GrantedBy:    creatorOrUnknown(userID),
 			ExpiresAt:    expiresAt,
 		}
-		// Use OnConflict to either create or update the ACL
 		return tx.Clauses(clause.OnConflict{
-			Columns:   []clause.Column{{Name: "collection_id"}, {Name: "group_id"}, {Name: "role"}},
+			Columns:   []clause.Column{{Name: "collection_id"}, {Name: "subject_type"}, {Name: "subject_id"}, {Name: "role"}},
 			DoUpdates: clause.AssignmentColumns([]string{"granted_by", "expires_at"}),
 		}).Create(&acl).Error
 	})
 }
 
-func RevokeCollectionAcl(db *gorm.DB, id, user, userID string, groups []string, groupId string, role AclRole, isAdmin bool) error {
-	collection := &Collection{}
-	if result := db.Preload("ACLs").Where("id = ?", id).First(collection); result.Error != nil {
-		return result.Error
+// applyCollectionACLRevoke is the revoke counterpart. It normalizes the
+// sentinel's empty ID and rejects an unknown subject type, then deletes
+// the row. Unlike the grant path it does not require the subject to
+// still exist — clearing a grant whose principal was deleted is the
+// whole reason the ID-space entry point exists.
+func applyCollectionACLRevoke(db *gorm.DB, id string, subject ACLSubject, role AclRole) error {
+	switch subject.Type {
+	case ACLSubjectGroup, ACLSubjectUser:
+	case ACLSubjectAuthenticated:
+		subject.ID = ""
+	default:
+		return fmt.Errorf("%w: unknown subject type %q", ErrUnknownACLSubject, subject.Type)
 	}
-
-	if !isAdmin {
-		err := validateACL(db, collection, user, userID, groups, token_scopes.Collection_Delete)
-		if err != nil {
-			return err
-		}
-	}
-
 	return db.Transaction(func(tx *gorm.DB) error {
-		if result := tx.Where("collection_id = ? AND group_id = ? AND role = ?", id, groupId, role).Delete(&CollectionACL{}); result.Error != nil {
-			return result.Error
-		}
-		return nil
+		return tx.Where("collection_id = ? AND subject_type = ? AND subject_id = ? AND role = ?",
+			id, subject.Type, subject.ID, role).Delete(&CollectionACL{}).Error
 	})
 }
 
-func UpsertCollectionMetadata(db *gorm.DB, id, user, userID string, groups []string, key, value string, isAdmin bool) error {
-	collection := &Collection{}
-	if result := db.Preload("ACLs").Where("id = ?", id).First(collection); result.Error != nil {
-		return result.Error
+// GrantCollectionAcl adds (or refreshes) a role grant on a collection.
+//
+// `ref` is a NAME-space target: a group name, `user-<username>`, or the
+// `@authenticated` sentinel. Callers holding an ID use
+// GrantCollectionAclBySubject instead — the two spaces have separate
+// entry points so neither has to be guessed from the string. A
+// reference that matches nothing is rejected with ErrUnknownACLSubject
+// rather than persisted verbatim.
+func GrantCollectionAcl(db *gorm.DB, id, user, userID string, groups []string, ref ACLSubjectRef, role AclRole, expiresAt *time.Time, isAdmin bool) error {
+	if _, err := loadCollectionForWrite(db, id, user, userID, groups, isAdmin, token_scopes.Collection_Delete); err != nil {
+		return err
 	}
+	// ResolveACLSubjectRef already proves the target exists, so there is
+	// nothing for LookupACLSubject to add here.
+	subject, err := ResolveACLSubjectRef(db, ref)
+	if err != nil {
+		return err
+	}
+	return applyCollectionACLGrant(db, id, userID, subject, role, expiresAt)
+}
 
-	if !isAdmin {
-		err := validateACL(db, collection, user, userID, groups, token_scopes.Collection_Modify)
-		if err != nil {
-			return err
-		}
+// GrantCollectionAclBySubject is the ID-space counterpart of
+// GrantCollectionAcl: the caller supplies the stored subject directly,
+// so there is no name to resolve and nothing to guess. This is the only
+// way to grant to a *user* by ID.
+func GrantCollectionAclBySubject(db *gorm.DB, id, user, userID string, groups []string, subject ACLSubject, role AclRole, expiresAt *time.Time, isAdmin bool) error {
+	if _, err := loadCollectionForWrite(db, id, user, userID, groups, isAdmin, token_scopes.Collection_Delete); err != nil {
+		return err
+	}
+	subject, err := LookupACLSubject(db, subject)
+	if err != nil {
+		return err
+	}
+	return applyCollectionACLGrant(db, id, userID, subject, role, expiresAt)
+}
+
+// RevokeCollectionAcl removes a role grant named in the NAME space —
+// the same spellings GrantCollectionAcl accepts, including the `groupId`
+// value the API hands back on a listing, so a client can round-trip what
+// it read.
+func RevokeCollectionAcl(db *gorm.DB, id, user, userID string, groups []string, ref ACLSubjectRef, role AclRole, isAdmin bool) error {
+	if _, err := loadCollectionForWrite(db, id, user, userID, groups, isAdmin, token_scopes.Collection_Delete); err != nil {
+		return err
+	}
+	subject, err := ResolveACLSubjectRef(db, ref)
+	if err != nil {
+		return err
+	}
+	return applyCollectionACLRevoke(db, id, subject, role)
+}
+
+// RevokeCollectionAclBySubject is the ID-space counterpart of
+// RevokeCollectionAcl. It is also the only way to clear a row whose
+// subject has since been deleted, since there is no name left to
+// resolve — so unlike the grant path it does NOT require the subject to
+// still exist.
+func RevokeCollectionAclBySubject(db *gorm.DB, id, user, userID string, groups []string, subject ACLSubject, role AclRole, isAdmin bool) error {
+	if _, err := loadCollectionForWrite(db, id, user, userID, groups, isAdmin, token_scopes.Collection_Delete); err != nil {
+		return err
+	}
+	return applyCollectionACLRevoke(db, id, subject, role)
+}
+
+func UpsertCollectionMetadata(db *gorm.DB, id, user, userID string, groups []string, key, value string, isAdmin bool) error {
+	_, err := loadCollectionForWrite(db, id, user, userID, groups, isAdmin, token_scopes.Collection_Modify)
+	if err != nil {
+		return err
 	}
 
 	return db.Transaction(func(tx *gorm.DB) error {
@@ -1007,16 +1593,9 @@ func UpsertCollectionMetadata(db *gorm.DB, id, user, userID string, groups []str
 }
 
 func DeleteCollectionMetadata(db *gorm.DB, id, user, userID string, groups []string, key string, isAdmin bool) error {
-	collection := &Collection{}
-	if result := db.Preload("ACLs").Where("id = ?", id).First(collection); result.Error != nil {
-		return result.Error
-	}
-
-	if !isAdmin {
-		err := validateACL(db, collection, user, userID, groups, token_scopes.Collection_Modify)
-		if err != nil {
-			return err
-		}
+	_, err := loadCollectionForWrite(db, id, user, userID, groups, isAdmin, token_scopes.Collection_Modify)
+	if err != nil {
+		return err
 	}
 
 	return db.Transaction(func(tx *gorm.DB) error {
@@ -1047,13 +1626,12 @@ type CreateShareReq struct {
 	Description        string
 	Namespace          string
 	Visibility         Visibility
-	// Owner identity — the share is owned by the caller minting it,
-	// not by the parent collection's owner. Per the design, access
-	// tokens for the share's prefixes are clamped to whatever the
-	// share owner currently has on the parent — that intersection
-	// happens at token-mint time (see oa4mp), not here.
-	OwnerUsername string
-	OwnerID       string
+	// OwnerID — the share is owned by the caller minting it, not by
+	// the parent collection's owner. Per the design, access tokens for
+	// the share's prefixes are clamped to whatever the share owner
+	// currently has on the parent — that intersection happens at
+	// token-mint time (see oa4mp), not here.
+	OwnerID string
 }
 
 // CreateShare persists a new share — a child Collection whose
@@ -1131,7 +1709,6 @@ func CreateShare(db *gorm.DB, req CreateShareReq) (*Collection, error) {
 		ID:                 slug,
 		Name:               req.Name,
 		Description:        req.Description,
-		Owner:              req.OwnerUsername,
 		OwnerID:            req.OwnerID,
 		Namespace:          ns,
 		Visibility:         req.Visibility,
@@ -1167,7 +1744,7 @@ func ListCollectionShares(db *gorm.DB, parentID, user, userID string, groups []s
 		return all, nil
 	}
 
-	groups = ExpandCallerACLGroups(db, user, userID, groups)
+	subjects := ResolveCallerACLSubjects(db, user, userID, groups)
 
 	out := []Collection{}
 	seen := map[string]struct{}{}
@@ -1188,57 +1765,38 @@ func ListCollectionShares(db *gorm.DB, parentID, user, userID string, groups []s
 	}
 	addAll(pub)
 
-	// (2) Owned shares — match either OwnerID or the legacy
-	// username field.
-	var owned []Collection
-	switch {
-	case userID != "" && user != "":
-		if err := db.Where("parent_collection_id = ? AND (owner_id = ? OR owner = ?)", parentID, userID, user).Find(&owned).Error; err != nil {
+	// (2) Owned shares, matched on the immutable User.ID.
+	if subjects.UserID != "" {
+		var owned []Collection
+		if err := db.Where("parent_collection_id = ? AND owner_id = ?", parentID, subjects.UserID).Find(&owned).Error; err != nil {
 			return nil, err
 		}
-	case userID != "":
-		if err := db.Where("parent_collection_id = ? AND owner_id = ?", parentID, userID).Find(&owned).Error; err != nil {
-			return nil, err
-		}
-	case user != "":
-		if err := db.Where("parent_collection_id = ? AND owner = ?", parentID, user).Find(&owned).Error; err != nil {
-			return nil, err
-		}
+		addAll(owned)
 	}
-	addAll(owned)
 
-	// (3) Admin-group membership via DB membership.
-	if userID != "" {
-		var adminViaMember []Collection
-		if err := db.Table("collections").
-			Joins("JOIN group_members ON group_members.group_id = collections.admin_id").
-			Where("collections.parent_collection_id = ? AND collections.admin_id <> '' AND group_members.user_id = ?", parentID, userID).
-			Find(&adminViaMember).Error; err != nil {
+	// (3) Admin-group membership (DB-recorded and asserted, unioned by
+	// ResolveCallerACLSubjects).
+	if len(subjects.GroupIDs) > 0 {
+		var viaAdminGroup []Collection
+		if err := db.Where("parent_collection_id = ? AND admin_id IN ?", parentID, subjects.GroupIDs).Find(&viaAdminGroup).Error; err != nil {
 			return nil, err
 		}
-		addAll(adminViaMember)
-	}
-	// (3b) Admin-group membership via cookie-asserted group names.
-	if len(groups) > 0 {
-		var adminViaName []Collection
-		if err := db.Table("collections").
-			Joins("JOIN groups ON groups.id = collections.admin_id").
-			Where("collections.parent_collection_id = ? AND collections.admin_id <> '' AND groups.name IN ?", parentID, groups).
-			Find(&adminViaName).Error; err != nil {
-			return nil, err
-		}
-		addAll(adminViaName)
+		addAll(viaAdminGroup)
 	}
 
 	// (4) ACL-granted read access.
-	var aclRows []Collection
-	if err := db.
-		Joins("JOIN collection_acls ON collections.id = collection_acls.collection_id").
-		Where("collections.parent_collection_id = ? AND collection_acls.group_id IN ? AND collection_acls.role IN ?", parentID, groups, ScopeToRole[token_scopes.Collection_Read]).
-		Find(&aclRows).Error; err != nil {
-		return nil, err
+	if where, args := subjects.ACLWhere(); where != "" {
+		var aclRows []Collection
+		if err := db.
+			Joins("JOIN collection_acls ON collections.id = collection_acls.collection_id").
+			Where("collections.parent_collection_id = ?", parentID).
+			Where(where, args...).
+			Where("collection_acls.role IN ?", ScopeToRole[token_scopes.Collection_Read]).
+			Find(&aclRows).Error; err != nil {
+			return nil, err
+		}
+		addAll(aclRows)
 	}
-	addAll(aclRows)
 
 	return out, nil
 }
@@ -1251,16 +1809,12 @@ func ListCollectionShares(db *gorm.DB, parentID, user, userID string, groups []s
 // owner can hand the collection to someone else, but a writer can't
 // elevate themselves).
 func UpdateCollection(db *gorm.DB, id, user, userID string, groups []string, name, description *string, visibility *Visibility, ownerID, adminID *string, enableSharing *bool, isAdmin bool) error {
-	collection := &Collection{}
-	if result := db.Preload("ACLs").Where("id = ?", id).First(collection); result.Error != nil {
-		return result.Error
+	collection, err := loadCollectionForWrite(db, id, user, userID, groups, isAdmin, token_scopes.Collection_Modify)
+	if err != nil {
+		return err
 	}
 
 	if !isAdmin {
-		err := validateACL(db, collection, user, userID, groups, token_scopes.Collection_Modify)
-		if err != nil {
-			return err
-		}
 		// Ownership transfer (ownerID) is owner-exclusive: an
 		// admin-group member must NOT be able to seize the
 		// collection by re-pointing OwnerID at themselves. The
@@ -1276,7 +1830,7 @@ func UpdateCollection(db *gorm.DB, id, user, userID string, groups []string, nam
 		// primary security concern (locking the rightful owner
 		// out) is addressed by the ownerID gate.
 		if ownerID != nil &&
-			!CallerIsCollectionOwner(collection, user, userID) {
+			!CallerIsCollectionOwner(db, collection, user, userID) {
 			return ErrForbidden
 		}
 		if adminID != nil &&
@@ -1293,8 +1847,20 @@ func UpdateCollection(db *gorm.DB, id, user, userID string, groups []string, nam
 	// here. The ownership-transfer-invite path (or a direct PATCH
 	// with a non-empty ownerId) is the supported way to hand a
 	// collection off.
-	if ownerID != nil && strings.TrimSpace(*ownerID) == "" {
-		return errors.New("ownerId cannot be empty; transfer to a real user instead")
+	if ownerID != nil {
+		if strings.TrimSpace(*ownerID) == "" {
+			return errors.New("ownerId cannot be empty; transfer to a real user instead")
+		}
+		// And it has to name a live account. OwnerID is now the ONLY
+		// ownership handle — there is no username column to fall back
+		// on — so a typo'd or stale ID would strand the collection
+		// exactly as an empty one would.
+		if err := db.Select("id").Where("id = ?", *ownerID).First(&User{}).Error; err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				return fmt.Errorf("ownerId %q does not name an active user", *ownerID)
+			}
+			return err
+		}
 	}
 
 	updates := make(map[string]interface{})
@@ -1325,16 +1891,9 @@ func UpdateCollection(db *gorm.DB, id, user, userID string, groups []string, nam
 }
 
 func AddCollectionMembers(db *gorm.DB, id string, members []string, addedBy, addedByID string, groups []string, isAdmin bool) error {
-	collection := &Collection{}
-	if result := db.Preload("ACLs").Where("id = ?", id).First(collection); result.Error != nil {
-		return result.Error
-	}
-
-	if !isAdmin {
-		err := validateACL(db, collection, addedBy, addedByID, groups, token_scopes.Collection_Modify)
-		if err != nil {
-			return err
-		}
+	collection, err := loadCollectionForWrite(db, id, addedBy, addedByID, groups, isAdmin, token_scopes.Collection_Modify)
+	if err != nil {
+		return err
 	}
 
 	// Enforce that each member belongs to the collection's namespace
@@ -1359,10 +1918,10 @@ func AddCollectionMembers(db *gorm.DB, id string, members []string, addedBy, add
 		records = append(records, CollectionMember{
 			CollectionID: id,
 			ObjectURL:    member,
-			AddedBy:      addedBy,
+			AddedBy:      creatorOrUnknown(addedByID),
 		})
 	}
-	err := db.Transaction(func(tx *gorm.DB) error {
+	err = db.Transaction(func(tx *gorm.DB) error {
 		if result := tx.Create(&records); result.Error != nil {
 			return result.Error
 		}
@@ -1375,16 +1934,9 @@ func AddCollectionMembers(db *gorm.DB, id string, members []string, addedBy, add
 }
 
 func RemoveCollectionMembers(db *gorm.DB, id string, members []string, user, userID string, groups []string, isAdmin bool) error {
-	collection := &Collection{}
-	if result := db.Preload("ACLs").Where("id = ?", id).First(collection); result.Error != nil {
-		return result.Error
-	}
-
-	if !isAdmin {
-		err := validateACL(db, collection, user, userID, groups, token_scopes.Collection_Modify)
-		if err != nil {
-			return err
-		}
+	_, err := loadCollectionForWrite(db, id, user, userID, groups, isAdmin, token_scopes.Collection_Modify)
+	if err != nil {
+		return err
 	}
 
 	return db.Transaction(func(tx *gorm.DB) error {
@@ -1408,10 +1960,10 @@ func DeleteCollection(db *gorm.DB, id string, owner, ownerID string, groups []st
 	// collection out from under its rightful owner. This intentionally
 	// diverges from the older validateACL-based check, which let any
 	// AclRoleOwner-row holder delete; under the new ownership model,
-	// that role no longer exists and the owner is identified by the
-	// Collection.OwnerID / Collection.Owner fields instead.
+	// that role no longer exists and the owner is identified by
+	// Collection.OwnerID.
 	if !isAdmin {
-		if !CallerIsCollectionOwner(collection, owner, ownerID) {
+		if !CallerIsCollectionOwner(db, collection, owner, ownerID) {
 			return ErrForbidden
 		}
 	}
@@ -1466,60 +2018,36 @@ func MinRole(a, b AclRole) AclRole {
 // EffectiveCollectionRole returns the highest ACL role the named
 // user holds on the supplied collection, or "" when they hold none.
 // Walks all the same paths CallerIsCollectionOwnerOrAdmin does
-// (direct ownership, admin-group via DB membership, ACL via DB
-// membership and personal `user-<name>` group, the
-// all-authenticated-users sentinel) but does NOT consider cookie-
-// asserted groups — the caller is identified by their stable User
-// row, not their current session.
+// (direct ownership, admin-group membership, ACL grants to the user
+// or to a group they belong to, the all-authenticated-users sentinel)
+// but does NOT consider session-asserted group names — the caller is
+// identified by their stable User row, not their current session.
 //
 // Used by the share-token-mint intersection: the data plane mints
 // `share.access:/$shareID` plus storage scopes clamped to the share
 // owner's current parent role. No session is available for that
-// owner at mint time, so DB-membership is the only authoritative
-// signal we can consult.
+// owner at mint time, so DB-recorded membership is the only
+// authoritative signal we can consult.
 func EffectiveCollectionRole(db *gorm.DB, coll *Collection, userID, username string) AclRole {
 	if coll == nil {
 		return ""
 	}
+	// No asserted group names: this path deliberately answers "what does
+	// this user hold right now", independent of any session. Mirrored
+	// memberships count even when stale — see
+	// ResolveCallerACLSubjectsToleratingStale for why this one caller
+	// tolerates that and no other does.
+	subjects := ResolveCallerACLSubjectsToleratingStale(db, username, userID)
+
 	// Direct ownership — Owner takes precedence over everything else.
-	if userID != "" && coll.OwnerID != "" && coll.OwnerID == userID {
-		return AclRoleOwner
-	}
-	if username != "" && coll.Owner == username {
+	if subjects.UserID != "" && coll.OwnerID != "" && coll.OwnerID == subjects.UserID {
 		return AclRoleOwner
 	}
 	// Admin-group membership — also Owner-equivalent for storage
 	// purposes (the admin group can add/remove members and ACLs;
 	// the only thing they can't do is delete the collection).
-	if coll.AdminID != "" && userID != "" && db != nil {
-		var n int64
-		if err := db.Model(&GroupMember{}).
-			Where("group_id = ? AND user_id = ?", coll.AdminID, userID).
-			Count(&n).Error; err == nil && n > 0 {
-			return AclRoleOwner
-		}
-	}
-	// ACL match — gather the user's group names (via DB membership)
-	// and synthesize the personal + all-authenticated entries the
-	// runtime uses elsewhere.
-	groupNames := []string{}
-	if userID != "" && db != nil {
-		var rows []struct{ Name string }
-		if err := db.Table("group_members").
-			Joins("JOIN groups ON groups.id = group_members.group_id").
-			Select("groups.name").
-			Where("group_members.user_id = ?", userID).
-			Scan(&rows).Error; err == nil {
-			for _, r := range rows {
-				groupNames = append(groupNames, r.Name)
-			}
-		}
-	}
-	if username != "" {
-		groupNames = append(groupNames, "user-"+username)
-	}
-	if userID != "" || username != "" {
-		groupNames = append(groupNames, AllAuthenticatedUsersACLGroup)
+	if coll.AdminID != "" && slices.Contains(subjects.GroupIDs, coll.AdminID) {
+		return AclRoleOwner
 	}
 
 	best := AclRole("")
@@ -1527,7 +2055,7 @@ func EffectiveCollectionRole(db *gorm.DB, coll *Collection, userID, username str
 		if acl.ExpiresAt != nil && acl.ExpiresAt.Before(time.Now()) {
 			continue
 		}
-		if !slices.Contains(groupNames, acl.GroupID) {
+		if !subjects.Matches(acl) {
 			continue
 		}
 		if rolePriority(acl.Role) > rolePriority(best) {
@@ -1538,59 +2066,36 @@ func EffectiveCollectionRole(db *gorm.DB, coll *Collection, userID, username str
 }
 
 // CallerIsCollectionOwnerOrAdmin reports whether the caller's
-// identity (username + User.ID + group memberships) gives them
-// owner-or-admin authority on the collection: matches Collection.Owner
-// (legacy username path), Collection.OwnerID (new User.ID path), or
-// is a member of Collection.AdminID (the admin group). When this
-// returns true the caller skips the ACL check entirely — they have
-// full management authority.
+// identity gives them owner-or-admin authority on the collection:
+// their User.ID matches Collection.OwnerID, or they belong to
+// Collection.AdminID (the admin group, by DB-recorded membership or by
+// an asserted group name that resolves to it). When this returns true
+// the caller skips the ACL check entirely — they have full management
+// authority.
 //
 // `db` may be nil during in-memory unit tests of the ACL filter; in
-// that case the admin-group lookup is skipped (membership check
-// requires a query) and the function still answers correctly for the
-// owner cases.
+// that case only the caller-supplied User.ID is available, and the
+// function still answers correctly for the owner case.
 func CallerIsCollectionOwnerOrAdmin(db *gorm.DB, collection *Collection, username, userID string, groups []string) bool {
-	// Owner via User.ID — the authoritative match. Owner via username
-	// is the back-compat path: existing rows pre-dating OwnerID may
-	// only carry the legacy `owner` field.
-	if userID != "" && collection.OwnerID != "" && userID == collection.OwnerID {
-		return true
+	return ResolveCallerACLSubjects(db, username, userID, groups).IsOwnerOrAdmin(collection)
+}
+
+// IsOwnerOrAdmin is CallerIsCollectionOwnerOrAdmin against an
+// already-resolved subject set. Callers that check many collections for
+// one caller — the listing endpoints, which compute a per-row `canEdit`
+// — should resolve once and call this, rather than re-running the
+// identity queries per row.
+func (s CallerACLSubjects) IsOwnerOrAdmin(collection *Collection) bool {
+	if collection == nil {
+		return false
 	}
-	if username != "" && username == collection.Owner {
+	if s.UserID != "" && collection.OwnerID != "" && s.UserID == collection.OwnerID {
 		return true
 	}
 	if collection.AdminID == "" {
 		return false
 	}
-	// Admin-group membership — the caller can assert it via the
-	// cookie-derived `groups` list (group NAMES, OIDC-asserted), OR
-	// via a real DB row in group_members. We accept both so admin
-	// authority is consistent whether group membership came from the
-	// IdP or the management UI.
-	if userID != "" && db != nil {
-		var n int64
-		if err := db.Model(&GroupMember{}).
-			Where("group_id = ? AND user_id = ?", collection.AdminID, userID).
-			Count(&n).Error; err == nil && n > 0 {
-			return true
-		}
-	}
-	if len(groups) == 0 {
-		return false
-	}
-	// `groups` carries group NAMES. Resolve AdminID (a slug) to a name
-	// and check membership-by-name.
-	if db != nil {
-		var grp Group
-		if err := db.Select("id", "name").
-			Where("id = ?", collection.AdminID).
-			First(&grp).Error; err == nil {
-			if slices.Contains(groups, grp.Name) {
-				return true
-			}
-		}
-	}
-	return false
+	return slices.Contains(s.GroupIDs, collection.AdminID)
 }
 
 // CallerIsCollectionOwner is the strict variant of
@@ -1609,22 +2114,33 @@ func CallerIsCollectionOwnerOrAdmin(db *gorm.DB, collection *Collection, usernam
 // NOT consulted here — the caller is responsible for layering an
 // admin-scope check on top when that bypass is appropriate (it is
 // for the management API, but isn't a property of this helper).
-func CallerIsCollectionOwner(collection *Collection, username, userID string) bool {
-	if userID != "" && collection.OwnerID != "" && userID == collection.OwnerID {
-		return true
+//
+// `db` may be nil, in which case only a caller who already carries a
+// User.ID can match; a caller identified by username alone cannot be
+// resolved without a query and is treated as a non-owner.
+func CallerIsCollectionOwner(db *gorm.DB, collection *Collection, username, userID string) bool {
+	if collection == nil || collection.OwnerID == "" {
+		return false
 	}
-	if username != "" && username == collection.Owner {
-		return true
+	if userID != "" {
+		return userID == collection.OwnerID
 	}
-	return false
+	if db == nil || username == "" {
+		return false
+	}
+	var u User
+	if err := db.Select("id").Where("username = ?", username).First(&u).Error; err != nil {
+		return false
+	}
+	return u.ID == collection.OwnerID
 }
 
 // validateACL is the ownership + ACL access check used by every
 // CRUD-walled collection function. It returns nil iff:
 //
-//  1. The caller is the collection's owner — username matches
-//     Collection.Owner OR userID matches Collection.OwnerID. Owner
-//     authority is unconditional (read + write + delete + transfer).
+//  1. The caller is the collection's owner — their User.ID matches
+//     Collection.OwnerID. Owner authority is unconditional (read +
+//     write + delete + transfer).
 //  2. The caller is a member of Collection.AdminID. Admin-group
 //     authority covers everything except ownership transfer and
 //     deletion — both of those re-gate to owner-exclusive in
@@ -1639,7 +2155,10 @@ func CallerIsCollectionOwner(collection *Collection, username, userID string) bo
 // tests); production code should always pass the live DB so the
 // admin-group bypass works.
 func validateACL(db *gorm.DB, collection *Collection, user, userID string, groups []string, scope token_scopes.TokenScope) error {
-	if CallerIsCollectionOwnerOrAdmin(db, collection, user, userID, groups) {
+	// Resolve the caller once; both the ownership check and the ACL
+	// scan below match against the same ID-keyed subject set.
+	subjects := ResolveCallerACLSubjects(db, user, userID, groups)
+	if subjects.IsOwnerOrAdmin(collection) {
 		return nil
 	}
 
@@ -1648,15 +2167,9 @@ func validateACL(db *gorm.DB, collection *Collection, user, userID string, group
 		return fmt.Errorf("invalid scope: %s", scope.String())
 	}
 
-	// Augment with the personal `user-<name>` group and (when
-	// authenticated) the all-authenticated-users sentinel. See
-	// ExpandCallerACLGroups for the contract.
-	groups = ExpandCallerACLGroups(db, user, userID, groups)
-
-	// for each acl, check if a user's group is the group in the ACL and has the required role
 	for _, acl := range collection.ACLs {
 		// Skip expired grants and keep scanning — a caller may hold the
-		// required role through more than one group, and ACL row order is
+		// required role through more than one subject, and ACL row order is
 		// not deterministic. Returning ErrForbidden on the first expired
 		// match (as this did previously) would intermittently deny a user
 		// who also has a still-valid grant, purely based on iteration
@@ -1665,10 +2178,8 @@ func validateACL(db *gorm.DB, collection *Collection, user, userID string, group
 		if acl.ExpiresAt != nil && acl.ExpiresAt.Before(time.Now()) {
 			continue
 		}
-		for _, group := range groups {
-			if acl.GroupID == group && slices.Contains(roles, acl.Role) {
-				return nil
-			}
+		if subjects.Matches(acl) && slices.Contains(roles, acl.Role) {
+			return nil
 		}
 	}
 
@@ -2104,8 +2615,20 @@ func CreateGroup(db *gorm.DB, name, displayName, description string, creator Cre
 	}
 
 	// Disallow creating groups that start with the reserved personal-group prefix.
-	if strings.HasPrefix(name, "user-") {
+	if strings.HasPrefix(name, PersonalACLGroupPrefix) {
 		return nil, ErrReservedGroupPrefix
+	}
+
+	// A name an identity provider already asserts is off-limits:
+	// otherwise, the user may be able to shadow a privileged group.
+	var clash Group
+	if err := db.Select("id", "name", "source").Where("name = ?", name).First(&clash).Error; err == nil {
+		if clash.Source.IsAsserted() {
+			return nil, fmt.Errorf("%w: %q %s", ErrGroupNameConflict, name, describeGroupNameHold(&clash))
+		}
+		return nil, fmt.Errorf("a group named %q already exists", name)
+	} else if !errors.Is(err, gorm.ErrRecordNotFound) {
+		return nil, err
 	}
 
 	createdBy := creatorOrUnknown(creator.UserID)
@@ -2129,6 +2652,7 @@ func CreateGroup(db *gorm.DB, name, displayName, description string, creator Cre
 		OwnerID:                owner,
 		CreatedForCollectionID: createdForCollectionID,
 		AuthTemplateEligible:   authTemplateEligible,
+		Source:                 GroupSourcePelican,
 	}
 
 	if result := db.Create(group); result.Error != nil {
@@ -2136,6 +2660,612 @@ func CreateGroup(db *gorm.DB, name, displayName, description string, creator Cre
 	}
 
 	return group, nil
+}
+
+// maxAssertedGroupNameLen bounds what we will write into groups.name
+// from a provider's assertion. Generous compared to ValidateIdentifier's
+// 64 (asserted names are hierarchical and can be long), but bounded so a
+// malformed claim can't balloon the table.
+const maxAssertedGroupNameLen = 255
+
+// GroupAutoCreationEnabled reports whether this server records a group
+// the first time a provider asserts its name. On by default; operators
+// opt out with Issuer.DisableGroupAutoCreation.
+func GroupAutoCreationEnabled() bool {
+	return !param.Issuer_DisableGroupAutoCreation.GetBool()
+}
+
+// BuiltinAdminUser returns the built-in "admin" account — the user
+// whose username is "admin" on the server's own issuer
+// (Server.ExternalWebUrl). Returns (nil, nil) when the URL isn't
+// configured yet or the row hasn't been bootstrapped.
+// See BootstrapAdminAndBackfillOwners, which creates the row.
+func BuiltinAdminUser(db *gorm.DB) (*User, error) {
+	externalURL := param.Server_ExternalWebUrl.GetString()
+	if db == nil || externalURL == "" {
+		return nil, nil
+	}
+	var admin User
+	err := db.Where("username = ? AND issuer = ?", "admin", externalURL).First(&admin).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	return &admin, nil
+}
+
+// EnsureAssertedGroups records a `groups` row for every group name
+// `source` asserted, so the name has a stable ID that collection ACLs
+// and group scopes can key on.
+//
+// Why this exists. Group names used to come from two unreconciled
+// places: records in this table, and whatever a provider asserted in a
+// token. Because ACLs matched on the name, the two were
+// indistinguishable at authorization time — so an unprivileged user
+// could create a group named after one the provider asserts and step
+// into its grants, and there was no ID to key an ACL on for a group
+// that had never been created in Pelican. Recording the row on first
+// observation collapses the two into one: from then on the provider's
+// group has an ID, and CreateGroup refuses the name
+// (ErrGroupNameConflict) because it is taken.
+//
+// The row is owned by the built-in admin user, not by whoever happened
+// to log in, so no ordinary user inherits authority over it. Its
+// membership is NOT written to `group_members`: the asserting provider
+// stays the source of truth for who is in it, and
+// ResolveCallerACLSubjects resolves a caller's asserted names to these
+// IDs on every request.
+//
+// AuthTemplateEligible is set true AT CREATION, which preserves today's
+// behavior rather than changing it: FilterAuthTemplateEligibleGroups
+// passes through names it has no record for, so an asserted name already
+// matches Issuer.AuthorizationTemplates / Server.*AdminGroups, and
+// recording it with the bit clear would silently revoke that.
+//
+// Re-observation deliberately does NOT touch the bit. An admin who
+// clears it has made a decision and we don't second guess it.
+//
+// A record that already exists with source GroupSourcePelican is left
+// alone.
+//
+// `source` must be the provider that actually asserted the names, and
+// must be one an operator configured via Issuer.GroupSource.
+//
+// Errors are returned but are not fatal to the caller's flow — a login
+// should still succeed if the bookkeeping write fails; the names just
+// stay unreconciled until the next observation.
+func EnsureAssertedGroups(db *gorm.DB, source GroupSource, names []string) (accepted []string, err error) {
+	if db == nil || len(names) == 0 || !GroupAutoCreationEnabled() {
+		return nil, nil
+	}
+	if !source.IsAsserted() {
+		return nil, fmt.Errorf("group source %q does not assert memberships", source)
+	}
+
+	wanted := recordableGroupNames(names, fmt.Sprintf("asserted by the %s source", source))
+	if len(wanted) == 0 {
+		return nil, nil
+	}
+
+	var existing []Group
+	if err := db.Select("id", "name", "source", "auth_template_eligible").
+		Where("name IN ? AND deleted_at IS NULL", wanted).Find(&existing).Error; err != nil {
+		return nil, err
+	}
+	known := make(map[string]Group, len(existing))
+	for _, g := range existing {
+		known[g.Name] = g
+	}
+
+	accepted = make([]string, 0, len(wanted))
+	var adminID, createdBy string
+	if len(known) < len(wanted) {
+		admin, err := BuiltinAdminUser(db)
+		if err != nil {
+			return nil, err
+		}
+		if admin != nil {
+			adminID = admin.ID
+			createdBy = admin.ID
+		} else {
+			// No admin row yet (brand-new install). Leave the group
+			// ownerless; BootstrapAdminAndBackfillOwners assigns every
+			// ownerless group to the admin on the next startup.
+			createdBy = CreatorUnknown
+		}
+	}
+
+	for _, name := range wanted {
+		g, ok := known[name]
+		if ok {
+			if g.Source == GroupSourcePelican {
+				log.Warnf("Group %q asserted by the %s source collides with a Pelican-created group (id %s); "+
+					"the Pelican group is left alone and no membership will be mirrored into it", name, source, g.ID)
+				continue
+			}
+			switch g.Source {
+			case GroupSourceUnknown:
+				// Completing a record the migration could only mark
+				// unknown — not changing a source, recording the one it
+				// always had.
+				if err := db.Model(&Group{}).Where("id = ?", g.ID).
+					Update("source", source).Error; err != nil {
+					return nil, err
+				}
+			case source:
+				// Nothing to do.
+			default:
+				// A group's source is a fact about where it came from,
+				// set once at bootstrap, so an operator who switches
+				// Issuer.GroupSource can still see which records predate
+				// the switch. Re-stamping would erase exactly that.
+				log.Warnf("Group %q was recorded from the %s source but is now asserted by %s; "+
+					"leaving its recorded source alone", name, g.Source, source)
+			}
+			accepted = append(accepted, name)
+			continue
+		}
+		slug, err := generateSlug()
+		if err != nil {
+			return nil, err
+		}
+		grp := &Group{
+			ID:                   slug,
+			Name:                 name,
+			CreatedBy:            createdBy,
+			OwnerID:              adminID,
+			AuthTemplateEligible: true,
+			Source:               source,
+		}
+		if err := db.Create(grp).Error; err != nil {
+			// Another request observing the same assertion got there
+			// first; that is a success for our purposes.
+			if isUniqueConstraintError(err) {
+				accepted = append(accepted, name)
+				continue
+			}
+			return nil, err
+		}
+		accepted = append(accepted, name)
+		log.Infof("Recorded group %q asserted by the %s source as group ID %s", name, source, slug)
+	}
+	return accepted, nil
+}
+
+// MirroredMembershipTTL is how long a mirrored membership may still
+// grant access after the provider last asserted it
+// (Issuer.AssertedGroupMembershipTTL). Zero disables mirrored
+// memberships as an authorization input without disabling the mirror
+// itself — the rows are still recorded and still shown in the UI.
+func MirroredMembershipTTL() time.Duration {
+	return param.Issuer_AssertedGroupMembershipTTL.GetDuration()
+}
+
+// freshAssertedMembershipCutoff returns the timestamp a mirrored row's
+// asserted_at must beat to still grant, and whether mirrored rows may
+// grant at all.
+//
+// Every GRANTING consumer must apply this; a RESTRICTING one
+// ("might this account hold a privilege?") must not, because for those
+// a stale copy still has to answer yes. That asymmetry is the whole
+// reason freshness gates granting rather than retention — see the
+// GroupMember.AssertedAt contract.
+func freshAssertedMembershipCutoff() (time.Time, bool) {
+	ttl := MirroredMembershipTTL()
+	if ttl <= 0 {
+		return time.Time{}, false
+	}
+	return time.Now().Add(-ttl), true
+}
+
+// membershipQuery builds the base query over a user's group
+// memberships, joined to live groups only. `grantingOnly` selects
+// between the two views the rest of this file is careful to keep
+// apart: the granting view drops mirrored memberships whose last
+// assertion is older than the TTL, while the restricting view keeps
+// them.
+func membershipQuery(db *gorm.DB, userID string, grantingOnly bool) *gorm.DB {
+	q := db.Table("group_members").
+		Joins("JOIN groups ON groups.id = group_members.group_id AND groups.deleted_at IS NULL").
+		Where("group_members.user_id = ?", userID)
+	if !grantingOnly {
+		return q
+	}
+	if cutoff, mirroredMayGrant := freshAssertedMembershipCutoff(); mirroredMayGrant {
+		return q.Where("group_members.source = ? OR group_members.asserted_at > ?", GroupSourcePelican, cutoff)
+	}
+	return q.Where("group_members.source = ?", GroupSourcePelican)
+}
+
+// observationDebounce is how long a freshness stamp may go un-rewritten
+// when nothing else about an observation has changed.
+//
+// The group-file refresher reconciles every known account on
+// Issuer.GroupFileRefreshInterval (15m by default) while mirrored rows
+// stay valid for Issuer.AssertedGroupMembershipTTL (168h) — so in the
+// steady state it rewrites `asserted_at` and `groups_observed_at`
+// roughly 672 times more often than expiry requires, at two write
+// commits per account per pass.
+//
+// Deriving the window from the TTL keeps the margin automatic: an eighth
+// of it leaves a row re-stamped about eight times over before it could
+// expire, whatever the operator set. A TTL of zero means mirrored rows
+// never grant at all, so the stamp is decorative and an hour is plenty.
+//
+// This bounds only the rewriting of timestamps. Whether the provider's
+// group SET changed is evaluated on every pass, never debounced — see
+// mirroredStateIsCurrent.
+func observationDebounce() time.Duration {
+	ttl := MirroredMembershipTTL()
+	if ttl <= 0 {
+		return time.Hour
+	}
+	return ttl / 8
+}
+
+// mirroredStateIsCurrent reports whether this user's mirrored
+// memberships already say exactly what the current assertion says, with
+// stamps recent enough to leave alone — in which case the caller can
+// skip the write transaction entirely.
+//
+// It answers false for any real difference: a mirrored row the provider
+// no longer asserts (which must be retracted NOW, not after the
+// debounce window), an asserted group with no row at all, or a row
+// carrying a previous provider's source. Only the timestamp is allowed
+// to be stale, and only inside the window.
+func mirroredStateIsCurrent(db *gorm.DB, source GroupSource, userID string, assertedIDs []string) (bool, error) {
+	var rows []struct {
+		GroupID    string
+		Source     GroupSource
+		AssertedAt *time.Time
+	}
+	if err := db.Table("group_members").
+		Select("group_id", "source", "asserted_at").
+		Where("user_id = ?", userID).
+		Scan(&rows).Error; err != nil {
+		return false, err
+	}
+
+	cutoff := time.Now().Add(-observationDebounce())
+	covered := make(map[string]struct{}, len(rows))
+	for _, r := range rows {
+		covered[r.GroupID] = struct{}{}
+		if r.Source == GroupSourcePelican {
+			// An administrator's own membership. It is never retracted
+			// or re-stamped, and it covers the group for insert
+			// purposes, so it can never be a reason to do work.
+			continue
+		}
+		if !slices.Contains(assertedIDs, r.GroupID) {
+			return false, nil // a retraction is due
+		}
+		if r.Source != source || r.AssertedAt == nil || r.AssertedAt.Before(cutoff) {
+			return false, nil // needs re-stamping
+		}
+	}
+	for _, id := range assertedIDs {
+		if _, ok := covered[id]; !ok {
+			return false, nil // a membership is missing
+		}
+	}
+	return true, nil
+}
+
+// grantingMembershipsFor returns the group IDs a user holds that may
+// grant access right now: every Pelican-created membership, plus every
+// mirrored membership the provider has asserted within the TTL.
+func grantingMembershipsFor(db *gorm.DB, userID string) ([]string, error) {
+	if db == nil || userID == "" {
+		return nil, nil
+	}
+	var rows []struct{ GroupID string }
+	if err := membershipQuery(db, userID, true).
+		Select("group_members.group_id").Scan(&rows).Error; err != nil {
+		return nil, err
+	}
+	out := make([]string, 0, len(rows))
+	for _, r := range rows {
+		out = append(out, r.GroupID)
+	}
+	return out, nil
+}
+
+// groupNamesFor returns the names of the groups the user belongs to
+// under one of the two membership views.
+func groupNamesFor(db *gorm.DB, userID string, grantingOnly bool) ([]string, error) {
+	if db == nil || userID == "" {
+		return nil, nil
+	}
+	var rows []struct{ Name string }
+	if err := membershipQuery(db, userID, grantingOnly).
+		Select("groups.name").Scan(&rows).Error; err != nil {
+		return nil, err
+	}
+	out := make([]string, 0, len(rows))
+	for _, r := range rows {
+		if r.Name != "" {
+			out = append(out, r.Name)
+		}
+	}
+	return out, nil
+}
+
+// ErrConfiguredAuthorityGroup is returned when an operation is refused
+// because the group's name is listed in Server.AdminGroups,
+// Server.UserAdminGroups or Server.CollectionAdminGroups. It is
+// distinct from ErrForbidden because it is not about the caller's
+// privileges — a full system administrator is refused too — and the
+// remedy is a configuration change, which the message carries.
+var ErrConfiguredAuthorityGroup = errors.New("group name confers administrator authority via configuration")
+
+// ErrGroupAdminLatched is returned when a caller tries to rule out an
+// account that has already been observed holding an administrative
+// group. The latch is deliberately one-way — see GroupAdminStatus — so
+// this is refused rather than honored.
+var ErrGroupAdminLatched = errors.New("account has been observed holding an administrative group")
+
+// AnyGroupCanConferAdminScope reports whether some group on this server
+// carries a directly granted administrator scope, i.e. a group_scopes
+// row for one of `scopes`.
+//
+// It is the database half of "could a group make this account an
+// administrator". The other half is the Server.*AdminGroups
+// configuration, which this package does not read; callers combine the
+// two — see web_ui.MustTreatAsSystemAdmin.
+//
+// Errors are reported rather than swallowed: the only caller uses this
+// to decide whether it may stop being cautious, so failing to answer
+// must not read as "no".
+func AnyGroupCanConferAdminScope(db *gorm.DB, scopes []string) (bool, error) {
+	if db == nil || len(scopes) == 0 {
+		return false, nil
+	}
+	var count int64
+	if err := db.Table("group_scopes").
+		Joins("JOIN groups ON groups.id = group_scopes.group_id AND groups.deleted_at IS NULL").
+		Where("group_scopes.scope IN ?", scopes).
+		Count(&count).Error; err != nil {
+		return false, err
+	}
+	return count > 0, nil
+}
+
+// RuleOutGroupAdmin records a full administrator's judgement that an
+// account does not hold an administrative group, moving it from
+// GroupAdminUnknown to GroupAdminRuledOut.
+//
+// This exists because `unknown` is otherwise only cleared by the
+// account itself signing in. Under an `oidc` or `github` group source
+// nothing else ever observes it, so an account that never signs in
+// again — a departed user, an invite never redeemed — stays `unknown`
+// forever and no user-administrator can act on it. Those are exactly
+// the accounts that need cleaning up.
+//
+// It is NOT an escape hatch for the latch. An account already recorded
+// GroupAdminPossible is refused with ErrGroupAdminLatched: that state
+// means Pelican has SEEN the account hold an administrative group, and
+// an API to erase that observation would be an API to defeat the guard
+// it feeds. Only the absence of evidence can be resolved this way, and
+// only by a caller who already bypasses the guard entirely.
+func RuleOutGroupAdmin(db *gorm.DB, userID string) error {
+	if db == nil || userID == "" {
+		return nil
+	}
+	var user User
+	if err := db.Select("id", "group_admin_status").First(&user, "id = ?", userID).Error; err != nil {
+		return err
+	}
+	if user.GroupAdminStatus == GroupAdminPossible {
+		return ErrGroupAdminLatched
+	}
+	return db.Model(&User{}).
+		Where("id = ? AND group_admin_status <> ?", userID, GroupAdminPossible).
+		Updates(map[string]interface{}{
+			"group_admin_status": GroupAdminRuledOut,
+			"groups_observed_at": time.Now(),
+		}).Error
+}
+
+// GroupNamesForGranting returns the names of every group the user
+// belongs to that may confer authority right now — the name-space
+// counterpart of grantingMembershipsFor.
+//
+// Use this wherever a true answer HANDS SOMETHING OUT. Its stale-
+// tolerant twin, GroupNamesForRestrictionCheck, is for the questions
+// where a true answer refuses something.
+func GroupNamesForGranting(db *gorm.DB, userID string) ([]string, error) {
+	return groupNamesFor(db, userID, true)
+}
+
+// GroupNamesForRestrictionCheck returns the names of every group the
+// user belongs to, INCLUDING mirrored memberships that have gone stale.
+//
+// This is the deliberate counterpart to GroupNamesForGranting, and the
+// two must not be confused. Use this only where the answer RESTRICTS
+// what a caller may do — web_ui.MustTreatAsSystemAdmin, which stops a
+// user-administrator from acting on a system administrator's account,
+// is the motivating case. There, "we last saw this account in an admin
+// group a month ago" must mean "refuse", not "go ahead": treating a
+// stale copy as absence is what opens the guard.
+//
+// Never use it to decide whether to hand out access.
+func GroupNamesForRestrictionCheck(db *gorm.DB, userID string) ([]string, error) {
+	return groupNamesFor(db, userID, false)
+}
+
+// RecordGroupAdminObservation latches what an observation of a user's
+// asserted group set concluded about their administrator privileges.
+//
+// `sawAdminGroup` is the caller's verdict — the group-to-scope matching
+// lives in the web layer, which owns the Server.*AdminGroups config, so
+// this function does not re-derive it. It only enforces the latch:
+//
+//   - true always sets GroupAdminPossible.
+//   - false moves GroupAdminUnknown to GroupAdminRuledOut, and leaves
+//     GroupAdminPossible alone. That asymmetry IS the latch: a provider
+//     retracting an administrative membership removes the evidence, not
+//     the history, and an account that has ever been able to administer
+//     this server should not become manageable by a user-administrator
+//     because the evidence went away.
+//
+// GroupsObservedAt is stamped either way, so an operator can tell "we
+// looked and found nothing" from "we have never looked".
+func RecordGroupAdminObservation(db *gorm.DB, userID string, sawAdminGroup bool) error {
+	if db == nil || userID == "" {
+		return nil
+	}
+	// Skip the write when it would change nothing. The refresher calls
+	// this for every account on every pass, so in the steady state this
+	// is the difference between one read and one fsyncing commit per
+	// account. Only the observed-at timestamp is allowed to drift, and
+	// only inside observationDebounce; the latch itself is evaluated
+	// every time.
+	var user User
+	if err := db.Select("id", "group_admin_status", "groups_observed_at").
+		First(&user, "id = ?", userID).Error; err != nil {
+		return err
+	}
+	target := GroupAdminRuledOut
+	if sawAdminGroup {
+		target = GroupAdminPossible
+	}
+	if user.GroupAdminStatus == GroupAdminPossible && !sawAdminGroup {
+		// The latch holds and nothing is recorded, matching the
+		// never-downgrade clause below.
+		return nil
+	}
+	if user.GroupAdminStatus == target && user.GroupsObservedAt != nil &&
+		user.GroupsObservedAt.After(time.Now().Add(-observationDebounce())) {
+		return nil
+	}
+
+	now := time.Now()
+	updates := map[string]interface{}{"groups_observed_at": now}
+	if sawAdminGroup {
+		updates["group_admin_status"] = GroupAdminPossible
+		return db.Model(&User{}).Where("id = ?", userID).Updates(updates).Error
+	}
+	// Never downgrade a latched account.
+	updates["group_admin_status"] = GroupAdminRuledOut
+	return db.Model(&User{}).
+		Where("id = ? AND group_admin_status <> ?", userID, GroupAdminPossible).
+		Updates(updates).Error
+}
+
+// MirrorAssertedGroupMemberships records, for one user, the memberships
+// `source` just asserted, and drops the ones it no longer asserts.
+//
+// A Pelican-created membership is never touched: it is authoritative,
+// so an admin who adds a local member to an asserted group keeps them.
+//
+// Everything else IS in scope, not just rows already stamped `source`.
+// Issuer.GroupSource is single-valued, so at any moment exactly one
+// provider decides membership, and a row left behind by a previous one
+// is stale by definition. Retracting those here is what makes a change
+// of Issuer.GroupSource take effect: without it the old provider's rows
+// would linger, granting until their TTL expired, with nothing left to
+// retract them. The group RECORDS keep their original source either way
+// — that is a fact about where a group came from, and an operator can
+// still see which ones predate the switch.
+//
+// `acceptedNames` must be what EnsureAssertedGroups accepted, not the
+// raw assertion: a name it declined — one a Pelican-created group
+// already holds — must not get a membership mirrored into that group,
+// since nothing could then remove it.
+//
+// Passing an empty list is meaningful, not a no-op: it says the
+// provider asserts nothing for this user, and retracts accordingly. A
+// caller that merely FAILED to ask must not call this at all.
+func MirrorAssertedGroupMemberships(db *gorm.DB, source GroupSource, userID string, acceptedNames []string) error {
+	if db == nil || userID == "" || !GroupAutoCreationEnabled() {
+		return nil
+	}
+	if !source.IsAsserted() {
+		return fmt.Errorf("group source %q does not assert memberships", source)
+	}
+
+	// Resolve to the group records EnsureAssertedGroups accepted. The
+	// `source <> pelican` filter is the second half of that agreement:
+	// even if a caller passes a name it should not have, a membership
+	// never lands in a group Pelican owns.
+	assertedIDs := []string{}
+	if len(acceptedNames) > 0 {
+		var rows []struct{ ID string }
+		if err := db.Table("groups").
+			Select("id").
+			Where("name IN ? AND deleted_at IS NULL AND source <> ?", acceptedNames, GroupSourcePelican).
+			Scan(&rows).Error; err != nil {
+			return err
+		}
+		for _, r := range rows {
+			assertedIDs = append(assertedIDs, r.ID)
+		}
+	}
+
+	// Fast path: if the stored state already matches the assertion, do
+	// not open a write transaction at all. One WAL read replaces two
+	// fsyncing commits, per account, on every refresh pass.
+	if current, err := mirroredStateIsCurrent(db, source, userID, assertedIDs); err != nil {
+		return err
+	} else if current {
+		return nil
+	}
+
+	now := time.Now()
+	return db.Transaction(func(tx *gorm.DB) error {
+		// Drop every mirrored membership this user has that the current
+		// provider does not assert — including ones stamped by a
+		// previous Issuer.GroupSource. Done before adding, so a
+		// membership that moved between groups cannot briefly appear in
+		// both.
+		stale := tx.Where("user_id = ? AND source <> ?", userID, GroupSourcePelican)
+		if len(assertedIDs) > 0 {
+			stale = stale.Where("group_id NOT IN ?", assertedIDs)
+		}
+		if err := stale.Delete(&GroupMember{}).Error; err != nil {
+			return err
+		}
+		if len(assertedIDs) == 0 {
+			return nil
+		}
+
+		// Refresh or insert. A row that already exists as
+		// GroupSourcePelican is left untouched: it outranks an
+		// assertion, and stamping asserted_at on it would make an
+		// administrator's deliberate membership expire.
+		for _, groupID := range assertedIDs {
+			member := GroupMember{
+				GroupID:    groupID,
+				UserID:     userID,
+				AddedBy:    creatorOrUnknown(""),
+				Source:     source,
+				AssertedAt: &now,
+			}
+			// Refresh any mirrored row for this pair, whatever source it
+			// carries, and restamp it to the current provider. Symmetric
+			// with the retraction above: both treat "mirrored" as one
+			// scope, so a provider change cannot leave a row that one
+			// half owns and the other does not.
+			res := tx.Model(&GroupMember{}).
+				Where("group_id = ? AND user_id = ? AND source <> ?", groupID, userID, GroupSourcePelican).
+				Updates(map[string]interface{}{"source": source, "asserted_at": now})
+			if res.Error != nil {
+				return res.Error
+			}
+			if res.RowsAffected > 0 {
+				continue
+			}
+			// No mirrored row to refresh: either there is none at all, or
+			// there is a Pelican one we must not touch. DoNothing sorts
+			// the two out without a second query.
+			if err := tx.Clauses(clause.OnConflict{DoNothing: true}).Create(&member).Error; err != nil {
+				return err
+			}
+		}
+		return nil
+	})
 }
 
 func GetGroupWithMembers(db *gorm.DB, groupId string) (*Group, error) {
@@ -2176,10 +3306,12 @@ func isGroupOwnerOrAdmin(db *gorm.DB, group *Group, userID string, isSystemAdmin
 			return true
 		}
 		if group.AdminType == AdminTypeGroup {
-			// Check if the user is a member of the admin group
-			var count int64
-			db.Model(&GroupMember{}).Where("group_id = ? AND user_id = ?", group.AdminID, userID).Count(&count)
-			if count > 0 {
+			// Membership of the admin group is a GRANTING decision, so
+			// it goes through grantingMembershipsFor: a mirrored row the
+			// provider stopped asserting is kept for restricting
+			// questions, but it must not still confer authority over
+			// this group.
+			if ids, err := grantingMembershipsFor(db, userID); err == nil && slices.Contains(ids, group.AdminID) {
 				return true
 			}
 		}
@@ -2374,6 +3506,24 @@ func UpdateGroup(db *gorm.DB, id string, name, displayName, description *string,
 			return ErrForbidden
 		}
 
+		// An asserted group's name IS the link to the provider's
+		// assertion — ResolveCallerACLSubjects matches the asserted name
+		// against this column. Renaming it would silently detach every
+		// member (their assertion no longer resolves) and the next login
+		// would mint a second record under the original name. The
+		// display name is still editable.
+		// A PATCH that echoes the current name is not a rename. UIs
+		// routinely send the whole object back, and treating that as an
+		// attempted rename refused the request outright and lost the
+		// edits alongside it.
+		if newName, ok := updates["name"].(string); ok && newName == group.Name {
+			delete(updates, "name")
+		}
+		if _, renaming := updates["name"]; renaming && group.Source.IsAsserted() {
+			return fmt.Errorf("%w: %q %s and cannot be renamed",
+				ErrGroupNameConflict, group.Name, describeGroupNameHold(&group))
+		}
+
 		return tx.Model(&Group{}).Where("id = ?", id).Updates(updates).Error
 	})
 }
@@ -2512,7 +3662,25 @@ func RemoveGroupMember(db *gorm.DB, groupId, userId, removedByUserId string, isA
 		return ErrForbidden
 	}
 
-	if result := db.Where("group_id = ? AND user_id = ?", groupId, userId).Delete(&GroupMember{}); result.Error != nil {
+	// Same contract as LeaveGroup: a mirrored membership belongs to the
+	// provider. Removing the row here would look like it worked and be
+	// undone at the member's next login, so say so instead. Note this
+	// applies to admins too — the authority to manage a group does not
+	// extend to overruling the identity provider.
+	var member GroupMember
+	err := db.Where("group_id = ? AND user_id = ?", groupId, userId).First(&member).Error
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil // already not a member; removal is idempotent
+		}
+		return err
+	}
+	if member.IsMirrored() {
+		return fmt.Errorf("%w: %q is asserted by the %s group source", ErrMembershipNotLocal, group.Name, member.Source)
+	}
+
+	if result := db.Where("group_id = ? AND user_id = ? AND source = ?", groupId, userId, GroupSourcePelican).
+		Delete(&GroupMember{}); result.Error != nil {
 		return result.Error
 	}
 	return nil
@@ -2558,8 +3726,9 @@ type GroupCard struct {
 //     (username)" for the current value, even if the caller has no
 //     other relationship to the row).
 //   - Members of the collection's admin group, if AdminID is set.
-//   - Members of every group attached via a CollectionACL row,
-//     regardless of read/write/owner role.
+//   - Users named directly by a CollectionACL row, and members of
+//     every group attached via one, regardless of read/write/owner
+//     role.
 //
 // Returns UserCard rows so the caller never sees more than the
 // public-safe (id, username, displayName) projection. Soft-deleted
@@ -2569,35 +3738,23 @@ func CollectionCandidateOwners(db *gorm.DB, coll *Collection) ([]UserCard, error
 		return nil, errors.New("collection is required")
 	}
 
-	// Collect the candidate user IDs from each source. group_members
-	// stores user IDs; the ACL rows store group NAMES, so we resolve
-	// those to slugs first via the groups table.
+	// Every handle involved is already an ID: group_members stores
+	// user IDs, and an ACL row stores either a Group.ID or a User.ID.
 	groupSlugs := []string{}
 	if coll.AdminID != "" {
 		groupSlugs = append(groupSlugs, coll.AdminID)
 	}
-	if len(coll.ACLs) > 0 {
-		aclNames := make([]string, 0, len(coll.ACLs))
-		for _, a := range coll.ACLs {
-			aclNames = append(aclNames, a.GroupID)
-		}
-		var resolved []struct {
-			ID string
-		}
-		if err := db.Table("groups").
-			Select("id").
-			Where("name IN ?", aclNames).
-			Scan(&resolved).Error; err != nil {
-			return nil, err
-		}
-		for _, r := range resolved {
-			groupSlugs = append(groupSlugs, r.ID)
-		}
-	}
-
 	idSet := map[string]struct{}{}
 	if coll.OwnerID != "" {
 		idSet[coll.OwnerID] = struct{}{}
+	}
+	for _, a := range coll.ACLs {
+		switch a.SubjectType {
+		case ACLSubjectGroup:
+			groupSlugs = append(groupSlugs, a.SubjectID)
+		case ACLSubjectUser:
+			idSet[a.SubjectID] = struct{}{}
+		}
 	}
 	if len(groupSlugs) > 0 {
 		var memberRows []struct {
@@ -2694,7 +3851,18 @@ func LeaveGroup(db *gorm.DB, groupID, userID string) error {
 	if group.OwnerID == userID {
 		return ErrForbidden
 	}
-	res := db.Where("group_id = ? AND user_id = ?", groupID, userID).Delete(&GroupMember{})
+	// A mirrored membership is not ours to remove: the provider decides
+	// it, and the next login would put it back. Refusing is the honest
+	// answer — the user has to be removed at the provider.
+	var member GroupMember
+	if err := db.Where("group_id = ? AND user_id = ?", groupID, userID).First(&member).Error; err != nil {
+		return err
+	}
+	if member.IsMirrored() {
+		return fmt.Errorf("%w: %q is asserted by the %s group source", ErrMembershipNotLocal, group.Name, member.Source)
+	}
+	res := db.Where("group_id = ? AND user_id = ? AND source = ?", groupID, userID, GroupSourcePelican).
+		Delete(&GroupMember{})
 	if res.Error != nil {
 		return res.Error
 	}
@@ -2720,8 +3888,25 @@ func GetAllCollections(db *gorm.DB) ([]Collection, error) {
 	return collections, nil
 }
 
-// DeleteGroup deletes a group and cleans up any collection ACL entries that reference the
-// group's name (ACLs store group names, not group slugs).
+// DeleteGroup soft-deletes a group and clears everything that would
+// otherwise keep pointing at it: collection ACL grants, group scopes,
+// memberships, invite links, and any collection or group that named it
+// as their administrator.
+//
+// Two rules are doing the work here. First, every reference keys on the
+// group's ID, so the cleanup is a straight delete rather than the old
+// "match whatever name the group happens to have right now" — which
+// missed rows orphaned by an earlier rename (issue #3752). Second, the
+// delete is SOFT, so the ID is spent forever; a hard delete freed it
+// for a later group to be minted with (generateSlug is 8 hex characters
+// with no uniqueness check) and inherit anything this cleanup missed.
+// Belt and braces: the cleanup is exhaustive AND the ID cannot come
+// back.
+//
+// Clearing admin_id rather than leaving it dangling matters for the
+// collection case in particular: the collection would otherwise be
+// stuck naming an administrator that no longer exists, which no UI
+// surfaces and no caller can satisfy.
 //
 // Only the group owner or a system admin may delete the group.
 func DeleteGroup(db *gorm.DB, groupID, requestorUserID string, isAdmin bool) error {
@@ -2736,13 +3921,49 @@ func DeleteGroup(db *gorm.DB, groupID, requestorUserID string, isAdmin bool) err
 			return ErrForbidden
 		}
 
+		// Deleting releases the name (the live-rows-only unique index),
+		// which for a name the configuration says confers administrator
+		// authority would hand an unprivileged user the chance to claim
+		// it before the next startup reserves it again. Refuse while the
+		// configuration still names it; removing the config entry is the
+		// step that makes the group ordinary.
+		if isConfiguredAuthorityGroupName(group.Name) {
+			// Deliberately NOT ErrForbidden: this is not about who the
+			// caller is — a full system admin is refused too — and the
+			// handler collapses ErrForbidden into a generic "you do not
+			// have permission", which would hide the one thing the
+			// operator needs to know.
+			return fmt.Errorf("%w: %q confers administrator authority via Server.*AdminGroups; "+
+				"remove it from the configuration first", ErrConfiguredAuthorityGroup, group.Name)
+		}
+
 		// Remove any invite links referencing the group.
 		if err := tx.Where("group_id = ?", group.ID).Delete(&GroupInviteLink{}).Error; err != nil {
 			return err
 		}
 
-		// Remove any ACL entries referencing the group name.
-		if err := tx.Where("group_id = ?", group.Name).Delete(&CollectionACL{}).Error; err != nil {
+		// Remove any ACL entries referencing the group.
+		if err := tx.Where("subject_type = ? AND subject_id = ?", ACLSubjectGroup, group.ID).
+			Delete(&CollectionACL{}).Error; err != nil {
+			return err
+		}
+
+		// Remove any scopes granted to the group. Without this the rows
+		// survive the group and are inherited wholesale by anything
+		// that later ends up holding the same ID.
+		if err := tx.Where("group_id = ?", group.ID).Delete(&GroupScope{}).Error; err != nil {
+			return err
+		}
+
+		// Stand the group down as administrator of any collection or
+		// other group that named it.
+		if err := tx.Model(&Collection{}).Where("admin_id = ?", group.ID).
+			Update("admin_id", "").Error; err != nil {
+			return err
+		}
+		if err := tx.Model(&Group{}).
+			Where("admin_type = ? AND admin_id = ?", AdminTypeGroup, group.ID).
+			Updates(map[string]interface{}{"admin_id": "", "admin_type": ""}).Error; err != nil {
 			return err
 		}
 
@@ -2751,7 +3972,8 @@ func DeleteGroup(db *gorm.DB, groupID, requestorUserID string, isAdmin bool) err
 			return err
 		}
 
-		// Finally, delete the group itself.
+		// Finally, tombstone the group itself. GORM turns this into an
+		// UPDATE of deleted_at because Group carries a gorm.DeletedAt.
 		if err := tx.Delete(&group).Error; err != nil {
 			return err
 		}
@@ -2760,8 +3982,9 @@ func DeleteGroup(db *gorm.DB, groupID, requestorUserID string, isAdmin bool) err
 	})
 }
 
-// DeleteUser deletes a user and cleans up any collection ACL entries that reference the
-// user's implicit personal group name ("user-"+username).
+// DeleteUser deletes a user and cleans up any collection ACL entries
+// granted to them personally. Like DeleteGroup this keys on the ID, so
+// renames can't leave a grant behind.
 //
 // If isAdmin is false, only the user themselves may delete their account.
 func DeleteUser(db *gorm.DB, userID, requestorUserID string, isAdmin bool) error {
@@ -2776,10 +3999,9 @@ func DeleteUser(db *gorm.DB, userID, requestorUserID string, isAdmin bool) error
 			return ErrForbidden
 		}
 
-		personalGroup := "user-" + user.Username
-
-		// Remove any ACL entries referencing the user's personal group name.
-		if err := tx.Where("group_id = ?", personalGroup).Delete(&CollectionACL{}).Error; err != nil {
+		// Remove any ACL entries granted to this user personally.
+		if err := tx.Where("subject_type = ? AND subject_id = ?", ACLSubjectUser, user.ID).
+			Delete(&CollectionACL{}).Error; err != nil {
 			return err
 		}
 
@@ -2914,9 +4136,8 @@ func CreatePasswordInviteLink(db *gorm.DB, targetUserID, createdByUserID string,
 }
 
 // CreateCollectionOwnershipInviteLink mints a single-use invite that,
-// when redeemed by a logged-in user, transfers Collection.OwnerID
-// (and the legacy Collection.Owner username) from the current owner
-// to the redeemer. The previous owner stays referenced via
+// when redeemed by a logged-in user, transfers Collection.OwnerID from
+// the current owner to the redeemer. The previous owner stays referenced via
 // CreatedBy on the invite + audit fields on the collection row, but
 // loses ownership the moment the link is redeemed.
 //
@@ -2945,7 +4166,7 @@ func CreateCollectionOwnershipInviteLink(db *gorm.DB, collectionID, createdByUse
 	// members and ACLs, but handing out an ownership invite is
 	// morally identical to transferring ownership; per the design
 	// contract that's owner-exclusive.
-	if !isCollectionAdmin && !CallerIsCollectionOwner(collection, createdByUsername, createdByUserID) {
+	if !isCollectionAdmin && !CallerIsCollectionOwner(db, collection, createdByUsername, createdByUserID) {
 		return nil, "", ErrForbidden
 	}
 	link, plaintext, err := mintInviteLink(db, GroupInviteLink{
@@ -3036,14 +4257,13 @@ func RedeemCollectionOwnershipInviteLink(db *gorm.DB, plaintext string, redeemer
 			return errors.New("invite link has already been redeemed")
 		}
 
-		// Atomic transfer: bump owner_id + the legacy owner-username
-		// audit field together.
+		// owner_id is the whole of ownership; there is no second
+		// username column to keep in lockstep any more, which is what
+		// made the PATCH path (which only ever wrote owner_id) a
+		// privilege-retention bug before.
 		if err := tx.Model(&Collection{}).
 			Where("id = ?", link.CollectionID).
-			Updates(map[string]interface{}{
-				"owner_id": redeemer.ID,
-				"owner":    redeemer.Username,
-			}).Error; err != nil {
+			Update("owner_id", redeemer.ID).Error; err != nil {
 			return err
 		}
 

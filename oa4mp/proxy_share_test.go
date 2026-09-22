@@ -41,10 +41,12 @@ import (
 // are added separately via seedACL.
 func seedParent(t *testing.T, db *gorm.DB, id, namespace, ownerUsername, ownerUserID string) {
 	t.Helper()
+	require.Equal(t, ownerUsername+"-id", ownerUserID,
+		"fixtures follow seedUser's <username>-id convention so a personal ACL for the same user resolves to this row")
+	seedUser(t, db, ownerUsername)
 	require.NoError(t, db.Create(&database.Collection{
 		ID:            id,
 		Name:          id,
-		Owner:         ownerUsername,
 		OwnerID:       ownerUserID,
 		Namespace:     namespace,
 		Visibility:    database.VisibilityPrivate,
@@ -57,10 +59,12 @@ func seedParent(t *testing.T, db *gorm.DB, id, namespace, ownerUsername, ownerUs
 // then get ACL grants on the share.
 func seedShare(t *testing.T, db *gorm.DB, id, namespace, ownerUsername, ownerUserID, parentID string) {
 	t.Helper()
+	require.Equal(t, ownerUsername+"-id", ownerUserID,
+		"fixtures follow seedUser's <username>-id convention")
+	seedUser(t, db, ownerUsername)
 	require.NoError(t, db.Create(&database.Collection{
 		ID:                 id,
 		Name:               id,
-		Owner:              ownerUsername,
 		OwnerID:            ownerUserID,
 		Namespace:          namespace,
 		Visibility:         database.VisibilityPrivate,
@@ -101,11 +105,9 @@ func TestGetUserCollectionScopes_ShareIntersection(t *testing.T) {
 		// Bob creates a share and grants Carol *write* on it.
 		seedShare(t, db, "share-2", "/data/p2/sub", "bob", "bob-id", "parent-2")
 		seedACL(t, db, "share-2", "carol-writers", database.AclRoleWrite, nil)
-		// EffectiveCollectionRole synthesises the personal `user-bob`
-		// group inside the helper so we don't need a User row — the
-		// helper queries the User row only via group_members joins,
-		// and missing-table errors are tolerated (the helper falls
-		// back to the personal-group + sentinel synthesis path).
+		// The personal grant above is stored against Bob's User.ID, and
+		// EffectiveCollectionRole resolves the share owner by that same
+		// ID — no name is involved on either side.
 
 		scopes, _, err := GetUserCollectionScopes(db, "carol", "", []string{"carol-writers"}, "")
 		require.NoError(t, err)

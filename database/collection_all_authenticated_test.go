@@ -24,7 +24,7 @@ package database
 // runtime contract:
 //
 //   - validateACL: any caller with a non-empty username or User.ID
-//     matches an ACL row whose GroupID is the sentinel.
+//     matches an ACL row whose SubjectType is ACLSubjectAuthenticated.
 //   - ListCollections: same — the listing returns collections that
 //     grant the sentinel even when the caller has no group membership.
 //   - Anonymous callers (both username and userID empty) do NOT match
@@ -57,14 +57,13 @@ func TestAllAuthenticatedUsersSentinel(t *testing.T) {
 		coll := &Collection{
 			ID:         "c-private",
 			Name:       "private",
-			Owner:      "owner",
 			OwnerID:    "u-owner",
 			Namespace:  "/secret",
 			Visibility: VisibilityPrivate,
 			ACLs: []CollectionACL{
 				{
 					CollectionID: "c-private",
-					GroupID:      AllAuthenticatedUsersACLGroup,
+					SubjectType:  ACLSubjectAuthenticated,
 					Role:         AclRoleRead,
 					GrantedBy:    "u-owner",
 				},
@@ -89,14 +88,13 @@ func TestAllAuthenticatedUsersSentinel(t *testing.T) {
 		coll := &Collection{
 			ID:         "c-anon",
 			Name:       "anon",
-			Owner:      "owner",
 			OwnerID:    "u-owner",
 			Namespace:  "/secret",
 			Visibility: VisibilityPrivate,
 			ACLs: []CollectionACL{
 				{
 					CollectionID: "c-anon",
-					GroupID:      AllAuthenticatedUsersACLGroup,
+					SubjectType:  ACLSubjectAuthenticated,
 					Role:         AclRoleRead,
 					GrantedBy:    "u-owner",
 				},
@@ -119,13 +117,12 @@ func TestAllAuthenticatedUsersSentinel(t *testing.T) {
 		require.NoError(t, db.Create(&Collection{
 			ID:         "c-open",
 			Name:       "open",
-			Owner:      "owner",
 			OwnerID:    "u-owner",
 			Namespace:  "/p1",
 			Visibility: VisibilityPrivate,
 			ACLs: []CollectionACL{{
 				CollectionID: "c-open",
-				GroupID:      AllAuthenticatedUsersACLGroup,
+				SubjectType:  ACLSubjectAuthenticated,
 				Role:         AclRoleRead,
 				GrantedBy:    "u-owner",
 			}},
@@ -133,7 +130,6 @@ func TestAllAuthenticatedUsersSentinel(t *testing.T) {
 		require.NoError(t, db.Create(&Collection{
 			ID:         "c-closed",
 			Name:       "closed",
-			Owner:      "owner",
 			OwnerID:    "u-owner",
 			Namespace:  "/p2",
 			Visibility: VisibilityPrivate,

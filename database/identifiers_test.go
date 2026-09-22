@@ -40,6 +40,14 @@ func TestValidateIdentifier(t *testing.T) {
 		{"User2026", true},
 		{strings.Repeat("a", 64), true},
 
+		// A name that happens to look like a generated ID is an
+		// ordinary name. The spaces are kept apart by type, not by
+		// shape — see ValidateIdentifier.
+		{"a1b2c3d4", true},
+		{"0badf00d", true},
+		{"deadbeef", true},
+		{"A1B2C3D4", true},
+
 		// banned characters — '/' is the most important
 		{"alice/admin", false},
 		{`alice\admin`, false},
@@ -217,4 +225,22 @@ func TestValidateDisplayName(t *testing.T) {
 			assert.Errorf(t, err, "expected %q to be rejected", tc.name)
 		}
 	}
+}
+
+// An identifier that happens to look like a generated ID is an ordinary
+// identifier. The two spaces are kept apart by type (ACLSubjectRef
+// versus ACLSubject) and by which API fields a caller populates, never
+// by inspecting the string — so refusing the shape protected nothing
+// while confiscating a usable slice of the namespace.
+func TestIDShapedNamesAreOrdinaryNames(t *testing.T) {
+	assert.NoError(t, ValidateIdentifier("a1b2c3d4"))
+	assert.NoError(t, ValidateIdentifier("deadbeef"))
+	assert.Equal(t, "a1b2c3d4", SanitizeIdentifier("a1b2c3d4"),
+		"and a provider asserting one must still be able to log in")
+
+	// The rules that exist because of what an identifier is embedded in
+	// still apply.
+	assert.Equal(t, "", SanitizeIdentifier("/"), "nothing salvageable")
+	assert.Equal(t, "a.b", SanitizeIdentifier("a..b"), "the path-traversal guard still applies")
+	assert.Error(t, ValidateIdentifier("a/b"))
 }

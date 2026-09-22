@@ -102,8 +102,8 @@ func ValidateDisplayName(name string) error {
 }
 
 // SanitizeIdentifier coerces a candidate identifier (typically a value
-// pulled from an OIDC claim) into a form that passes ValidateIdentifier,
-// or returns "" if no useful sanitisation exists.
+// pulled from an OIDC claim) into a form that satisfies the identifier
+// rules, or returns "" if no useful sanitisation exists.
 //
 // The conservative substitution rules:
 //

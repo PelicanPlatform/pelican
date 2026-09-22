@@ -53,6 +53,11 @@ func setupCollectionTestDB(t *testing.T) *gorm.DB {
 	// view so the column gets added — the User struct intentionally has
 	// no PasswordHash field, see database/credentials.go.
 	require.NoError(t, db.AutoMigrate(&userCredential{}))
+	// Production scopes several uniqueness indexes to live rows; GORM
+	// can only emit full ones from struct tags. Without this the
+	// account- and group-reuse paths are unreachable and any test of
+	// them passes vacuously. See applyPartialIndexesForTests.
+	require.NoError(t, applyPartialIndexesForTests(db))
 	err = db.Exec("PRAGMA foreign_keys = ON").Error
 	require.NoError(t, err)
 	return db
@@ -284,7 +289,6 @@ func TestRedeemCollectionOwnershipInviteLink_GroupCascade(t *testing.T) {
 		coll := Collection{
 			ID:        "col-iota",
 			Name:      "iota",
-			Owner:     "owner1",
 			OwnerID:   "owner-1",
 			Namespace: "/iota",
 		}
@@ -322,7 +326,6 @@ func TestRedeemCollectionOwnershipInviteLink_GroupCascade(t *testing.T) {
 		var afterCol Collection
 		require.NoError(t, db.First(&afterCol, "id = ?", "col-iota").Error)
 		assert.Equal(t, "redeemer-1", afterCol.OwnerID)
-		assert.Equal(t, "redeemer1", afterCol.Owner)
 
 		// The onboarded group's ownership followed.
 		var afterOnboarded Group
@@ -360,7 +363,7 @@ func TestRedeemCollectionOwnershipInviteLink_GroupCascade(t *testing.T) {
 
 		coll := Collection{
 			ID: "col-alpha", Name: "alpha",
-			Owner: "owner2", OwnerID: "owner-2", Namespace: "/alpha",
+			OwnerID: "owner-2", Namespace: "/alpha",
 		}
 		require.NoError(t, db.Create(&coll).Error)
 

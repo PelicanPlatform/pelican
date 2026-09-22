@@ -524,16 +524,19 @@ func createApiToken(ctx *gin.Context) {
 		expirationTime = expirationTime.UTC()
 	}
 	scopes := strings.Join(req.Scopes, ",")
-	user, _, _, err := GetUserGroups(ctx)
-	if err != nil {
-		log.Warn("Failed to get user from context")
+	// api_keys.created_by records the creator's User.ID. The key's persisted
+	// scopes are re-intersected against that user's current effective scopes,
+	// so the column is an authorization input.
+	_, userID, _, err := GetUserGroups(ctx)
+	if err != nil || userID == "" {
+		log.Warn("Failed to identify the calling user when creating an API key")
 		ctx.JSON(http.StatusInternalServerError, server_structs.SimpleApiResp{
 			Status: server_structs.RespFailed,
 			Msg:    "No user found when creating API key",
 		})
 		return
 	}
-	token, err := api_token.CreateApiKey(database.ServerDatabase, req.Name, user, scopes, expirationTime)
+	token, err := api_token.CreateApiKey(database.ServerDatabase, req.Name, userID, scopes, expirationTime)
 	if err != nil {
 		log.Warning("Failed to create API key: ", err)
 		ctx.JSON(status, server_structs.SimpleApiResp{
@@ -604,16 +607,41 @@ func listApiTokens(ctx *gin.Context) {
 		return
 	}
 
+	// created_by is a User.ID; resolve it so the listing can show
+	// a username. A key whose creator has been deleted — or one minted
+	// before the column existed — resolves to nothing: that key no
+	// longer carries any user-derived authority.
+	creatorIDs := make([]string, 0, len(apiKeys))
+	for _, apiKey := range apiKeys {
+		if apiKey.CreatedBy != "" {
+			creatorIDs = append(creatorIDs, apiKey.CreatedBy)
+		}
+	}
+	creatorCards, err := database.GetUserCards(database.ServerDatabase, creatorIDs)
+	if err != nil {
+		log.Warning("Failed to resolve API key creators: ", err)
+		ctx.JSON(http.StatusInternalServerError, server_structs.SimpleApiResp{
+			Status: server_structs.RespFailed,
+			Msg:    err.Error(),
+		})
+		return
+	}
+
 	// Convert the API keys to the response format
 	apiKeysResponse := make([]server_structs.ApiKeyResponse, len(apiKeys))
 	for i, apiKey := range apiKeys {
+		createdBy := ""
+		if card, ok := creatorCards[apiKey.CreatedBy]; ok {
+			createdBy = card.Username
+		}
 		apiKeysResponse[i] = server_structs.ApiKeyResponse{
-			ID:        apiKey.ID,
-			Name:      apiKey.Name,
-			Scopes:    strings.Split(apiKey.Scopes, ","),
-			ExpiresAt: apiKey.ExpiresAt,
-			CreatedAt: apiKey.CreatedAt,
-			CreatedBy: apiKey.CreatedBy,
+			ID:          apiKey.ID,
+			Name:        apiKey.Name,
+			Scopes:      strings.Split(apiKey.Scopes, ","),
+			ExpiresAt:   apiKey.ExpiresAt,
+			CreatedAt:   apiKey.CreatedAt,
+			CreatedBy:   createdBy,
+			CreatedByID: apiKey.CreatedBy,
 		}
 	}
 
@@ -799,7 +827,7 @@ func registerCommonEndpoints(routerGroup *gin.RouterGroup) error {
 
 	// /users/* is gated by UserAdminAuthHandler — accepts holders of either
 	// server.admin OR server.user_admin. Per-target guards inside the
-	// handlers (IsSystemAdminUserID) prevent a user-admin from acting on a
+	// handlers (MustTreatAsSystemAdmin) prevent a user-admin from acting on a
 	// system-admin account. Self-service for ordinary users lives under
 	// /me/* (see below). Even admins must be AUP-compliant.
 	//

@@ -1063,8 +1063,12 @@ func TestCollectionsAPI(t *testing.T) {
 		require.NoError(t, json.Unmarshal(createColResp["id"], &collectionID))
 		require.NotEmpty(t, collectionID)
 
-		// 3. Grant the group read access to the collection
-		grantAclReq := map[string]string{"group_id": groupID, "role": "read"}
+		// 3. Grant the group read access to the collection.
+		//    Addressed in the ID space: `groupId`/`group_id` is the NAME
+		//    space, so a slug there does not resolve. The two are
+		//    separate fields precisely so neither has to be guessed from
+		//    the string — see database.ACLSubjectRef.
+		grantAclReq := map[string]string{"subjectType": "group", "subjectId": groupID, "role": "read"}
 		body, err = json.Marshal(grantAclReq)
 		require.NoError(t, err)
 		req, err = http.NewRequest("POST", "/api/v1.0/origin_ui/collections/"+collectionID+"/acl", bytes.NewReader(body))
@@ -1093,8 +1097,9 @@ func TestCollectionsAPI(t *testing.T) {
 		router.ServeHTTP(recorder, req)
 		assert.Equal(t, http.StatusOK, recorder.Code, fmt.Sprintf("unexpected status %d on GET, body: %s", recorder.Code, recorder.Body.String()))
 
-		// 6. Grant the group write access to the collection
-		grantAclReq = map[string]string{"group_id": groupID, "role": "write"}
+		// 6. Grant the group write access to the collection, this time
+		//    naming it in the NAME space to cover the other entry point.
+		grantAclReq = map[string]string{"group_id": groupName, "role": "write"}
 		body, err = json.Marshal(grantAclReq)
 		require.NoError(t, err)
 		req, err = http.NewRequest("POST", "/api/v1.0/origin_ui/collections/"+collectionID+"/acl", bytes.NewReader(body))

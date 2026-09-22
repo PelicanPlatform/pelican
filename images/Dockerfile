@@ -663,11 +663,20 @@ RUN --mount=type=cache,id=dnf-${TARGETPLATFORM},target=/var/cache/dnf,sharing=lo
   # gcc is also needed to enable the Go race detector (-race flag).
   dnf install -y gcc git make
 
-  # Install HTCondor for integration tests, but forcibly remove the
-  # Pelican packages that it pulls in so that there is zero chance tests
-  # are run using the wrong binary.
+  # Install HTCondor for integration tests, but forcibly remove any
+  # Pelican packages it pulls in so that there is zero chance tests are
+  # run using the wrong binary.
+  #
+  # Checked per package rather than removed blind: condor no longer
+  # depends on these, so `rpm -e` on the whole list aborts the build
+  # under `set -e` with "package pelican is not installed". Removal
+  # itself is still allowed to fail loudly.
   dnf install -y --enablerepo=${OSG_REPO} condor
-  rpm -e --nodeps pelican pelican-osdf-compat
+  for pkg in pelican pelican-osdf-compat; do
+    if rpm -q "${pkg}" >/dev/null 2>&1; then
+      rpm -e --nodeps "${pkg}"
+    fi
+  done
 
   # Add some normal user accounts for testing.
   # The inspiration for their names: https://en.wikipedia.org/wiki/Alice_and_Bob#Cast_of_characters.

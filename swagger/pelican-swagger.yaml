@@ -243,7 +243,10 @@ definitions:
         description: The name of the token
       createdBy:
         type: string
-        description: The user who created the token
+        description: >-
+          Ignored on create. The server records the calling user's ID as
+          the token's creator; the token's scopes are re-intersected
+          against that user's current effective scopes on every use.
       expiration:
         type: string
         description: The expiration time of the token. If it is empty or "never", the token will never expire. The token should be in the RFC3339 format.
@@ -268,7 +271,15 @@ definitions:
               description: The name of the token
             createdBy:
               type: string
-              description: The user who created the token
+              description: >-
+                Username of whoever created the token, resolved
+                server-side from the stored creator ID. Empty when that
+                account no longer exists.
+            createdById:
+              type: string
+              description: >-
+                The creator's immutable user ID.  The token's scopes are limited
+                to the active scopes of the creator.
             expiration:
               type: string
               description: The expiration time of the token. If it is empty or "never", the token will never expire. The token should be in the RFC3339 format.
@@ -890,8 +901,10 @@ definitions:
         example: "Collection of research data files"
       owner:
         type: string
-        description: The owner of the collection
-        example: "user@example.com"
+        description: >-
+          Username of the collection's owner. Empty when the owning
+          account no longer exists.
+        example: "alice"
       namespace:
         type: string
         description: The namespace prefix this collection belongs to
@@ -950,14 +963,44 @@ definitions:
         example: "2024-01-15T10:30:00Z"
   CollectionACL:
     type: object
+    description: >-
+      One role grant on a collection. The grant target is the
+      (`subjectType`, `subjectId`) pair, and `subjectId` is always an
+      immutable ID — a group, user, or empty for all authenticated users
     properties:
       collectionId:
         type: string
         description: ID of the collection
         example: "481c756c"
+      subjectType:
+        type: string
+        description: What kind of principal this row grants its role to.
+        enum:
+          - group
+          - user
+          - authenticated
+        example: "group"
+      subjectId:
+        type: string
+        description: >-
+          The granted principal's immutable ID: a group ID when
+          subjectType is `group`, a user ID when it is `user`, empty
+          when it is `authenticated`.
+        example: "abc12345"
+      subjectName:
+        type: string
+        description: >-
+          Current display handle for `subjectId` — a group name, a
+          username, or `@authenticated`. Empty when the principal's
+          row has been deleted.
+        example: "research-team"
       groupId:
         type: string
-        description: ID or name of the group
+        description: >-
+          Legacy spelling of the target, derived from `subjectName`:
+          the group name, `user-<username>`, or `@authenticated`.
+          Retained so existing clients keep working; prefer
+          `subjectType` + `subjectId` in new code.
         example: "research-team"
       role:
         type: string
@@ -1065,6 +1108,27 @@ definitions:
           - user
           - group
         example: "user"
+      source:
+        type: string
+        description: >-
+          Which provider this group came from. `pelican` groups were
+          created through this API and their membership lives in the
+          internal database. Every other value names a provider that
+          asserts the group (matching the `Issuer.GroupSource` config): those
+          records are created automatically the first time the name is observed
+          (see `Issuer.DisableGroupAutoCreation`), are owned by the built-in
+          admin user, cannot be renamed, and their membership is
+          whatever the provider asserts. `unknown` marks a record
+          backfilled by migration from a pre-existing collection ACL
+          whose asserting provider was not recorded; the next assertion
+          stamps the real one.
+        enum:
+          - pelican
+          - oidc
+          - file
+          - github
+          - unknown
+        example: "pelican"
       createdAt:
         type: string
         format: date-time
@@ -1137,6 +1201,37 @@ definitions:
         type: string
         format: date-time
         description: Timestamp when the user agreed to the AUP.
+      groupAdminStatus:
+        type: string
+        description: >-
+          What has been established about this account's group-derived
+          administrator privileges. Read-only, and consulted only to
+          decide whether a caller holding `server.user_admin` may act on
+          the account — never to grant anything.
+
+          `unknown` means Pelican has not established it (the default,
+          and what every account carries until its groups are first
+          observed); `possible` means the account has been observed
+          holding a group that confers an administrator scope, and is
+          sticky — a provider retracting the membership removes the
+          evidence, not the history; `ruled-out` means its groups have
+          been observed and none is administrative.
+
+          A user-administrator may act on the account only when this is
+          `ruled-out`. A full `server.admin` is not constrained by it.
+        enum:
+          - unknown
+          - possible
+          - ruled-out
+        example: "ruled-out"
+      groupsObservedAt:
+        type: string
+        format: date-time
+        description: >-
+          When this account's provider-asserted group set was last
+          reconciled; absent if it never has been. Says when the
+          observation happened, where `groupAdminStatus` says what it
+          concluded.
       createdBy:
         type: string
         description: >-
@@ -1183,6 +1278,10 @@ definitions:
         type: string
   GroupMember:
     type: object
+    description: >-
+      One user's membership in one group. There is at most one row per
+      (group, user) regardless of how the membership arose; `source` says
+      which kind it is.
     properties:
       groupId:
         type: string
@@ -1191,6 +1290,32 @@ definitions:
       userId:
         type: string
         description: ID of the user
+      source:
+        type: string
+        description: >-
+          `pelican` for a membership created through this API —
+          authoritative, never expires, and an assertion will neither
+          overwrite nor retract it. Any other value names the provider
+          that asserted the membership; such a membership is mirrored
+          automatically at login, cannot be removed through Pelican
+          (remove the user at the provider instead), and only grants
+          access while `assertedAt` is inside
+          `Issuer.AssertedGroupMembershipTTL`.
+        enum:
+          - pelican
+          - oidc
+          - file
+          - github
+          - unknown
+        example: "pelican"
+      assertedAt:
+        type: string
+        format: date-time
+        description: >-
+          When the provider last asserted this membership. Absent on
+          `pelican` memberships, which do not expire. A mirrored
+          membership older than the TTL is kept but no longer grants
+          access; logging in refreshes it.
       user:
         $ref: "#/definitions/User"
       createdBy:
@@ -1562,14 +1687,40 @@ definitions:
         example: ["pelican://origin.example.com/research/data/file1.txt"]
   GrantACLRequest:
     type: object
+    description: >-
+      Grants a role on a collection. `groupId` is a NAME: a group name,
+      `user-<username>` for a personal grant, or the `@authenticated`
+      sentinel; the server resolves it to a stored (subjectType,
+      subjectId) pair. An ID of either kind is NOT accepted here —
+      address a principal by ID with `subjectType` + `subjectId`. A target
+      that matches nothing is rejected with 400: grants are keyed on IDs,
+      so there is nothing to store for a name this server does not know.
+      To pre-grant access to a group your identity provider asserts but
+      nobody has logged in with yet, create the group first.
+      Supply either `groupId` or `subjectType`; OpenAPI 2.0 cannot
+      express that either/or, so only `role` is listed as required.
     required:
-      - groupId
       - role
     properties:
       groupId:
         type: string
-        description: ID or name of the group to grant access to
+        description: The ACL target. See the schema description for accepted spellings.
         example: "research-team"
+      subjectType:
+        type: string
+        description: >-
+          Address the principal by its stored ID instead of resolving a
+          name. Use together with `subjectId`.
+        enum:
+          - group
+          - user
+          - authenticated
+        example: "user"
+      subjectId:
+        type: string
+        description: >-
+          The target's stored ID; used together with `subjectType`.
+        example: "abc12345"
       role:
         type: string
         description: Role to grant
@@ -1585,14 +1736,33 @@ definitions:
         example: "2024-12-31T23:59:59Z"
   RevokeACLRequest:
     type: object
+    description: >-
+      Revokes a role grant. Accepts the same target spellings as
+      GrantACLRequest, including the `groupId` value returned by the ACL
+      listing. Supplying `subjectType` + `subjectId` skips name
+      resolution entirely, which is the only way to clear a grant whose
+      group or user row has already been deleted.
+      Supply either `groupId` or `subjectType`; OpenAPI 2.0 cannot
+      express that either/or, so only `role` is listed as required.
     required:
-      - groupId
       - role
     properties:
       groupId:
         type: string
-        description: ID or name of the group to revoke access from
+        description: The ACL target to revoke. See the schema description.
         example: "research-team"
+      subjectType:
+        type: string
+        description: Address the stored row directly instead of resolving a name.
+        enum:
+          - group
+          - user
+          - authenticated
+        example: "group"
+      subjectId:
+        type: string
+        description: The stored subject ID; used together with `subjectType`.
+        example: "abc12345"
       role:
         type: string
         description: Role to revoke
@@ -7009,11 +7179,15 @@ paths:
         - users
       summary: Update an existing user
       description: >-
-        `Admin privilege Required`. Only `username` and `displayName`
-        are mutable here. The user's primary OIDC identity (`sub`,
-        `issuer`) is managed via `/users/{id}/identities`, never inline
-        — and a username rename of a local-issuer account also rotates
-        the primary `sub` so password login keeps working.
+        `Admin privilege Required`. Only `username`, `displayName` and
+        `groupAdminRuledOut` are mutable here. The user's primary OIDC
+        identity (`sub`, `issuer`) is managed via
+        `/users/{id}/identities`, never inline — and a username rename
+        of a local-issuer account also rotates the primary `sub` so
+        password login keeps working.
+
+        `username` and `displayName` accept a user-admin caller;
+        `groupAdminRuledOut` requires a full system administrator.
       consumes:
         - application/json
       produces:
@@ -7026,7 +7200,9 @@ paths:
           type: string
         - in: body
           name: user
-          description: At least one of `username` or `displayName` must be set.
+          description: >-
+            At least one of `username`, `displayName` or
+            `groupAdminRuledOut` must be set.
           required: true
           schema:
             type: object
@@ -7037,11 +7213,28 @@ paths:
               displayName:
                 type: string
                 description: New human-readable display name.
+              groupAdminRuledOut:
+                type: boolean
+                description: >-
+                  Records that a system administrator has checked and
+                  this account does not hold a group conferring an
+                  administrator scope, which lets a user-administrator
+                  act on it. Only `true` is accepted, and only from a
+                  full system administrator. Needed because the state is
+                  otherwise only reached by the account signing in, so
+                  under an external group source an account that never
+                  signs in again can never be acted on. It cannot
+                  override an account already observed holding an
+                  administrative group; that returns 409.
       responses:
         "204":
           description: User updated successfully
         "400":
-          description: Bad request (no field set, invalid identifier, or uniqueness violation)
+          description: Bad request (no field set, invalid identifier, uniqueness violation, or groupAdminRuledOut set to false)
+        "409":
+          description: >-
+            The account has been observed holding an administrative
+            group, so `groupAdminRuledOut` cannot be recorded for it.
           schema:
             $ref: "#/definitions/ErrorModelV2"
         "401":

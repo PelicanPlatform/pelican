@@ -347,33 +347,47 @@ func EffectiveScopes(db *gorm.DB, userID string, externalGroupNames []string) ([
 	}
 
 	// 2. group_scopes for groups the user belongs to via group_members.
+	//    Mirrored memberships count only while the provider has asserted
+	//    them recently enough to grant — this is a granting path.
 	if userID != "" {
+		memberGroupIDs, err := grantingMembershipsFor(db, userID)
+		if err != nil {
+			return nil, err
+		}
 		var memberRows []struct {
 			Scope string
 		}
-		if err := db.Table("group_scopes").
-			Select("group_scopes.scope").
-			Joins("JOIN group_members ON group_members.group_id = group_scopes.group_id").
-			Where("group_members.user_id = ?", userID).
-			Scan(&memberRows).Error; err != nil {
-			return nil, err
+		if len(memberGroupIDs) > 0 {
+			if err := db.Table("group_scopes").
+				Select("scope").
+				Where("group_id IN ?", memberGroupIDs).
+				Scan(&memberRows).Error; err != nil {
+				return nil, err
+			}
 		}
 		for _, r := range memberRows {
 			add(r.Scope)
 		}
 	}
 
-	// 3. group_scopes for OIDC-asserted group names. Filter at SQL time
-	// so an asserted name that doesn't correspond to a real group
+	// 3. group_scopes for provider-asserted group names. Filter at SQL
+	// time so an asserted name that doesn't correspond to a real group
 	// produces no rows (mirrors ListGroupsVisibleToUser's stance:
 	// "external assertions only count when they map to a known group").
+	//
+	// Deliberately NOT filtered on `source`; see the matching note in
+	// ResolveCallerACLSubjects. The provider is trusted to say who the
+	// caller is, so it is trusted to say which groups they are in;
+	// excluding Pelican-created groups would buy nothing and would stop
+	// an administrator creating a group through the API and letting the
+	// provider decide who is in it.
 	if len(externalGroupNames) > 0 {
 		var extRows []struct {
 			Scope string
 		}
 		if err := db.Table("group_scopes").
 			Select("group_scopes.scope").
-			Joins("JOIN groups ON groups.id = group_scopes.group_id").
+			Joins("JOIN groups ON groups.id = group_scopes.group_id AND groups.deleted_at IS NULL").
 			Where("groups.name IN ?", externalGroupNames).
 			Scan(&extRows).Error; err != nil {
 			return nil, err

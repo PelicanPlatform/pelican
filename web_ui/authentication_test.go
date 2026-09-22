@@ -49,37 +49,6 @@ import (
 	"github.com/pelicanplatform/pelican/token_scopes"
 )
 
-func migrateTestDB(t *testing.T) {
-	err := database.ServerDatabase.AutoMigrate(&database.Collection{})
-	require.NoError(t, err, "Failed to migrate DB for collections table")
-	err = database.ServerDatabase.AutoMigrate(&database.CollectionMember{})
-	require.NoError(t, err, "Failed to migrate DB for collection members table")
-	err = database.ServerDatabase.AutoMigrate(&database.CollectionMetadata{})
-	require.NoError(t, err, "Failed to migrate DB for collection metadata table")
-	err = database.ServerDatabase.AutoMigrate(&database.CollectionACL{})
-	require.NoError(t, err, "Failed to migrate DB for collection ACLs table")
-	err = database.ServerDatabase.AutoMigrate(&database.Group{})
-	require.NoError(t, err, "Failed to migrate DB for groups table")
-	err = database.ServerDatabase.AutoMigrate(&database.GroupMember{})
-	require.NoError(t, err, "Failed to migrate DB for group members table")
-	err = database.ServerDatabase.AutoMigrate(&database.User{})
-	require.NoError(t, err, "Failed to migrate DB for users table")
-	// User struct intentionally has no PasswordHash field; this helper
-	// adds the password_hash column so password-based login tests work.
-	require.NoError(t, database.AutoMigrateCredentialsForTests(database.ServerDatabase),
-		"Failed to migrate DB for user credentials column")
-	err = database.ServerDatabase.AutoMigrate(&database.GroupInviteLink{})
-	require.NoError(t, err, "Failed to migrate DB for group invite links table")
-	err = database.ServerDatabase.AutoMigrate(&database.UserIdentity{})
-	require.NoError(t, err, "Failed to migrate DB for user identities table")
-	err = database.ServerDatabase.AutoMigrate(&database.AUPDocument{})
-	require.NoError(t, err, "Failed to migrate DB for AUP documents table")
-	err = database.ServerDatabase.AutoMigrate(&database.UserScope{})
-	require.NoError(t, err, "Failed to migrate DB for user_scopes table")
-	err = database.ServerDatabase.AutoMigrate(&database.GroupScope{})
-	require.NoError(t, err, "Failed to migrate DB for group_scopes table")
-}
-
 func TestWaitUntilLogin(t *testing.T) {
 	t.Cleanup(test_utils.SetupTestLogging(t))
 	ctx, cancel, egrp := test_utils.TestContext(context.Background(), t)
@@ -1039,13 +1008,7 @@ func TestUserAdminAuthHandler(t *testing.T) {
 		prev := database.ServerDatabase
 		db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
 		require.NoError(t, err)
-		require.NoError(t, db.AutoMigrate(
-			&database.User{},
-			&database.Group{},
-			&database.GroupMember{},
-			&database.UserScope{},
-			&database.GroupScope{},
-		))
+		migrateTestDBHandle(t, db)
 		database.ServerDatabase = db
 		t.Cleanup(func() { database.ServerDatabase = prev })
 	}
@@ -1195,17 +1158,7 @@ func setupUserStatusTestDB(t *testing.T) {
 	prev := database.ServerDatabase
 	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
 	require.NoError(t, err)
-	// User is the row userRecordIsActive looks up; the rest are
-	// here because DeleteUser (used in the soft-delete subtest)
-	// also cleans up CollectionACL rows referencing the user's
-	// personal-group name and GroupMember rows referencing the
-	// user.
-	require.NoError(t, db.AutoMigrate(
-		&database.User{},
-		&database.GroupMember{},
-		&database.CollectionACL{},
-	))
-	require.NoError(t, database.AutoMigrateCredentialsForTests(db))
+	migrateTestDBHandle(t, db)
 	database.ServerDatabase = db
 	t.Cleanup(func() { database.ServerDatabase = prev })
 }

@@ -19,6 +19,7 @@
 package oa4mp
 
 import (
+	"strings"
 	"testing"
 	"time"
 
@@ -28,6 +29,7 @@ import (
 	"gorm.io/gorm"
 
 	"github.com/pelicanplatform/pelican/database"
+	dbutils "github.com/pelicanplatform/pelican/database/utils"
 )
 
 // newCollectionTestDB spins up an in-memory sqlite database with just the
@@ -38,9 +40,47 @@ func newCollectionTestDB(t *testing.T) *gorm.DB {
 	t.Helper()
 	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
 	require.NoError(t, err)
-	require.NoError(t, db.AutoMigrate(&database.Collection{}))
-	require.NoError(t, db.AutoMigrate(&database.CollectionACL{}))
+	// The production migrations, not AutoMigrate: GORM can only emit a
+	// FULL unique index from struct tags, so a hand-rolled schema lacks
+	// the partial indexes that let a soft-deleted group or account
+	// release its name — and this package's tests turn on exactly those
+	// paths.
+	sqlDB, err := db.DB()
+	require.NoError(t, err)
+	// ":memory:" is per-connection, so the pool must be pinned to one.
+	sqlDB.SetMaxOpenConns(1)
+	require.NoError(t, dbutils.MigrateDB(sqlDB, database.EmbedUniversalMigrations, "universal_migrations"))
 	return db
+}
+
+// seedUser inserts (or reuses) a user row. Test IDs follow the
+// "<username>-id" convention so a fixture can name the same user by
+// either handle without threading the slug around.
+func seedUser(t *testing.T, db *gorm.DB, username string) string {
+	t.Helper()
+	id := username + "-id"
+	var u database.User
+	require.NoError(t, db.Where(database.User{Username: username}).Attrs(database.User{
+		ID: id, Sub: username, Issuer: "https://idp.example.com",
+		Status: database.UserStatusActive,
+	}).FirstOrCreate(&u).Error)
+	return u.ID
+}
+
+// seedGroup inserts (or reuses) a group row and returns its ID.
+func seedGroup(t *testing.T, db *gorm.DB, name string) string {
+	t.Helper()
+	var g database.Group
+	// Provider-asserted: these fixtures hand group NAMES to the scope
+	// resolver the way a cookie's wlcg.groups claim does, and a name
+	// only resolves to a group the provider is allowed to speak for. A
+	// `pelican` group's membership is this server's own and reaches a
+	// caller by ID instead — see proxy_db_membership_test.go.
+	require.NoError(t, db.Where(database.Group{Name: name}).Attrs(database.Group{
+		ID: "g-" + name, CreatedBy: "owner-user-id", OwnerID: "owner-user-id",
+		Source: database.GroupSourceOIDC,
+	}).FirstOrCreate(&g).Error)
+	return g.ID
 }
 
 // seedCollection inserts a collection row directly. We bypass the
@@ -48,25 +88,40 @@ func newCollectionTestDB(t *testing.T) *gorm.DB {
 // ownership / authorization logic.
 func seedCollection(t *testing.T, db *gorm.DB, id, namespace string) {
 	t.Helper()
+	seedUser(t, db, "owner-user")
 	require.NoError(t, db.Create(&database.Collection{
 		ID:         id,
 		Name:       id,
-		Owner:      "owner-user",
 		OwnerID:    "owner-user-id",
 		Namespace:  namespace,
 		Visibility: database.VisibilityPrivate,
 	}).Error)
 }
 
-func seedACL(t *testing.T, db *gorm.DB, collectionID, groupID string, role database.AclRole, expiresAt *time.Time) {
+// seedACL grants a role on a collection to `target`, which is written
+// the way an operator would name it: a group name, `user-<username>`,
+// or the all-authenticated sentinel. The helper materializes whatever
+// row that names and stores the resulting ID, mirroring what
+// database.ResolveACLSubject does in production.
+func seedACL(t *testing.T, db *gorm.DB, collectionID, target string, role database.AclRole, expiresAt *time.Time) {
 	t.Helper()
-	require.NoError(t, db.Create(&database.CollectionACL{
+	acl := database.CollectionACL{
 		CollectionID: collectionID,
-		GroupID:      groupID,
 		Role:         role,
-		GrantedBy:    "owner-user",
+		GrantedBy:    "owner-user-id",
 		ExpiresAt:    expiresAt,
-	}).Error)
+	}
+	switch {
+	case target == database.AllAuthenticatedUsersACLGroup:
+		acl.SubjectType = database.ACLSubjectAuthenticated
+	case strings.HasPrefix(target, database.PersonalACLGroupPrefix):
+		acl.SubjectType = database.ACLSubjectUser
+		acl.SubjectID = seedUser(t, db, strings.TrimPrefix(target, database.PersonalACLGroupPrefix))
+	default:
+		acl.SubjectType = database.ACLSubjectGroup
+		acl.SubjectID = seedGroup(t, db, target)
+	}
+	require.NoError(t, db.Create(&acl).Error)
 }
 
 // TestGetUserCollectionScopes_StorageScopeBridge verifies the data-plane

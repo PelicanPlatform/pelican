@@ -403,6 +403,17 @@ func handleCreateGroup(ctx *gin.Context) {
 			})
 			return
 		}
+		if errors.Is(err, database.ErrGroupNameConflict) {
+			// The name belongs to a group this server's identity
+			// provider asserts. Handing it to a local group would let
+			// its members stand in for the provider's group in every
+			// ACL keyed on it.
+			ctx.JSON(http.StatusConflict, server_structs.SimpleApiResp{
+				Status: server_structs.RespFailed,
+				Msg:    err.Error(),
+			})
+			return
+		}
 		if errors.Is(err, database.ErrInvalidIdentifier) || errors.Is(err, database.ErrInvalidDisplayName) {
 			ctx.JSON(http.StatusBadRequest, server_structs.SimpleApiResp{
 				Status: server_structs.RespFailed,
@@ -485,6 +496,11 @@ func handleUpdateGroup(ctx *gin.Context) {
 			ctx.JSON(http.StatusBadRequest, server_structs.SimpleApiResp{
 				Status: server_structs.RespFailed,
 				Msg:    "Group name cannot start with 'user-'",
+			})
+		} else if errors.Is(err, database.ErrGroupNameConflict) {
+			ctx.JSON(http.StatusConflict, server_structs.SimpleApiResp{
+				Status: server_structs.RespFailed,
+				Msg:    err.Error(),
 			})
 		} else if errors.Is(err, database.ErrInvalidIdentifier) {
 			ctx.JSON(http.StatusBadRequest, server_structs.SimpleApiResp{
@@ -840,6 +856,13 @@ func handleRemoveGroupMember(ctx *gin.Context) {
 				Status: server_structs.RespFailed,
 				Msg:    "you do not have permission to remove members from this group",
 			})
+		} else if errors.Is(err, database.ErrMembershipNotLocal) {
+			// Not a permission problem — no one, including an admin, can
+			// remove a membership the identity provider keeps asserting.
+			ctx.JSON(http.StatusConflict, server_structs.SimpleApiResp{
+				Status: server_structs.RespFailed,
+				Msg:    err.Error() + "; remove them at the identity provider instead",
+			})
 		} else {
 			ctx.JSON(http.StatusInternalServerError, server_structs.SimpleApiResp{
 				Status: server_structs.RespFailed,
@@ -931,6 +954,16 @@ type UpdateUserReq struct {
 	//     /users/:id/identities, never directly here.
 	Username    *string `json:"username"`
 	DisplayName *string `json:"displayName"`
+	// GroupAdminRuledOut records that a full administrator has checked
+	// and this account does not hold an administrative group. It exists
+	// because that state is otherwise only reached by the account
+	// signing in, so under an external group source an account that
+	// never signs in again can never be acted on by a user-admin.
+	//
+	// Only `true` is accepted, and only from a full system admin. It
+	// cannot clear the latch on an account already observed holding an
+	// administrative group; see database.RuleOutGroupAdmin.
+	GroupAdminRuledOut *bool `json:"groupAdminRuledOut"`
 }
 
 func handleUpdateUser(ctx *gin.Context) {
@@ -965,10 +998,19 @@ func handleUpdateUser(ctx *gin.Context) {
 		})
 		return
 	}
-	if req.Username == nil && req.DisplayName == nil {
+	if req.Username == nil && req.DisplayName == nil && req.GroupAdminRuledOut == nil {
 		ctx.JSON(http.StatusBadRequest, server_structs.SimpleApiResp{
 			Status: server_structs.RespFailed,
-			Msg:    "request must specify at least one of: username, displayName",
+			Msg:    "request must specify at least one of: username, displayName, groupAdminRuledOut",
+		})
+		return
+	}
+	if req.GroupAdminRuledOut != nil && !*req.GroupAdminRuledOut {
+		// Un-ruling-out would only ever restrict the caller, and
+		// accepting it would imply the reverse is possible too.
+		ctx.JSON(http.StatusBadRequest, server_structs.SimpleApiResp{
+			Status: server_structs.RespFailed,
+			Msg:    "groupAdminRuledOut may only be set to true",
 		})
 		return
 	}
@@ -993,10 +1035,10 @@ func handleUpdateUser(ctx *gin.Context) {
 		Sub:      ctx.GetString("OIDCSub"),
 	}
 	isSystemAdmin, _ := CheckAdmin(identity)
-	if !isSystemAdmin && IsSystemAdminUserID(database.ServerDatabase, id) {
+	if mustRefuse, why := MustTreatAsSystemAdmin(database.ServerDatabase, id); !isSystemAdmin && mustRefuse {
 		ctx.JSON(http.StatusForbidden, server_structs.SimpleApiResp{
 			Status: server_structs.RespFailed,
-			Msg:    "user administrators cannot modify system admin accounts",
+			Msg:    "cannot modify this account: " + why,
 		})
 		return
 	}
@@ -1042,6 +1084,33 @@ func handleUpdateUser(ctx *gin.Context) {
 					Msg:    fmt.Sprintf("Failed to update user: %v", err),
 				})
 			}
+			return
+		}
+	}
+	if req.GroupAdminRuledOut != nil {
+		// System admin only. A user-admin recording "this account is
+		// not an administrator" would be changing something about an
+		// account that might outrank it.
+		if !isSystemAdmin {
+			ctx.JSON(http.StatusForbidden, server_structs.SimpleApiResp{
+				Status: server_structs.RespFailed,
+				Msg:    "only a system administrator may record that an account is not an administrator",
+			})
+			return
+		}
+		if err := database.RuleOutGroupAdmin(database.ServerDatabase, id); err != nil {
+			if errors.Is(err, database.ErrGroupAdminLatched) {
+				ctx.JSON(http.StatusConflict, server_structs.SimpleApiResp{
+					Status: server_structs.RespFailed,
+					Msg: "this account has been observed holding an administrative group and cannot be " +
+						"marked otherwise; remove it from that group at the identity provider first",
+				})
+				return
+			}
+			ctx.JSON(http.StatusInternalServerError, server_structs.SimpleApiResp{
+				Status: server_structs.RespFailed,
+				Msg:    fmt.Sprintf("Failed to update administrator status: %v", err),
+			})
 			return
 		}
 	}
@@ -1102,6 +1171,14 @@ func handleDeleteGroup(ctx *gin.Context) {
 			ctx.JSON(http.StatusNotFound, server_structs.SimpleApiResp{
 				Status: server_structs.RespFailed,
 				Msg:    "group not found",
+			})
+		} else if errors.Is(err, database.ErrConfiguredAuthorityGroup) {
+			// Not a permissions problem — a full administrator is
+			// refused too — so the remedy travels with the message
+			// rather than being flattened into a generic 403.
+			ctx.JSON(http.StatusConflict, server_structs.SimpleApiResp{
+				Status: server_structs.RespFailed,
+				Msg:    err.Error(),
 			})
 		} else if errors.Is(err, database.ErrForbidden) {
 			ctx.JSON(http.StatusForbidden, server_structs.SimpleApiResp{
@@ -1171,10 +1248,10 @@ func handleDeleteUser(ctx *gin.Context) {
 	}
 
 	// User admins cannot delete system admin users
-	if !isAdmin && IsSystemAdminUserID(database.ServerDatabase, id) {
+	if mustRefuse, why := MustTreatAsSystemAdmin(database.ServerDatabase, id); !isAdmin && mustRefuse {
 		ctx.JSON(http.StatusForbidden, server_structs.SimpleApiResp{
 			Status: server_structs.RespFailed,
-			Msg:    "user administrators cannot delete system admin accounts",
+			Msg:    "cannot delete this account: " + why,
 		})
 		return
 	}
@@ -1825,10 +1902,10 @@ func handleUpdateUserStatus(ctx *gin.Context) {
 
 	// User admins cannot modify system admin users (only system admins can)
 	isSystemAdmin, _ := CheckAdmin(identity)
-	if !isSystemAdmin && IsSystemAdminUserID(database.ServerDatabase, id) {
+	if mustRefuse, why := MustTreatAsSystemAdmin(database.ServerDatabase, id); !isSystemAdmin && mustRefuse {
 		ctx.JSON(http.StatusForbidden, server_structs.SimpleApiResp{
 			Status: server_structs.RespFailed,
-			Msg:    "user administrators cannot modify system admin accounts",
+			Msg:    "cannot modify this account: " + why,
 		})
 		return
 	}
@@ -1948,10 +2025,10 @@ func handleClearAUPAgreement(ctx *gin.Context) {
 		Sub:      ctx.GetString("OIDCSub"),
 	}
 	isAdmin, _ := CheckAdmin(identity)
-	if !isAdmin && IsSystemAdminUserID(database.ServerDatabase, id) {
+	if mustRefuse, why := MustTreatAsSystemAdmin(database.ServerDatabase, id); !isAdmin && mustRefuse {
 		ctx.JSON(http.StatusForbidden, server_structs.SimpleApiResp{
 			Status: server_structs.RespFailed,
-			Msg:    "user administrators cannot clear a system admin's AUP acceptance",
+			Msg:    "cannot clear this account's AUP acceptance: " + why,
 		})
 		return
 	}

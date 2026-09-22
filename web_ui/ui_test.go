@@ -761,9 +761,8 @@ func TestApiToken(t *testing.T) {
 	mockDB, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
 	database.ServerDatabase = mockDB
 	require.NoError(t, err, "Error setting up mock origin DB")
-	err = database.ServerDatabase.AutoMigrate(&server_structs.ApiKey{})
-	require.NoError(t, err, "Failed to migrate DB for API key table")
 
+	// api_keys comes from the migrations now, like every other table.
 	migrateTestDB(t)
 	// AuthHandler now revalidates the user record on every cookie
 	// read; the synthetic admin cookie above points at user_id
@@ -1348,20 +1347,26 @@ func TestGroupManagementAPI(t *testing.T) {
 		groupID := createGroupResp.ID
 		require.NotEmpty(t, groupID)
 
-		// Create a collection ACL entry referencing the group name (not group ID)
-		col, err := database.CreateCollection(database.ServerDatabase, "col-for-group-delete", "desc", "owner-user", "owner-user", "/test", database.VisibilityPrivate)
+		// Create a collection ACL entry naming the group by its ID.
+		col, err := database.CreateCollection(database.ServerDatabase, "col-for-group-delete", "desc", "owner-user", "/test", database.VisibilityPrivate)
 		require.NoError(t, err)
 		acl := database.CollectionACL{
 			CollectionID: col.ID,
-			GroupID:      groupName,
+			SubjectType:  database.ACLSubjectGroup,
+			SubjectID:    groupID,
 			Role:         database.AclRoleRead,
 			GrantedBy:    "owner-user",
 		}
 		require.NoError(t, database.ServerDatabase.Create(&acl).Error)
 
-		var aclCount int64
-		require.NoError(t, database.ServerDatabase.Model(&database.CollectionACL{}).Where("group_id = ?", groupName).Count(&aclCount).Error)
-		require.EqualValues(t, 1, aclCount)
+		countGroupACLs := func() int64 {
+			var n int64
+			require.NoError(t, database.ServerDatabase.Model(&database.CollectionACL{}).
+				Where("subject_type = ? AND subject_id = ?", database.ACLSubjectGroup, groupID).
+				Count(&n).Error)
+			return n
+		}
+		require.EqualValues(t, 1, countGroupACLs())
 
 		// Non-creator, non-admin cannot delete
 		req, err = http.NewRequest("DELETE", "/api/v1.0/groups/"+groupID, nil)
@@ -1379,8 +1384,7 @@ func TestGroupManagementAPI(t *testing.T) {
 		route.ServeHTTP(recorder, req)
 		require.Equal(t, http.StatusNoContent, recorder.Code)
 
-		require.NoError(t, database.ServerDatabase.Model(&database.CollectionACL{}).Where("group_id = ?", groupName).Count(&aclCount).Error)
-		require.EqualValues(t, 0, aclCount)
+		require.EqualValues(t, 0, countGroupACLs())
 	})
 
 	t.Run("test-delete-user-admin-and-acl-cleanup", func(t *testing.T) {
@@ -1411,21 +1415,28 @@ func TestGroupManagementAPI(t *testing.T) {
 		userID := createUserResp.ID
 		require.NotEmpty(t, userID)
 
-		// Create a collection ACL entry referencing the user's implicit personal group name
-		personalGroup := "user-" + username
-		col, err := database.CreateCollection(database.ServerDatabase, "col-for-user-delete", "desc", "owner-user2", "owner-user2", "/test2", database.VisibilityPrivate)
+		// Create a personal ACL entry for the user — keyed on their
+		// User.ID, so deleting the account (or renaming it) leaves no
+		// grant behind for whoever claims the username next.
+		col, err := database.CreateCollection(database.ServerDatabase, "col-for-user-delete", "desc", "owner-user2", "/test2", database.VisibilityPrivate)
 		require.NoError(t, err)
 		acl := database.CollectionACL{
 			CollectionID: col.ID,
-			GroupID:      personalGroup,
+			SubjectType:  database.ACLSubjectUser,
+			SubjectID:    userID,
 			Role:         database.AclRoleRead,
 			GrantedBy:    "owner-user2",
 		}
 		require.NoError(t, database.ServerDatabase.Create(&acl).Error)
 
-		var aclCount int64
-		require.NoError(t, database.ServerDatabase.Model(&database.CollectionACL{}).Where("group_id = ?", personalGroup).Count(&aclCount).Error)
-		require.EqualValues(t, 1, aclCount)
+		countUserACLs := func() int64 {
+			var n int64
+			require.NoError(t, database.ServerDatabase.Model(&database.CollectionACL{}).
+				Where("subject_type = ? AND subject_id = ?", database.ACLSubjectUser, userID).
+				Count(&n).Error)
+			return n
+		}
+		require.EqualValues(t, 1, countUserACLs())
 
 		// Delete user as admin and ensure ACL cleanup happened
 		req, err = http.NewRequest("DELETE", "/api/v1.0/users/"+userID, nil)
@@ -1435,8 +1446,7 @@ func TestGroupManagementAPI(t *testing.T) {
 		route.ServeHTTP(recorder, req)
 		require.Equal(t, http.StatusNoContent, recorder.Code)
 
-		require.NoError(t, database.ServerDatabase.Model(&database.CollectionACL{}).Where("group_id = ?", personalGroup).Count(&aclCount).Error)
-		require.EqualValues(t, 0, aclCount)
+		require.EqualValues(t, 0, countUserACLs())
 	})
 }
 

@@ -140,6 +140,9 @@ func TestOIDCAssertedGroupPropagation(t *testing.T) {
 		ID:        "g-research",
 		Name:      "research",
 		CreatedBy: "u-other",
+		// The provider asserts this group; a `pelican` one could not be
+		// claimed by an assertion.
+		Source: database.GroupSourceOIDC,
 	}
 	require.NoError(t, database.ServerDatabase.Create(research).Error)
 
@@ -158,19 +161,20 @@ func TestOIDCAssertedGroupPropagation(t *testing.T) {
 	coll := &database.Collection{
 		ID:         "c-secret",
 		Name:       "secret",
-		Owner:      otherOwner.Username,
 		OwnerID:    otherOwner.ID,
 		Namespace:  "/secret",
 		Visibility: database.VisibilityPrivate,
 	}
 	require.NoError(t, database.ServerDatabase.Create(coll).Error)
 
-	// ACLs are stored by group NAME (the backend canonicalises
-	// slug→name on write). The cookie's wlcg.groups carries names too;
-	// the match here is the seam under test.
+	// ACLs are stored by group ID. The cookie's wlcg.groups carries
+	// NAMES, so the seam under test is the resolution step
+	// (ResolveCallerACLSubjects) that turns the asserted name into this
+	// group's ID before any row is matched.
 	require.NoError(t, database.ServerDatabase.Create(&database.CollectionACL{
 		CollectionID: coll.ID,
-		GroupID:      research.Name,
+		SubjectType:  database.ACLSubjectGroup,
+		SubjectID:    research.ID,
 		Role:         database.AclRoleRead,
 		GrantedBy:    otherOwner.ID,
 	}).Error)

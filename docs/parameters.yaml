@@ -4888,6 +4888,75 @@ type: bool
 default: false
 components: ["origin"]
 ---
+name: Issuer.DisableGroupAutoCreation
+description: |+
+  Disable recording a group in the internal database for every group
+  name observed from the provider named by `Issuer.GroupSource`
+  (e.g., the OIDC group claim, the group file, or GitHub organizations).
+
+  By default, the first time a user logs in asserting membership in a
+  group Pelican has no record of, Pelican creates one owned by the
+  built-in `admin` user and stamped with the source that asserted it.
+  The record exists so other users cannot create an overlapping group
+  within the database.
+
+  Membership of these records is cached locally; the asserting
+  provider is the source of truth for who belongs to them.
+
+  Set this to `true` only if you do not want Pelican writing groups it
+  did not create. With auto-creation disabled, these groups cannot be
+  named in a collection ACL.
+
+  This knob does not affect the group names listed in
+  `Server.AdminGroups`, `Server.UserAdminGroups`, or
+  `Server.CollectionAdminGroups`. Pelican always records them at
+  startup.
+type: bool
+default: false
+components: ["origin", "registry", "director", "cache"]
+---
+name: Issuer.AssertedGroupMembershipTTL
+description: |+
+  How long a group membership mirrored from `Issuer.GroupSource` may
+  still grant access after the last observation.
+
+  When group membership comes from an outside provider, Pelican caches
+  the information for authorization lookups (e.g., whether the owner of
+  a share still has access to the parent collection).
+
+  Past this window Pelican will no longer grant access based on the cached
+  information. Logging in refreshes the copy again.
+
+  Expiry governs *authorization*, not retention: a stale copy is kept so a
+  check that asks whether an account might hold a privilege (such as
+  determining whether a user could possibly be an administrator).
+
+  Only the `file` group source can be refreshed without the user
+  present, and Pelican re-reads it on `Issuer.GroupFileRefreshInterval`;
+  `oidc` and `github` memberships refresh only at login.
+
+  Set to 0 to disable mirrored memberships as an authorization input —
+  the copies are still recorded and shown in the UI but aren't used.
+type: duration
+default: 168h
+components: ["origin", "registry", "director", "cache"]
+---
+name: Issuer.GroupFileRefreshInterval
+description: |+
+  How often to re-read `Issuer.GroupFile` and refresh the group
+  memberships mirrored from it.
+
+  Unlike the `oidc` and `github` group sources, the group file is local
+  so Pelican can refresh it. That keeps mirrored memberships from this
+  source continuously fresh.
+
+  Only takes effect when `Issuer.GroupSource` is `file` and
+  `Issuer.GroupFile` is set. Set to 0 to disable the periodic refresh,
+  in which case file-derived memberships only refresh at login.
+type: duration
+default: 15m
+components: ["origin", "registry", "director", "cache"]
+---
 name: Issuer.GroupSource
 description: |+
   How the issuer should determine group information based on the authenticated identity.  Valid values are:
@@ -4919,6 +4988,8 @@ description: |+
   The location of a file containing group information.  The file should contain a single JSON object with
   keys corresponding to the "user" name and the value a list of strings that are interpreted as the user's
   groups.
+
+  Only consulted when `Issuer.GroupSource` is set to `file`.
 type: string
 default: none
 components: ["origin"]

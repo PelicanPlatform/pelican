@@ -811,20 +811,167 @@ func CheckCollectionAdmin(identity UserIdentity) (bool, string) {
 	return false, "You don't have collection administrator permission"
 }
 
-// IsSystemAdminUserID checks whether the given user ID belongs to a system admin.
-// This is used to prevent user administrators from modifying system admin accounts.
-func IsSystemAdminUserID(db *gorm.DB, userID string) bool {
+// MustTreatAsSystemAdmin reports whether a caller holding only
+// server.user_admin must be refused on this target account, and a
+// human-readable reason to return with the refusal.
+//
+// It replaces a predicate that asked "is this user an admin?" and
+// answered false whenever it could not tell. That default was the bug:
+// a system administrator whose authority comes from Server.AdminGroups
+// plus a group an outside provider asserts may appear to not be an admin
+// because membership lives at the provider.
+//
+// The question is now the safe one: not "have we proved this account IS
+// an administrator", but "have we proved it is NOT one". Three things
+// can establish that it might be, and the first two are positive
+// evidence while the third is the absence of any:
+//
+//  1. The account's currently-evaluable privileges include server.admin
+//     — a config username match, a directly granted scope, or a group
+//     Pelican has a record of, including a mirrored membership that has
+//     gone stale. (Stale counts here for the same reason: this is a
+//     restricting question, so an old observation still answers it.)
+//  2. The account is latched GroupAdminPossible: it has been observed
+//     holding an administrative group at some point, even if the
+//     provider has since retracted it. See GroupAdminStatus.
+//  3. Nothing has ever been established about it (GroupAdminUnknown)
+//     AND a group could confer admin on this server AND its groups come
+//     from somewhere Pelican cannot enumerate on demand.
+//
+// Case 3 is the conservative default, and it is deliberately broad: on
+// upgrade to the user/group code, every account is GroupAdminUnknown,
+// so a user-administrator can act on none of them until each has signed
+// in once. In a deployment where no group confers admin (Server.AdminGroups
+// unset) nothing changes at all, and elsewhere it self-heals one login at a
+// time.
+//
+// Recourse is a full server.admin, who bypasses every one of these
+// guards.
+func MustTreatAsSystemAdmin(db *gorm.DB, userID string) (bool, string) {
+	user, err := database.GetUserByID(db, userID)
+	if err != nil {
+		// Cannot load the account, so cannot rule anything out.
+		return true, "could not load the target account to check its privileges"
+	}
+
+	// (1) Positive evidence from whatever is evaluable right now.
+	// Deliberately NOT IsConfirmedSystemAdmin: that one asks the
+	// granting-direction question and so ignores a mirrored membership
+	// the provider has stopped asserting. Here a stale observation is
+	// still an answer — "we last saw this account in an admin group a
+	// month ago" must mean refuse.
+	if adminFromGroupView(db, user, database.GroupNamesForRestrictionCheck) {
+		return true, "the target account holds administrator privileges"
+	}
+
+	// (2) The latch.
+	if user.GroupAdminStatus == database.GroupAdminPossible {
+		return true, "the target account has previously held administrator privileges through a group"
+	}
+
+	// (3) No evidence either way. If no group can confer admin here,
+	// there is nothing a group could be hiding and the account is ruled
+	// out by (1) alone.
+	if !aGroupCouldConferAdmin(db) {
+		return false, ""
+	}
+	// If group membership is Pelican's own, `group_members` is complete
+	// and (1) has already seen everything there is to see.
+	if !assertedGroupSourceConfigured() {
+		return false, ""
+	}
+	if user.GroupAdminStatus == database.GroupAdminUnknown {
+		return true, "cannot determine whether the target account holds administrator privileges: " +
+			"its group memberships come from an external group source and have not been observed yet. " +
+			"Ask the account to sign in, or perform this action as a full administrator"
+	}
+	return false, ""
+}
+
+// aGroupCouldConferAdmin reports whether membership of SOME group could
+// make an account a system administrator here. It is the precondition
+// for MustTreatAsSystemAdmin's conservative default: where no group can
+// confer admin, an unobserved account is ruled out on the evidence
+// alone and ordinary user administration is unaffected.
+//
+// It must stay in step with assertsAdminGroup, which decides what gets
+// latched. That one asks the full scope evaluator, so it recognizes
+// BOTH ways a group confers the scope: a name listed in
+// Server.AdminGroups, and a scope granted to the group itself through
+// group_scopes. Checking only the configuration here would leave the
+// second kind unguarded — an account holding admin through a scoped
+// group, not yet observed, would look like an ordinary user and a
+// user-administrator could act on it before its first login.
+//
+// A database error answers true. This gates whether the caller may stop
+// being careful, so "could not tell" has to mean "keep being careful".
+func aGroupCouldConferAdmin(db *gorm.DB) bool {
+	if param.Server_AdminGroups.IsSet() && len(param.Server_AdminGroups.GetStringSlice()) > 0 {
+		return true
+	}
+	scoped, err := database.AnyGroupCanConferAdminScope(db, []string{token_scopes.Server_Admin.String()})
+	if err != nil {
+		log.Warningf("Could not determine whether any group grants %s; treating the account as a possible administrator: %v",
+			token_scopes.Server_Admin, err)
+		return true
+	}
+	return scoped
+}
+
+// IsConfirmedSystemAdmin reports whether an account can be shown, from
+// what this server currently knows, to hold server.admin.
+//
+// This is the GRANTING-direction counterpart of MustTreatAsSystemAdmin.
+// Use this one where a true answer hands out something. Use
+// MustTreatAsSystemAdmin where a true answer refuses something, so an
+// uncertain answer must mean "refuse".
+//
+// Uncertainty resolves to FALSE here. Unlike the restricting guard this
+// consults no latch and makes no inference from silence: it reports
+// only what is demonstrable.
+func IsConfirmedSystemAdmin(db *gorm.DB, userID string) bool {
 	user, err := database.GetUserByID(db, userID)
 	if err != nil {
 		return false
 	}
-	identity := UserIdentity{
+	// GroupNamesForGranting, not GroupNamesForRestrictionCheck: a true
+	// answer here hands something out, so a mirrored membership the
+	// provider has stopped asserting must not count.
+	return adminFromGroupView(db, user, database.GroupNamesForGranting)
+}
+
+// adminFromGroupView runs the config-and-scope admin check over one of
+// the two group-membership views. Which view is the whole question —
+// see IsConfirmedSystemAdmin and MustTreatAsSystemAdmin.
+//
+// A failure to load memberships is logged rather than folded into the
+// verdict: the config-derived username paths still answer, which is the
+// pre-mirroring behavior.
+func adminFromGroupView(db *gorm.DB, user *database.User, view func(*gorm.DB, string) ([]string, error)) bool {
+	groups, err := view(db, user.ID)
+	if err != nil {
+		log.Warningf("Failed to load group memberships while checking whether user %s is a system admin: %v", user.ID, err)
+	}
+	isAdmin, _ := CheckAdmin(UserIdentity{
 		Username: user.Username,
 		ID:       user.ID,
 		Sub:      user.Sub,
-	}
-	isAdmin, _ := CheckAdmin(identity)
+		Groups:   groups,
+	})
 	return isAdmin
+}
+
+// assertedGroupSourceConfigured reports whether some provider outside
+// Pelican decides group membership on this server — in which case
+// `group_members` is a mirror that may be incomplete, rather than the
+// whole truth.
+//
+// The group file counts whatever Issuer.GroupSource says, because the
+// password-login path reads it unconditionally.
+func assertedGroupSourceConfigured() bool {
+	// Deliberately the single configured source. Issuer.GroupFile
+	// used to be an always-on second provider; it is not any more.
+	return database.ConfiguredGroupSource().IsAsserted()
 }
 
 // UserAdminAuthHandler accepts callers whose effective scope set
@@ -834,7 +981,7 @@ func IsSystemAdminUserID(db *gorm.DB, userID string) bool {
 // able to use, and which a "user administrator" (per the design
 // contract: manage non-admin users and unprivileged groups) is also
 // expected to use. Per-target guards inside the handlers (notably
-// IsSystemAdminUserID) prevent a user-admin from acting on a
+// MustTreatAsSystemAdmin) prevent a user-admin from acting on a
 // system-admin account; this gate just decides who clears the door.
 //
 // Cascade behind AuthHandler (cookie/bearer parsing must have run
@@ -1075,10 +1222,17 @@ func loginHandler(ctx *gin.Context) {
 		}
 	}
 
-	groups, err := generateGroupInfo(userRecord.Username)
+	groups, consulted, err := GroupsForLogin(userRecord)
 	if err != nil {
-		log.Errorf("Failed to generate group info for user %s: %s", userRecord.Username, err)
+		log.Errorf("Failed to determine group membership for user %s: %s", userRecord.Username, err)
 		groups = nil
+	}
+	// Record only what the configured source actually told us. `consulted`
+	// is false when this path could not ask it — an `oidc` server reached
+	// through a password login — and recording an empty list there would
+	// assert, falsely, that the account is in no groups.
+	if consulted {
+		RecordAssertedGroups(database.ConfiguredGroupSource(), userRecord.ID, userRecord.Username, groups)
 	}
 
 	setLoginCookie(ctx, userRecord, groups)
@@ -1146,11 +1300,10 @@ func initLoginHandler(ctx *gin.Context) {
 		return
 	}
 
-	groups, err := generateGroupInfo("admin")
-	if err != nil {
-		log.Errorln("Failed to generate group info for admin:", err)
-		groups = nil
-	}
+	// Resolved after the admin's user record exists, below: the
+	// configured source may need the account's ID, and recording a
+	// membership certainly does.
+	var groups []string
 
 	// Get or create the admin user in the database. The init-code path
 	// is the bootstrap admin authenticating themselves — self-enrolled.
@@ -1164,6 +1317,14 @@ func initLoginHandler(ctx *gin.Context) {
 				Msg:    "Failed to create admin session",
 			})
 		return
+	}
+	groups, consulted, err := GroupsForLogin(userRecord)
+	if err != nil {
+		log.Errorln("Failed to determine group membership for admin:", err)
+		groups = nil
+	}
+	if consulted {
+		RecordAssertedGroups(database.ConfiguredGroupSource(), userRecord.ID, userRecord.Username, groups)
 	}
 
 	setLoginCookie(ctx, userRecord, groups)
