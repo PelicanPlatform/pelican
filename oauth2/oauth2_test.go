@@ -25,8 +25,6 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-
-	"github.com/pelicanplatform/pelican/config"
 )
 
 // verificationCall records one invocation of a VerificationURLHandler.
@@ -161,7 +159,7 @@ func TestVerificationURLHandler(t *testing.T) {
 }
 
 func TestVerificationTargetAvailable(t *testing.T) {
-	skipVar := config.GetPreferredPrefix().String() + "_SKIP_TERMINAL_CHECK"
+	skipVar := "PELICAN_SKIP_TERMINAL_CHECK"
 
 	stdoutIsTerminal := func(t *testing.T) bool {
 		t.Helper()

@@ -1,6 +1,6 @@
 /***************************************************************
  *
- * Copyright (C) 2024, Pelican Project, Morgridge Institute for Research
+ * Copyright (C) 2026, Pelican Project, Morgridge Institute for Research
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you
  * may not use this file except in compliance with the License.  You may
@@ -191,7 +191,7 @@ func verificationTargetAvailable() bool {
 	if verificationURLHandler.Load() != nil {
 		return true
 	}
-	if len(os.Getenv(config.GetPreferredPrefix().String()+"_SKIP_TERMINAL_CHECK")) > 0 {
+	if len(os.Getenv("PELICAN_SKIP_TERMINAL_CHECK")) > 0 {
 		return true
 	}
 	// Stat fails on a closed or exotic descriptor, which is not a terminal

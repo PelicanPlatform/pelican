@@ -1249,20 +1249,6 @@ func TestEnvVarConfigMapping(t *testing.T) {
 				assert.Equal(t, "https://cache.example.com:8443", caches[0])
 			},
 		},
-		{
-			name:              "osdf-binary-osdf-env-client-backward-compat",
-			binaryPrefix:      OsdfPrefix,
-			envVarPrefix:      "OSDF",
-			envVarSuffix:      "CLIENT_PREFERREDCACHES",
-			configValue:       "https://cache.example.com:8443",
-			mode:              clientMode,
-			configShouldApply: true,
-			validateFunc: func(t *testing.T) {
-				caches := param.Client_PreferredCaches.GetStringSlice()
-				require.Len(t, caches, 1)
-				assert.Equal(t, "https://cache.example.com:8443", caches[0])
-			},
-		},
 		// Server mode tests - verify env vars work for server initialization too
 		{
 			name:              "pelican-binary-pelican-env-server",
@@ -1280,18 +1266,6 @@ func TestEnvVarConfigMapping(t *testing.T) {
 			name:              "osdf-binary-pelican-env-server",
 			binaryPrefix:      OsdfPrefix,
 			envVarPrefix:      "PELICAN",
-			envVarSuffix:      "SERVER_WEBPORT",
-			configValue:       "9999",
-			mode:              serverMode,
-			configShouldApply: true,
-			validateFunc: func(t *testing.T) {
-				assert.Equal(t, 9999, param.Server_WebPort.GetInt())
-			},
-		},
-		{
-			name:              "osdf-binary-osdf-env-server-backward-compat",
-			binaryPrefix:      OsdfPrefix,
-			envVarPrefix:      "OSDF",
 			envVarSuffix:      "SERVER_WEBPORT",
 			configValue:       "9999",
 			mode:              serverMode,

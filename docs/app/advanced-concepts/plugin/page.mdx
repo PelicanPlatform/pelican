@@ -65,12 +65,17 @@ as `PELICAN_CLIENT_PREFERREDCACHES` was introduced in v7.16.0 with the intention
 
 > This particular example would be useful for testing that a specific cache is operational
 > and accessible from the EP the job is running at.
-> Use of `PELICAN_NEAREST_CACHE`,  though, bypasses the Director
+> Restricting the Plugin to specific caches, though, bypasses the Director
 > and its logic that helps prevent any one Pelican component in the Federation from being overwhelmed.
 >
-> For production, it would be better to use the `PELICAN_PREFERRED_CACHE` configuration.
-> The cache specified using this option is always tried first,
+> For production, it would be better to end the list of caches with `+`,
+> as in `PELICAN_CLIENT_PREFERREDCACHES=https://address.to.desired.cache:port,+`.
+> The caches listed before the `+` are always tried first,
 > but if there is an issue the Plugin will fall back to the Director for a list of other caches to try.
+> Without the trailing `+`, as in the example above, the Plugin tries *only* the listed caches.
+> Separate the entries with commas rather than spaces,
+> because spaces separate variables in the `environment` value.
+> See [`Client.PreferredCaches`](/parameters#Client-PreferredCaches) for details.
 
 A couple of things to note about this methodology for configuring the Plugin:
 
