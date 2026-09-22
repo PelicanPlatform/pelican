@@ -607,8 +607,12 @@ func TestEnabledServers(t *testing.T) {
 	})
 }
 
-// Tests the function setPreferredPrefix: ensures case-insensitivity and invalid values are handled correctly
+// TestSetPreferredPrefix checks that SetPreferredPrefix sets the override,
+// returns the previous one, and rejects invalid values.
 func TestSetPreferredPrefix(t *testing.T) {
+	// Start from an empty override and restore the ambient one afterward.
+	setTestTier(t, "")
+
 	t.Run("TestPelicanPreferredPrefix", func(t *testing.T) {
 		oldPref, err := SetPreferredPrefix(PelicanPrefix)
 		assert.NoError(t, err)
