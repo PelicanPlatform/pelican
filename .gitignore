@@ -13,6 +13,7 @@ pelican.yaml
 oidc-client-id
 oidc-client-secret
 MaxMindKey
+.pnpm-store/
 
 # Various ways test binaries have almost been committed
 # from top-level directories to the code base via `git -A`.
