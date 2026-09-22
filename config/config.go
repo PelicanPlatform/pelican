@@ -647,20 +647,6 @@ func SetPreferredPrefix(newPref ConfigPrefix) (oldPref ConfigPrefix, err error) 
 	return oldPrefix, nil
 }
 
-// Get the list of valid prefixes for this binary.  Given there's been so
-// many renames of the project (stash -> osdf -> pelican), we allow multiple
-// prefixes when searching through environment variables.
-func GetAllPrefixes() []ConfigPrefix {
-	prefixes := []ConfigPrefix{GetPreferredPrefix()}
-
-	if prefixes[0] == OsdfPrefix {
-		prefixes = append(prefixes, StashPrefix, PelicanPrefix)
-	} else if prefixes[0] == StashPrefix {
-		prefixes = append(prefixes, OsdfPrefix, PelicanPrefix)
-	}
-	return prefixes
-}
-
 // We can't parse a schemeless hostname when there's a port, so check for a scheme and add one if none exists.
 func wrapWithHttpsIfNeeded(urlStr string) string {
 	// The fact that we don't overwrite http:// with https:// appears to be an artifact from testing.
@@ -1330,11 +1316,7 @@ func SetWebConfigOverride(v *viper.Viper, configPath string) error {
 // SetBaseDefaultsInConfig) and ApplyDerivedDefaults.
 func defaultTierContext() (isRoot bool, isOSDF bool) {
 	isRoot = IsRootExecution()
-	prefix := GetPreferredPrefix()
-	isOSDF = prefix == OsdfPrefix
-	if os.Getenv("STASH_USE_TOPOLOGY") == "" {
-		isOSDF = isOSDF || (prefix == "STASH")
-	}
+	isOSDF = GetPreferredPrefix() == OsdfPrefix
 	return
 }
 
@@ -1454,9 +1436,6 @@ func initConfigInternalImpl(logLevel log.Level) {
 		}
 	}
 
-	// Load environment variables into the config
-	bindNonPelicanEnv() // Deprecate OSDF env prefix but be compatible for now
-
 	// This line allows viper to use an env var like ORIGIN_VALUE to override the viper string "Origin.Value"
 	viper.SetEnvKeyReplacer(strings.NewReplacer(".", "_"))
 
@@ -1483,20 +1462,18 @@ func initConfigInternalImpl(logLevel log.Level) {
 		}
 	}
 
-	// Handle config file specified via <PREFIX>_CONFIG_FILE environment variable
-	// This supports PELICAN_CONFIG_FILE, OSDF_CONFIG_FILE, STASH_CONFIG_FILE
-	upperPrefix := GetPreferredPrefix()
-	if envConfigFile := os.Getenv(upperPrefix.String() + "_CONFIG_FILE"); envConfigFile != "" {
+	// Handle config file specified via the PELICAN_CONFIG_FILE environment variable
+	if envConfigFile := os.Getenv("PELICAN_CONFIG_FILE"); envConfigFile != "" {
 		fp, err := os.Open(envConfigFile)
 		if err != nil {
 			if !os.IsNotExist(err) {
-				cobra.CheckErr(errors.Wrapf(err, "failed to open config file specified via %s_CONFIG_FILE", upperPrefix.String()))
+				cobra.CheckErr(errors.Wrap(err, "failed to open config file specified via PELICAN_CONFIG_FILE"))
 			}
 			// If file doesn't exist, continue without it
 		} else {
 			defer fp.Close()
 			if err := viper.MergeConfig(fp); err != nil {
-				cobra.CheckErr(errors.Wrapf(err, "failed to read config file specified via %s_CONFIG_FILE", upperPrefix.String()))
+				cobra.CheckErr(errors.Wrap(err, "failed to read config file specified via PELICAN_CONFIG_FILE"))
 			}
 			if err := st.RecordConfigFileKeys(envConfigFile, SourceConfigFile); err != nil {
 				log.WithError(err).Warnf("Failed to record config source provenance for %s", envConfigFile)
@@ -1547,6 +1524,9 @@ func initConfigInternalImpl(logLevel log.Level) {
 	}
 
 	goose.SetLogger(CustomGooseLogger{})
+
+	// Warn about environment variables that Pelican no longer reads
+	warnRemovedEnv()
 
 	// Warn users about deprecated config keys they're using and try to map them to any new equivalent we've defined.
 	handleDeprecatedConfig()
@@ -2869,7 +2849,7 @@ func InitClient() error {
 	InitConfigInternal(log.WarnLevel)
 	logging.FlushLogs(true)
 
-	// Bind legacy client environment variables (e.g., STASHCP_*, OSG_*, NEAREST_CACHE)
+	// Bind legacy client environment variables (e.g., PELICAN_DIRECTOR_URL, PELICAN_NEAREST_CACHE)
 	// This must happen after InitConfigInternal but before SetClientDefaults
 	bindLegacyClientEnv()
 
@@ -2967,6 +2947,7 @@ func ResetConfig() {
 
 	warnDeprecatedOnce = sync.Once{}
 	warnDebugOnce = sync.Once{}
+	warnRemovedEnvOnce = sync.Once{}
 
 	setServerOnce = sync.Once{}
 	enabledServers.Clear()
