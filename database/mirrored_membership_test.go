@@ -582,3 +582,100 @@ func TestRepeatedObservationsAreDebounced(t *testing.T) {
 			"an account that has just been seen in an admin group must latch immediately")
 	})
 }
+
+// TestOrphanedMirroredMembershipsAreRetracted covers the one-way door a
+// group-source change used to create.
+//
+// Reconciliation happens when an account is observed through the
+// CURRENT source. Switch Issuer.GroupSource and the old provider is
+// never consulted again, so a password-only account under `oidc` or
+// `github` is never reconciled and its old rows live forever. If one of
+// those rows is in a group that confers administrator privilege, every
+// exit is closed at once — the restricting guard keeps seeing it, the
+// latch will not clear, the membership reads as provider-owned so it
+// cannot be removed, and the group cannot be deleted while the
+// configuration names it.
+func TestOrphanedMirroredMembershipsAreRetracted(t *testing.T) {
+	withMembershipTTL(t, 24*time.Hour)
+
+	setup := func(t *testing.T) (*gorm.DB, *User, Group) {
+		db := setupCollectionTestDB(t)
+		withExternalWebURL(t, db)
+		bob := mkUser(t, db, "u-bob", "bob")
+		// Mirrored in while the group file was the source.
+		require.NoError(t, param.Issuer_GroupSource.Set(GroupSourceTypeFile))
+		mustEnsureAssertedGroups(t, db, GroupSourceFile, []string{"ops"})
+		var ops Group
+		require.NoError(t, db.First(&ops, "name = ?", "ops").Error)
+		require.NoError(t, MirrorAssertedGroupMemberships(db, GroupSourceFile, bob.ID, []string{"ops"}))
+		require.Equal(t, []string{"ops"}, memberGroupNames(t, db, bob.ID))
+		return db, bob, ops
+	}
+
+	t.Run("a row from a source that is no longer configured is retracted once stale", func(t *testing.T) {
+		db, bob, ops := setup(t)
+		// The origin restarts on oidc. Bob only ever logs in with a
+		// password, so nothing will ever reconcile him.
+		require.NoError(t, param.Issuer_GroupSource.Set(GroupSourceTypeOIDC))
+
+		n, err := RetractOrphanedMirroredMemberships(db)
+		require.NoError(t, err)
+		assert.Zero(t, n, "a grace period first: the row is still fresh right after the switch")
+		assert.Equal(t, []string{"ops"}, memberGroupNames(t, db, bob.ID))
+
+		ageMembership(t, db, ops.ID, bob.ID, 48*time.Hour)
+		n, err = RetractOrphanedMirroredMemberships(db)
+		require.NoError(t, err)
+		assert.EqualValues(t, 1, n)
+		assert.Empty(t, memberGroupNames(t, db, bob.ID),
+			"nothing else would ever have removed this row")
+	})
+
+	t.Run("the active source's stale rows are left alone", func(t *testing.T) {
+		// Stale here means "this account has not signed in lately", and
+		// the share-owner clamp reads those rows deliberately so a share
+		// does not die while its owner is away.
+		db, bob, ops := setup(t)
+		ageMembership(t, db, ops.ID, bob.ID, 48*time.Hour)
+
+		n, err := RetractOrphanedMirroredMemberships(db)
+		require.NoError(t, err)
+		assert.Zero(t, n)
+		assert.Equal(t, []string{"ops"}, memberGroupNames(t, db, bob.ID),
+			"the file source is still configured, so this row may yet be refreshed")
+	})
+
+	t.Run("a local membership is never swept", func(t *testing.T) {
+		db, bob, ops := setup(t)
+		require.NoError(t, db.Model(&GroupMember{}).
+			Where("group_id = ? AND user_id = ?", ops.ID, bob.ID).
+			Updates(map[string]any{"source": GroupSourcePelican, "asserted_at": nil}).Error)
+		require.NoError(t, param.Issuer_GroupSource.Set(GroupSourceTypeOIDC))
+
+		n, err := RetractOrphanedMirroredMemberships(db)
+		require.NoError(t, err)
+		assert.Zero(t, n)
+		assert.Equal(t, []string{"ops"}, memberGroupNames(t, db, bob.ID),
+			"an administrator's own membership is not a provider's to retract")
+	})
+
+	t.Run("the account becomes manageable again", func(t *testing.T) {
+		// The point of the sweep: the restricting guard reads stale
+		// rows on purpose, so while the orphan exists no user-admin can
+		// act on the account.
+		db, bob, ops := setup(t)
+		require.NoError(t, param.Issuer_GroupSource.Set(GroupSourceTypeOIDC))
+		ageMembership(t, db, ops.ID, bob.ID, 48*time.Hour)
+
+		names, err := GroupNamesForRestrictionCheck(db, bob.ID)
+		require.NoError(t, err)
+		require.Contains(t, names, "ops", "precondition: the guard still sees the orphan")
+
+		_, err = RetractOrphanedMirroredMemberships(db)
+		require.NoError(t, err)
+
+		names, err = GroupNamesForRestrictionCheck(db, bob.ID)
+		require.NoError(t, err)
+		assert.NotContains(t, names, "ops")
+	})
+}

@@ -264,6 +264,12 @@ func LaunchModules(ctx context.Context, modules server_structs.ServerType) (serv
 	// Start periodic database backup routine
 	database.LaunchPeriodicBackup(ctx, egrp)
 
+	// Retract mirrored memberships from a group source that is no
+	// longer configured. Nothing else will: reconciliation happens when
+	// an account is observed through the CURRENT source, which a
+	// password-only account never is under oidc or github.
+	database.LaunchPeriodicOrphanedMembershipSweep(ctx, egrp)
+
 	// Keep group memberships mirrored from Issuer.GroupFile current.
 	// The file source is the only one Pelican can re-read without the
 	// user present; oidc and github refresh at login instead.
