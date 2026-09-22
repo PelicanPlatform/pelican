@@ -1,7 +1,7 @@
 -- +goose NO TRANSACTION
 --
--- Required by step 2. Rebuilding `groups` drops the old table, which
--- SQLite treats as deleting every row — firing group_members' ON DELETE
+-- Rebuilding `groups` drops the old table, which SQLite treats as
+-- deleting every row — firing group_members' ON DELETE
 -- CASCADE and taking every membership on the server with it. Only
 -- `foreign_keys=OFF` prevents that, and it is a no-op inside a
 -- transaction (`defer_foreign_keys` and `legacy_alter_table` were both
@@ -13,41 +13,8 @@
 -- +goose Up
 -- +goose StatementBegin
 
--- Follow-on to 20260916120000, which re-keyed collection ownership and
--- ACLs onto immutable IDs. Two more places still mixed the two kinds of
--- handle, or let one be reused.
-
 ------------------------------------------------------------------
--- 1. api_keys.created_by becomes a User.ID.
-------------------------------------------------------------------
---
--- The column has always been READ as a user ID, but the create handler
--- wrote the caller's username, so the lookup fell back to matching on
--- username — which let a released username re-activate a dead key. See
--- the commit message for the full sequence.
---
--- Resolution order matters: try the value as an ID first, because a
--- legacy username could itself be shaped like one. A value that matches
--- neither becomes the empty string, which intersectWithUserScopes
--- treats as "cannot attribute this key to any current authority" and
--- fails closed on every user-grantable scope.
---
--- The `created_at` clause keeps this migration from rebinding the key
--- against an account created *after* the key (which should be
--- impossible).
-UPDATE api_keys
-SET created_by = COALESCE(
-    (SELECT u.id FROM users u WHERE u.id = api_keys.created_by),
-    (SELECT u.id FROM users u
-      WHERE u.username = api_keys.created_by
-        AND u.deleted_at IS NULL
-        AND u.created_at <= api_keys.created_at),
-    ''
-)
-WHERE created_by IS NOT NULL AND created_by <> '';
-
-------------------------------------------------------------------
--- 2. Groups become soft-deletable.
+-- Groups become soft-deletable.
 ------------------------------------------------------------------
 --
 -- Group.ID was the one authorization primitive that could be reused:
@@ -71,6 +38,11 @@ WHERE created_by IS NOT NULL AND created_by <> '';
 -- top of this file. Without it the DROP TABLE below cascades through
 -- group_members.group_id and deletes every membership.
 PRAGMA foreign_keys = OFF;
+
+-- A previous attempt that failed part-way leaves this behind, and
+-- without the drop every retry dies on "table groups_new already
+-- exists" instead of making progress.
+DROP TABLE IF EXISTS groups_new;
 
 CREATE TABLE groups_new (
     id                        TEXT PRIMARY KEY,
@@ -117,7 +89,6 @@ PRAGMA foreign_keys = ON;
 -- +goose Down
 -- +goose StatementBegin
 
--- The api_keys.created_by values are not recoverable as usernames.
 -- Roll back by restoring a backup instead.
 
 -- +goose StatementEnd

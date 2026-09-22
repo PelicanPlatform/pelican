@@ -44,7 +44,7 @@ import (
 const versionBeforeIDKeyedAuthz = 20260911120000
 
 // versionBeforeIDKeyedAPIKeys is the migration immediately preceding
-// 20260917120000, i.e. the last version where `api_keys.created_by` may
+// 20260917110000, i.e. the last version where `api_keys.created_by` may
 // hold a username and `groups` has no `deleted_at`.
 const versionBeforeIDKeyedAPIKeys = 20260916120000
 
@@ -315,6 +315,15 @@ func TestIDKeyedAPIKeysAndGroupSoftDeleteMigration(t *testing.T) {
 		var violations []map[string]interface{}
 		require.NoError(t, db.Raw("PRAGMA foreign_key_check").Scan(&violations).Error)
 		assert.Empty(t, violations, "the rebuilt table must leave no foreign-key violations")
+
+		// The migration turns foreign keys off by hand and back on at
+		// the end. Nothing outside the process can see that, so check
+		// it here: leaving them off would silently disable every
+		// cascade for the life of the connection.
+		var fkEnabled int
+		require.NoError(t, db.Raw("PRAGMA foreign_keys").Scan(&fkEnabled).Error)
+		assert.Equal(t, 1, fkEnabled,
+			"the migration must restore foreign_keys after the rebuild")
 	})
 
 	t.Run("groups gain a tombstone and release their name", func(t *testing.T) {
