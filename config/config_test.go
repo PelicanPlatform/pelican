@@ -670,6 +670,110 @@ func TestEnabledServers(t *testing.T) {
 	})
 }
 
+// TestTierForBinary checks the mapping from a binary's name to its
+// behavior tier.
+func TestTierForBinary(t *testing.T) {
+	tests := []struct {
+		name   string
+		binary string
+		want   ConfigPrefix
+	}{
+		{name: "pelican/pelican-tier", binary: "pelican", want: PelicanPrefix},
+		{name: "pelican-server/pelican-tier", binary: "pelican-server", want: PelicanPrefix},
+		{name: "osdf/osdf-tier", binary: "osdf", want: OsdfPrefix},
+		{name: "stashcp/osdf-tier", binary: "stashcp", want: OsdfPrefix},
+		{name: "stash_plugin/osdf-tier", binary: "stash_plugin", want: OsdfPrefix},
+		{
+			name:   "mixed-case-name/osdf-tier",
+			binary: "StashCP",
+			want:   OsdfPrefix,
+		},
+		{
+			name:   "underscore-is-not-special/osdf-tier",
+			binary: "osdf_plugin",
+			want:   OsdfPrefix,
+		},
+		{
+			name:   "non-osdf-name-with-underscore/pelican-tier",
+			binary: "pelican_plugin",
+			want:   PelicanPrefix,
+		},
+		{
+			name:   "substring-does-not-match/pelican-tier",
+			binary: "pelican-stashcp",
+			want:   PelicanPrefix,
+		},
+		{
+			// What filepath.Base returns for an empty argv[0].
+			name:   "nameless-invocation/pelican-tier",
+			binary: ".",
+			want:   PelicanPrefix,
+		},
+		{
+			// This package's test binary, which other tests rely on
+			// mapping to the Pelican tier.
+			name:   "go-test-binary/pelican-tier",
+			binary: "config.test",
+			want:   PelicanPrefix,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			assert.Equal(t, tc.want, tierForBinary(tc.binary))
+		})
+	}
+}
+
+// TestGetPreferredPrefixUsesArgv0 checks that GetPreferredPrefix matches
+// on the base name of os.Args[0]. HTCondor invokes the plugin by its full
+// path.
+func TestGetPreferredPrefixUsesArgv0(t *testing.T) {
+	// Clear the override, which GetPreferredPrefix checks first.
+	setTestTier(t, "")
+
+	// Restore os.Args before any earlier cleanup runs, since
+	// logging.isTestProcess checks it for a ".test" suffix.
+	previousArgs := os.Args
+	t.Cleanup(func() { os.Args = previousArgs })
+
+	tests := []struct {
+		name string
+		arg0 string
+		want ConfigPrefix
+	}{
+		{
+			name: "installed-plugin-path/osdf-tier",
+			arg0: "/usr/libexec/condor/stash_plugin",
+			want: OsdfPrefix,
+		},
+		{
+			name: "installed-symlink-path/osdf-tier",
+			arg0: "/usr/bin/osdf",
+			want: OsdfPrefix,
+		},
+		{
+			name: "directory-name-is-not-matched/pelican-tier",
+			arg0: "/opt/osdf/bin/pelican",
+			want: PelicanPrefix,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			os.Args = []string{tc.arg0}
+			assert.Equal(t, tc.want, GetPreferredPrefix())
+		})
+	}
+
+	t.Run("override-wins-over-the-binary-name", func(t *testing.T) {
+		os.Args = []string{"/usr/bin/osdf"}
+		setTestTier(t, PelicanPrefix)
+
+		assert.Equal(t, PelicanPrefix, GetPreferredPrefix())
+	})
+}
+
 // TestSetPreferredPrefix checks that SetPreferredPrefix sets the override,
 // returns the previous one, and rejects invalid values.
 func TestSetPreferredPrefix(t *testing.T) {
