@@ -57,8 +57,11 @@ WEBSITE_SRC_FILES := $(shell find $(WEBSITE_SRC_PATH) -type f -not -path "*.next
 WEBSITE_CLEAN_LIST := $(WEBSITE_OUT_PATH) \
 						$(WEBSITE_CACHE_PATH)
 
-$(info These files have changed causing the website to have to rebuild: [$(shell find $(WEBSITE_SRC_PATH) -type f -not -path "*.next*" -not -path "*/out/*" -not -path "*node_modules*" -not -path "*.pnpm-store*" -not -path "*pelican-swagger.yaml" -newer web_ui/frontend/out/index.html)])
-
+ifneq ($(wildcard $(WEBSITE_OUT_PATH)/index.html),)
+$(info These files have changed causing the website to have to rebuild: [$(shell find $(WEBSITE_SRC_PATH) -type f -not -path "*.next*" -not -path "*/out/*" -not -path "*node_modules*" -not -path "*.pnpm-store*" -not -path "*pelican-swagger.yaml" -newer $(WEBSITE_OUT_PATH)/index.html)])
+else
+$(info Skipping website change check: $(WEBSITE_OUT_PATH)/index.html does not exist yet)
+endif
 
 .PHONY: all
 all: pelican-build
