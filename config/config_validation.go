@@ -1,6 +1,6 @@
 /***************************************************************
 *
-* Copyright (C) 2024, Pelican Project, Morgridge Institute for Research
+* Copyright (C) 2026, Pelican Project, Morgridge Institute for Research
 *
 * Licensed under the Apache License, Version 2.0 (the "License"); you
 * may not use this file except in compliance with the License.  You may
@@ -56,8 +56,7 @@ func validateConfigKeys() []string {
 	envs := os.Environ()
 	for _, env := range envs {
 		parts := strings.SplitN(env, "=", 2)
-		// Until we fully deprecate OSDF and STASH prefixes, we'll check for them here
-		if strings.HasPrefix(parts[0], "PELICAN_") || strings.HasPrefix(parts[0], "OSDF_") || strings.HasPrefix(parts[0], "STASH_") {
+		if strings.HasPrefix(parts[0], "PELICAN_") {
 			// Strip off the prefix, convert to lower and replace _ with .
 			key := strings.SplitN(parts[0], "_", 2)[1]
 			key = strings.ToLower(key)
