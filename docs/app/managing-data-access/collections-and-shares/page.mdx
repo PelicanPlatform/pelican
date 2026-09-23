@@ -143,11 +143,28 @@ Any signed-in user can create a group; see [Create a group](/managing-data-acces
 
 Existing grants are listed above the picker with their group name; the trash icon beside a row revokes the grant.
 
-### Grant access to anonymous users
+### Grant access to all authenticated users
 
-Access to a collection does not require that the user create an account on the Origin.
+Sometimes the right audience for a collection is everyone with an account on the Origin, not any one group.
+For that, the **Add group** picker offers a virtual group named **All authenticated users** at the top of its list.
+Granting it a role gives that role to every signed-in user, regardless of which groups they belong to.
 
-To grant access to anonymous users, ***TODO***.
+> Once the deployment data is cleaned up, Dr. Reyes wants anyone in the department to be able to read it.
+> Rather than chase down every departmental group, Christina grants **All authenticated users** `Read`.
+> The `reyes_researchers` grant stays in place, so the lab keeps `write`.
+
+1. Open **Collections**, find the collection, and click the **Edit collection** (pencil) icon on its row.
+2. Scroll to **Access groups**.
+3. In **Add group**, pick **All authenticated users**.
+4. Set **Role** to `Read` or `Write`.
+5. Click **ADD**.
+
+The grant appears in the list like any other row and is revoked the same way.
+On the command line and in the API, this virtual group is spelled `@authenticated`; see [Doing this from the command line or the API](#doing-this-from-the-command-line-or-the-api).
+
+<Callout type="info">
+The `All authenticated users` group is only selectable after the collection has been created in its edit menu.
+</Callout>
 
 ## Turn on sharing
 

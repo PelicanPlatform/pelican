@@ -176,11 +176,15 @@ You can set the flag at creation time if you are a server administrator.
 
 ## Delete a group
 
-*Requires **TODO**.*
+*Requires group ownership or server administrator privileges — a group administrator cannot delete the group; see [Group administration](/managing-data-access/permissions-reference#group-administration).*
 
-To delete a group, 
+Deleting a group removes the group itself along with its memberships, any open invite links, and every collection or share grant that names the group.
+Users who had access to a collection only through that group lose it on their next request to the Origin; a data access token they already hold keeps working until it expires. See [Revoke access](/managing-data-access/collections-and-shares#revoke-access).
+If the group was named as the administrator of a collection or of another group, that record simply has no administrator; its owner is unaffected.
 
-1. TODO
+1. Open **Groups** from the sidebar.
+2. Find the group's row in the listing.
+3. Click the trash icon on that row, then click the check mark to confirm. The icon is shown only to the group's owner and to server administrators.
 
 ## Grant a scope to a user or group
 
