@@ -77,9 +77,9 @@ By using an onboarding link, a new account is created and associated with the SS
 After clicking on the link, the recipient signs in through the identity provider first, and then accepts the invite.
 
 1. Open **Groups** from the sidebar, or **Settings** → **Groups**.
-2. Search and Click to expand the Group you wish to onboard the user to.
-3. Navigate the **Invite Links** section
-4. Toggle **Single Use** if you want just one person to use this link, adjust the expiration of the link as needed and click **Generate Invite Link**.
+2. Search for and expand the group you wish to onboard the user to.
+3. Navigate to the **Invite links** section.
+4. Toggle **Single use** if you want just one person to use this link, adjust the expiration of the link as needed and click **GENERATE INVITE LINK**.
 5. Copy and send the URL to the user you wish to onboard.
 
 ## Delete a user
@@ -106,6 +106,7 @@ Group creation is open to any user, allowing them to grant access to their own c
 Groups created by unprivileged users, however, cannot be used for Pelican's authorization templates mechanism or be referenced from the configuration variables granting administrator access.
 
 The group **name** is the machine-readable name (such as `reyes-lab-writers`); it is 2 to 64 characters drawn from letters, digits, `.`, `_`, `@`, and `-` and must start with a letter or digit.
+Names that appear in the server's admin-group settings, or that the identity provider asserts, are reserved; creating a group with one of those names is refused.
 The **display name** and **description** are free-form labels for human readability.
 
 Once the group exists, use it to grant access to a collection: see [Grant read or write access to a group](/managing-data-access/collections-and-shares#grant-read-or-write-access-to-a-group).
@@ -118,22 +119,25 @@ Once the group exists, use it to grant access to a collection: see [Grant read o
 
 ## Add and remove group members
 
-*Requires group ownership/administrator privilege or server user administration privilege; see [Group administration](/managing-data-access/permissions-reference#group-administration).*
+*Requires group ownership/administrator privilege or server administrator privilege; see [Group administration](/managing-data-access/permissions-reference#group-administration).*
 
 Each group has an owner (an individual user account); optionally, it may also have an administrator, which can be either another user or a group.
 Either the owner or the administrator can manage group membership.
 
 1. Open **Groups** and expand the group, or open its detail page.
-2. Under **Members**, click **ADD MEMBER**, pick the user, and click **ADD MEMBER** again in the dialog.
+2. If you are a server administrator, under **Members** click **ADD MEMBER**, pick the user, and click **ADD MEMBER** again in the dialog.
 3. To remove someone, click the remove icon beside their row and confirm.
 
-For administrators, the **ADD MEMBER** drop-down shows all users at the server.  Otherwise, it only shows users in groups the owner is a member of.
+The **ADD MEMBER** button and its user picker appear only for server administrators.
+A group owner or administrator without that privilege brings people in with an invite link (see [Invite people to a group with a link](#invite-people-to-a-group-with-a-link)) or, for themselves, the **Join this group** button.
+
+Members whose membership was asserted by the identity provider are listed like any other, but cannot be removed here; remove them at the provider.
 
 Removing a member does not relinquish ownership; the owner remains the owner even after their membership is deleted.
 
 ## Invite people to a group with a link
 
-*Requires group ownership/administrator privilege or server user administration privilege; see [Group administration](/managing-data-access/permissions-reference#group-administration).*
+*Requires group ownership/administrator privilege or server administrator privilege; see [Group administration](/managing-data-access/permissions-reference#group-administration).*
 
 An invite link is how a group owner brings in people they cannot look up.
 A single-use link admits one person; a multi-use link admits everyone who holds it until it expires or you revoke it.
@@ -182,6 +186,8 @@ Deleting a group removes the group itself along with its memberships, any open i
 Users who had access to a collection only through that group lose it on their next request to the Origin; a data access token they already hold keeps working until it expires. See [Revoke access](/managing-data-access/collections-and-shares#revoke-access).
 If the group was named as the administrator of a collection or of another group, that record simply has no administrator; its owner is unaffected.
 
+A group whose name appears in [`Server.AdminGroups`](/parameters#Server-AdminGroups), [`Server.UserAdminGroups`](/parameters#Server-UserAdminGroups), or [`Server.CollectionAdminGroups`](/parameters#Server-CollectionAdminGroups) cannot be deleted by anyone, server administrators included, until the entry is removed from the configuration.
+
 1. Open **Groups** from the sidebar.
 2. Find the group's row in the listing.
 3. Click the trash icon on that row, then click the check mark to confirm. The icon is shown only to the group's owner and to server administrators.
@@ -206,4 +212,4 @@ Open the user menu and choose **Profile**.
 - **Local password** — **RESET PASSWORD** asks for your current password and a new one; **REMOVE PASSWORD** disables username-and-password login while leaving linked OIDC identities working. Both appear only when a password is already set.
 - **Effective scopes** — the full set the server computes for you right now.
 - **Linked identities** — unlink a secondary identity with the unlink icon. Your primary identity is marked `managed by admin`.
-- **Your groups** — click **LEAVE**, then **CONFIRM LEAVE**. You cannot leave a group you own; transfer ownership first.
+- **Your groups** — click **LEAVE**, then **CONFIRM LEAVE**. You cannot leave a group you own; transfer ownership first. You also cannot leave a group the identity provider placed you in; that change belongs at the provider.

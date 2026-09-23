@@ -15,7 +15,7 @@ This section describes what kinds of access can be granted and situations it may
 2. A Namespace Prefix export configured in the Origin
 
 To *create* a "collection" (see below), you must be a collections administrator (includes Origin administrators).
-Everything after that — including deleting the collection — is done by the collection's owner and the people they delegate to, with no administrator privilege at all.
+Everything after that is done by the collection's owner and the people they delegate to, with no administrator privilege at all.
 
 ## Process
 
@@ -49,9 +49,9 @@ The Origin service has the concept of users and groups.
 A **user** may log into the Origin's web interface to interact with the collections system.
 A **group** consists of one or more users.
 
-**Access permissions for a collection can only be assigned to a group, not a user.**
+**Access permissions for a collection are assigned to a group, to a single user, or to every signed-in user.**
 
-To give one person access, put them in a group — or use the implicit personal group every user has, named `user-` followed by their username, which can be granted to directly.
+To give one person access, use their user group. A user group comes in the format `user-<username>` where a user with username `brian.bockelman` would have user group `user-brian.bockelman`.
 There is also a virtual target, `@authenticated`, that matches every signed-in user; it grants no access to anonymous callers.
 
 An Origin configured with an OIDC provider will automatically provision users as they log into the Origin.
@@ -101,9 +101,9 @@ At this point, Sysadmin Brian is no longer involved in the data access managemen
 
 #### Administering the collection
 
-1. Dr. Reyes generates an invite link for her lab manager Christina, who redeems it and creates an account in the Origin service, via the browser.
-2. In the Origin's browser interface, Dr. Reyes navigates to the collections menu and selects her `Reyes Lab` collection.
-3. Dr. Reyes creates a group `reyes_admins`, adds Christina to it, and assigns that group as the admin group of the `Reyes Lab` collection.
+1. Dr. Reyes creates a group `reyes_admins`.
+2. From that group, Dr. Reyes generates an invite link and sends it to her lab manager Christina, who signs in to the Origin (creating her account) and accepts the invite, becoming a member of `reyes_admins`.
+3. In the Origin's browser interface, Dr. Reyes navigates to the collections menu, selects her `Reyes Lab` collection, and assigns `reyes_admins` as its admin group.
 
 A collection delegates to a *group*, never to an individual, which is why Christina gets a group of her own rather than being named directly.
 

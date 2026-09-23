@@ -7,16 +7,15 @@ This page provides the practical instructions on how to
 * create a collection,
 * transfer or delegate management of a collection,
 * assign groups with read or write access to a collection,
-* enable and create shares of a collection,
+* enable and create shares of a collection, and so on.
 
-and so on. 
 Every task here is written for the origin's **web interface**, because that is the one place all of it can be done.
 
 <Callout>
 For instructions on how to script most of these actions, see [Doing this from the command line or the API](#doing-this-from-the-command-line-or-the-api) at the end of the page.
 </Callout>
 
-As described in the overview, 
+As described in the overview,
 
 * A **collection** is a prefix inside a namespace your origin already exports, together with the groups allowed to read or write it.
 * A **share** is a child collection an ordinary user creates to hand part of their own access to someone else.
@@ -34,7 +33,7 @@ To help contextualize the instructions, we'll include snippets from the [overvie
 The **Reyes Lab** studies nearshore currents, and has just come back from a field season with several terabytes of instrument data that its collaborators need to reach.
 
 Throughout this guide, the lab's collection will be created, handed to the people who run it, and opened up to students — with one student passing part of that access on to classmates outside the lab.
-Here is a summary of the roles of the lab members the permissions they'll be given.
+Here is a summary of the roles of the lab members and the permissions they'll be given.
 
 | Person | Role in the story | Group |
 | --- | --- | --- |
@@ -51,7 +50,7 @@ You need an Origin with an exported namespace.
 A collection cannot be created if there is not a corresponding exported namespace.
 
 <Callout>
-See [Serving an Origin](/federating-your-data/origin) for instructions on how to setup an Origin and export storage under a namespace.
+See [Serving an Origin](/federating-your-data/origin) for instructions on how to set up an Origin and export storage under a namespace.
 </Callout>
 
 > Riptide University's storage is exported at `/riptide-university` long before Brian touches the Collections page.
@@ -70,20 +69,23 @@ The **ONBOARD COLLECTION** form does the whole thing in one pass: the collection
 1. In the Origin web interface, open **Collections** in the left sidebar.
 2. Click **ONBOARD COLLECTION**.
 3. Under **Collection**, fill in:
-- **Name** — a short human-readable name.
-- **Exported prefix** — pick the exported prefix from the dropdown and type the rest of the path in the box beside it. The full path is shown back as you type. *If only one namespace is served from this origin you won't have a dropdown.*
-- **Description** and **Visibility** (`Private` or `Public`).
+   - **Name** — a short human-readable name.
+   - **Exported prefix** — pick the exported prefix from the dropdown and type the rest of the path in the box beside it. The full path is shown back as you type. *If only one namespace is served from this origin you won't have a dropdown.*
+   - **Description** and **Visibility** (`Private` or `Public`).
 
-> Brian names it `Reyes Lab`, picks the `/riptide-university` namespace from the dropdown and types `reyes-lab` beside it, describes it as "Nearshore current data, Reyes Lab", and leaves it `Private`.
+   > Brian names it `Reyes Lab`, picks the `/riptide-university` namespace from the dropdown and types `reyes-lab` beside it, describes it as "Nearshore current data, Reyes Lab", and leaves it `Private`.
 
 4. Under **Ownership**, choose who owns the collection.
-The default is the creator of the collection (you); use **Pick an existing user** to name them, **Create a new user** if they have no account yet, or **Send an ownership invite** to mint a link they redeem themselves.
+   The default is the creator of the collection (you); use **Pick an existing user** to name them, **Create a new user** if they have no account yet, or **Send an ownership invite** to mint a link they redeem themselves.
+   **Pick an existing user** and **Create a new user** are enabled only if you also hold `server.user_admin`; a plain collection administrator has the default and the invite.
 
-> Dr. Reyes has never signed in to the origin, so Brian reaches for an ownership invite — see [Transfer ownership of a collection](#transfer-ownership-of-a-collection).
+   > Dr. Reyes has never signed in to the origin, so Brian reaches for an ownership invite — see [Transfer ownership of a collection](#transfer-ownership-of-a-collection).
+
 5. Under **Access Control**, fill in the three group rows — the `admin` row becomes the collection's admin group, the `write` row and the `read` row become access grants.
-Each row can either create a fresh group or attach one that already exists.
+   Each row can either create a fresh group or attach one that already exists.
 
-> Brian does not know the groups that will want to access collections, so he skips these assignments, letting the Reyes lab manage that after he passes it on.
+   > Brian does not know the groups that will want to access collections, so he skips these assignments, letting the Reyes lab manage that after he passes it on.
+
 6. Click **ONBOARD COLLECTION** at the bottom of the form.
 
 > One form, and Brian is done: the lab now runs its own access control, and Research Computing is out of the loop for everything that follows.
@@ -163,7 +165,7 @@ The grant appears in the list like any other row and is revoked the same way.
 On the command line and in the API, this virtual group is spelled `@authenticated`; see [Doing this from the command line or the API](#doing-this-from-the-command-line-or-the-api).
 
 <Callout type="info">
-The `All authenticated users` group is only selectable after the collection has been created in its edit menu.
+The **All authenticated users** entry is offered only on the **Edit collection** page; the onboard and quick-create group pickers do not list it.
 </Callout>
 
 ## Turn on sharing
@@ -199,8 +201,8 @@ While a share is technically a type of collection, it's important to understand 
 
 Altogether, this means that 
 
-* A member of `admin-group` cannot manage who has access to a share, only what the owner has access to.
-* Objects in a share can only be reached if the share's owner still has access to parent collection (this is checked for every issuance).
+* The collection's admin group cannot manage who has access to a share; it controls only what the share's owner has access to.
+* Objects in a share can only be reached if the share's owner still has access to the parent collection (this is checked for every issuance).
 * If the owner of the share has their access revoked (or sharing is disabled in the collection settings), then the objects can no longer be accessed via the share.
 * Someone with access to a share cannot further extend access to someone else.
 
@@ -217,7 +219,7 @@ Otherwise, the individual who created the share represents a single point of fai
 
 ## Create a share
 
-*Requires: You have `read` or `write` on the parent collection, which in turn has sharing enabled — see [Share administration](/managing-data-access/permissions-reference#share-administration).*
+*Requires: You can read the parent collection — through a `read` or `write` grant, as its owner or an admin-group member, as an administrator, or as any signed-in user if the collection is public — and the parent has sharing enabled. See [Share administration](/managing-data-access/permissions-reference#share-administration).*
 
 > Andrew has access to `/riptide-university/reyes-lab/andrews-project`, and sharing has been enabled.
 > He goes to create a share so that his classmates can also have access to this namespace.
@@ -225,7 +227,7 @@ Otherwise, the individual who created the share represents a single point of fai
 To create a share:
 
 1. Open **Collections** and find the parent collection.
-The share icon appears on its row only when sharing is enabled there.
+   The share icon appears on its row only when sharing is enabled there.
 2. Click the **Create share** (share) icon.
 3. In the **Create share of …** dialog, fill in **Share name**, an optional **Description**, and optionally a **Namespace (optional)** beneath the parent's — leave it blank to use the parent's namespace.
   (The namespace, if set, has to be equal to, or a subset of, the parent collection's namespace.)
@@ -264,24 +266,24 @@ In that case, setting the role `write` in the share would still issue read-only 
 Three levers, in increasing order of blast radius.
 
 1. **Remove the person from the group.**
-  Everything else keeps working; only that person loses the access the group carried.
-  See [Add and remove group members](/managing-data-access/users-and-groups#add-and-remove-group-members).
+   Everything else keeps working; only that person loses the access the group carried.
+   See [Add and remove group members](/managing-data-access/users-and-groups#add-and-remove-group-members).
 
-  > After Andrew removes his former classmate from the share's access group, that classmate can no longer access objects via the share.
+   > After Andrew removes his former classmate from the share's access group, that classmate can no longer access objects via the share.
 
 2. **Remove access of the share's owner to the parent.**
-  Not only does the share's owner lose access, but so does anyone who was accessing objects via the share.
-  See [Add and remove group members](/managing-data-access/users-and-groups#add-and-remove-group-members).
+   Not only does the share's owner lose access, but so does anyone who was accessing objects via the share.
+   See [Add and remove group members](/managing-data-access/users-and-groups#add-and-remove-group-members).
 
-  > After Christina removes Andrew from `reyes_students`, Andrew can no longer access objects in the collection. 
-  > Furthermore, none of his classmates can use his share anymore.
+   > After Christina removes Andrew from `reyes_students`, Andrew can no longer access objects in the collection.
+   > Furthermore, none of his classmates can use his share anymore.
 
-3. **Revoke the grant**
-  The whole group loses that role on that collection.
-  Use the trash icon beside the row under **Access groups**.
-  See [Grant read or write access to a group](/managing-data-access/collections-and-shares#grant-read-or-write-access-to-a-group).
+3. **Revoke the grant.**
+   The whole group loses that role on that collection.
+   Use the trash icon beside the row under **Access groups**.
+   See [Grant read or write access to a group](#grant-read-or-write-access-to-a-group).
 
-  > After Christina removes the `reyes_students` read grant, no one in the `reyes_students` group can read objects in the collection, unless they are in a different group that also has read access.
+   > After Christina removes the `reyes_students` read grant, no one in the `reyes_students` group can read objects in the collection, unless they are in a different group that also has read access.
 
 **All three take effect the next time a token is *issued***, not against tokens already in the field.
 An access token minted before you revoked keeps working until it expires, and the one after it is smaller or empty.
@@ -295,7 +297,7 @@ An access token minted before you revoked keeps working until it expires, and th
 
 *Requires: You are the owner of the collection or share, or `server.collection_admin`; admin-group members cannot delete — see [Collection administration](/managing-data-access/permissions-reference#collection-administration).*
 
-> Dr. Reyes is considering retirement and asks what should be done about her lab's collection. 
+> Dr. Reyes is considering retirement and asks what should be done about her lab's collection.
 > Should it be deleted?
 > And if so, how would she go about it?
 
@@ -353,7 +355,7 @@ Mint an ownership-transfer invite.
 These links are always single-use.
 The recipient signs in (self-enrolling through OIDC if this is their first visit), redeems the link, and becomes the owner at that moment; the previous owner loses ownership simultaneously.
 
-> Christina sends the new faculty member the invite link. 
+> Christina sends the new faculty member the invite link.
 > Ownership of `reyes-lab` collection is transferred when the new faculty member redeems the link.
 
 ## Doing this from the command line or the API
@@ -375,6 +377,7 @@ pelican-server origin collection create \
 ```
 
 The command prints the new collection, including its ID, which every later command on that collection needs.
+Creating a collection from the command line needs the same `server.collection_admin` (or `server.admin`) privilege as the web interface.
 
 **The API.**
 Every endpoint sits under `/api/v1.0/origin_ui/collections`, and takes a login cookie or an API token whose creator holds the scope the task calls for.
@@ -387,14 +390,16 @@ Coverage is not equal across the three, so here is what each one can actually do
 | [Create a collection](#create-a-collection) | [`collection create`](/commands-reference/pelican-server/origin/collection/create) | `POST /collections` |
 | [Grant or revoke access](#grant-read-or-write-access-to-a-group) | [`collection acl grant`](/commands-reference/pelican-server/origin/collection/acl/grant) / [`revoke`](/commands-reference/pelican-server/origin/collection/acl/revoke) | `POST` / `DELETE /collections/{id}/acl` |
 | [Set the admin group](#delegate-day-to-day-management-to-an-admin-group) | — | `PATCH /collections/{id}` |
-| [Transfer ownership](#transfer-ownership-of-a-collection) | [`collection ownership-invite create`](/commands-reference/pelican-server/origin/collection/ownership-invite) (invite only) | `PATCH /collections/{id}`, or `POST /collections/{id}/ownership-invites` |
+| [Transfer ownership](#transfer-ownership-of-a-collection) | [`collection ownership-invite create`](/commands-reference/pelican-server/origin/collection/ownership-invite/create) (invite only) | `PATCH /collections/{id}`, or `POST /collections/{id}/ownership-invites` |
 | [Turn on sharing](#turn-on-sharing) | — | `PATCH /collections/{id}` |
 | [Create a share](#create-a-share) | — | `POST /collections/{id}/shares` |
 | [Delete a collection or share](#delete-a-collection-or-share) | [`collection delete`](/commands-reference/pelican-server/origin/collection/delete) | `DELETE /collections/{id}` |
 
 A dash means the web interface is the only option today.
 `pelican-server origin collection update` covers the descriptive fields only, which is why the admin group and the sharing switch have no command-line path.
-The two share endpoints are also not yet described in the [API browser](/api-docs), though the surrounding collection endpoints are.
+The share endpoints (`GET` and `POST /collections/{id}/shares`) are also not yet described in the [API browser](/api-docs), though the surrounding collection endpoints are.
 
-On the command line and the API, `@authenticated` goes wherever you would pass a group name, and `--group-id` accepts either a group's internal ID or its name — Pelican stores the canonical name on the grant either way.
+On the command line, `--group-id` takes a **name**: a group name, `user-<username>` for one person, or `@authenticated` — never a group's internal ID, which the command refuses.
+The API accepts the same names in `groupId`, or a target by ID through `subjectType` and `subjectId`.
+Either way Pelican resolves the name and stores the target's immutable ID on the grant, so renaming a group does not break its grants and a reclaimed name inherits nothing.
 The command line and the API call a collection's set of grants its **ACL** (access control list), which is why the subcommand is `acl grant`; see [`collection acl`](/commands-reference/pelican-server/origin/collection/acl).

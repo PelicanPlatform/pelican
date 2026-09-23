@@ -35,19 +35,27 @@ Administrator access for people identified by their identity provider comes from
 
 ### Groups are how authorization is written down
 
-Because users hold no permissions, everything that grants permission is written against a group: collection access grants, admin lists, and authorization templates all name groups.
-Membership arrives from two directions — Pelican's own records, and the group names your login token asserts, filtered to names this server actually knows.
-The two are unioned, which is why someone added to a group in the web interface sees the effect immediately instead of waiting for their identity provider to catch up.
+Because users hold no permissions, almost everything that grants permission is written against a group: admin lists and authorization templates name groups, and so do most collection access grants.
+Membership arrives from two directions.
+Pelican's own records hold the members an owner or administrator added, and those never expire.
+When you sign in through the configured group source ([`Issuer.GroupSource`](/parameters#Issuer-GroupSource), a single provider), the groups it asserts for you are mirrored into the same membership table, tagged with their source and the time they were last seen.
+A mirrored membership confers authority only while it is fresher than [`Issuer.AssertedGroupMembershipTTL`](/parameters#Issuer-AssertedGroupMembershipTTL), is retracted the next time the provider stops asserting it, and cannot be removed or left through Pelican — that change belongs at the provider.
+The two sources are unioned, which is why someone added to a group in the web interface sees the effect immediately instead of waiting for their identity provider to catch up.
 
-Two names are synthesized rather than created.
-Every user implicitly belongs to a personal group named `user-` followed by their username, which is how you grant access to one person without a second kind of grant.
-`@authenticated` is the virtual target meaning "every signed-in caller", added to your group list whenever you have any identity at all.
-Neither can be created or joined, and neither can collide with a real group name.
+Two grant targets are not groups at all, though they are written where a group name goes.
+`user-` followed by a username names one person: the grant is stored against that user's ID, and it is how you give an individual access without a second kind of grant.
+`@authenticated` means "every signed-in caller" and matches anyone who has an identity at all.
+Neither is a group you can create, join, or list, and neither can collide with a real group name.
 
 Within a group there are three positions.
 The owner may transfer ownership, delegate an administrator, and delete the group, and is the one member who cannot simply leave.
 The administrator — a user or another group — handles membership and metadata day to day but cannot transfer or delete.
 Members are everyone else and can always leave, which is why membership is never used to express a restriction.
+
+Two kinds of group are special.
+A group whose name appears in [`Server.AdminGroups`](/parameters#Server-AdminGroups), [`Server.UserAdminGroups`](/parameters#Server-UserAdminGroups), or [`Server.CollectionAdminGroups`](/parameters#Server-CollectionAdminGroups) is created at startup, owned by the built-in administrator, and held while the setting names it: nobody can rename, delete, or claim it.
+A group first recorded because the identity provider asserted its name likewise cannot be renamed.
+Deleting any other group retires its ID for good but frees its name for reuse; nothing keys on names, so a new group with the old name inherits nothing.
 
 See [Managing Users and Groups](/managing-data-access/users-and-groups) for how to create and run one.
 
@@ -56,6 +64,7 @@ See [Managing Users and Groups](/managing-data-access/users-and-groups) for how 
 A scope is a named capability attached to an account or a group, and four of them shape this section.
 `web_ui.access` is the baseline: the account may sign in and use the interface at all.
 `server.user_admin` covers managing other people's accounts, `server.collection_admin` covers creating collections, and `server.admin` is the master scope that implies both.
+When group membership comes from an external source, a user administrator can act only on accounts Pelican has observed and found free of administrator-conferring groups; the [Permissions Reference](/managing-data-access/permissions-reference#user-administration) has the rule.
 
 Scopes are not free-form.
 The management API accepts only scopes from a fixed, user-grantable catalogue.
@@ -78,6 +87,7 @@ Group creation itself is open.
 Any signed-in user can create a group, because users need groups of their own to grant access on their collections and shares.
 What a self-created group cannot do is act as bearer authority: [`Issuer.AuthorizationTemplates`](/parameters#Issuer-AuthorizationTemplates) and the [`Server.AdminGroups`](/parameters#Server-AdminGroups) settings match on a group's *name*, so a group you named yourself must not automatically start matching them.
 Each group therefore carries an auth-template-eligibility flag, and only a system administrator can turn it on for an existing group.
+The flag is applied as an exclusion: a name whose group is flagged ineligible is dropped, and a name with no group record at all passes.
 Collection access grants do not consult the flag.
 
 ## How access to data is granted
@@ -100,18 +110,21 @@ So the depth at which a collection is created is a floor on how finely access ca
 Three kinds of authority attach to a collection.
 The owner is one user, responsible for it, and the only one who can transfer or delete it.
 The admin group runs it day to day and can do everything except transfer and delete.
-Each grant gives one group `read` or `write`, optionally until an expiry; holding `write` is authority over the collection's data, not over its access control.
+Each grant gives one group, one user, or every signed-in caller `read` or `write`, optionally until an expiry; an expired grant no longer grants anything, though it still shows in listings until removed.
+Holding `write` is authority over the collection's data, not over its access control.
 
-Visibility is a separate axis: a public collection has its existence visible to callers who hold no access to it, and a private one does not appear in their listing at all.
+Visibility is a separate axis: a public collection has its record — name, description, namespace, metadata, and grant list — readable by any signed-in caller, and a private one does not appear in their listing at all.
 Visibility grants no data access, and `@authenticated` — which does grant data access to every signed-in caller — does not make a collection public.
 
-Your role on a collection is what becomes data access: owner or `write` yields read, modify, and create on that collection's namespace, `read` yields read alone, and no role yields nothing, because there is no implicit floor.
+Grants are what become data access: a `write` grant that matches you yields read, modify, and create on that collection's namespace, a `read` grant yields read alone, and no matching grant yields nothing, because there is no implicit floor.
+Ownership and admin-group membership are management authority only.
+The issuer does not consult them, so an owner who wants to move data needs a grant like anyone else.
 See [Managing Access to a Collection](/managing-data-access/collections-and-shares) for the tasks, and [Data access](/managing-data-access/permissions-reference#data-access) for the full mapping.
 
 ### Shares delegate access you already hold
 
 Creating a collection needs `server.collection_admin`, and most people who want to share data do not have it and should not need it — which is what shares are for.
-A share is a child collection created by someone who already holds read access on the parent, once the parent's owner has turned sharing on.
+A share is a child collection created by someone who can already read the parent — through a grant, ownership, the admin group, or public visibility — once the parent's owner has turned sharing on.
 The creator owns the share, so they can grant access on it exactly as a collection owner would, without gaining any new privilege on the parent.
 A share's prefix has to be the parent's namespace or a path beneath it, shares start private, and a share of a share is refused.
 
@@ -136,7 +149,7 @@ Serving share data means acting as the share's owner, and the multi-user backend
 Knowing which check refused you is usually enough to fix the problem.
 
 The **login gate** establishes who you are and whether your account is still active.
-A deactivated account fails here on its next request, without waiting for a token to expire.
+A deactivated account fails here on its next management-API request, without waiting for a token to expire.
 
 The **management-API gate** compares your effective scopes against what the route requires.
 The Acceptable Use Policy gate sits alongside it: where a policy is configured, you must accept the current version before the user, group, and self-service APIs will answer you.
