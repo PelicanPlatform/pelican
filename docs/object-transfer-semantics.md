@@ -1,6 +1,6 @@
-# `pelican object get` / `put`: source/destination semantics
+# `pelican object get` / `put` / `copy`: source/destination semantics
 
-This note captures how the client library and CLI handle the cartesian product of {single vs. multiple sources} × {file vs. collection} × {recursive vs. not} for downloads (`get`) and uploads (`put`). It exists so future contributors have a single place to look when reasoning about "did I break someone's script?", and so the regression tests have a written contract to assert against.
+This note captures how the client library and CLI handle the cartesian product of {single vs. multiple sources} × {file vs. collection} × {recursive vs. not} for downloads (`get`), uploads (`put`), and copies (`copy`, including the third-party copy where both ends are remote). It exists so future contributors have a single place to look when reasoning about "did I break someone's script?", and so the regression tests have a written contract to assert against.
 
 If you change any of the behaviors below, please:
 
@@ -12,7 +12,7 @@ If you change any of the behaviors below, please:
 
 - **Collection** — a "directory" in the pelican namespace. The wire format is WebDAV; the storage backend calls them collections, so we do too. On the filesystem side, "directory" is synonymous.
 - **Object** — a "file" in the pelican namespace (a leaf).
-- **Recursive** — `--recursive` (`-r`) on the CLI, or the `recursive` bool parameter on `client.DoGet` / `client.DoPut`. Also settable via the `?recursive` query parameter on the URL.
+- **Recursive** — `--recursive` (`-r`) on the CLI, or the `recursive` bool parameter on `client.DoGet` / `client.DoPut` / `client.DoCopy`. Also settable via the `?recursive` query parameter on the URL.
 - **Container target** — a destination path that names a container: an existing local directory (for `get`), or an existing remote collection (for `put`). For **non-recursive** single-object transfers, a container target triggers *filename inference* (source basename joined onto the destination). For **recursive** transfers, entries land **flat** under the destination — the source basename is NOT interposed. This follows the layout agreed for `pelican object sync` in discussion [#1638](https://github.com/orgs/PelicanPlatform/discussions/1638), where syncing a collection into a local directory puts its entries directly in that directory, and syncing a local directory to a namespace prefix puts its files directly under that prefix: recursive transfers are `rsync`-flavored (`rsync -a src/ dst/`), not `cp -r`-flavored.
 
 ## `pelican object get REMOTE [REMOTE...] LOCAL`
@@ -100,13 +100,56 @@ It also runs with `client.WithStatUploadDestination(true)` and `client.WithAcqui
 
 **Caveat:** a namespace that grants writes but no `listings` cannot answer the pre-flight at all, so `put ./file.txt REMOTE_COLLECTION` still fails there with `already exists` (row P2). Row P3-cli holds only where the destination can be stat'ed.
 
+## `pelican object copy {SOURCE ...} DESTINATION`
+
+`copy` picks its direction from the URL schemes rather than from the subcommand name:
+
+| Source | Destination | What runs                                                                                                                                                                                                                              |
+| ------ | ----------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| local  | remote      | `client.DoPut` — rows P1-P10 apply unchanged.                                                                                                                                                                                          |
+| remote | local       | `client.DoGet` — rows G1-G10 apply unchanged.                                                                                                                                                                                          |
+| remote | remote      | **Third-party copy**: the destination origin is told (WebDAV `COPY`) to pull from the source. No object bytes pass through the client; the source credential is handed to the destination in the `TransferHeaderAuthorization` header. |
+
+The rows below are the ones `cmd/object_copy.go` adds on top of that, and they apply to every **remote** destination — the put direction and the third-party one alike, since the destination side of the question is the same either way.
+
+### Single source, `--recursive=false`
+
+| #      | Remote destination            | Behavior                                                                                                                                                                                                                        |
+| ------ | ----------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| C1     | a non-existent remote path    | Copied as-is (destination is treated as the target object URL).                                                                                                                                                                 |
+| C2     | an existing remote object     | Whatever the destination origin answers for a write over an existing object — `already exists` for a Pelican origin.                                                                                                            |
+| C3-cli | an existing remote collection | Object name inferred by the CLI (`cmd/object_copy.go` pre-flights the destination with `client.DoStat`): copied to `DEST/basename(SOURCE)`. Symmetric with P3-cli and G2, and named off the URL path when the source is remote. |
+| C3-lib | an existing remote collection | `client.DoCopy` infers nothing and surfaces the destination's refusal. Symmetric with P3-lib: the inference is a CLI affordance, not a library one.                                                                             |
+
+Row C3-cli is [issue #3663](https://github.com/PelicanPlatform/pelican/issues/3663). Without it, `copy REMOTE_OBJECT REMOTE_COLLECTION/` reaches the destination origin as a write to the collection itself, and the user gets back an HTTP 409 whose reason ("is a directory") lives only in the response body. The copy path now also carries that body onto the error value, so a destination that refuses for some *other* reason says so in the line the CLI prints rather than only in the log above it.
+
+### Single source, `--recursive=true`
+
+| #   | Behavior                                                                                                                                                                     |
+| --- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| C4  | Entries land **flat** under the destination collection, exactly as in G5/P6. The name inference is skipped entirely so the layout cannot pick up a `cp -r`-flavored nesting. |
+
+As with put, recursion is read from `?recursive` on the destination as well as from `-r`, since `client.DoCopy` honors both.
+
+### Multiple sources
+
+| #   | Remote destination | Behavior                                                                                                                                                              |
+| --- | ------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| C5  | any                | Treated as a container: each source is copied to `DEST/basename(SOURCE_i)`, the same rule as P8/P9. A stat that cannot answer does not change this (soft, as in P10). |
+
+The local multi-source destination check (`Destination does not exist` / `Destination is not a collection`) now runs **only for a local destination**. It used to run for every destination, so `copy A B osdf:///coll/` failed with `Destination does not exist` about a path that was never meant to be local.
+
+### Credentials
+
+A third-party copy asks for the same two token operations a get and a put do: `config.TokenRead` for the source and `config.TokenWrite` for the destination (`copySourceTokenOperation` / `copyDestinationTokenOperation` in `client/handle_http.go`). It must **not** ask for the `Shared*` variants — those back `pelican object share`, demand a scope naming the object exactly, and suppress the issuer's scope-depth narrowing, so an ordinary prefix-scoped credential looks unacceptable and every copy warns `Using provided token ... even though it does not appear to be acceptable to perform transfer` before using it anyway. That was the other half of issue #3663.
+
 ## Design principles the matrix follows
 
 - **`get` and `put` are symmetric for object/collection type checks.** The library catches the "source type mismatched with recursive flag" cases (G4 / P4); the CLI catches "multi-source needs a container destination" (G8-G10 / P8-P10).
 - **Non-recursive single-object transfers into a container-typed destination infer the name.** G2 follows `cp` / `scp` for the "singular object into an already existing container (that tab-completion filled in for me)" gesture granted for the download direction in discussion [#1638](https://github.com/orgs/PelicanPlatform/discussions/1638). P3-cli is the upload converse, which that discussion flagged as an error; it is allowed here per issue [#2946](https://github.com/PelicanPlatform/pelican/issues/2946), because the error users actually got — `remote object already exists` naming a collection they were not writing to — reads as a false statement about their own filename. The change is confined to the CLI: `client.DoPut` still errors (P3-lib), so no library caller silently acquires the new behavior.
 - **Recursive transfers into a container are `rsync`-flavored, not `cp -r`-flavored.** G5 and P6 both lay entries flat under the destination — the source basename is NOT interposed. This is the layout agreed for `pelican object sync` in discussion [#1638](https://github.com/orgs/PelicanPlatform/discussions/1638); `get -r` / `put -r` inherit the same rule so that `object sync` and library callers (`client_agent`, embedders) see one consistent layout.
 - **The library never invents container creation semantics that could surprise a scripting user.** `?recursive` and `--recursive` are the explicit opt-in for walking or expanding directory-typed sources; when absent, a directory source is a client-side error rather than a silent success or a strange partial upload. Both spellings must be read wherever recursion changes the layout, since `client.DoPut` and `client.DoGet` honor the query parameter regardless of the boolean they were passed.
-- **An inferred name is validated, never just joined.** `path.Join` cleans its result, so a source basename of `..` would resolve to the parent of the collection the caller named and upload there without saying so. `cmd/object_put.go` refuses such a source instead of rewriting it.
+- **An inferred name is validated, never just joined.** `path.Join` cleans its result, so a source basename of `..` would resolve to the parent of the collection the caller named and upload there without saying so. `cmd/object_put.go` and `cmd/object_copy.go` refuse such a source instead of rewriting it.
 - **Pre-flight stats fail soft on the put side, hard on the get side.** For put, a stat failure does not imply the put will fail (write-only tokens, no `listings`), so the pre-flight logs at debug and falls through. For non-recursive get, non-`ErrObjectNotFound` stat failures propagate — the G4 decision cannot be made without knowing whether the source is a collection, and guessing wrong corrupts the local layout. Recursive get skips the stat entirely (no G4 check needed since the walker handles both shapes).
 
 ## Where the code lives
@@ -117,17 +160,23 @@ It also runs with `client.WithStatUploadDestination(true)` and `client.WithAcqui
 - `client.DoPut` (in `client/main.go`) — library-level put, including the P4 "local source is a directory but recursive is false" guard.
 - `cmd/object_get.go` — CLI wrapper for get. Adds the multi-source destination checks (rows G8-G10).
 - `cmd/object_put.go` — CLI wrapper for put. Pre-flights the destination with a single `client.DoStat` outside the source loop, then rewrites the per-source destination for P3-cli/P8/P9 only, via `inferRemoteObjectName`. Recursive uploads skip the rewrite so P6 stays flat. Stat failures are soft (row P10).
+- `client.DoCopy` (in `client/main.go`) — library-level copy. Dispatches to `DoPut`, `DoGet`, or `doThirdPartyCopy` by scheme.
+- `client.TransferClient.NewCopyJob` (in `client/handle_http.go`) — builds the two token generators a third-party copy needs, from `copySourceTokenOperation` and `copyDestinationTokenOperation`.
+- `cmd/object_copy.go` — CLI wrapper for copy. Adds the C-rows: the remote-destination pre-flight and the `inferCopyObjectName` rewrite (C3-cli/C5), and scopes the local multi-source check to local destinations.
 
 ## Where the tests live
 
 Subtests are named after the row IDs above, so a failure points directly at a documented expectation. Coverage is split by where the behavior is implemented:
 
-| Test                                                                   | Rows covered                                                                                                   |
-| ---------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------- |
-| `cmd/object_transfer_semantics_test.go`: `TestObjectTransferSemantics` | G1-G6, P1, P2, P3-lib, P4, P5, P6 — the library-level rows, against one POSIXv2-backed federation              |
-| `cmd/object_put_test.go`: `TestObjectPutSemanticsCLI`                  | P3-cli, P6 (via `?recursive`, and with several sources), P8, P9, P10 — the rows `cmd/object_put.go` implements |
-| `cmd/object_put_test.go`: `TestInferRemoteObjectName`                  | The destination rewrite in isolation, including the sources it refuses                                         |
-| `cmd/object_put_test.go`: `TestObjectPutToDirectoryInfersFilename`     | P3-cli end to end through an authenticated XRootD-backed origin                                                |
+| Test                                                                              | Rows covered                                                                                                   |
+| --------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------- |
+| `cmd/object_transfer_semantics_test.go`: `TestObjectTransferSemantics`            | G1-G6, P1, P2, P3-lib, P4, P5, P6 — the library-level rows, against one POSIXv2-backed federation              |
+| `cmd/object_put_test.go`: `TestObjectPutSemanticsCLI`                             | P3-cli, P6 (via `?recursive`, and with several sources), P8, P9, P10 — the rows `cmd/object_put.go` implements |
+| `cmd/object_put_test.go`: `TestInferRemoteObjectName`                             | The destination rewrite in isolation, including the sources it refuses                                         |
+| `cmd/object_put_test.go`: `TestObjectPutToDirectoryInfersFilename`                | P3-cli end to end through an authenticated XRootD-backed origin                                                |
+| `cmd/object_copy_test.go`: `TestInferCopyObjectName`                              | The copy destination rewrite in isolation, for both local and remote sources, including the sources it refuses |
+| `cmd/object_copy_test.go`: `TestObjectCopyToCollectionInfersObjectName`           | C3-cli end to end: a third-party copy into an existing collection through an authenticated POSIXv2 origin      |
+| `client/acquire_token_test.go`: `TestCopyTokenOperationsAcceptPrefixScopedTokens` | That a copy's token operations accept an ordinary prefix-scoped credential, and that the `Shared*` ones do not |
 
 Rows **G7**, **G8**, **G9**, **G10**, and **P7** are documented but not yet asserted anywhere; G9 and G10 are `os.Exit` paths in `cmd/object_get.go`, which cannot be driven through `rootCmd` in-process. Adding coverage for them is welcome.
 

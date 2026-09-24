@@ -151,3 +151,33 @@ func TestMonitorTPC(t *testing.T) {
 		assert.NoError(t, msg.err)
 	})
 }
+
+// TestSummarizeCopyFailure covers what a destination's refusal looks like by
+// the time it reaches the caller.  Before issue #3663 the body was logged and
+// then dropped, leaving the user with a bare "TPC COPY failed (HTTP status
+// 409)" and no way to learn that the destination they named is a collection.
+func TestSummarizeCopyFailure(t *testing.T) {
+	t.Run("carries the destination's reason", func(t *testing.T) {
+		body := []byte("failure: Unable to create /ospool/ap40/data/user/tpc2; is a directory, " +
+			"local=/ospool/ap40/data/user/tpc2, remote=https://dtn.example:8443/ospool/ap40/data/user/tpc1/file")
+		got := summarizeCopyFailure(body)
+		assert.Contains(t, got, "is a directory")
+		assert.False(t, strings.HasPrefix(got, "failure:"),
+			"XRootD's \"failure:\" prefix adds nothing to a message that already says the copy failed")
+	})
+
+	t.Run("flattens a multi-line body to one line", func(t *testing.T) {
+		got := summarizeCopyFailure([]byte("  first line\n\tsecond line\n\n"))
+		assert.Equal(t, "first line second line", got)
+	})
+
+	t.Run("bounds a hostile body", func(t *testing.T) {
+		got := summarizeCopyFailure([]byte(strings.Repeat("A", 4096)))
+		assert.Less(t, len(got), 4096, "a remote peer must not choose how long the error message is")
+	})
+
+	t.Run("says nothing when the body is empty", func(t *testing.T) {
+		assert.Empty(t, summarizeCopyFailure(nil))
+		assert.Empty(t, summarizeCopyFailure([]byte("   \n ")))
+	})
+}
