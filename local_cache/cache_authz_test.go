@@ -20,14 +20,25 @@ package local_cache
 
 import (
 	"context"
+	"crypto/ecdsa"
+	"crypto/elliptic"
+	"crypto/rand"
+	"encoding/json"
+	"net/http"
+	"net/http/httptest"
 	"net/url"
 	"testing"
+	"time"
 
+	"github.com/lestrrat-go/jwx/v2/jwa"
+	"github.com/lestrrat-go/jwx/v2/jwk"
+	"github.com/lestrrat-go/jwx/v2/jwt"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"golang.org/x/sync/errgroup"
 
 	"github.com/pelicanplatform/pelican/server_structs"
+	"github.com/pelicanplatform/pelican/token"
 	"github.com/pelicanplatform/pelican/token_scopes"
 )
 
@@ -53,7 +64,7 @@ func TestGetAcls_PublicNamespaceWithInvalidToken(t *testing.T) {
 	require.NoError(t, ac.updateConfig(nsAds))
 
 	t.Run("EmptyToken", func(t *testing.T) {
-		acls, trusted, err := ac.getAcls("")
+		acls, trusted, _, err := ac.getAcls("")
 		require.NoError(t, err)
 		assert.True(t, trusted, "empty token should be treated as trusted (no token)")
 		require.Len(t, acls, 1)
@@ -62,7 +73,7 @@ func TestGetAcls_PublicNamespaceWithInvalidToken(t *testing.T) {
 	})
 
 	t.Run("GarbageToken", func(t *testing.T) {
-		acls, trusted, err := ac.getAcls("not-a-real-jwt")
+		acls, trusted, _, err := ac.getAcls("not-a-real-jwt")
 		require.NoError(t, err)
 		assert.False(t, trusted, "garbage token should not be trusted")
 		require.Len(t, acls, 1, "Public ACLs must still be granted")
@@ -96,7 +107,7 @@ func TestGetAcls_MixedNamespaces(t *testing.T) {
 	require.NoError(t, ac.updateConfig(nsAds))
 
 	t.Run("InvalidTokenGetsOnlyPublicACLs", func(t *testing.T) {
-		acls, trusted, err := ac.getAcls("bad-token")
+		acls, trusted, _, err := ac.getAcls("bad-token")
 		require.NoError(t, err)
 		assert.False(t, trusted)
 
@@ -190,7 +201,7 @@ func TestGetAcls_HierarchicalNamespaceOR(t *testing.T) {
 		}
 		require.NoError(t, ac.updateConfig(nsAds))
 
-		acls, _, err := ac.getAcls("")
+		acls, _, _, err := ac.getAcls("")
 		require.NoError(t, err)
 		// Only the public namespace contributes (no valid token).
 		require.Len(t, acls, 1)
@@ -217,7 +228,7 @@ func TestGetAcls_HierarchicalNamespaceOR(t *testing.T) {
 		}
 		require.NoError(t, ac.updateConfig(nsAds))
 
-		acls, _, err := ac.getAcls("")
+		acls, _, _, err := ac.getAcls("")
 		require.NoError(t, err)
 		// Only the child's public namespace contributes.
 		require.Len(t, acls, 1)
@@ -241,7 +252,7 @@ func TestGetAcls_HierarchicalNamespaceOR(t *testing.T) {
 		}
 		require.NoError(t, ac.updateConfig(nsAds))
 
-		acls, _, err := ac.getAcls("")
+		acls, _, _, err := ac.getAcls("")
 		require.NoError(t, err)
 		require.Len(t, acls, 2)
 
@@ -369,4 +380,153 @@ func TestNsAdsAuthzEqual(t *testing.T) {
 		assert.True(t, nsAdsAuthzEqual(nil, nil))
 		assert.True(t, nsAdsAuthzEqual([]server_structs.NamespaceAd{}, []server_structs.NamespaceAd{}))
 	})
+}
+
+// newTestIssuerServer generates a signing key and starts an HTTP server that
+// publishes its public half via JWKS along with the OpenID discovery document.
+// It returns the signing key and the issuer URL.
+func newTestIssuerServer(t *testing.T) (jwk.Key, string) {
+	privEC, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	require.NoError(t, err)
+	key, err := jwk.FromRaw(privEC)
+	require.NoError(t, err)
+	require.NoError(t, key.Set(jwk.KeyIDKey, "test-key"))
+	require.NoError(t, key.Set(jwk.AlgorithmKey, jwa.ES256))
+
+	pubKey, err := key.PublicKey()
+	require.NoError(t, err)
+	require.NoError(t, pubKey.Set(jwk.KeyIDKey, "test-key"))
+	require.NoError(t, pubKey.Set(jwk.AlgorithmKey, jwa.ES256))
+
+	jwks := jwk.NewSet()
+	require.NoError(t, jwks.AddKey(pubKey))
+
+	mux := http.NewServeMux()
+	mux.HandleFunc("/jwks", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		data, _ := json.Marshal(jwks)
+		_, _ = w.Write(data)
+	})
+	mux.HandleFunc("/.well-known/openid-configuration", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		cfg := map[string]interface{}{
+			"issuer":   "http://" + r.Host,
+			"jwks_uri": "http://" + r.Host + "/jwks",
+		}
+		data, _ := json.Marshal(cfg)
+		_, _ = w.Write(data)
+	})
+	server := httptest.NewServer(mux)
+	t.Cleanup(server.Close)
+	return key, server.URL
+}
+
+// mintTestToken creates a signed token from the given issuer with an explicit
+// expiration time.
+func mintTestToken(t *testing.T, key jwk.Key, issuer string, exp time.Time, scopes string) string {
+	tok, err := jwt.NewBuilder().
+		Issuer(issuer).
+		Subject("alice").
+		IssuedAt(time.Now().Add(-5*time.Minute)).
+		Expiration(exp).
+		Claim("scope", scopes).
+		Audience([]string{"https://wlcg.cern.ch/jwt/v1/any"}).
+		Build()
+	require.NoError(t, err)
+
+	signed, err := jwt.Sign(tok, jwt.WithKey(jwa.ES256, key))
+	require.NoError(t, err)
+	return string(signed)
+}
+
+// TestAuthorize_TokenExpiryBoundsCacheEntry verifies the fixes for issue
+// #3696 in the local cache: a cached authorization entry must not outlive the
+// token that produced it, and a cache read must not extend the entry's
+// lifetime (touch-on-hit).
+func TestAuthorize_TokenExpiryBoundsCacheEntry(t *testing.T) {
+	key, issuerURL := newTestIssuerServer(t)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	egrp, ctx := errgroup.WithContext(ctx)
+
+	ac := newAuthConfig(ctx, egrp)
+
+	parsedIssuer, err := url.Parse(issuerURL)
+	require.NoError(t, err)
+	nsAds := []server_structs.NamespaceAd{
+		{
+			Path: "/data",
+			Caps: server_structs.Capabilities{Reads: true},
+			Issuer: []server_structs.TokenIssuer{{
+				IssuerUrl: *parsedIssuer,
+				BasePaths: []string{"/data"},
+			}},
+		},
+	}
+	require.NoError(t, ac.updateConfig(nsAds))
+
+	tokenLifetime := 30 * time.Second
+	now := time.Now()
+	tokenStr := mintTestToken(t, key, issuerURL, now.Add(tokenLifetime), "storage.read:/")
+
+	ok, reason := ac.authorize(token_scopes.Wlcg_Storage_Read, "/data/file.txt", tokenStr)
+	require.True(t, ok, "a currently-valid token should authorize (denied: %s)", reason)
+
+	item := ac.tokenAuthz.Get(tokenStr)
+	require.NotNil(t, item)
+	maxExpiry := now.Add(tokenLifetime + token.ClockSkewLeeway + 10*time.Second)
+	assert.True(t, item.ExpiresAt().Before(maxExpiry),
+		"cache entry expiry %v should be clamped near the token's exp, not the default TTL", item.ExpiresAt())
+
+	// A read must not push the entry's expiry out.  Let the wall clock advance
+	// so that a touch-on-hit, if present, would produce a visibly later expiry.
+	firstExpiry := item.ExpiresAt()
+	time.Sleep(20 * time.Millisecond)
+	ok, _ = ac.authorize(token_scopes.Wlcg_Storage_Read, "/data/file.txt", tokenStr)
+	require.True(t, ok)
+	item = ac.tokenAuthz.Get(tokenStr)
+	require.NotNil(t, item)
+	assert.True(t, firstExpiry.Equal(item.ExpiresAt()),
+		"a cache read must not extend the entry's expiry (was %v, now %v)", firstExpiry, item.ExpiresAt())
+
+	cancel()
+	_ = egrp.Wait()
+}
+
+// TestAuthorize_ExpiredTokenDenied verifies that a token whose exp is past
+// (beyond the verifier's clock-skew leeway) no longer grants access to a
+// private namespace.
+func TestAuthorize_ExpiredTokenDenied(t *testing.T) {
+	key, issuerURL := newTestIssuerServer(t)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	egrp, ctx := errgroup.WithContext(ctx)
+
+	ac := newAuthConfig(ctx, egrp)
+
+	parsedIssuer, err := url.Parse(issuerURL)
+	require.NoError(t, err)
+	nsAds := []server_structs.NamespaceAd{
+		{
+			Path: "/data",
+			Caps: server_structs.Capabilities{Reads: true},
+			Issuer: []server_structs.TokenIssuer{{
+				IssuerUrl: *parsedIssuer,
+				BasePaths: []string{"/data"},
+			}},
+		},
+	}
+	require.NoError(t, ac.updateConfig(nsAds))
+
+	tokenStr := mintTestToken(t, key, issuerURL,
+		time.Now().Add(-2*token.ClockSkewLeeway), "storage.read:/")
+
+	ok, reason := ac.authorize(token_scopes.Wlcg_Storage_Read, "/data/file.txt", tokenStr)
+	assert.False(t, ok, "an expired token must not authorize")
+	assert.Contains(t, reason, "token validation failed")
+
+	cancel()
+	_ = egrp.Wait()
 }

@@ -318,3 +318,53 @@ func TestCachedLookup_SecondaryCache(t *testing.T) {
 	require.Error(t, err)
 	assert.Equal(t, int64(2), mock.secondaryCalls.Load(), "expected negative cache hit for secondary")
 }
+
+// TestCachedLookup_ReadsDoNotExtendExpiry verifies that cache reads do not
+// touch (extend) an entry's expiry.  Without ttlcache's WithDisableTouchOnHit,
+// a continuously-active user would never be re-resolved, so revoked group
+// memberships (and cached negative lookups) would persist indefinitely.
+func TestCachedLookup_ReadsDoNotExtendExpiry(t *testing.T) {
+	mock := &mockStrategyWithSecondary{
+		mockStrategy: *newMockStrategy(),
+		secondaryMap: map[string][]uint32{
+			"alice": {2000, 3000},
+		},
+	}
+	cached := NewCachedLookup(mock)
+
+	_, err := cached.UidForUser("alice")
+	require.NoError(t, err)
+	_, err = cached.GidForGroup("users")
+	require.NoError(t, err)
+	_, err = cached.SecondaryGidsForUser("alice")
+	require.NoError(t, err)
+	_, err = cached.UidForUser("nonexistent")
+	require.Error(t, err)
+
+	userExpiry := cached.userCache.Get("alice").ExpiresAt()
+	gidExpiry := cached.gidCache.Get("users").ExpiresAt()
+	secondaryExpiry := cached.secondaryCache.Get("alice").ExpiresAt()
+	negativeExpiry := cached.userCache.Get("nonexistent").ExpiresAt()
+
+	// Let the wall clock advance so a touch-on-hit, if present, would
+	// produce a visibly later expiry on the re-reads below.
+	time.Sleep(20 * time.Millisecond)
+
+	_, err = cached.UidForUser("alice")
+	require.NoError(t, err)
+	_, err = cached.GidForGroup("users")
+	require.NoError(t, err)
+	_, err = cached.SecondaryGidsForUser("alice")
+	require.NoError(t, err)
+	_, err = cached.UidForUser("nonexistent")
+	require.Error(t, err)
+
+	assert.True(t, userExpiry.Equal(cached.userCache.Get("alice").ExpiresAt()),
+		"a read must not extend the user entry's expiry")
+	assert.True(t, gidExpiry.Equal(cached.gidCache.Get("users").ExpiresAt()),
+		"a read must not extend the group entry's expiry")
+	assert.True(t, secondaryExpiry.Equal(cached.secondaryCache.Get("alice").ExpiresAt()),
+		"a read must not extend the secondary-GID entry's expiry")
+	assert.True(t, negativeExpiry.Equal(cached.userCache.Get("nonexistent").ExpiresAt()),
+		"a read must not extend a negative entry's expiry")
+}

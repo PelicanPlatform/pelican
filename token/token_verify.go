@@ -85,6 +85,17 @@ var (
 	registeredServerJWKSResolver atomic.Pointer[RegisteredServerJWKSResolver]
 )
 
+// Verification fails for two quite different reasons, and callers sometimes
+// need to tell them apart: a signature that does not check out may mean the
+// signing key is one we have not seen, and is worth re-reading the issuer's
+// keys over, while a rejected claim (expired, wrong audience, insufficient
+// scope) says nothing about the keys.  Wrap both so errors.Is can distinguish
+// them without matching on message text.
+var (
+	ErrTokenSignature = errors_default.New("failed to verify token signature")
+	ErrTokenClaims    = errors_default.New("failed to validate token claims")
+)
+
 func init() {
 	authChecker = &AuthCheckImpl{}
 }
@@ -326,7 +337,7 @@ func UnsafeParseClaims(tokenStr string) (jwt.Token, error) {
 func VerifyWithKeysetStrict(tokenStr string, jwks jwk.Set, opts ...jwt.ValidateOption) (jwt.Token, error) {
 	tok, err := jwt.Parse([]byte(tokenStr), jwt.WithKeySet(jwks), jwt.WithValidate(false))
 	if err != nil {
-		return nil, errors.Wrap(err, "failed to verify token signature")
+		return nil, fmt.Errorf("%w: %w", ErrTokenSignature, err)
 	}
 	validateOpts := make([]jwt.ValidateOption, 0, len(opts)+3)
 	validateOpts = append(validateOpts, opts...)
@@ -336,7 +347,7 @@ func VerifyWithKeysetStrict(tokenStr string, jwks jwk.Set, opts ...jwt.ValidateO
 		jwt.WithAcceptableSkew(0),
 	)
 	if err := jwt.Validate(tok, validateOpts...); err != nil {
-		return nil, errors.Wrap(err, "failed to validate token claims")
+		return nil, fmt.Errorf("%w: %w", ErrTokenClaims, err)
 	}
 	return tok, nil
 }
@@ -352,7 +363,7 @@ func VerifyWithKeysetStrict(tokenStr string, jwks jwk.Set, opts ...jwt.ValidateO
 func VerifyWithKeyset(tokenStr string, jwks jwk.Set, opts ...jwt.ValidateOption) (jwt.Token, error) {
 	tok, err := jwt.Parse([]byte(tokenStr), jwt.WithKeySet(jwks), jwt.WithValidate(false))
 	if err != nil {
-		return nil, errors.Wrap(err, "failed to verify token signature")
+		return nil, fmt.Errorf("%w: %w", ErrTokenSignature, err)
 	}
 	// Build the final option slice with a defensive copy
 	// to avoid mutating the caller's backing array.
@@ -364,7 +375,7 @@ func VerifyWithKeyset(tokenStr string, jwks jwk.Set, opts ...jwt.ValidateOption)
 		jwt.WithAcceptableSkew(ClockSkewLeeway),
 	)
 	if err := jwt.Validate(tok, validateOpts...); err != nil {
-		return nil, errors.Wrap(err, "failed to validate token claims")
+		return nil, fmt.Errorf("%w: %w", ErrTokenClaims, err)
 	}
 	return tok, nil
 }
