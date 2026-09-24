@@ -86,7 +86,7 @@ func TestHandleErrorTooManyRequests(t *testing.T) {
 
 	t.Run("BareSentinel", func(t *testing.T) {
 		rec := httptest.NewRecorder()
-		handleError(rec, client.ErrTooManyRequests, false, reqLog)
+		(&PersistentCache{}).handleError(rec, client.ErrTooManyRequests, "/test/object", false, reqLog)
 		require.Equal(t, 429, rec.Code)
 		require.Equal(t, "60", rec.Header().Get("Retry-After"),
 			"Retry-After should tell the client to back off for 60 seconds")
@@ -104,7 +104,7 @@ func TestHandleErrorTooManyRequests(t *testing.T) {
 		// via errors.Is.
 		rec := httptest.NewRecorder()
 		wrapped := errors.Wrapf(client.ErrTooManyRequests, "origin %q pending queue is full", "originA")
-		handleError(rec, wrapped, false, reqLog)
+		(&PersistentCache{}).handleError(rec, wrapped, "/test/object", false, reqLog)
 		require.Equal(t, 429, rec.Code)
 		require.Equal(t, "60", rec.Header().Get("Retry-After"))
 	})
@@ -120,7 +120,7 @@ func TestHandleErrorTooManyRequests(t *testing.T) {
 		} {
 			rec := httptest.NewRecorder()
 			rej := &client.SchedulerRejection{Reason: reason, Tag: "originA"}
-			handleError(rec, rej, false, reqLog)
+			(&PersistentCache{}).handleError(rec, rej, "/test/object", false, reqLog)
 			require.Equal(t, 429, rec.Code)
 			require.Equal(t, "60", rec.Header().Get("Retry-After"))
 			var body map[string]string
@@ -136,7 +136,7 @@ func TestHandleErrorTooManyRequests(t *testing.T) {
 		// 429 with the upstream's reason — not as a misleading 500.
 		rec := httptest.NewRecorder()
 		throttled := &client.CacheThrottleError{Reason: string(client.ShedOriginSlow)}
-		handleError(rec, throttled, false, reqLog)
+		(&PersistentCache{}).handleError(rec, throttled, "/test/object", false, reqLog)
 		require.Equal(t, 429, rec.Code)
 		require.Equal(t, "60", rec.Header().Get("Retry-After"))
 		var body map[string]string
@@ -149,7 +149,7 @@ func TestHandleErrorTooManyRequests(t *testing.T) {
 		// existing internal_error / not_found / etc. paths, not fall
 		// through the new 429 branch.
 		rec := httptest.NewRecorder()
-		handleError(rec, errors.New("some other error"), false, reqLog)
+		(&PersistentCache{}).handleError(rec, errors.New("some other error"), "/test/object", false, reqLog)
 		assert.NotEqual(t, 429, rec.Code, "non-scheduler errors must not accidentally map to 429")
 		assert.Empty(t, rec.Header().Get("Retry-After"))
 	})
@@ -274,7 +274,7 @@ func TestHandleErrorThrottlePrecedence(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			rec := httptest.NewRecorder()
-			handleError(rec, tt.err, false, reqLog)
+			(&PersistentCache{}).handleError(rec, tt.err, "/test/object", false, reqLog)
 			if tt.wantStatus == 0 {
 				assert.NotEqual(t, http.StatusTooManyRequests, rec.Code,
 					"a throttled attempt must not mask a more specific failure")
@@ -333,7 +333,7 @@ func TestRetryAfterValue(t *testing.T) {
 
 			// The same value is what a shed request actually advertises.
 			rec := httptest.NewRecorder()
-			handleError(rec, client.ErrTooManyRequests, false, log.NewEntry(log.New()))
+			(&PersistentCache{}).handleError(rec, client.ErrTooManyRequests, "/test/object", false, log.NewEntry(log.New()))
 			require.Equal(t, http.StatusTooManyRequests, rec.Code)
 			assert.Equal(t, tt.want, rec.Header().Get("Retry-After"))
 		})
@@ -363,10 +363,10 @@ func TestHandleErrorShedReasonIsValidated(t *testing.T) {
 	for _, reason := range known {
 		t.Run("known/"+reason, func(t *testing.T) {
 			rec := httptest.NewRecorder()
-			handleError(rec, &client.CacheThrottleError{
+			(&PersistentCache{}).handleError(rec, &client.CacheThrottleError{
 				Reason: reason,
 				Err:    client.ErrTooManyRequests,
-			}, false, reqLog)
+			}, "/test/object", false, reqLog)
 			require.Equal(t, http.StatusTooManyRequests, rec.Code)
 
 			var body map[string]string
@@ -387,10 +387,10 @@ func TestHandleErrorShedReasonIsValidated(t *testing.T) {
 	for _, tt := range hostile {
 		t.Run("rejected/"+tt.name, func(t *testing.T) {
 			rec := httptest.NewRecorder()
-			handleError(rec, &client.CacheThrottleError{
+			(&PersistentCache{}).handleError(rec, &client.CacheThrottleError{
 				Reason: tt.reason,
 				Err:    client.ErrTooManyRequests,
-			}, false, reqLog)
+			}, "/test/object", false, reqLog)
 			require.Equal(t, http.StatusTooManyRequests, rec.Code,
 				"the response is still a throttle; only the reason is discarded")
 
@@ -485,7 +485,7 @@ func TestHandleErrorNotFoundDoesNotMaskSpecificFailures(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			rec := httptest.NewRecorder()
-			handleError(rec, tt.err, false, reqLog)
+			(&PersistentCache{}).handleError(rec, tt.err, "/test/object", false, reqLog)
 			assert.Equal(t, tt.wantStatus, rec.Code)
 		})
 	}

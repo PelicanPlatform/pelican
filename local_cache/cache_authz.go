@@ -34,6 +34,7 @@ import (
 	"golang.org/x/sync/errgroup"
 
 	"github.com/pelicanplatform/pelican/config"
+	"github.com/pelicanplatform/pelican/param"
 	"github.com/pelicanplatform/pelican/server_structs"
 	"github.com/pelicanplatform/pelican/token"
 	"github.com/pelicanplatform/pelican/token_scopes"
@@ -151,6 +152,52 @@ func (ac *authConfig) updateConfig(nsAds []server_structs.NamespaceAd) error {
 		ac.tokenAuthz.DeleteAll()
 	}
 	return nil
+}
+
+// SetTokenHintHeaders writes the director's X-Pelican-{Namespace,Authorization,
+// Token-Generation} headers describing how a caller could obtain a token for
+// resource, or does nothing if no namespace the cache knows about covers it.
+//
+// A client that a director sent here has already been told this.  A client that
+// came on its own has not: it named this cache itself (Client.PreferredCaches,
+// -c), or the director it would have asked was unreachable, and a bare refusal
+// would leave it with nowhere to go.  Emitting what the director would have said
+// lets it acquire the right credential and try again (see the token-hint retry
+// in client/handle_http.go), and lets a human with curl see where to
+// authenticate.  Whether such a hint may be acted on is the client's decision --
+// canApplyTokenHint -- not ours.
+//
+// The hint names the credential this cache recommends for the most specific
+// namespace covering resource; it is not a statement of what will be refused.
+// Authorization itself is unchanged: it still admits any token whose scopes
+// reach the path.
+func (ac *authConfig) SetTokenHintHeaders(hdr http.Header, resource string) {
+	// A cache that never finished configuring has no namespaces to describe;
+	// saying nothing is the same answer as having no match for the path.
+	if ac == nil {
+		return
+	}
+	namespaces := ac.ns.Load()
+	if namespaces == nil {
+		return
+	}
+	nsAd := server_structs.LongestNSMatch(resource, *namespaces)
+	if nsAd == nil {
+		return
+	}
+	// The V2 cache proxies PROPFIND to the origin on the same endpoint it serves
+	// objects from, so it is its own collections URL: a listing can flow through
+	// the cache the client is already talking to instead of sending it back to
+	// the origin.  Cache.Url is that endpoint (launchers/cache_serve.go sets it,
+	// including the federation prefix when a director is in play); the external
+	// web URL is what a cache configured before that assignment has.
+	collUrl := param.Cache_Url.GetString()
+	if collUrl == "" {
+		collUrl = param.Server_ExternalWebUrl.GetString()
+	}
+	server_structs.SetXNamespaceHeaderWithCollections(hdr, collUrl, *nsAd)
+	server_structs.SetXAuthHeader(hdr, *nsAd)
+	server_structs.SetXTokenGenHeader(hdr, *nsAd)
 }
 
 // nsAdsAuthzEqual reports whether two namespace-ad slices are semantically
