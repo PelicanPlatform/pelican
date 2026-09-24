@@ -29,7 +29,6 @@ import (
 	"time"
 
 	"github.com/pkg/errors"
-	log "github.com/sirupsen/logrus"
 	"golang.org/x/sync/errgroup"
 
 	"github.com/pelicanplatform/pelican/config"
@@ -452,7 +451,7 @@ func runConnection(ctx context.Context, sessionEstablishTimeout time.Duration, c
 			AuthCookie:       authCookie,
 			Exports:          exports,
 			DirectListenMode: true,
-			LogLevel:         log.GetLevel().String(),
+			LogLevel:         config.GetEffectiveLogLevel().String(),
 		}
 		sshLog.Info("Tunnel mode: helper will listen on local port (origin dials via SSH)")
 	} else {
@@ -469,7 +468,7 @@ func runConnection(ctx context.Context, sessionEstablishTimeout time.Duration, c
 		if err != nil {
 			return errors.Wrap(err, "failed to create helper config")
 		}
-		helperConfig.LogLevel = log.GetLevel().String()
+		helperConfig.LogLevel = config.GetEffectiveLogLevel().String()
 	}
 
 	// Start the helper process.
