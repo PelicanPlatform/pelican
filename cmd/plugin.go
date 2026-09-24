@@ -568,7 +568,10 @@ func runPluginWorker(ctx context.Context, upload bool, workChan <-chan PluginTra
 				if err != nil {
 					log.Errorf("Failed to set TransferType: %s", err)
 				}
-				err = resultAd.Set("TransferFileName", path.Base(transfer.url.String()))
+				// Use the per-file Source URL (set by processTransfer) so that
+				// recursive child files report their own name rather than the
+				// parent collection name with ?recursive appended.
+				err = resultAd.Set("TransferFileName", path.Base(result.Source))
 				if err != nil {
 					log.Errorf("Failed to set TransferFileName: %s", err)
 				}

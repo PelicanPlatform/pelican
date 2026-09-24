@@ -1462,7 +1462,22 @@ func TestPluginRecursiveDownload(t *testing.T) {
 			}
 		}
 		// Check we get 2 result ads back (each file has been downloaded)
-		assert.Equal(t, 2, len(resultAds))
+		require.Equal(t, 2, len(resultAds))
+
+		// Verify that each child file reports the correct TransferProtocol
+		// and TransferFileName (not the parent collection URL with ?recursive).
+		fileNames := make([]string, 0, 2)
+		for _, ad := range resultAds {
+			proto, ok := classad.GetAs[string](ad, "TransferProtocol")
+			require.True(t, ok, "TransferProtocol must be present")
+			assert.Equal(t, "pelican", proto, "TransferProtocol should be the original scheme, not empty")
+
+			fileName, ok := classad.GetAs[string](ad, "TransferFileName")
+			require.True(t, ok, "TransferFileName must be present")
+			assert.NotContains(t, fileName, "recursive", "TransferFileName should not contain the ?recursive query")
+			fileNames = append(fileNames, fileName)
+		}
+		assert.ElementsMatch(t, []string{"test.txt", "test2.txt"}, fileNames)
 	})
 
 	t.Run("TestRecursiveFailureDirNotFound", func(t *testing.T) {
