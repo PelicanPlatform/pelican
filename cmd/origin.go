@@ -22,7 +22,6 @@ package main
 
 import (
 	"fmt"
-	"os"
 
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
@@ -91,7 +90,7 @@ and https://github.com/WLCG-AuthZ-WG/common-jwt-profile/blob/master/profile.md, 
 
 func configOrigin( /*cmd*/ *cobra.Command /*args*/, []string) {
 	fmt.Println("'origin config' command is not yet implemented")
-	os.Exit(1)
+	exitWithFlush(1)
 }
 
 func init() {
@@ -222,7 +221,7 @@ instead.
 		}
 
 		if shouldCancel {
-			os.Exit(1)
+			exitWithFlush(1)
 		}
 	}
 
