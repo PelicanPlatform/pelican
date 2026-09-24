@@ -20,12 +20,16 @@ package token
 
 import (
 	"bytes"
+	"context"
 	"crypto/ecdsa"
 	"crypto/elliptic"
 	"crypto/rand"
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -890,4 +894,92 @@ func TestSkewedTokenAcceptedByVerifyWithKeysetButRejectedByStrict(t *testing.T) 
 
 	_, strictErr := VerifyWithKeysetStrict(tokenStr, pubSet)
 	assert.Error(t, strictErr, "VerifyWithKeysetStrict should reject the same token (self-issued path, zero skew)")
+}
+
+// federationJWKS is reached concurrently on every server -- a director
+// resolving a token while an origin reports a director-test result, for
+// instance -- and is called with whichever JwksUri the federation currently
+// advertises.  These tests pin both properties: the lazy cache setup must be
+// race-free, and every distinct URI must be registered rather than only the
+// first one seen.
+func newJWKSServer(t *testing.T) (url string, hits *atomic.Int32) {
+	t.Helper()
+	key, err := jwk.FromRaw([]byte("this-is-only-a-test-key"))
+	require.NoError(t, err)
+	require.NoError(t, key.Set(jwk.KeyIDKey, "test-kid"))
+	set := jwk.NewSet()
+	require.NoError(t, set.AddKey(key))
+	body, err := json.Marshal(set)
+	require.NoError(t, err)
+
+	hits = &atomic.Int32{}
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		hits.Add(1)
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write(body)
+	}))
+	t.Cleanup(srv.Close)
+	return srv.URL, hits
+}
+
+// resetFederationJWKCache drops the process-wide cache so one test's
+// registrations do not decide another's outcome.
+func resetFederationJWKCache(t *testing.T) {
+	t.Helper()
+	reset := func() {
+		federationJWKMu.Lock()
+		federationJWK = nil
+		federationJWKMu.Unlock()
+	}
+	reset()
+	t.Cleanup(reset)
+}
+
+// A second federation JWKS URI must be fetched, not rejected because some
+// earlier call registered a different one.
+func TestFederationJWKSRegistersEachURI(t *testing.T) {
+	resetFederationJWKCache(t)
+	firstURL, _ := newJWKSServer(t)
+	secondURL, secondHits := newJWKSServer(t)
+
+	set, err := federationJWKS(context.Background(), firstURL)
+	require.NoError(t, err)
+	require.Equal(t, 1, set.Len())
+
+	set, err = federationJWKS(context.Background(), secondURL)
+	require.NoError(t, err, "a second JWKS URI must be registered on demand")
+	require.Equal(t, 1, set.Len())
+	require.GreaterOrEqual(t, int(secondHits.Load()), 1, "the second URI was never actually fetched")
+}
+
+// Concurrent verification must not race on the lazily created cache.  Run
+// under -race for this to mean anything.
+func TestFederationJWKSConcurrent(t *testing.T) {
+	resetFederationJWKCache(t)
+	urlA, _ := newJWKSServer(t)
+	urlB, _ := newJWKSServer(t)
+
+	const goroutines = 16
+	start := make(chan struct{})
+	errs := make(chan error, goroutines)
+	var wg sync.WaitGroup
+	for i := 0; i < goroutines; i++ {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			uri := urlA
+			if i%2 == 1 {
+				uri = urlB
+			}
+			<-start // release them together, so the nil check collides
+			_, err := federationJWKS(context.Background(), uri)
+			errs <- err
+		}(i)
+	}
+	close(start)
+	wg.Wait()
+	close(errs)
+	for err := range errs {
+		require.NoError(t, err)
+	}
 }

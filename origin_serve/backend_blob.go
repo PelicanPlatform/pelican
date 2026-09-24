@@ -512,10 +512,11 @@ func (fs *blobFileSystem) Stat(ctx context.Context, name string) (os.FileInfo, e
 	attrs, err := fs.bucket.Attributes(ctx, key)
 	if err == nil {
 		return &blobFileInfo{
-			name: path.Base(name),
-			size: attrs.Size,
-			mod:  attrs.ModTime,
-			etag: attrs.ETag,
+			name:         path.Base(name),
+			size:         attrs.Size,
+			mod:          attrs.ModTime,
+			etag:         attrs.ETag,
+			cacheControl: attrs.CacheControl,
 		}, nil
 	}
 
@@ -549,16 +550,20 @@ func isNotFound(err error) bool {
 // ---------------------------------------------------------------------------
 
 type blobFileInfo struct {
-	name  string
-	size  int64
-	mod   time.Time
-	isDir bool
-	etag  string
+	name         string
+	size         int64
+	mod          time.Time
+	isDir        bool
+	etag         string
+	cacheControl string
 }
 
 // BlobFileSysInfo is returned by blobFileInfo.Sys() when metadata is available.
 type BlobFileSysInfo struct {
 	ETag string
+	// CacheControl is the object's Cache-Control metadata as reported by the
+	// provider (e.g. the S3 object's Cache-Control attribute), if any.
+	CacheControl string
 }
 
 func (fi *blobFileInfo) Name() string      { return fi.name }
@@ -572,8 +577,8 @@ func (fi *blobFileInfo) ModTime() time.Time {
 }
 func (fi *blobFileInfo) IsDir() bool { return fi.isDir }
 func (fi *blobFileInfo) Sys() interface{} {
-	if fi.etag != "" {
-		return &BlobFileSysInfo{ETag: fi.etag}
+	if fi.etag != "" || fi.cacheControl != "" {
+		return &BlobFileSysInfo{ETag: fi.etag, CacheControl: fi.cacheControl}
 	}
 	return nil
 }

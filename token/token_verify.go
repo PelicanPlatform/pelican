@@ -25,6 +25,7 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -79,14 +80,54 @@ const (
 )
 
 var (
-	federationJWK *jwk.Cache
-	authChecker   AuthChecker
+	// federationJWKMu guards federationJWK.  Verify runs concurrently on
+	// every server (a director resolving a token while an origin reports a
+	// test result, say), so the lazy initialization below is a genuine data
+	// race without it.
+	federationJWKMu sync.Mutex
+	federationJWK   *jwk.Cache
+	authChecker     AuthChecker
 
 	registeredServerJWKSResolver atomic.Pointer[RegisteredServerJWKSResolver]
 )
 
 func init() {
 	authChecker = &AuthCheckImpl{}
+}
+
+// federationJWKS returns the federation's public JWKS for jwksURI, fetching it
+// through a process-wide cache that refreshes in the background.
+//
+// Each distinct URI is registered on demand rather than only the first one
+// seen.  The cache was previously created once, for whichever URI happened to
+// arrive first, while the subsequent Get used the caller's URI -- so once the
+// federation's JwksUri changed (a config reload, or a test switching
+// federations) every verification failed with "url is not registered".
+func federationJWKS(ctx context.Context, jwksURI string) (jwk.Set, error) {
+	federationJWKMu.Lock()
+	if federationJWK == nil {
+		// The cache's own context bounds its background refresh goroutine, so
+		// it must outlive any single request.
+		federationJWK = jwk.NewCache(context.Background())
+	}
+	if !federationJWK.IsRegistered(jwksURI) {
+		client := &http.Client{Transport: config.GetTransport()}
+		if err := federationJWK.Register(jwksURI,
+			jwk.WithRefreshInterval(15*time.Minute),
+			jwk.WithHTTPClient(client)); err != nil {
+			federationJWKMu.Unlock()
+			return nil, errors.Wrap(err, "Failed to register cache for federation's public JWKS")
+		}
+	}
+	cache := federationJWK
+	federationJWKMu.Unlock()
+
+	// Get performs the HTTP fetch on a miss, so it runs outside the lock.
+	jwks, err := cache.Get(ctx, jwksURI)
+	if err != nil {
+		return nil, errors.Wrap(err, "Failed to get federation's public JWKS")
+	}
+	return jwks, nil
 }
 
 // RegisterServerJWKSResolver allows other packages (e.g. the Registry) to provide a
@@ -143,19 +184,9 @@ func (a AuthCheckImpl) checkFederationIssuer(c *gin.Context, strToken string, ex
 		}
 	}
 
-	fedURIFile := fedInfo.JwksUri
-	ctx := context.Background()
-	if federationJWK == nil {
-		client := &http.Client{Transport: config.GetTransport()}
-		federationJWK = jwk.NewCache(ctx)
-		if err := federationJWK.Register(fedURIFile, jwk.WithRefreshInterval(15*time.Minute), jwk.WithHTTPClient(client)); err != nil {
-			return errors.Wrap(err, "Failed to register cache for federation's public JWKS")
-		}
-	}
-
-	jwks, err := federationJWK.Get(ctx, fedURIFile)
+	jwks, err := federationJWKS(context.Background(), fedInfo.JwksUri)
 	if err != nil {
-		return errors.Wrap(err, "Failed to get federation's public JWKS")
+		return err
 	}
 
 	scopeValidator := token_scopes.CreateScopeValidator(expectedScopes, allScopes)

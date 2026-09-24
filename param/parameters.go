@@ -478,6 +478,11 @@ var runtimeConfigurableMap = map[string]bool{
 	"Origin.SelfTest": false,
 	"Origin.SelfTestInterval": false,
 	"Origin.SelfTestMaxAge": false,
+	"Origin.StorageCacheDefaultMaxAge": false,
+	"Origin.StorageCacheLocation": false,
+	"Origin.StorageCacheMaxConcurrentFetches": false,
+	"Origin.StorageCacheRevalidationJitter": false,
+	"Origin.StorageCacheSize": false,
 	"Origin.StoragePrefix": false,
 	"Origin.StorageType": false,
 	"Origin.SupportedChecksumTypes": false,
@@ -798,6 +803,8 @@ var stringAccessors = map[string]func(*Config) string{
 	"Origin.ScitokensNameMapFile": func(c *Config) string { return c.Origin.ScitokensNameMapFile },
 	"Origin.ScitokensUnauthenticatedUser": func(c *Config) string { return c.Origin.ScitokensUnauthenticatedUser },
 	"Origin.ScitokensUsernameClaim": func(c *Config) string { return c.Origin.ScitokensUsernameClaim },
+	"Origin.StorageCacheLocation": func(c *Config) string { return c.Origin.StorageCacheLocation },
+	"Origin.StorageCacheSize": func(c *Config) string { return c.Origin.StorageCacheSize },
 	"Origin.StoragePrefix": func(c *Config) string { return c.Origin.StoragePrefix },
 	"Origin.StorageType": func(c *Config) string { return c.Origin.StorageType },
 	"Origin.TokenAudience": func(c *Config) string { return c.Origin.TokenAudience },
@@ -1009,6 +1016,8 @@ var intAccessors = map[string]func(*Config) int{
 	"Origin.Port": func(c *Config) int { return c.Origin.Port },
 	"Origin.SSH.MaxRetries": func(c *Config) int { return c.Origin.SSH.MaxRetries },
 	"Origin.SSH.Port": func(c *Config) int { return c.Origin.SSH.Port },
+	"Origin.StorageCacheMaxConcurrentFetches": func(c *Config) int { return c.Origin.StorageCacheMaxConcurrentFetches },
+	"Origin.StorageCacheRevalidationJitter": func(c *Config) int { return c.Origin.StorageCacheRevalidationJitter },
 	"Plugin.DirectorDecisionPercentage": func(c *Config) int { return c.Plugin.DirectorDecisionPercentage },
 	"Server.DatabaseBackup.MaxCount": func(c *Config) int { return c.Server.DatabaseBackup.MaxCount },
 	"Server.IssuerPort": func(c *Config) int { return c.Server.IssuerPort },
@@ -1300,6 +1309,7 @@ var durationAccessors = map[string]func(*Config) time.Duration{
 	"Origin.SSH.SessionEstablishTimeout": func(c *Config) time.Duration { return c.Origin.SSH.SessionEstablishTimeout },
 	"Origin.SelfTestInterval": func(c *Config) time.Duration { return c.Origin.SelfTestInterval },
 	"Origin.SelfTestMaxAge": func(c *Config) time.Duration { return c.Origin.SelfTestMaxAge },
+	"Origin.StorageCacheDefaultMaxAge": func(c *Config) time.Duration { return c.Origin.StorageCacheDefaultMaxAge },
 	"Origin.UserMapfileRefreshInterval": func(c *Config) time.Duration { return c.Origin.UserMapfileRefreshInterval },
 	"Registry.InactiveRegistrationCleanupInterval": func(c *Config) time.Duration { return c.Registry.InactiveRegistrationCleanupInterval },
 	"Registry.InactiveRegistrationTimeout": func(c *Config) time.Duration { return c.Registry.InactiveRegistrationTimeout },
@@ -1794,6 +1804,11 @@ var allParameterNames = []string{
 	"Origin.SelfTest",
 	"Origin.SelfTestInterval",
 	"Origin.SelfTestMaxAge",
+	"Origin.StorageCacheDefaultMaxAge",
+	"Origin.StorageCacheLocation",
+	"Origin.StorageCacheMaxConcurrentFetches",
+	"Origin.StorageCacheRevalidationJitter",
+	"Origin.StorageCacheSize",
 	"Origin.StoragePrefix",
 	"Origin.StorageType",
 	"Origin.SupportedChecksumTypes",
@@ -2087,6 +2102,8 @@ var (
 	Origin_ScitokensNameMapFile = StringParam{"Origin.ScitokensNameMapFile"}
 	Origin_ScitokensUnauthenticatedUser = StringParam{"Origin.ScitokensUnauthenticatedUser"}
 	Origin_ScitokensUsernameClaim = StringParam{"Origin.ScitokensUsernameClaim"}
+	Origin_StorageCacheLocation = StringParam{"Origin.StorageCacheLocation"}
+	Origin_StorageCacheSize = StringParam{"Origin.StorageCacheSize"}
 	Origin_StoragePrefix = StringParam{"Origin.StoragePrefix"}
 	Origin_StorageType = StringParam{"Origin.StorageType"}
 	Origin_TokenAudience = StringParam{"Origin.TokenAudience"}
@@ -2242,6 +2259,8 @@ var (
 	Origin_Port = IntParam{"Origin.Port"}
 	Origin_SSH_MaxRetries = IntParam{"Origin.SSH.MaxRetries"}
 	Origin_SSH_Port = IntParam{"Origin.SSH.Port"}
+	Origin_StorageCacheMaxConcurrentFetches = IntParam{"Origin.StorageCacheMaxConcurrentFetches"}
+	Origin_StorageCacheRevalidationJitter = IntParam{"Origin.StorageCacheRevalidationJitter"}
 	Plugin_DirectorDecisionPercentage = IntParam{"Plugin.DirectorDecisionPercentage"}
 	Server_DatabaseBackup_MaxCount = IntParam{"Server.DatabaseBackup.MaxCount"}
 	Server_IssuerPort = IntParam{"Server.IssuerPort"}
@@ -2440,6 +2459,7 @@ var (
 	Origin_SSH_SessionEstablishTimeout = DurationParam{"Origin.SSH.SessionEstablishTimeout"}
 	Origin_SelfTestInterval = DurationParam{"Origin.SelfTestInterval"}
 	Origin_SelfTestMaxAge = DurationParam{"Origin.SelfTestMaxAge"}
+	Origin_StorageCacheDefaultMaxAge = DurationParam{"Origin.StorageCacheDefaultMaxAge"}
 	Origin_UserMapfileRefreshInterval = DurationParam{"Origin.UserMapfileRefreshInterval"}
 	Registry_InactiveRegistrationCleanupInterval = DurationParam{"Registry.InactiveRegistrationCleanupInterval"}
 	Registry_InactiveRegistrationTimeout = DurationParam{"Registry.InactiveRegistrationTimeout"}
@@ -2644,6 +2664,8 @@ func init() {
 		"Origin.ScitokensNameMapFile": Origin_ScitokensNameMapFile,
 		"Origin.ScitokensUnauthenticatedUser": Origin_ScitokensUnauthenticatedUser,
 		"Origin.ScitokensUsernameClaim": Origin_ScitokensUsernameClaim,
+		"Origin.StorageCacheLocation": Origin_StorageCacheLocation,
+		"Origin.StorageCacheSize": Origin_StorageCacheSize,
 		"Origin.StoragePrefix": Origin_StoragePrefix,
 		"Origin.StorageType": Origin_StorageType,
 		"Origin.TokenAudience": Origin_TokenAudience,
@@ -2793,6 +2815,8 @@ func init() {
 		"Origin.Port": Origin_Port,
 		"Origin.SSH.MaxRetries": Origin_SSH_MaxRetries,
 		"Origin.SSH.Port": Origin_SSH_Port,
+		"Origin.StorageCacheMaxConcurrentFetches": Origin_StorageCacheMaxConcurrentFetches,
+		"Origin.StorageCacheRevalidationJitter": Origin_StorageCacheRevalidationJitter,
 		"Plugin.DirectorDecisionPercentage": Plugin_DirectorDecisionPercentage,
 		"Server.DatabaseBackup.MaxCount": Server_DatabaseBackup_MaxCount,
 		"Server.IssuerPort": Server_IssuerPort,
@@ -2982,6 +3006,7 @@ func init() {
 		"Origin.SSH.SessionEstablishTimeout": Origin_SSH_SessionEstablishTimeout,
 		"Origin.SelfTestInterval": Origin_SelfTestInterval,
 		"Origin.SelfTestMaxAge": Origin_SelfTestMaxAge,
+		"Origin.StorageCacheDefaultMaxAge": Origin_StorageCacheDefaultMaxAge,
 		"Origin.UserMapfileRefreshInterval": Origin_UserMapfileRefreshInterval,
 		"Registry.InactiveRegistrationCleanupInterval": Registry_InactiveRegistrationCleanupInterval,
 		"Registry.InactiveRegistrationTimeout": Registry_InactiveRegistrationTimeout,
