@@ -11,6 +11,7 @@ import PathForm from './PathForm';
 import AuthorizationTemplateForm from './AuthorizationTemplateForm';
 import PolicyDefinitionForm from './PolicyDefinitionForm';
 import StorageDirForm from './StorageDirForm';
+import S3StorageTargetForm from './S3StorageTargetForm';
 
 export {
   AuthorizationTemplateForm,
@@ -25,4 +26,5 @@ export {
   PathForm,
   PolicyDefinitionForm,
   StorageDirForm,
+  S3StorageTargetForm,
 };

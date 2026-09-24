@@ -22,10 +22,12 @@ import (
 	"context"
 	"encoding/binary"
 	"io"
+	"math"
 	"os"
 	"path/filepath"
 	"runtime"
 	"sort"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -371,6 +373,18 @@ type StorageManager struct {
 	// overwrites this with EvictionManager.ChooseDiskStorage (weighted
 	// by free space) before any concurrent access begins.
 	chooseDir func() StorageID
+
+	// s3Targets maps storageID → S3 bucket target.  New objects are never
+	// placed here directly; completed objects are tiered to S3 by the
+	// uploader.  Populated by RegisterS3Targets during single-threaded
+	// init; read-only afterwards.
+	s3Targets map[StorageID]*s3Target
+
+	// onObjectComplete, when non-nil, is invoked (on the completing
+	// goroutine) each time an object transitions to Completed.  Set during
+	// single-threaded init by the S3 uploader to observe candidates for
+	// tiering.
+	onObjectComplete func(InstanceHash)
 }
 
 // StorageDirInfo describes a configured storage directory at runtime.
@@ -546,6 +560,12 @@ func NewStorageManager(db *CacheDB, dirs []string, inlineMax int, egrp *errgroup
 		}
 	}
 	if ptCacheSize > 0 {
+		// Clamp to MaxInt64 before the int64 conversions below: ristretto's
+		// cost API is int64, and a configured size above MaxInt64 would wrap
+		// to a negative cost.  No real memory cache approaches this bound.
+		if ptCacheSize > uint64(math.MaxInt64) {
+			ptCacheSize = uint64(math.MaxInt64)
+		}
 		// NumCounters should be ~10× the expected max number of entries.
 		numEntries := int64(ptCacheSize) / BlockDataSize
 		numCounters := numEntries * 10
@@ -634,6 +654,112 @@ func (sm *StorageManager) GetDirs() map[StorageID]string {
 	return sm.dirs
 }
 
+// RegisterS3Targets resolves identities for the configured S3 storage
+// targets and assigns each a storage ID, mirroring the UUID-based directory
+// association performed by NewStorageManager.  Must be called during
+// single-threaded initialization, before any concurrent access.
+//
+// Returns the storageID → config mapping for the registered targets.
+func (sm *StorageManager) RegisterS3Targets(ctx context.Context, configs []S3TargetConfig) (map[StorageID]S3TargetConfig, error) {
+	if len(configs) == 0 {
+		return nil, nil
+	}
+	persisted, err := sm.db.LoadDiskMappings()
+	if err != nil {
+		return nil, errors.Wrap(err, "failed to load disk mappings for S3 target registration")
+	}
+	byUUID := make(map[string]DiskMapping, len(persisted))
+	usedIDs := make(map[StorageID]bool, len(persisted))
+	for _, dm := range persisted {
+		byUUID[dm.UUID] = dm
+		usedIDs[dm.ID] = true
+	}
+	for id := range sm.dirs {
+		usedIDs[id] = true
+	}
+	if len(sm.dirs)+len(configs) > 255 {
+		return nil, errors.New("at most 255 storage targets (directories + S3 buckets) are supported")
+	}
+
+	sm.s3Targets = make(map[StorageID]*s3Target, len(configs))
+	result := make(map[StorageID]S3TargetConfig, len(configs))
+	cacheHost := cacheExternalHost()
+	claimedUUIDs := make(map[string]string, len(configs))
+	for i := range configs {
+		cfg := configs[i]
+		if !strings.EqualFold(cfg.ServiceUrlScheme(), "https") {
+			log.Warnf("Cache S3 target %s is configured over %s: object data and pre-signed URLs "+
+				"will cross the network in cleartext", cfg.DisplayURL(), cfg.ServiceUrlScheme())
+		}
+		target, err := newS3Target(ctx, cfg)
+		if err != nil {
+			return nil, err
+		}
+		uid, err := target.resolveIdentity(ctx)
+		if err != nil {
+			return nil, err
+		}
+		// Two entries that resolve to the same bucket and prefix share an
+		// identity object, so they would be assigned one storage ID and the
+		// second would silently replace the first -- leaving one entry's
+		// MaxSize governing both buckets' worth of data.
+		if prev, dup := claimedUUIDs[uid]; dup {
+			return nil, errors.Errorf("cache S3 targets %s and %s resolve to the same bucket and prefix; "+
+				"configure each bucket (or prefix) once", prev, cfg.DisplayURL())
+		}
+		claimedUUIDs[uid] = cfg.DisplayURL()
+
+		// Advisory: warn once at startup about an arrangement that will make
+		// the cache proxy token-bearing requests instead of redirecting them.
+		// The decision itself is per-request, against the host the client
+		// actually connected to -- see (*PersistentCache).tryS3Redirect.
+		if cacheHost != "" && redirectRetainsAuthorization(cfg.ServiceUrl, cacheHost) {
+			log.Warnf("Cache S3 target %s shares the cache's DNS domain (%s); authenticated requests for "+
+				"objects on it will be proxied rather than served by pre-signed redirect, so that client "+
+				"credentials are not forwarded to the bucket endpoint", cfg.DisplayURL(), cacheHost)
+		}
+
+		var id StorageID
+		if dm, known := byUUID[uid]; known {
+			if dm.Backend != BackendS3 {
+				return nil, errors.Errorf("cache S3 target %s has the identity of storage %d, which is not an S3 target", cfg.DisplayURL(), dm.ID)
+			}
+			id = dm.ID
+			if dm.Directory != cfg.DisplayURL() {
+				log.Infof("Cache S3 target %d (UUID %s) moved: %s → %s", dm.ID, uid, dm.Directory, cfg.DisplayURL())
+			}
+		} else {
+			id = StorageIDFirstDisk
+			for usedIDs[id] {
+				id++
+				if id == 0 {
+					return nil, errors.New("exhausted storage IDs while registering S3 targets")
+				}
+			}
+			log.Infof("Assigned storage ID %d (UUID %s) to cache S3 target %s", id, uid, cfg.DisplayURL())
+		}
+		if err := sm.db.SaveDiskMapping(DiskMapping{ID: id, UUID: uid, Directory: cfg.DisplayURL(), Backend: BackendS3}); err != nil {
+			return nil, errors.Wrapf(err, "failed to save mapping for cache S3 target %s", cfg.DisplayURL())
+		}
+		usedIDs[id] = true
+		target.id = id
+		sm.s3Targets[id] = target
+		result[id] = cfg
+	}
+	return result, nil
+}
+
+// IsS3Backed reports whether the given storage ID is an S3 bucket target.
+func (sm *StorageManager) IsS3Backed(id StorageID) bool {
+	_, ok := sm.s3Targets[id]
+	return ok
+}
+
+// getS3Target returns the S3 target for a storage ID, or nil.
+func (sm *StorageManager) getS3Target(id StorageID) *s3Target {
+	return sm.s3Targets[id]
+}
+
 // Close stops TTL cache eviction goroutines and releases cached resources.
 //
 // Only the caches that were actually started are stopped.  ttlcache's Stop is
@@ -682,6 +808,9 @@ func NewStorageManagerReadOnly(baseDir string, db *CacheDB) (*StorageManager, er
 
 	objDirs := make(map[StorageID]string, len(mappings))
 	for _, dm := range mappings {
+		if dm.Backend != BackendPosix {
+			continue // S3 targets have no local directory
+		}
 		objDirs[dm.ID] = filepath.Join(dm.Directory, objectsSubDir)
 	}
 
@@ -808,7 +937,58 @@ func (sm *StorageManager) getObjectPathForDir(storageID StorageID, instanceHash 
 			break
 		}
 	}
-	return filepath.Join(dir, GetInstanceStoragePath(instanceHash))
+	return containedObjectPath(dir, GetInstanceStoragePath(instanceHash))
+}
+
+// containedObjectPath joins a storage-relative object path onto a storage
+// directory and returns it only if the result stays inside that directory.
+//
+// An instance hash is the hex of an HMAC, so in practice it cannot contain a
+// separator or a "..", and every hash reaching here was produced by
+// ComputeInstanceHash rather than taken from a request.  That is an argument
+// about the callers, though, and it is the sort of argument that quietly stops
+// being true: the hash is derived from a client-supplied URL, it names a path,
+// and a future caller could reasonably pass one from somewhere else -- a
+// bucket listing, a repair tool, a database whose contents are older than the
+// code reading them.  Checking containment here costs one comparison on a path
+// that is about to be opened anyway, and it is the difference between "this
+// cannot escape the cache directory" and "this cannot escape as long as
+// nobody changes how hashes are made".
+//
+// Returns "" when the path would escape, which every os.* call rejects; the
+// caller reports it the same way it reports any other unopenable object.
+func containedObjectPath(dir, relative string) string {
+	if dir == "" {
+		return ""
+	}
+	root := filepath.Clean(dir)
+	full := filepath.Join(root, relative)
+	if full != root && !strings.HasPrefix(full, root+string(os.PathSeparator)) {
+		log.Errorf("Refusing an object path that escapes its storage directory: %q under %q", relative, root)
+		return ""
+	}
+	return full
+}
+
+// storageIsResolvable reports whether a storage ID names something this manager
+// can actually reach: a configured directory, inline storage, or a registered
+// S3 target.
+//
+// An object whose storage ID resolves to none of those must be treated as a
+// miss rather than looked up on disk.  A bucket that has been removed from the
+// configuration leaves its objects' metadata behind pointing at an ID with no
+// directory, and getObjectPathForDir answers for any unknown ID by falling back
+// to an arbitrary directory -- so a read would silently look for the object in
+// the wrong place, and auto-repair could write it there.
+func (sm *StorageManager) storageIsResolvable(storageID StorageID) bool {
+	if storageID == StorageIDInline {
+		return true
+	}
+	if _, ok := sm.dirs[storageID]; ok {
+		return true
+	}
+	_, ok := sm.s3Targets[storageID]
+	return ok
 }
 
 // getObjectPath returns the full filesystem path for an object.
@@ -823,6 +1003,11 @@ func (sm *StorageManager) getObjectPath(instanceHash InstanceHash) string {
 // For chunks 1+, a suffix like "-2", "-3" is appended.
 func (sm *StorageManager) getChunkPath(storageID StorageID, instanceHash InstanceHash, chunkIndex int) string {
 	basePath := sm.getObjectPathForDir(storageID, instanceHash)
+	if basePath == "" {
+		// Rejected by containment; suffixing it would turn an unusable path
+		// back into a usable one.
+		return ""
+	}
 	return GetChunkPath(basePath, chunkIndex)
 }
 
@@ -1428,6 +1613,9 @@ func (sm *StorageManager) checkAndMarkComplete(instanceHash InstanceHash, meta *
 		if err := sm.db.MergeMetadata(instanceHash, completionMeta); err != nil {
 			log.Warnf("Failed to update completion time: %v", err)
 		}
+		if sm.onObjectComplete != nil {
+			sm.onObjectComplete(instanceHash)
+		}
 	}
 }
 
@@ -1888,9 +2076,19 @@ func (sm *StorageManager) Delete(instanceHash InstanceHash) error {
 	}
 	sm.invalidateObjectCaches(instanceHash, chunkCount)
 
-	// If stored on disk, delete all chunk files
-	if meta != nil && meta.IsDisk() {
-		sm.deleteChunkFiles(instanceHash, meta.ContentLength, meta.StorageID, meta.ChunkSizeCode, meta.ChunkLocations)
+	// If stored on an S3 target, delete the bucket object; otherwise
+	// delete all chunk files on disk.
+	if meta != nil {
+		if target := sm.getS3Target(meta.StorageID); target != nil {
+			delCtx, delCancel := context.WithTimeout(context.Background(), s3SweepOpTimeout)
+			err := target.deleteObject(delCtx, instanceHash)
+			delCancel()
+			if err != nil {
+				log.Warnf("Failed to delete %s from S3 target %d (consistency sweep will retry): %v", instanceHash, meta.StorageID, err)
+			}
+		} else if meta.IsDisk() {
+			sm.deleteChunkFiles(instanceHash, meta.ContentLength, meta.StorageID, meta.ChunkSizeCode, meta.ChunkLocations)
+		}
 	}
 
 	return nil
@@ -1971,8 +2169,17 @@ func (sm *StorageManager) EvictByLRU(storageID StorageID, namespaceID NamespaceI
 		// Remove all in-memory cached state for this object.
 		sm.invalidateObjectCaches(obj.instanceHash, CalculateChunkCount(obj.contentLen, obj.chunkSizeCode))
 
-		// Delete all chunk files from disk
-		if obj.storageID != StorageIDInline {
+		// Delete the backing data: bucket object for S3-resident objects,
+		// chunk files on disk otherwise.
+		if target := sm.getS3Target(obj.storageID); target != nil {
+			delCtx, delCancel := context.WithTimeout(context.Background(), s3SweepOpTimeout)
+			err := target.deleteObject(delCtx, obj.instanceHash)
+			delCancel()
+			if err != nil {
+				log.Warnf("Failed to delete evicted object %s from S3 target %d (consistency sweep will retry): %v",
+					obj.instanceHash, obj.storageID, err)
+			}
+		} else if obj.storageID != StorageIDInline {
 			sm.deleteChunkFiles(obj.instanceHash, obj.contentLen, obj.storageID, obj.chunkSizeCode, obj.chunkLocations)
 		}
 	}
@@ -2651,6 +2858,12 @@ func (bw *BlockWriter) Close() error {
 
 		if bw.onComplete != nil {
 			bw.onComplete()
+		}
+
+		// Notify the completion observer (e.g. the S3 uploader) so the
+		// object can be considered for tiering.
+		if bw.sm.onObjectComplete != nil {
+			bw.sm.onObjectComplete(bw.instanceHash)
 		}
 	}
 

@@ -36,6 +36,7 @@ ENUMERATIONS = {
 # configurable via Pelican's web UI. The ones in this list are known to have
 # beeh handled appropriately.
 VERIFIED_OBJECT_STRUCTURES = [
+    "Cache.S3StorageTargets",
     "GeoIPOverrides",
     "Issuer.AuthorizationTemplates",
     "Issuer.OIDCAuthenticationRequirements",

@@ -111,6 +111,14 @@ func SetParameterDefaults(v *viper.Viper, isRoot bool, isOSDF bool) {
 		val = strings.ReplaceAll(val, "${Cache.RunLocation}", v.GetString(param.Cache_RunLocation.GetName()))
 		v.SetDefault(param.Cache_ClientStatisticsLocation.GetName(), val)
 	}
+	// Cache.S3DisableRedirect
+	v.SetDefault(param.Cache_S3DisableRedirect.GetName(), false)
+	// Cache.S3PresignEvictionHold
+	v.SetDefault(param.Cache_S3PresignEvictionHold.GetName(), "5m")
+	// Cache.S3PresignExpiry
+	v.SetDefault(param.Cache_S3PresignExpiry.GetName(), "5m")
+	// Cache.S3UploadThreshold
+	v.SetDefault(param.Cache_S3UploadThreshold.GetName(), "4MB")
 	// Cache.SelfTest
 	v.SetDefault(param.Cache_SelfTest.GetName(), true)
 	// Cache.SelfTestInterval

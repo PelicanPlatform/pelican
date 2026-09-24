@@ -88,6 +88,11 @@ type CacheDB struct {
 	// so this flag is what actually keeps an inspection tool from modifying
 	// the database: every mutating entry point checks it first.
 	readOnly bool
+
+	// presignHold is how long after a pre-signed URL was handed out an
+	// object is protected from eviction (0 = no protection).  Set during
+	// single-threaded init via setPresignHold; read-only afterwards.
+	presignHold time.Duration
 }
 
 // ErrReadOnly is returned by every mutating CacheDB method when the handle was
@@ -104,6 +109,14 @@ func (cdb *CacheDB) checkWritable() error {
 
 // ReadOnly reports whether this handle refuses mutations.
 func (cdb *CacheDB) ReadOnly() bool { return cdb.readOnly }
+
+// setPresignHold configures the eviction protection window for objects with
+// a recently issued pre-signed URL.  Must be called during single-threaded
+// initialization.  It only sets an in-memory field (it is not a database
+// write), so it is unexported and needs no read-only guard.
+func (cdb *CacheDB) setPresignHold(d time.Duration) {
+	cdb.presignHold = d
+}
 
 // cacheDBOptions builds the BadgerDB options shared by every way of opening a
 // cache database.  Both the writable open and the introspection open must use
@@ -686,6 +699,15 @@ func formatSchemaVersion(v SchemaVersion) []byte {
 // from ensureSchemaVersion before the stamping transaction, and leave this
 // function for the cheap in-place cases.
 func migrateSchema(txn *badger.Txn, from SchemaVersion) error {
+	if from == 1 {
+		// 1 -> 2 rewrites nothing: the S3 layout only adds key prefixes (up:,
+		// ps:) that a version-1 database simply has none of, and the new
+		// DiskMapping.Backend field decodes as BackendPosix when absent, which
+		// is what every mapping written under version 1 is.  Stamping the new
+		// version is the whole migration; see CurrentSchemaVersion for why the
+		// stamp matters even so.
+		return nil
+	}
 	return errors.Errorf("no migration is available from schema version %d", from)
 }
 
@@ -1937,6 +1959,223 @@ func (cdb *CacheDB) ComputeActualUsage() (map[StorageUsageKey]int64, error) {
 	return actual, err
 }
 
+// --- S3 Tiering Operations ---
+
+// SetS3UploadIntent records an in-progress upload to an S3 target.  Written
+// before the first byte reaches the bucket so that a crash never leaves an
+// untracked object in S3.
+//
+// This and DeleteS3UploadIntent perform a single blind Set/Delete with no
+// prior read, so their transaction read-set is empty and BadgerDB's
+// serializable-snapshot conflict detection can never flag them — no retry
+// loop is required (unlike RecordPresignIssued or RelocateObject, which read
+// before writing).
+func (cdb *CacheDB) SetS3UploadIntent(instanceHash InstanceHash, intent *S3UploadIntent) error {
+	if err := cdb.checkWritable(); err != nil {
+		return err
+	}
+	data, err := msgpack.Marshal(intent)
+	if err != nil {
+		return errors.Wrap(err, "failed to marshal upload intent")
+	}
+	return cdb.db.Update(func(txn *badger.Txn) error {
+		return txn.Set(S3UploadIntentKey(instanceHash), data)
+	})
+}
+
+// DeleteS3UploadIntent removes an upload intent record.
+func (cdb *CacheDB) DeleteS3UploadIntent(instanceHash InstanceHash) error {
+	if err := cdb.checkWritable(); err != nil {
+		return err
+	}
+	return cdb.db.Update(func(txn *badger.Txn) error {
+		err := txn.Delete(S3UploadIntentKey(instanceHash))
+		if errors.Is(err, badger.ErrKeyNotFound) {
+			return nil
+		}
+		return err
+	})
+}
+
+// ListS3UploadIntents returns all recorded upload intents, used by crash
+// recovery to reconcile the bucket with the metadata store.
+func (cdb *CacheDB) ListS3UploadIntents() (map[InstanceHash]*S3UploadIntent, error) {
+	intents := make(map[InstanceHash]*S3UploadIntent)
+	err := cdb.db.View(func(txn *badger.Txn) error {
+		prefix := []byte(PrefixS3Upload)
+		opts := badger.DefaultIteratorOptions
+		opts.Prefix = prefix
+		it := txn.NewIterator(opts)
+		defer it.Close()
+
+		for it.Seek(prefix); it.ValidForPrefix(prefix); it.Next() {
+			item := it.Item()
+			hash := InstanceHash(item.Key()[len(PrefixS3Upload):])
+			var intent S3UploadIntent
+			err := item.Value(func(val []byte) error {
+				return msgpack.Unmarshal(val, &intent)
+			})
+			if err != nil {
+				log.Warnf("Failed to unmarshal S3 upload intent for %s: %v", hash, err)
+				continue
+			}
+			intents[hash] = &intent
+		}
+		return nil
+	})
+	return intents, err
+}
+
+// presignRecordRetries bounds retries of RecordPresignIssued on BadgerDB
+// write conflicts (the debounce read makes it a read-modify-write, so two
+// presigns racing on the same object can conflict).
+const presignRecordRetries = 5
+
+// RecordPresignIssued stamps the current time on an object's presign key.
+// Objects with a stamp newer than the configured presign hold window are
+// skipped by eviction, so a client holding a fresh pre-signed URL never has
+// the object deleted out from under it.
+//
+// The write is debounced so that a hot object being redirected repeatedly does
+// not stamp the same key on every request.  The debounce window is bounded by
+// how much slack the hold has over a URL's lifetime: skipping a write leaves
+// the stamp up to one window old, so the protection a caller can still count
+// on is hold-minus-window, which must remain at least as long as the URL it
+// just handed out.  presignHoldHeadroom is the slack the cache guarantees when
+// it resolves the hold, and a quarter of the hold is the cheaper bound, so the
+// debounce is the smaller of the two.
+func (cdb *CacheDB) RecordPresignIssued(instanceHash InstanceHash) error {
+	if err := cdb.checkWritable(); err != nil {
+		return err
+	}
+	now := time.Now()
+	debounce := cdb.presignHold / 4
+	if slack := cdb.presignHold - s3PresignExpiry(); slack < debounce {
+		debounce = slack
+	}
+	val := make([]byte, 8)
+	binary.BigEndian.PutUint64(val, uint64(now.UnixNano()))
+
+	for attempt := 0; ; attempt++ {
+		err := cdb.db.Update(func(txn *badger.Txn) error {
+			if debounce > 0 {
+				if item, gErr := txn.Get(PresignKey(instanceHash)); gErr == nil {
+					var prev int64
+					_ = item.Value(func(v []byte) error {
+						if len(v) >= 8 {
+							prev = int64(binary.BigEndian.Uint64(v))
+						}
+						return nil
+					})
+					if prev > 0 && now.Sub(time.Unix(0, prev)) < debounce {
+						return nil // recent enough; skip the write
+					}
+				}
+			}
+			return txn.Set(PresignKey(instanceHash), val)
+		})
+		if err == nil {
+			return nil
+		}
+		if errors.Is(err, badger.ErrConflict) && attempt < presignRecordRetries {
+			continue
+		}
+		return err
+	}
+}
+
+// presignHeldInTxn reports whether the object's presign stamp is within the
+// eviction protection window.
+func (cdb *CacheDB) presignHeldInTxn(txn *badger.Txn, instanceHash InstanceHash) bool {
+	if cdb.presignHold <= 0 {
+		return false
+	}
+	item, err := txn.Get(PresignKey(instanceHash))
+	if err != nil {
+		return false
+	}
+	var issuedAt int64
+	_ = item.Value(func(val []byte) error {
+		if len(val) >= 8 {
+			issuedAt = int64(binary.BigEndian.Uint64(val))
+		}
+		return nil
+	})
+	return issuedAt > 0 && time.Since(time.Unix(0, issuedAt)) < cdb.presignHold
+}
+
+// RelocateObject atomically moves a completed object's metadata onto the
+// given S3 storage target.  The StorageID is rewritten (bypassing the
+// set-once merge rule — this is the one sanctioned transition) and the LRU
+// index entry is moved from the object's base storage ID to the new one.
+//
+// Chunked objects are supported: because an S3 target holds the object as a
+// single contiguous blob, relocation flattens the chunk layout
+// (ChunkSizeCode / ChunkLocations are cleared).  The returned pre-relocation
+// metadata still carries the original chunk layout so the caller can delete
+// every local chunk file and refund each contributing directory's usage.
+//
+// The caller is responsible for moving the object *data* and for adjusting
+// usage counters after the transaction commits (AddUsage cannot run inside
+// a transaction).  Returns the pre-relocation metadata.
+func (cdb *CacheDB) RelocateObject(instanceHash InstanceHash, newStorageID StorageID) (*CacheMetadata, error) {
+	if err := cdb.checkWritable(); err != nil {
+		return nil, err
+	}
+	var prev CacheMetadata
+	err := cdb.db.Update(func(txn *badger.Txn) error {
+		item, err := txn.Get(MetaKey(instanceHash))
+		if err != nil {
+			return errors.Wrap(err, "object metadata not found")
+		}
+		if err := item.Value(func(val []byte) error {
+			return msgpack.Unmarshal(val, &prev)
+		}); err != nil {
+			return errors.Wrap(err, "failed to unmarshal metadata")
+		}
+
+		if prev.Completed.IsZero() {
+			return errors.New("cannot relocate an incomplete object")
+		}
+		if prev.StorageID == StorageIDInline && !prev.IsChunked() {
+			return errors.New("cannot relocate an inline object")
+		}
+		if prev.StorageID == newStorageID {
+			return errors.New("object already resides on the target storage")
+		}
+
+		// Move the LRU index entry, preserving the access timestamp.  The
+		// LRU is keyed by the object's base StorageID (chunk 0's directory
+		// for chunked objects), which is what deleteObjectInTxn also uses.
+		if !prev.LastAccessTime.IsZero() {
+			oldKey := LRUKey(prev.StorageID, prev.NamespaceID, prev.LastAccessTime, instanceHash)
+			if err := txn.Delete(oldKey); err != nil && !errors.Is(err, badger.ErrKeyNotFound) {
+				return errors.Wrap(err, "failed to delete old LRU key")
+			}
+			newKey := LRUKey(newStorageID, prev.NamespaceID, prev.LastAccessTime, instanceHash)
+			if err := txn.Set(newKey, nil); err != nil {
+				return errors.Wrap(err, "failed to set new LRU key")
+			}
+		}
+
+		updated := prev
+		updated.StorageID = newStorageID
+		// The bucket holds one contiguous blob; drop the chunk layout so the
+		// object is a plain single-storage object on the S3 target.
+		updated.ChunkSizeCode = ChunkingDisabled
+		updated.ChunkLocations = nil
+		data, err := msgpack.Marshal(&updated)
+		if err != nil {
+			return errors.Wrap(err, "failed to marshal relocated metadata")
+		}
+		return txn.Set(MetaKey(instanceHash), data)
+	})
+	if err != nil {
+		return nil, err
+	}
+	return &prev, nil
+}
+
 // --- Bulk Operations ---
 
 // deleteObjectInTxn removes all DB keys for a cached object within an
@@ -2050,8 +2289,20 @@ func deleteObjectWithMetaInTxn(txn *badger.Txn, salt []byte, instanceHash Instan
 		}
 	}
 
-	// Delete purge-first marker if present (best-effort, ignore not-found)
+	// Delete purge-first marker, presign stamp, and any S3 upload intent if
+	// present (best-effort, ignore not-found).
+	//
+	// Dropping the intent here is safe and necessary: an intent outliving its
+	// object would make the S3 consistency sweep skip that hash in both
+	// directions forever, on the assumption that the uploader owns it.  Any
+	// bucket bytes are handled by the same deletion -- StorageManager.Delete
+	// and EvictByLRU remove the bucket object for an S3-resident version --
+	// and an intent for an upload still in flight belongs to an object whose
+	// metadata is being deleted underneath it, which the uploader detects when
+	// its relocation fails and cleans up the bucket copy itself.
 	_ = txn.Delete(PurgeFirstKey(instanceHash))
+	_ = txn.Delete(PresignKey(instanceHash))
+	_ = txn.Delete(S3UploadIntentKey(instanceHash))
 
 	// Likewise the append-in-flight marker: whatever removed the object also
 	// removed the thing the marker exists to let us reclaim.
@@ -2184,6 +2435,15 @@ func (cdb *CacheDB) EvictByLRU(storageID StorageID, namespaceID NamespaceID, max
 			// Checked before the metadata read: a protected object is not
 			// going anywhere this pass, so there is nothing to learn about it.
 			if skip != nil && skip(hash) {
+				*skipCounter++
+				return
+			}
+			// Objects with a recently issued pre-signed URL are protected the
+			// same way: a client may still be downloading directly from the
+			// bucket.  Counts against the skip budget so a namespace full of
+			// held objects cannot spin the LRU walk.
+			if cdb.presignHeldInTxn(txn, hash) {
+				log.Debugf("Skipping eviction of %s: pre-signed URL issued within hold window", hash)
 				*skipCounter++
 				return
 			}
@@ -2576,6 +2836,11 @@ func (cdb *CacheDB) FindRecyclableStorageID(mountedDirs map[StorageID]string) (S
 	for _, dm := range mappings {
 		if _, mounted := mountedDirs[dm.ID]; mounted {
 			continue // still in use
+		}
+		if dm.Backend != BackendPosix {
+			// S3 targets are never in mountedDirs; they must not be
+			// recycled out from under a configured bucket.
+			continue
 		}
 
 		// Sum usage across all namespaces for this storageID.
