@@ -60,7 +60,7 @@ See [Serving an Origin](/federating-your-data/origin) for instructions on how to
 *Requires: You must be a member of `server.collection_admin` or `server.admin` — see [Collection administration](/managing-data-access/permissions-reference#collection-administration).*
 
 > Dr. Reyes emails Research Computing: several new students have joined her lab, and she wants to give them access to her data on the department storage. To reduce the back-and-forth, she wants to give her lab manager the ability to manage her lab's data access.
-> 
+>
 > Sysadmin Brian picks up the ticket.
 > The storage is already exported at `/riptide-university`, so there is no new hardware and no new export to arrange — what the lab actually needs is a collection: a named prefix with an owner and a list of who may read and write it.
 
@@ -101,9 +101,9 @@ The **ONBOARD COLLECTION** form does the whole thing in one pass: the collection
 > Dr. Reyes spends six weeks a year in the field without internet access to manage data access.
 > She stays the owner — the collection is the lab's — but puts Christina in the admin group `reyes_admins`, so her lab manager can grant and revoke on her behalf.
 
-Admin-group members can 
+Admin-group members can
 
-* edit the collection's name, description, 
+* edit the collection's name, description,
 * change the visibility and sharing setting,
 * read and write its metadata,
 * grant and revoke access, and
@@ -199,7 +199,7 @@ While a share is technically a type of collection, it's important to understand 
 * **A share binds data to its owner.**
   That is, objects reached via a share are served as if the *owner themselves* were accessing the data.
 
-Altogether, this means that 
+Altogether, this means that
 
 * The collection's admin group cannot manage who has access to a share; it controls only what the share's owner has access to.
 * Objects in a share can only be reached if the share's owner still has access to the parent collection (this is checked for every issuance).
@@ -260,7 +260,7 @@ In that case, setting the role `write` in the share would still issue read-only 
 > May is a month of change for the lab.
 >
 > * **May 1st**: One of Andrew's classmates drops the class — Andrew removes that person from the share's group and touches nothing else.
-> * **May 14th**: Andrew is graduating and no longer working with the group - Christina removes Andrew's membership from `reyes_students`. 
+> * **May 14th**: Andrew is graduating and no longer working with the group - Christina removes Andrew's membership from `reyes_students`.
 > * **May 28th**: Dr. Reyes decides working with undergraduates is too time-consuming - Christina revokes the `reyes_students` read grant on the collection entirely.
 
 Three levers, in increasing order of blast radius.
