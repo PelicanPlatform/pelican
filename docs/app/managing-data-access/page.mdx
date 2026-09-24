@@ -1,0 +1,165 @@
+export const metadata = {
+  asIndexPage: true,
+}
+
+import { Callout } from 'nextra/components'
+
+# Managing Data Access
+
+Pelican requires authorization for writing data and optionally for reading data.
+This section describes what kinds of access can be granted and situations it may be useful.
+
+## Requirements
+
+1. An Origin service, with an operational web interface
+2. A Namespace Prefix export configured in the Origin
+
+To *create* a "collection" (see below), you must be a collections administrator (includes Origin administrators).
+Everything after that is done by the collection's owner and the people they delegate to, with no administrator privilege at all.
+
+## Process
+
+Key to the access model is the concept of a "collection".
+A collection:
+
+* has an "owner"
+* maps to a Namespace Prefix
+* determines who has access, and the level of access
+
+### Delegation
+
+The main benefit to this collection model is the ability to delegate the administration of the collection to others.
+
+1. A collections administrator creates a "collection" and designates a "collection owner".
+2. The collection owner may delegate management of the collection to an "admin group".
+3. The collection owner or a member of the admin group can further grant read or write access to other groups.
+
+### Collection management
+
+A collections administrator, the collection owner, or a member of the designated admin group may
+
+* edit the collection settings (name, description, etc.)
+* designate a different admin group for the collection
+* grant read or write access to the collection to other groups
+
+### Users and groups
+
+The Origin service has the concept of users and groups.
+
+A **user** may log into the Origin's web interface to interact with the collections system.
+A **group** consists of one or more users.
+
+**Access permissions for a collection are assigned to a group, to a single user, or to every signed-in user.**
+
+To give one person access, use their user group. A user group comes in the format `user-<username>` where a user with username `brian.bockelman` would have user group `user-brian.bockelman`.
+There is also a virtual target, `@authenticated`, that matches every signed-in user; it grants no access to anonymous callers.
+
+An Origin configured with an OIDC provider will automatically provision users as they log into the Origin.
+Otherwise, an admin or different user can send an invite that will create a local account for the user.
+
+## Example
+
+<Callout type="info">
+  This example covers the full scope of what is possible, not what is required to implement.
+</Callout>
+
+To illustrate how the process works, consider the following fictional example.
+
+### Background
+
+**Dr. Reyes** is a research professor at Riptide University, whose lab focuses on collecting and analyzing experimental data.
+The researchers in the lab use a variety of national computing resources for the analysis and want to leverage the OSDF for the data movement.
+
+**Sysadmin Brian** was tasked with deploying the Origin service and related infrastructure, but does not have the effort to manage low-level access permissions.
+
+Dr. Reyes delegates day-to-day management of her lab, including the data, to her **lab manager Christina**.
+That means Christina should be the one responsible for granting and revoking access to the data, though Dr. Reyes is still the ultimate authority.
+
+There are two students working on the project: **Grad student Danny** is responsible for collecting the data, so he will need to be able to write to the data storage, and **undergrad student Andrew** needs to be able to read the data for his analyses.
+
+Here is a summary of the stakeholders in the story and their access requirements
+
+* **Sysadmin "Brian"** - deploys the Origin service.
+* **Research professor "Dr. Reyes"** - the ultimate authority on access for her lab's data.
+* **Lab manager "Christina"** - day-to-day management of lab, read and write access to the data.
+* **Grad student "Danny"** - read and write access to the data.
+* **Undergrad student "Andrew"** - read (but not write) access to the data.
+
+### Process
+
+#### Creating the collection
+
+1. Sysadmin Brian deploys the Origin, exposing the storage under `/riptide-university/reyes-lab`.
+2. Sysadmin Brian creates a collection with
+   * Name: `Reyes Lab`
+   * Namespace: `/riptide-university/reyes-lab`
+   * Owner: `Dr. Reyes`
+3. Since Dr. Reyes hasn't used the system yet, Sysadmin Brian generates an invite link and shares it.
+4. Dr. Reyes accepts the invitation and creates an account in the Origin service, via the browser.
+
+At this point, Sysadmin Brian is no longer involved in the data access management.
+
+#### Administering the collection
+
+1. Dr. Reyes creates a group `reyes_admins`.
+2. From that group, Dr. Reyes generates an invite link and sends it to her lab manager Christina, who signs in to the Origin (creating her account) and accepts the invite, becoming a member of `reyes_admins`.
+3. In the Origin's browser interface, Dr. Reyes navigates to the collections menu, selects her `Reyes Lab` collection, and assigns `reyes_admins` as its admin group.
+
+A collection delegates to a *group*, never to an individual, which is why Christina gets a group of her own rather than being named directly.
+
+At this point, either Dr. Reyes or Christina can administer the collection.
+
+#### Creating user groups
+
+1. Christina creates a group `reyes_researchers` (this will be for write access).
+2. Christina generates an invite link using the interface, and sends it to grad student Danny.
+3. Christina repeats the process to create another group `reyes_students` (for read access).
+4. Christina generates a separate invite link for this group and sends it to undergrad student Andrew.
+
+Once Danny and Andrew follow their invite links, they'll be members of their respective groups.
+The groups carry no access to the data yet — that comes next.
+
+<Callout type="info">
+  Creating a group makes you its owner but not automatically a member.
+  Christina leaves **Add me as a member of this group** checked on both, so she is the owner and a member of each.
+</Callout>
+
+#### Granting access
+
+1. Christina edits the `Reyes Lab` collection to add the `reyes_researchers` group as having `Write` access.
+2. Christina then adds the `reyes_students` group as having `Read` access.
+
+#### Accessing the collection
+
+As members of the `reyes_researchers` group, Christina and Danny are now able to read and write to the `/riptide-university/reyes-lab` namespace.
+
+As a member of the `reyes_students` group, Andrew is now able to read (but not write) to the namespace.
+
+## Shares
+
+A "share" is a child collection that an ordinary user creates to pass on part of the access they already hold, without needing any administrator privilege of their own.
+
+* **Anyone with read access to a collection can create a share**, once the collection's owner or admin group has enabled sharing on it
+* A share is itself a collection, so its creator can grant `read` or `write` on it, and manages it as its owner
+* Data read or written through a share is served as the **share's owner**, who stays accountable for it
+* The recipient of a share can **not** propagate access onward — there is no share of a share
+
+The owner or the admin group of a collection enables the ability to create a "share".
+
+### Example (continued)
+
+Let's say undergrad student Andrew wants to use some of the Reyes Lab research data for a class project, alongside two classmates who have no connection to the lab.
+
+1. Christina creates and populates `/riptide-university/reyes-lab/andrews-project` with some example data, and switches on **Allow users to create shares** on the `Reyes Lab` collection.
+2. Andrew creates a "share" targeting `/riptide-university/reyes-lab/andrews-project`.
+3. Andrew grants his classmates `read` on the share — through a group, or through each classmate's personal `user-` group.
+
+Andrew's classmates can now read that prefix with a Pelican Client, and they never needed a role on the `Reyes Lab` collection itself.
+Because the share is served as Andrew, it also cannot outlast his own access: if Andrew's `reyes_students` grant is removed, the share stops issuing usable tokens.
+No tickets to the Origin admin, and nobody had to widen access to the rest of the lab's data.
+
+<Callout type="warning">
+  Setting a collection or a share to **public** visibility only makes its *existence* visible to people who hold no access to it.
+  It grants no data access, and it does not make objects readable without an account.
+  Whether an anonymous client can read a prefix is decided by the Origin's export configuration, not by a collection or a share.
+</Callout>
