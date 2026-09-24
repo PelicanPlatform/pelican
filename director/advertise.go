@@ -358,11 +358,13 @@ func AdvertiseOSDF(ctx context.Context) error {
 	}
 
 	for _, ad := range originAdMap {
-		recordAd(ctx, ad.ServerAd, &ad.NamespaceAds)
+		// Topology ads carry no registry prefix to verify a name against.
+		recordAd(ctx, ad.ServerAd, &ad.NamespaceAds, false)
 	}
 
 	for _, ad := range cacheAdMap {
-		recordAd(ctx, ad.ServerAd, &ad.NamespaceAds)
+		// Topology ads carry no registry prefix to verify a name against.
+		recordAd(ctx, ad.ServerAd, &ad.NamespaceAds, false)
 	}
 
 	return nil
