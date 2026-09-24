@@ -762,19 +762,11 @@ func SetParameterDefaults(v *viper.Viper, isRoot bool, isOSDF bool) {
 	// Registry.InstitutionsUrlReloadMinutes
 	v.SetDefault(param.Registry_InstitutionsUrlReloadMinutes.GetName(), "15m")
 	// Registry.RequireCacheApproval
-	if isOSDF {
-		v.SetDefault(param.Registry_RequireCacheApproval.GetName(), true)
-	} else {
-		v.SetDefault(param.Registry_RequireCacheApproval.GetName(), false)
-	}
+	v.SetDefault(param.Registry_RequireCacheApproval.GetName(), true)
 	// Registry.RequireKeyChaining
 	v.SetDefault(param.Registry_RequireKeyChaining.GetName(), true)
 	// Registry.RequireOriginApproval
-	if isOSDF {
-		v.SetDefault(param.Registry_RequireOriginApproval.GetName(), true)
-	} else {
-		v.SetDefault(param.Registry_RequireOriginApproval.GetName(), false)
-	}
+	v.SetDefault(param.Registry_RequireOriginApproval.GetName(), true)
 	// Server.AdLifetime
 	v.SetDefault(param.Server_AdLifetime.GetName(), "10m")
 	// Server.AdvertisementInterval
