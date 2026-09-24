@@ -18,7 +18,7 @@
  *
  ***************************************************************/
 
-package fed_tests
+package oauth_tests
 
 import (
 	"os"

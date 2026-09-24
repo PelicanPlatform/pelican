@@ -18,7 +18,7 @@
  *
  ***************************************************************/
 
-package fed_tests
+package cache_tests
 
 import (
 	"os"

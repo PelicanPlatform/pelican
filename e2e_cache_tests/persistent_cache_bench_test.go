@@ -26,7 +26,7 @@
 // federation once (in an untimed setup phase) and then iterates b.N
 // times over the hot path.
 
-package fed_tests
+package cache_tests
 
 import (
 	"context"
@@ -70,7 +70,7 @@ func setupBenchTestEnv(tb testing.TB, fileSize int, prime bool) *benchTestEnv {
 	require.NoError(tb, param.Cache_EnableV2.Set(true))
 	ft := fed_test_utils.NewFedTest(tb, persistentCacheConfig)
 
-	token := getTempTokenForTest(tb)
+	token := fed_test_utils.TempWriteToken(tb)
 
 	content := generateTestData(fileSize)
 	localTmpDir := tb.TempDir()
@@ -288,7 +288,7 @@ func BenchmarkCacheMiss_Concurrent_Stampede(b *testing.B) {
 
 	require.NoError(b, param.Cache_EnableV2.Set(true))
 	ft := fed_test_utils.NewFedTest(b, persistentCacheConfig)
-	token := getTempTokenForTest(b)
+	token := fed_test_utils.TempWriteToken(b)
 
 	b.SetBytes(int64(fileSize) * int64(concurrency))
 	b.ResetTimer()

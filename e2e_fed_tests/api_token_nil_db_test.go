@@ -52,7 +52,7 @@ const wellFormedApiToken = "abcde.0000000000000000000000000000000000000000000000
 // TestDirectorApiTokenWithUninitializedDB is the end-to-end regression
 // guard for the nil-database panic.
 func TestDirectorApiTokenWithUninitializedDB(t *testing.T) {
-	fed := fed_test_utils.NewFedTest(t, bothPubNamespaces)
+	fed := fed_test_utils.NewFedTest(t, fed_test_utils.BothPublicNamespaces)
 
 	directorUrl := param.Server_ExternalWebUrl.GetString()
 	require.NotEmpty(t, directorUrl, "fed test did not populate the server web URL")

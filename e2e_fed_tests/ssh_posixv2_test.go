@@ -268,7 +268,7 @@ func TestSSHPosixv2OriginUploadDownload(t *testing.T) {
 	}
 
 	// Build the pelican binary (built once and shared across tests)
-	pelicanBinary := getPelicanBinary(t)
+	pelicanBinary := test_utils.PelicanBinary(t)
 
 	// Start the test SSH server
 	sshServer, err := startTestSSHD(t)
@@ -297,7 +297,7 @@ func TestSSHPosixv2OriginUploadDownload(t *testing.T) {
 	uploadURL := fmt.Sprintf("pelican://%s:%d/test/test.txt",
 		param.Server_Hostname.GetString(), param.Server_WebPort.GetInt())
 
-	testToken := getTempTokenForTest(t)
+	testToken := fed_test_utils.TempWriteToken(t)
 
 	// Upload should succeed immediately since SSH backend is now ready
 	_, err = client.DoPut(ft.Ctx, localFile, uploadURL, false, client.WithToken(testToken))
@@ -335,7 +335,7 @@ func TestSSHPosixv2OriginStat(t *testing.T) {
 	}
 
 	// Build the pelican binary (built once and shared across tests)
-	pelicanBinary := getPelicanBinary(t)
+	pelicanBinary := test_utils.PelicanBinary(t)
 
 	sshServer, err := startTestSSHD(t)
 	require.NoError(t, err, "Failed to start test SSH server")
@@ -360,7 +360,7 @@ func TestSSHPosixv2OriginStat(t *testing.T) {
 	uploadURL := fmt.Sprintf("pelican://%s:%d/test/stat_test.txt",
 		param.Server_Hostname.GetString(), param.Server_WebPort.GetInt())
 
-	testToken := getTempTokenForTest(t)
+	testToken := fed_test_utils.TempWriteToken(t)
 
 	// Upload file (should succeed immediately since SSH backend is ready)
 	_, err = client.DoPut(ft.Ctx, localFile, uploadURL, false, client.WithToken(testToken))
@@ -392,7 +392,7 @@ func TestSSHPosixv2OriginLargeFile(t *testing.T) {
 	}
 
 	// Build the pelican binary (built once and shared across tests)
-	pelicanBinary := getPelicanBinary(t)
+	pelicanBinary := test_utils.PelicanBinary(t)
 
 	sshServer, err := startTestSSHD(t)
 	require.NoError(t, err, "Failed to start test SSH server")
@@ -421,7 +421,7 @@ func TestSSHPosixv2OriginLargeFile(t *testing.T) {
 	uploadURL := fmt.Sprintf("pelican://%s:%d/test/large_file.bin",
 		param.Server_Hostname.GetString(), param.Server_WebPort.GetInt())
 
-	testToken := getTempTokenForTest(t)
+	testToken := fed_test_utils.TempWriteToken(t)
 
 	// Upload file (should succeed immediately since SSH backend is ready)
 	_, err = client.DoPut(ft.Ctx, localFile, uploadURL, false, client.WithToken(testToken))
@@ -453,7 +453,7 @@ func TestSSHPosixv2OriginDirectoryListing(t *testing.T) {
 	}
 
 	// Build the pelican binary (built once and shared across tests)
-	pelicanBinary := getPelicanBinary(t)
+	pelicanBinary := test_utils.PelicanBinary(t)
 
 	sshServer, err := startTestSSHD(t)
 	require.NoError(t, err, "Failed to start test SSH server")
@@ -477,7 +477,7 @@ func TestSSHPosixv2OriginDirectoryListing(t *testing.T) {
 	require.NoError(t, os.WriteFile(filepath.Join(actualStorageDir, "file2.txt"), []byte("content2"), 0644))
 	require.NoError(t, os.WriteFile(filepath.Join(subdir, "file3.txt"), []byte("content3"), 0644))
 
-	testToken := getTempTokenForTest(t)
+	testToken := fed_test_utils.TempWriteToken(t)
 
 	// List directory (should succeed immediately since SSH backend is ready)
 	listURL := fmt.Sprintf("pelican://%s:%d/test/",
@@ -532,7 +532,7 @@ func TestSSHPosixv2OriginMultipleFiles(t *testing.T) {
 	}
 
 	// Build the pelican binary (built once and shared across tests)
-	pelicanBinary := getPelicanBinary(t)
+	pelicanBinary := test_utils.PelicanBinary(t)
 
 	sshServer, err := startTestSSHD(t)
 	require.NoError(t, err, "Failed to start test SSH server")
@@ -547,7 +547,7 @@ func TestSSHPosixv2OriginMultipleFiles(t *testing.T) {
 	waitForSSHBackendReady(t, 60*time.Second)
 
 	localTmpDir := t.TempDir()
-	testToken := getTempTokenForTest(t)
+	testToken := fed_test_utils.TempWriteToken(t)
 
 	// Define multiple test files
 	testFiles := map[string][]byte{
@@ -598,7 +598,7 @@ func TestSSHPosixv2OriginConnectionStress(t *testing.T) {
 	}
 
 	// Build the pelican binary (built once and shared across tests)
-	pelicanBinary := getPelicanBinary(t)
+	pelicanBinary := test_utils.PelicanBinary(t)
 
 	sshServer, err := startTestSSHD(t)
 	require.NoError(t, err, "Failed to start test SSH server")
@@ -614,7 +614,7 @@ func TestSSHPosixv2OriginConnectionStress(t *testing.T) {
 
 	require.NotEmpty(t, ft.Exports, "Should have at least one export")
 	actualStorageDir := ft.Exports[0].StoragePrefix
-	testToken := getTempTokenForTest(t)
+	testToken := fed_test_utils.TempWriteToken(t)
 	localTmpDir := t.TempDir()
 
 	// Seed the storage with a handful of small files and a subdirectory
@@ -796,7 +796,7 @@ func TestSSHPosixv2OriginTunnelMode(t *testing.T) {
 	}
 
 	// Build the pelican binary (built once and shared across tests)
-	pelicanBinary := getPelicanBinary(t)
+	pelicanBinary := test_utils.PelicanBinary(t)
 
 	// Start the test SSH server
 	sshServer, err := startTestSSHD(t)
@@ -815,7 +815,7 @@ func TestSSHPosixv2OriginTunnelMode(t *testing.T) {
 	// Wait for SSH backend to be ready - tunnel establishment may take a bit longer
 	waitForSSHBackendReady(t, 90*time.Second)
 
-	testToken := getTempTokenForTest(t)
+	testToken := fed_test_utils.TempWriteToken(t)
 	localTmpDir := t.TempDir()
 
 	// Sub-test 1: Basic upload and download through tunnel
