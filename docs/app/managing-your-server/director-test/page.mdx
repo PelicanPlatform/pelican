@@ -6,7 +6,10 @@ The Director periodically runs file transfer tests against every Origin and Cach
 (every `Director.OriginCacheHealthTestInterval`, 15s by default).
 A server that repeatedly fails these tests is marked unhealthy and taken out of client redirection.
 
-The test mechanism differs between Origins and Caches.
+The test mechanism differs between Origins and Caches because of what each server can do with data.
+An Origin exports a writable monitoring namespace, so the Director can exercise the full data path with a real file: upload it, read it back, and delete it.
+A Cache is a read-only proxy: it accepts no uploads or deletes and only holds objects it has fetched from an upstream server, so the Director can only ask it to fetch an object.
+To keep that fetch from depending on the health of any particular Origin, the Director itself acts as the upstream for the `/pelican/monitoring` namespace and serves the test object from its own API, as described below.
 
 ## How the Director Tests an Origin
 
@@ -16,21 +19,27 @@ For an Origin, the Director performs a full write–read–delete cycle with a r
 2. GET the file back and verify its content.
 3. DELETE the file.
 
-Because the delete only happens after a successful download, test files persist on an Origin's disk only when a test cycle fails partway through.
+The Director runs these three steps in order and stops at the first failure, so the DELETE only runs after a successful GET.
+A cycle that fails after the upload therefore leaves that one test file behind on the Origin's disk.
+
+Unlike on Caches (see below), the Origin layout is flat and is not organized per Director.
+In a federation with several Directors, all of them write into the same `/pelican/monitoring/directorTest/` directory, distinguished only by the timestamp in the file name, and each Director deletes its own file at the end of a successful cycle.
 
 ## How the Director Tests a Cache
 
 For a Cache, the Director performs a single GET of a synthetic path such as `/pelican/monitoring/directorTest/<director-hostname>/<YYYY-MM-DD>/director-test-<timestamp>.txt` and checks the response body against a known test string.
-No origin is involved: the Director itself serves the file content from its `/api/v1.0/director/healthTest` API, acting as the upstream for the request.
+No Origin is involved: the Director itself serves the file content from its `/api/v1.0/director/healthTest` API, acting as the upstream for the request.
 
-Although the Director never uploads anything on the Cache, the Cache's XRootD proxy file cache (PFC) stores each fetched test object on disk as a side effect of caching it: a small (~100 byte) data file plus a companion `.cinfo` metadata file.
+Although the Director never uploads anything to the Cache, the Cache's XRootD proxy file cache (PFC) stores each fetched test object on disk as a side effect of caching it: a small (~100 byte) data file plus a companion `.cinfo` metadata file.
 After each successful test cycle, the Director evicts the previous cycle's test files by POSTing to the Cache.
 
 ## Test File Cleanup on Caches
 
-Before Pelican v7.27, cache's test files accumulated in a single flat `/pelican/monitoring/directorTest/` directory, growing to tens of thousands of entries and leading to disk/inode exhaustion.
+Before Pelican v7.27, a Cache's test files accumulated in a single flat `/pelican/monitoring/directorTest/` directory, growing to tens of thousands of entries and leading to disk/inode exhaustion.
 The files were only ever removed when the cache's *total* disk usage crossed the XRootD PFC high watermark and the LRU purge swept them out as the oldest-accessed objects.
-Since v7.27, test files are organized per-director and per-day, and are cleaned up by two complementary mechanisms.
+Since v7.27, test files are organized per Director and per day, and are cleaned up by two complementary mechanisms:
+a **Director-initiated eviction** after every successful test cycle, and a **Cache-side daily sweep** that catches anything the Director missed.
+Both are described below.
 
 ### Test File Layout
 
@@ -47,7 +56,8 @@ The daily subdirectories keep any single directory small and allow whole days to
 
 **Director-initiated eviction (primary).**
 After each successful test cycle, the Director asks the Cache to evict the previous cycle's test file by calling `POST /api/v1.0/cache/evictTestFile` with a federation-issued token.
-The Cache validates the token and the requested path (it must match the director test layout above), then evicts the file through its local XRootD evict API.
+The Cache validates the token and the requested path (it must match the director test layout above), then calls the evict endpoint of its own XRootD server, `/pelican/api/v1.0/evict`, which is provided by the `xrdhttp-pelican` plugin loaded into the Cache's XRootD.
+The plugin asks XRootD's PFC to mark the file as a purge candidate.
 
 **Cache-side daily sweep (backup).**
 Each Cache also runs its own cleanup at startup and every 24 hours thereafter.
