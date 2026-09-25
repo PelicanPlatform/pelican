@@ -18,11 +18,17 @@ Pelican also has a set of built-in metrics to monitor Pelican server's status, l
 
 ## Scrape Pelican Metrics with an External Prometheus
 
-If you operate a separate Prometheus instance and want it to scrape metrics from one or more Pelican services (for example, to collect federation-wide metrics into a central monitoring stack), you can point that Prometheus at the Pelican `/metrics` endpoint. Because `/metrics` is authenticated by default, you must issue a Pelican API key for the scraping job and configure Prometheus to send it as a bearer credential.
+If you operate a separate Prometheus instance and want it to scrape metrics from one or more Pelican services, you can point that Prometheus at the Pelican `/metrics` endpoint.
+Because `/metrics` requires authentication by default, you must issue a Pelican API key for the scraping job and configure Prometheus to send it as a bearer credential.
+
+The built-in Prometheus instance (controlled by `Monitoring.EnablePrometheus`, on by default) is sufficient when you only need to inspect a single server: it keeps metrics for the period set by `Monitoring.DataRetention` (15 days by default) and needs no extra infrastructure.
+Use an external Prometheus when you want to collect metrics from several Pelican servers in one place, retain them for longer, or feed a shared Grafana or alerting stack.
+The two are not mutually exclusive: `/metrics` is served regardless of `Monitoring.EnablePrometheus`, so you can keep the built-in instance and scrape the same server externally.
 
 ### Generate an API key
 
-Use `pelican apikey generate` on the Pelican server you want to scrape. The key must include the `monitoring.scrape` scope, which grants access to the `/metrics` endpoint. (The separate `monitoring.query` scope is only needed when issuing PromQL queries against `/api/v1.0/prometheus`; it does not grant access to `/metrics`.)
+Use `pelican apikey generate` on the Pelican server you want to scrape. The command reads the server's configuration to sign its request with the server's issuer key, so if the server's configuration file is not at the default location, pass the same `--config <path>` the server was started with.
+The key must include the `monitoring.scrape` scope, which grants access to the `/metrics` endpoint. (The separate `monitoring.query` scope is only needed when issuing PromQL queries against `/api/v1.0/prometheus`; it does not grant access to `/metrics`.)
 
 ```bash copy
 pelican apikey generate \
@@ -33,7 +39,7 @@ pelican apikey generate \
 
 * `--scopes`: must include `monitoring.scrape` for scraping `/metrics`. To allow the same key to also run PromQL queries, use `--scopes "monitoring.scrape,monitoring.query"`.
 * `--expiration`: RFC3339 timestamp at which the key stops being valid.
-* `--server`: must match the Pelican server's `Server.ExternalWebUrl`. When that value is not set explicitly, it falls back to `https://<Server.Hostname>[:<WebPort>]`, with the default `:443` port stripped. If the server is reachable by multiple hostnames (for example, both an A record and a CNAME), use the hostname the server is actually configured with; a mismatch will be rejected.
+* `--server`: must match the Pelican server's `Server.ExternalWebUrl`. When that value is not set explicitly, it falls back to `https://<Server.Hostname>[:<WebPort>]`, with the default `:443` port stripped. If the server is reachable by multiple hostnames, use the one the server is configured with. For example, if `aaa.com` is a CNAME pointing at `bbb.com` and the server's configuration sets `Server.Hostname: bbb.com` with `Server.ExternalWebUrl` unset, use `--server https://bbb.com`; if the configuration instead sets `Server.ExternalWebUrl: https://aaa.com`, use `--server https://aaa.com`. A mismatch will be rejected.
 
 The command prints the API key to standard output. Save it to a file that the scraping Prometheus instance can read (for example, `/etc/prometheus/secrets/pelican-apikey`) and restrict the file's permissions; treat it as a credential.
 
@@ -60,7 +66,23 @@ scrape_configs:
 * `targets` should be the same `host[:port]` you used for `--server` (without the `https://` scheme). For a server reachable on the default HTTPS port, the `:443` suffix can be omitted.
 * `authorization.credentials_file` should point to the file containing the API key value, with no `Bearer ` prefix or trailing newline. To inline the secret instead of reading it from a file, use `credentials: <api-key>` in place of `credentials_file`. (Older Prometheus syntax exposes the equivalent `bearer_token` / `bearer_token_file` fields; the `authorization` block is the current preferred form.)
 
-After reloading Prometheus, the new target should appear as `UP` on the Prometheus `/targets` page. If the target instead reports a `403`, double-check that the API key was issued with the `monitoring.scrape` scope and that the `--server` value used when generating the key matched the Pelican server's `Server.ExternalWebUrl`.
+> **Note**: For a test deployment that uses a self-signed certificate, you can turn off server certificate verification for this job by adding the following under the job entry. Do not use this in production.
+>
+> ```yaml
+>     tls_config:
+>       insecure_skip_verify: true
+> ```
+
+### Start Prometheus
+
+Start Prometheus with the configuration file above (or reload a running instance so it picks up the new job):
+
+```bash copy
+prometheus --config.file=/etc/prometheus/prometheus.yml
+```
+
+Once Prometheus is running, the new target should appear as `UP` on the Prometheus `/targets` page (`http://localhost:9090/targets` by default).
+If the target instead reports a `403`, double-check that the API key was issued with the `monitoring.scrape` scope and that the `--server` value used when generating the key matched the Pelican server's `Server.ExternalWebUrl`.
 
 ### Counter Metrics
 
