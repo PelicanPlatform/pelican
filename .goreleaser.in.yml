@@ -329,7 +329,6 @@ nfpms:
       - "stashcache-client = %RPMVERSION%"
       - "osdf-client = %RPMVERSION%"
       - "stashcp = %RPMVERSION%"
-      - "condor-stash-plugin = %RPMVERSION%"
     overrides:
       apk:
         contents:
@@ -347,17 +346,10 @@ nfpms:
           - src: "./pelican"
             dst: "/usr/bin/stashcp"
             type: symlink
-          - src: "../../bin/pelican"
-            dst: "/usr/libexec/condor/stash_plugin"
-            type: symlink
-          - src: "client/resources/10-stash-plugin.conf"
-            dst: "/etc/condor/config.d/10-stash-plugin.conf"
-            type: config|noreplace
         replaces:
           - "stashcache-client < 7"
           - "osdf-client < 7"
           - "stashcp < 7"
-          - "condor-stash-plugin < 7"
       deb:
         contents:
           - src: "./pelican"
@@ -366,23 +358,15 @@ nfpms:
           - src: "./pelican"
             dst: "/usr/bin/stashcp"
             type: symlink
-          - src: "../../bin/pelican"
-            dst: "/usr/libexec/condor/stash_plugin"
-            type: symlink
-          - src: "client/resources/10-stash-plugin.conf"
-            dst: "/etc/condor/config.d/10-stash-plugin.conf"
-            type: config|noreplace
         # deb has different syntax
         provides:
           - "stashcache-client (= %RPMVERSION%)"
           - "osdf-client (= %RPMVERSION%)"
           - "stashcp (= %RPMVERSION%)"
-          - "condor-stash-plugin (= %RPMVERSION%)"
         replaces:
           - "stashcache-client (<< 7)"
           - "osdf-client (<< 7)"
           - "stashcp (<< 7)"
-          - "condor-stash-plugin (<< 7)"
   # end package pelican-osdf-compat
 
   - id: pelican-server
