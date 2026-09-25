@@ -1,6 +1,6 @@
 #!/bin/bash -xe
 #
-# Copyright (C) 2024, University of Nebraska-Lincoln
+# Copyright (C) 2026, University of Nebraska-Lincoln
 #
 # Licensed under the Apache License, Version 2.0 (the "License"); you
 # may not use this file except in compliance with the License.  You may
@@ -122,7 +122,8 @@ if ! check_cache_status "/pelicanplatform/test/hello-world.txt" "504"; then
   exit 1
 fi
 
-NEAREST_CACHE="unix://$SOCKET_DIR/socket" ./stash_plugin -d osdf:///pelicanplatform/test/hello-world.txt /dev/null
+# Test we work with the legacy PELICAN_NEAREST_CACHE alias
+PELICAN_NEAREST_CACHE="unix://$SOCKET_DIR/socket" ./stash_plugin -d osdf:///pelicanplatform/test/hello-world.txt /dev/null
 exit_status=$?
 
 if ! [[ "$exit_status" = 0 ]]; then
@@ -135,8 +136,8 @@ if ! check_cache_status "/pelicanplatform/test/hello-world.txt" "200"; then
   exit 1
 fi
 
-# Test we work with PELICAN_NEAREST_CACHE as well
-PELICAN_PREFFERREDCACHES="unix://$SOCKET_DIR/socket" ./stash_plugin -d osdf:///pelicanplatform/test/hello-world.txt /dev/null
+# Test we work with the canonical PELICAN_CLIENT_PREFERREDCACHES
+PELICAN_CLIENT_PREFERREDCACHES="unix://$SOCKET_DIR/socket" ./stash_plugin -d osdf:///pelicanplatform/test/hello-world.txt /dev/null
 exit_status=$?
 
 if ! [[ "$exit_status" = 0 ]]; then

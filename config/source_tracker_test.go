@@ -136,22 +136,69 @@ func TestRecordConfigFileKeys(t *testing.T) {
 	assert.False(t, ok)
 }
 
+// TestRecordEnvVarSources checks that only PELICAN_ variables are recorded
+// as config sources.
 func TestRecordEnvVarSources(t *testing.T) {
-	st := &SourceTracker{sources: make(map[string]ConfigSource)}
+	tests := []struct {
+		name         string
+		osdfBinary   bool
+		envName      string
+		wantRecorded bool
+	}{
+		{
+			name:         "pelican-prefix-is-recorded",
+			envName:      "PELICAN_LOGGING_LEVEL",
+			wantRecorded: true,
+		},
+		{
+			name:         "pelican-prefix-is-recorded-under-osdf-binary",
+			osdfBinary:   true,
+			envName:      "PELICAN_LOGGING_LEVEL",
+			wantRecorded: true,
+		},
+		{
+			name:       "osdf-prefix-is-ignored",
+			osdfBinary: true,
+			envName:    "OSDF_LOGGING_LEVEL",
+		},
+		{
+			name:       "stash-prefix-is-ignored",
+			osdfBinary: true,
+			envName:    "STASH_LOGGING_LEVEL",
+		},
+		{
+			// LookupParam resolves a canonical name, so only
+			// the prefix check keeps this one from being recorded.
+			name:    "unprefixed-name-is-ignored",
+			envName: "Logging.Level",
+		},
+	}
 
-	t.Setenv("PELICAN_LOGGING_LEVEL", "debug")
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			scrubConfigEnv(t)
 
-	st.RecordEnvVarSources()
+			tier := PelicanPrefix
+			if tc.osdfBinary {
+				tier = OsdfPrefix
+			}
+			setTestTier(t, tier)
 
-	src, ok := st.Get("logging.level")
-	require.True(t, ok)
-	assert.Equal(t, SourceEnvVar, src.Type)
-	assert.Equal(t, "PELICAN_LOGGING_LEVEL", src.Detail)
+			t.Setenv(tc.envName, "debug")
 
-	// Non-PELICAN env vars should not be recorded.
-	t.Setenv("HOME", "/root")
-	_, ok = st.Get("home")
-	assert.False(t, ok)
+			st := &SourceTracker{sources: make(map[string]ConfigSource)}
+			st.RecordEnvVarSources()
+
+			src, ok := st.Get("logging.level")
+			if !tc.wantRecorded {
+				assert.False(t, ok)
+				return
+			}
+			require.True(t, ok)
+			assert.Equal(t, SourceEnvVar, src.Type)
+			assert.Equal(t, tc.envName, src.Detail)
+		})
+	}
 }
 
 // TestSourceTrackerInitConfigIntegration exercises the source tracker through the

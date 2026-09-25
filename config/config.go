@@ -64,6 +64,9 @@ import (
 var ErrNoDiscoveryEndpoint = stderrors.New("no discovery endpoint was resolved")
 
 type (
+	// ConfigPrefix identifies a behavior tier, OSDF or Pelican, which
+	// GetPreferredPrefix derives from the name of the binary. Despite its
+	// name, it does not select an environment variable prefix.
 	ConfigPrefix string
 
 	TokenEntry struct {
@@ -176,7 +179,6 @@ type (
 const (
 	PelicanPrefix ConfigPrefix = "PELICAN"
 	OsdfPrefix    ConfigPrefix = "OSDF"
-	StashPrefix   ConfigPrefix = "STASH"
 )
 
 const (
@@ -442,7 +444,6 @@ var (
 	validPrefixes = map[ConfigPrefix]bool{
 		PelicanPrefix: true,
 		OsdfPrefix:    true,
-		StashPrefix:   true,
 		"":            true,
 	}
 
@@ -613,24 +614,24 @@ func ValidateServerType(allowedServerTypes []server_structs.ServerType) bool {
 	return false
 }
 
-// Based on the name of the current binary, determine the preferred "style"
-// of behavior.  For example, a binary with the "osdf_" prefix should utilize
-// the known URLs for OSDF.  For "pelican"-style commands, the user will
-// need to manually configure the location of the director endpoint.
+// Based on the name of the current binary, determine the preferred
+// "style" of behavior. Binaries whose names start with "osdf" or "stash"
+// (e.g., osdf, stashcp, and stash_plugin) utilize the known URLs for OSDF.
+// For "pelican"-style commands, the user will need to manually configure
+// the location of the director endpoint.
 func GetPreferredPrefix() ConfigPrefix {
 	// Testing override to programmatically force different behaviors.
 	if testingPreferredPrefix != "" {
 		return ConfigPrefix(testingPreferredPrefix)
 	}
-	arg0 := strings.ToUpper(filepath.Base(os.Args[0]))
-	underscore_idx := strings.Index(arg0, "_")
-	if underscore_idx != -1 {
-		prefix := string(ConfigPrefix(arg0[0:underscore_idx]))
-		if prefix == "STASH" {
-			return OsdfPrefix
-		}
-	}
-	if strings.HasPrefix(arg0, "STASH") || strings.HasPrefix(arg0, "OSDF") {
+	return tierForBinary(filepath.Base(os.Args[0]))
+}
+
+// tierForBinary maps the base name of a binary onto the behavior tier
+// that name selects.
+func tierForBinary(name string) ConfigPrefix {
+	upper := strings.ToUpper(name)
+	if strings.HasPrefix(upper, "STASH") || strings.HasPrefix(upper, "OSDF") {
 		return OsdfPrefix
 	}
 	return PelicanPrefix
@@ -645,20 +646,6 @@ func SetPreferredPrefix(newPref ConfigPrefix) (oldPref ConfigPrefix, err error) 
 	oldPrefix := testingPreferredPrefix
 	testingPreferredPrefix = newPref
 	return oldPrefix, nil
-}
-
-// Get the list of valid prefixes for this binary.  Given there's been so
-// many renames of the project (stash -> osdf -> pelican), we allow multiple
-// prefixes when searching through environment variables.
-func GetAllPrefixes() []ConfigPrefix {
-	prefixes := []ConfigPrefix{GetPreferredPrefix()}
-
-	if prefixes[0] == OsdfPrefix {
-		prefixes = append(prefixes, StashPrefix, PelicanPrefix)
-	} else if prefixes[0] == StashPrefix {
-		prefixes = append(prefixes, OsdfPrefix, PelicanPrefix)
-	}
-	return prefixes
 }
 
 // We can't parse a schemeless hostname when there's a port, so check for a scheme and add one if none exists.
@@ -1330,11 +1317,7 @@ func SetWebConfigOverride(v *viper.Viper, configPath string) error {
 // SetBaseDefaultsInConfig) and ApplyDerivedDefaults.
 func defaultTierContext() (isRoot bool, isOSDF bool) {
 	isRoot = IsRootExecution()
-	prefix := GetPreferredPrefix()
-	isOSDF = prefix == OsdfPrefix
-	if os.Getenv("STASH_USE_TOPOLOGY") == "" {
-		isOSDF = isOSDF || (prefix == "STASH")
-	}
+	isOSDF = GetPreferredPrefix() == OsdfPrefix
 	return
 }
 
@@ -1454,9 +1437,6 @@ func initConfigInternalImpl(logLevel log.Level) {
 		}
 	}
 
-	// Load environment variables into the config
-	bindNonPelicanEnv() // Deprecate OSDF env prefix but be compatible for now
-
 	// This line allows viper to use an env var like ORIGIN_VALUE to override the viper string "Origin.Value"
 	viper.SetEnvKeyReplacer(strings.NewReplacer(".", "_"))
 
@@ -1483,20 +1463,18 @@ func initConfigInternalImpl(logLevel log.Level) {
 		}
 	}
 
-	// Handle config file specified via <PREFIX>_CONFIG_FILE environment variable
-	// This supports PELICAN_CONFIG_FILE, OSDF_CONFIG_FILE, STASH_CONFIG_FILE
-	upperPrefix := GetPreferredPrefix()
-	if envConfigFile := os.Getenv(upperPrefix.String() + "_CONFIG_FILE"); envConfigFile != "" {
+	// Handle config file specified via the PELICAN_CONFIG_FILE environment variable
+	if envConfigFile := os.Getenv("PELICAN_CONFIG_FILE"); envConfigFile != "" {
 		fp, err := os.Open(envConfigFile)
 		if err != nil {
 			if !os.IsNotExist(err) {
-				cobra.CheckErr(errors.Wrapf(err, "failed to open config file specified via %s_CONFIG_FILE", upperPrefix.String()))
+				cobra.CheckErr(errors.Wrap(err, "failed to open config file specified via PELICAN_CONFIG_FILE"))
 			}
 			// If file doesn't exist, continue without it
 		} else {
 			defer fp.Close()
 			if err := viper.MergeConfig(fp); err != nil {
-				cobra.CheckErr(errors.Wrapf(err, "failed to read config file specified via %s_CONFIG_FILE", upperPrefix.String()))
+				cobra.CheckErr(errors.Wrap(err, "failed to read config file specified via PELICAN_CONFIG_FILE"))
 			}
 			if err := st.RecordConfigFileKeys(envConfigFile, SourceConfigFile); err != nil {
 				log.WithError(err).Warnf("Failed to record config source provenance for %s", envConfigFile)
@@ -1547,6 +1525,9 @@ func initConfigInternalImpl(logLevel log.Level) {
 	}
 
 	goose.SetLogger(CustomGooseLogger{})
+
+	// Warn about environment variables that Pelican no longer reads
+	warnRemovedEnv()
 
 	// Warn users about deprecated config keys they're using and try to map them to any new equivalent we've defined.
 	handleDeprecatedConfig()
@@ -2841,8 +2822,7 @@ func SetClientDefaults(v *viper.Viper) error {
 	// Deprecated param defaults: excluded from generated SetParameterDefaults.
 	v.SetDefault(param.IssuerKey.GetName(), filepath.Join(configDir, "issuer.jwk"))
 
-	upperPrefix := GetPreferredPrefix()
-	if upperPrefix == OsdfPrefix || upperPrefix == StashPrefix {
+	if GetPreferredPrefix() == OsdfPrefix {
 		v.SetDefault("Federation.TopologyNamespaceURL", "https://topology.opensciencegrid.org/osdf/namespaces")
 	}
 
@@ -2869,7 +2849,7 @@ func InitClient() error {
 	InitConfigInternal(log.WarnLevel)
 	logging.FlushLogs(true)
 
-	// Bind legacy client environment variables (e.g., STASHCP_*, OSG_*, NEAREST_CACHE)
+	// Bind legacy client environment variables (e.g., PELICAN_DIRECTOR_URL, PELICAN_NEAREST_CACHE)
 	// This must happen after InitConfigInternal but before SetClientDefaults
 	bindLegacyClientEnv()
 
@@ -2967,6 +2947,7 @@ func ResetConfig() {
 
 	warnDeprecatedOnce = sync.Once{}
 	warnDebugOnce = sync.Once{}
+	warnRemovedEnvOnce = sync.Once{}
 
 	setServerOnce = sync.Once{}
 	enabledServers.Clear()
