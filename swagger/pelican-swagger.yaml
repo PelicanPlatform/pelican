@@ -3864,7 +3864,10 @@ paths:
         For user with admin privilege, they can update any valid namespace.
 
 
-        Non-admin users can update only namespaces they own and only if the approval status is `admin_metadata.status == approved`, otherwise the endpoint returns 404.
+        Non-admin users can update only namespaces they own. For a namespace with `admin_metadata.status == approved`,
+        only `admin_metadata.description`, `admin_metadata.site_name`, `admin_metadata.institution`, and
+        `admin_metadata.security_contact_user_id` are updated; `prefix`, `pubkey`, `custom_fields`, and
+        `admin_metadata.user_id` keep their stored values.
         "
       operationId: updateNamespaceById
       parameters:
