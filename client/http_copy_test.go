@@ -139,8 +139,51 @@ func TestMonitorTPC(t *testing.T) {
 		}
 	})
 
+	// A destination that says nothing at all has not reported a successful
+	// copy.  This used to be read as success -- the caller got a completed
+	// transfer, carrying the source's byte count, and exited 0.
 	t.Run("EmptyBody", func(t *testing.T) {
 		body := strings.NewReader("")
+
+		messages := make(chan tpcStatus, 1)
+		err := monitorTPC(context.Background(), messages, body)
+		require.NoError(t, err)
+
+		msg := <-messages
+		assert.True(t, msg.done)
+		require.Error(t, msg.err, "a stream carrying no verdict must not be reported as a successful copy")
+		assert.Contains(t, msg.err.Error(), "without reporting success or failure")
+	})
+
+	// The dangerous shape: real progress markers, so the transfer looks alive
+	// and the byte counts land, and then the stream simply stops.
+	t.Run("PerfMarkersThenSilence", func(t *testing.T) {
+		body := strings.NewReader(
+			"Perf Marker\n" +
+				"Stripe Index: 0\n" +
+				"Stripe Bytes Transferred: 1024\n" +
+				"Total Stripe Count: 1\n" +
+				"End\n",
+		)
+
+		messages := make(chan tpcStatus, 2)
+		err := monitorTPC(context.Background(), messages, body)
+		require.NoError(t, err)
+
+		msg1 := <-messages
+		assert.Equal(t, uint64(1024), msg1.xferred)
+		assert.False(t, msg1.done)
+
+		msg2 := <-messages
+		assert.True(t, msg2.done)
+		require.Error(t, msg2.err, "progress markers are not a verdict; only \"success:\" is")
+		assert.Contains(t, msg2.err.Error(), "without reporting success or failure")
+	})
+
+	// The verdict is what decides the outcome, not the presence of markers:
+	// a bare "success:" with no perf markers at all is still a success.
+	t.Run("SuccessWithoutPerfMarkers", func(t *testing.T) {
+		body := strings.NewReader("success: Created\n")
 
 		messages := make(chan tpcStatus, 1)
 		err := monitorTPC(context.Background(), messages, body)
