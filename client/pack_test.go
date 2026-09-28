@@ -159,3 +159,301 @@ func TestAutoPacker(t *testing.T) {
 		verifyTestDirectory(t, dirnameDest)
 	})
 }
+
+// tarEntry describes one archive member for buildTar.
+type tarEntry struct {
+	Name     string
+	Typeflag byte
+	Linkname string
+	Mode     int64
+	Body     string
+}
+
+// buildTar writes the given entries into an in-memory (uncompressed) tar
+// archive.  Regular files default to mode 0644 and directories to 0755.
+func buildTar(t *testing.T, entries []tarEntry) []byte {
+	t.Helper()
+	buf := new(bytes.Buffer)
+	tw := tar.NewWriter(buf)
+	for _, e := range entries {
+		mode := e.Mode
+		if mode == 0 {
+			if e.Typeflag == tar.TypeDir {
+				mode = 0755
+			} else {
+				mode = 0644
+			}
+		}
+		hdr := &tar.Header{
+			Name:     e.Name,
+			Typeflag: e.Typeflag,
+			Linkname: e.Linkname,
+			Mode:     mode,
+		}
+		if e.Typeflag == tar.TypeReg {
+			hdr.Size = int64(len(e.Body))
+		}
+		require.NoError(t, tw.WriteHeader(hdr))
+		if e.Typeflag == tar.TypeReg {
+			_, err := io.WriteString(tw, e.Body)
+			require.NoError(t, err)
+		}
+	}
+	require.NoError(t, tw.Close())
+	return buf.Bytes()
+}
+
+// unpackBytes streams archive into a fresh unpacker rooted at dest and then
+// closes it, returning the first error from either step.
+func unpackBytes(dest string, archive []byte) error {
+	aup := newAutoUnpacker(dest, autoBehavior)
+	_, copyErr := io.Copy(aup, bytes.NewReader(archive))
+	closeErr := aup.Close()
+	if copyErr != nil {
+		return copyErr
+	}
+	return closeErr
+}
+
+// dirNames returns the sorted base names of the entries directly under dir.
+func dirNames(t *testing.T, dir string) []string {
+	t.Helper()
+	entries, err := os.ReadDir(dir)
+	require.NoError(t, err)
+	names := make([]string, 0, len(entries))
+	for _, e := range entries {
+		names = append(names, e.Name())
+	}
+	return names
+}
+
+// TestAutoUnpackerRejectsEscapes covers the ways an archive can try to write
+// outside the destination directory: `..` components, a sibling directory
+// sharing the destination's name as a prefix, and writing through a symlink
+// whose target lies outside the destination.
+func TestAutoUnpackerRejectsEscapes(t *testing.T) {
+	t.Parallel()
+
+	type testCase struct {
+		name    string
+		entries func(dest, outside string) []tarEntry
+		// preSeed runs after dest/outside are created and before unpacking.
+		preSeed func(t *testing.T, dest, outside string)
+		// extraCheck runs after the unpack failure for case-specific assertions.
+		extraCheck func(t *testing.T, parent, dest, outside string)
+	}
+
+	relOutside := func(dest, outside string) string {
+		rel, err := filepath.Rel(dest, outside)
+		require.NoError(t, err)
+		return rel
+	}
+
+	cases := []testCase{
+		{
+			name: "dot-dot regular file",
+			entries: func(dest, outside string) []tarEntry {
+				return []tarEntry{{Name: "../escape.txt", Typeflag: tar.TypeReg, Body: "pwned"}}
+			},
+		},
+		{
+			// destDir=/parent/dest; entry ../dest-evil/x joins to /parent/dest-evil/x,
+			// which passes a bare string-prefix check against /parent/dest.
+			name: "sibling prefix bypass",
+			entries: func(dest, outside string) []tarEntry {
+				return []tarEntry{
+					{Name: "../" + filepath.Base(dest) + "-evil", Typeflag: tar.TypeDir},
+					{Name: "../" + filepath.Base(dest) + "-evil/x", Typeflag: tar.TypeReg, Body: "pwned"},
+				}
+			},
+			extraCheck: func(t *testing.T, parent, dest, outside string) {
+				_, err := os.Lstat(dest + "-evil")
+				assert.True(t, os.IsNotExist(err), "sibling directory must not be created")
+			},
+		},
+		{
+			name: "absolute symlink then file through it",
+			entries: func(dest, outside string) []tarEntry {
+				return []tarEntry{
+					{Name: "evil", Typeflag: tar.TypeSymlink, Linkname: outside},
+					{Name: "evil/pwned", Typeflag: tar.TypeReg, Body: "pwned"},
+				}
+			},
+		},
+		{
+			name: "relative symlink then file through it",
+			entries: func(dest, outside string) []tarEntry {
+				return []tarEntry{
+					{Name: "evil", Typeflag: tar.TypeSymlink, Linkname: relOutside(dest, outside)},
+					{Name: "evil/pwned", Typeflag: tar.TypeReg, Body: "pwned"},
+				}
+			},
+		},
+		{
+			name: "symlink then directory through it",
+			entries: func(dest, outside string) []tarEntry {
+				return []tarEntry{
+					{Name: "evil", Typeflag: tar.TypeSymlink, Linkname: outside},
+					{Name: "evil/sub", Typeflag: tar.TypeDir},
+				}
+			},
+			extraCheck: func(t *testing.T, parent, dest, outside string) {
+				_, err := os.Lstat(filepath.Join(outside, "sub"))
+				assert.True(t, os.IsNotExist(err), "directory must not be created through the symlink")
+			},
+		},
+		{
+			name: "symlink then hard link through it",
+			entries: func(dest, outside string) []tarEntry {
+				return []tarEntry{
+					{Name: "evil", Typeflag: tar.TypeSymlink, Linkname: outside},
+					{Name: "h", Typeflag: tar.TypeLink, Linkname: "evil/target"},
+				}
+			},
+			extraCheck: func(t *testing.T, parent, dest, outside string) {
+				_, err := os.Lstat(filepath.Join(dest, "h"))
+				assert.True(t, os.IsNotExist(err), "hard link to an outside file must not be created")
+			},
+		},
+		{
+			name: "dot-dot hard link target",
+			entries: func(dest, outside string) []tarEntry {
+				return []tarEntry{
+					{Name: "h", Typeflag: tar.TypeLink, Linkname: "../" + filepath.Base(outside) + "/target"},
+				}
+			},
+			extraCheck: func(t *testing.T, parent, dest, outside string) {
+				_, err := os.Lstat(filepath.Join(dest, "h"))
+				assert.True(t, os.IsNotExist(err), "hard link to an outside file must not be created")
+			},
+		},
+		{
+			// The archive is clean; the user's destination already holds a
+			// symlink pointing outside.  It must not be followed either.
+			name: "pre-existing symlink in destination",
+			preSeed: func(t *testing.T, dest, outside string) {
+				require.NoError(t, os.Symlink(outside, filepath.Join(dest, "pre")))
+			},
+			entries: func(dest, outside string) []tarEntry {
+				return []tarEntry{{Name: "pre/x", Typeflag: tar.TypeReg, Body: "pwned"}}
+			},
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			parent := t.TempDir()
+			dest := filepath.Join(parent, "dest")
+			outside := filepath.Join(parent, "outside")
+			require.NoError(t, os.Mkdir(dest, 0755))
+			require.NoError(t, os.Mkdir(outside, 0755))
+			require.NoError(t, os.WriteFile(filepath.Join(outside, "target"), []byte("canary"), 0644))
+			if tc.preSeed != nil {
+				tc.preSeed(t, dest, outside)
+			}
+
+			err := unpackBytes(dest, buildTar(t, tc.entries(dest, outside)))
+			require.Error(t, err)
+			t.Logf("unpack refused: %v", err)
+
+			// The canary directory must be untouched: exactly one entry, unchanged.
+			assert.Equal(t, []string{"target"}, dirNames(t, outside))
+			body, readErr := os.ReadFile(filepath.Join(outside, "target"))
+			require.NoError(t, readErr)
+			assert.Equal(t, "canary", string(body))
+			// Nothing may have been written beside dest/outside in the parent either.
+			assert.Equal(t, []string{"dest", "outside"}, dirNames(t, parent))
+
+			if tc.extraCheck != nil {
+				tc.extraCheck(t, parent, dest, outside)
+			}
+		})
+	}
+}
+
+// TestAutoUnpackerAccepts pins the legitimate behaviours that the hardening
+// must not break.
+func TestAutoUnpackerAccepts(t *testing.T) {
+	t.Parallel()
+
+	t.Run("symlink with absolute target is created verbatim", func(t *testing.T) {
+		t.Parallel()
+		dest := t.TempDir()
+		// Dangling and pointing outside: allowed, because nothing is written
+		// through it.  Pelican's own packer records such targets verbatim.
+		err := unpackBytes(dest, buildTar(t, []tarEntry{
+			{Name: "link", Typeflag: tar.TypeSymlink, Linkname: "/nonexistent/elsewhere"},
+		}))
+		require.NoError(t, err)
+		target, err := os.Readlink(filepath.Join(dest, "link"))
+		require.NoError(t, err)
+		assert.Equal(t, "/nonexistent/elsewhere", target)
+	})
+
+	t.Run("leading slash is stripped", func(t *testing.T) {
+		t.Parallel()
+		dest := t.TempDir()
+		err := unpackBytes(dest, buildTar(t, []tarEntry{
+			{Name: "/a", Typeflag: tar.TypeDir},
+			{Name: "/a/b.txt", Typeflag: tar.TypeReg, Body: "b"},
+		}))
+		require.NoError(t, err)
+		body, err := os.ReadFile(filepath.Join(dest, "a", "b.txt"))
+		require.NoError(t, err)
+		assert.Equal(t, "b", string(body))
+	})
+
+	t.Run("hard link inside destination", func(t *testing.T) {
+		t.Parallel()
+		dest := t.TempDir()
+		err := unpackBytes(dest, buildTar(t, []tarEntry{
+			{Name: "orig", Typeflag: tar.TypeReg, Body: "orig"},
+			{Name: "copy", Typeflag: tar.TypeLink, Linkname: "orig"},
+		}))
+		require.NoError(t, err)
+		body, err := os.ReadFile(filepath.Join(dest, "copy"))
+		require.NoError(t, err)
+		assert.Equal(t, "orig", string(body))
+	})
+
+	t.Run("overwrite truncates", func(t *testing.T) {
+		t.Parallel()
+		dest := t.TempDir()
+		require.NoError(t, os.WriteFile(filepath.Join(dest, "f.txt"), []byte("a much longer original body"), 0644))
+		err := unpackBytes(dest, buildTar(t, []tarEntry{
+			{Name: "f.txt", Typeflag: tar.TypeReg, Body: "short"},
+		}))
+		require.NoError(t, err)
+		body, err := os.ReadFile(filepath.Join(dest, "f.txt"))
+		require.NoError(t, err)
+		assert.Equal(t, "short", string(body))
+	})
+
+	t.Run("setuid bit is dropped", func(t *testing.T) {
+		t.Parallel()
+		dest := t.TempDir()
+		err := unpackBytes(dest, buildTar(t, []tarEntry{
+			{Name: "bin", Typeflag: tar.TypeReg, Body: "#!/bin/sh\n", Mode: 0o4755},
+		}))
+		require.NoError(t, err)
+		fi, err := os.Stat(filepath.Join(dest, "bin"))
+		require.NoError(t, err)
+		assert.Equal(t, fs.FileMode(0o755), fi.Mode().Perm())
+		assert.Zero(t, fi.Mode()&fs.ModeSetuid)
+	})
+
+	t.Run("close without bytes is an error", func(t *testing.T) {
+		t.Parallel()
+		aup := newAutoUnpacker(t.TempDir(), autoBehavior)
+		err := aup.Close()
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "closed prior to any bytes written")
+	})
+
+	t.Run("missing destination directory", func(t *testing.T) {
+		t.Parallel()
+		aup := newAutoUnpacker(filepath.Join(t.TempDir(), "does-not-exist"), autoBehavior)
+		require.Error(t, aup.Error())
+	})
+}
