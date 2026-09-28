@@ -36,8 +36,10 @@ It submits its public key, namespace prefix(es), and site name, entering the sys
 While any of the service's registrations remains incomplete, the service generates a **registration completion link** for each incomplete prefix (valid for 15 minutes and re-minted every 10 minutes). Access these links through:
 
 * **Service Logs / stdout:** Every 10 minutes the service logs, at `error` level, `Server registration is incomplete; open the link below in a browser and log in to the registry to complete it ...`, followed by one `Complete server registration at <link> (expire at <time>)` line per prefix. The expiry is printed in the server's local time zone.
-* **Link File:** The same `Complete server registration at ...` lines (one per prefix) are written to the path defined in [`Server.RegistrationCompletionLinkFile`](../parameters.mdx#Server-RegistrationCompletionLinkFile), facilitating headless or automated setups. A prefix's line disappears on the poll after its registration is complete, and the file is removed once no incomplete registration remains. Set the parameter to an empty string to disable the file.
+* **Link File:** The same `Complete server registration at ...` lines (one per prefix) are written to the path defined in [`Server.RegistrationCompletionLinkFile`](../parameters.mdx#Server-RegistrationCompletionLinkFile), facilitating headless or automated setups. A prefix's line disappears on the poll after its registration is complete, and the file is removed once no incomplete registration remains (and when the service shuts down).
 * **Origin Admin UI:** Displayed under the **Data Exports** table for each prefix.
+
+To turn the reminder off, set `Server.RegistrationCompletionLinkFile` to an empty string: the service then neither polls the Registry for completeness nor logs or writes the link. The Origin Admin UI keeps showing the registration status.
 
 ### 3. Claiming Ownership
 1. Open the completion link.

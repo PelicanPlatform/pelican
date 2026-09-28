@@ -602,7 +602,8 @@ func TestUpdateRegCompletionLinkFile(t *testing.T) {
 	_, _, err = updateRegCompletionLinkFile("/foo", "")
 	require.NoError(t, err)
 
-	// An empty path disables the file but still returns the contents for logging
+	// An empty path (the reminder is disabled; the watcher is never started in
+	// that case) must not touch the disk even when called directly
 	require.NoError(t, param.Server_RegistrationCompletionLinkFile.Set(""))
 	contents, path, err = updateRegCompletionLinkFile("/foo", lineFoo)
 	require.NoError(t, err)
@@ -720,6 +721,28 @@ func TestWatchRegistrationCompletion(t *testing.T) {
 			t.Fatal("watcher did not exit on its own")
 		}
 	}
+
+	t.Run("empty-link-file-param-disables-the-reminder", func(t *testing.T) {
+		logHook.Reset()
+		requests.Store(0)
+		setResponse(statusResponse(server_structs.CheckNamespaceCompleteRes{
+			Results: map[string]server_structs.NamespaceCompletenessResult{
+				prefix: {EditUrl: editUrl, Msg: "Incomplete registration: Institution is a required field"},
+			},
+		}))
+		require.NoError(t, param.Server_RegistrationCompletionLinkFile.Set(""))
+		defer func() { require.NoError(t, param.Server_RegistrationCompletionLinkFile.Set(linkFile)) }()
+
+		wctx, wcancel, wegrp := test_utils.TestContext(ctx, t)
+		defer wcancel()
+		watchRegistrationCompletion(wctx, wegrp, prefix)
+		// No goroutine was started, so the group is already done.
+		waitForExit(t, wegrp)
+
+		assert.Zero(t, requests.Load(), "a disabled reminder must not poll the registry")
+		assert.True(t, fileAbsent())
+		assert.False(t, logged(logrus.ErrorLevel, "Server registration is incomplete"))
+	})
 
 	t.Run("registry-without-endpoint-stops-quietly", func(t *testing.T) {
 		logHook.Reset()
