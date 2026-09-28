@@ -22,6 +22,7 @@ package client_test
 
 import (
 	"archive/tar"
+	"bytes"
 	"context"
 	_ "embed"
 	"fmt"
@@ -987,6 +988,65 @@ func TestClientUnpack(t *testing.T) {
 	fi, err = os.Stat(fooLocation)
 	require.NoError(t, err)
 	assert.Equal(t, int64(11), fi.Size())
+}
+
+// An origin serves a tarball whose first entry is a symlink pointing outside
+// the destination and whose second entry writes through it.  The transfer
+// must fail with the os.Root "escapes from parent" message, and the outside
+// directory must remain empty.
+func TestClientUnpackRejectsSymlinkEscape(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
+	server_utils.ResetTestState()
+	test_utils.InitClient(t, nil)
+
+	fed := fed_test_utils.NewFedTest(t, bothPublicOriginCfg)
+	export := fed.Exports[0]
+
+	destDir := t.TempDir()
+	outsideDir := t.TempDir()
+
+	// Build evil.tar in the origin export.
+	tarBuf := new(bytes.Buffer)
+	tw := tar.NewWriter(tarBuf)
+	require.NoError(t, tw.WriteHeader(&tar.Header{
+		Name:     "evil",
+		Typeflag: tar.TypeSymlink,
+		Linkname: outsideDir,
+		Mode:     0777,
+	}))
+	payload := []byte("pwned")
+	require.NoError(t, tw.WriteHeader(&tar.Header{
+		Name:     "evil/pwned",
+		Typeflag: tar.TypeReg,
+		Mode:     0644,
+		Size:     int64(len(payload)),
+	}))
+	_, err := tw.Write(payload)
+	require.NoError(t, err)
+	require.NoError(t, tw.Close())
+	sourceTarLocation := filepath.Join(export.StoragePrefix, "evil.tar")
+	require.NoError(t, os.WriteFile(sourceTarLocation, tarBuf.Bytes(), 0644))
+
+	downloadURL := fmt.Sprintf("pelican://%s:%s%s/evil.tar?pack=auto&directread",
+		param.Server_Hostname.GetString(),
+		strconv.Itoa(param.Server_WebPort.GetInt()),
+		export.FederationPrefix,
+	)
+	results, err := client.DoGet(fed.Ctx, downloadURL, destDir, false)
+	if err == nil {
+		require.Len(t, results, 1)
+		err = results[0].Error
+	}
+	require.Error(t, err, "download of an escaping archive must fail")
+	t.Logf("unpack refused: %v", err)
+	assert.Contains(t, err.Error(), "escapes from parent")
+
+	// Nothing may have been written through the symlink.
+	entries, err := os.ReadDir(outsideDir)
+	require.NoError(t, err)
+	assert.Empty(t, entries, "outside directory must stay empty")
+	_, err = os.Stat(filepath.Join(outsideDir, "pwned"))
+	assert.True(t, os.IsNotExist(err))
 }
 
 // A test that generates a token locally from the private key
