@@ -2851,9 +2851,18 @@ func downloadObject(transfer *transferFile) (transferResults TransferResults, er
 				err = errors.Wrap(err, "failed to get absolute path for destination directory")
 				return
 			}
-			fileWriter = newAutoUnpacker(localPath, behavior)
+			unpacker := newAutoUnpacker(localPath, behavior)
+			fileWriter = unpacker
 			// Pack operations unpack in-place to the destination directory
 			writeDestination = localPath
+			// Close surfaces errors from the final archive entries.  Kept apart
+			// from the fileCloser defer, which would replace transferResults
+			// (and its attempt details) with a bare error.
+			defer func() {
+				if closeErr := unpacker.Close(); closeErr != nil && err == nil && transferResults.Error == nil {
+					err = errors.Wrap(closeErr, "failed to finish unpacking downloaded archive")
+				}
+			}()
 		} else {
 			if info != nil && info.IsDir() {
 				localPath = path.Join(localPath, path.Base(transfer.job.remoteURL.Path))
@@ -3541,17 +3550,6 @@ func downloadHTTP(ctx context.Context, te *TransferEngine, callback TransferCall
 	if req, err = http.NewRequestWithContext(ctx, http.MethodGet, transferUrl.String(), nil); err != nil {
 		return
 	}
-
-	var unpacker *autoUnpacker
-	defer func() {
-		if unpacker != nil {
-			unpacker.Close()
-			if unpackerErr := unpacker.Error(); unpackerErr != nil {
-				log.WithFields(fields).Errorln("Failed to close unpacker:", err)
-				return
-			}
-		}
-	}()
 
 	rateLimit := param.Client_MaximumDownloadSpeed.GetInt()
 	if rateLimit > 0 {
