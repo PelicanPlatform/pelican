@@ -495,7 +495,11 @@ func runPluginWorker(ctx context.Context, upload bool, workChan <-chan PluginTra
 			if upload {
 				log.Debugln("Uploading:", transfer.localFile, "to", transfer.url)
 			} else {
-				transfer.localFile = parseDestination(transfer)
+				transfer.localFile, err = parseDestination(transfer)
+				if err != nil {
+					failTransfer(transfer.url.String(), transfer.localFile, results, upload, err)
+					return err
+				}
 				log.Debugln("Downloading:", transfer.url, "to", transfer.localFile)
 			}
 
@@ -686,7 +690,9 @@ func failTransfer(remoteUrl string, localFile string, results chan<- *classad.Cl
 // Gets the absolute path for the local destination. This is important
 // especially for downloaded directories so that the downloaded files end up
 // in the directory specified for download.
-func parseDestination(transfer PluginTransfer) (parsedDest string) {
+// Errors when the destination is a directory and the source URL has no usable
+// base name (e.g. it ends in "/.."), which would land outside the sandbox.
+func parseDestination(transfer PluginTransfer) (parsedDest string, err error) {
 	// get absolute path
 	destPath, _ := filepath.Abs(transfer.localFile)
 
@@ -698,16 +704,19 @@ func parseDestination(transfer PluginTransfer) (parsedDest string) {
 	}
 
 	// Check if path exists or if its in a folder
-	if destStat, err := os.Stat(destPath); os.IsNotExist(err) {
-		return destPath
+	if destStat, statErr := os.Stat(destPath); os.IsNotExist(statErr) {
+		return destPath, nil
 	} else if destStat.IsDir() && !isPack {
 		// If we are a directory, add the source filename to the destination dir
-		sourceFilename := path.Base(transfer.url.Path)
+		sourceFilename, err := client.RemoteObjectBaseName(transfer.url.Path)
+		if err != nil {
+			return "", err
+		}
 		parsedDest = path.Join(destPath, sourceFilename)
-		return parsedDest
+		return parsedDest, nil
 	}
 
-	return destPath
+	return destPath, nil
 }
 
 // WriteOutfile takes in the result ads from the job and the file to be outputted, it returns a boolean indicating:

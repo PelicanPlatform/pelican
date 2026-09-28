@@ -961,8 +961,13 @@ func DoGet(ctx context.Context, remoteObject string, localDestination string, re
 		// If we have an auto-pack request, it's OK for the destination to be a directory
 		// Otherwise, get the base name of the source and append it to the destination dir.
 		// Note that we use the pUrl.Path, as this will have stripped any query params for us
-		remoteObjectFilename := path.Base(pUrl.Path)
 		if !recursive {
+			// Only the non-recursive path uses the basename; a source ending in
+			// "/.." must not name the destination's parent.
+			remoteObjectFilename, nameErr := RemoteObjectBaseName(pUrl.Path)
+			if nameErr != nil {
+				return nil, nameErr
+			}
 			localDestination = path.Join(localDestPath, remoteObjectFilename)
 		}
 	}
