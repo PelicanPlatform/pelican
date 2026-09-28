@@ -4196,6 +4196,20 @@ func (te *TransferEngine) walkDirDownload(job *clientTransferJob, transfers []tr
 	return te.walkDirDownloadHelper(job, transfers, files, url.Path, client)
 }
 
+// validateListingName rejects a collection-listing entry name that is not a
+// single, plain path component.  Names come from a remote PROPFIND, and a
+// "..", empty, or separator-bearing name joined onto the local destination
+// would escape it.
+func validateListingName(name string) error {
+	if name == "" || name == "." || name == ".." {
+		return errors.Errorf("invalid entry name %q", name)
+	}
+	if strings.ContainsAny(name, "/\\\x00") {
+		return errors.Errorf("invalid entry name %q", name)
+	}
+	return nil
+}
+
 // Helper function for the `walkDirDownload`.
 //
 // Recursively walks through the remote server collection, emitting transfer files
@@ -4297,6 +4311,9 @@ func (te *TransferEngine) walkDirDownloadHelper(job *clientTransferJob, transfer
 	}
 	localBase := strings.TrimPrefix(remotePath, job.job.remoteURL.Path)
 	for _, info := range infos {
+		if err := validateListingName(info.Name()); err != nil {
+			return errors.Wrapf(err, "remote collection %s returned an invalid entry", remotePath)
+		}
 		newPath := path.Join(remotePath, info.Name())
 		if info.IsDir() {
 			err := te.walkDirDownloadHelper(job, transfers, files, newPath, client)
@@ -4313,6 +4330,11 @@ func (te *TransferEngine) walkDirDownloadHelper(job *clientTransferJob, transfer
 			targetPath := job.job.localPath
 			if targetPath != os.DevNull {
 				targetPath = path.Join(job.job.localPath, localBase, info.Name())
+				// Belt and braces on top of validateListingName.
+				rel, relErr := filepath.Rel(job.job.localPath, targetPath)
+				if relErr != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+					return errors.Errorf("remote collection %s returned an invalid entry: %q resolves outside the destination directory", remotePath, info.Name())
+				}
 			}
 
 			if job.job.xferType == transferTypeDownload && skipDownload(job.job.syncLevel, info, targetPath) {
