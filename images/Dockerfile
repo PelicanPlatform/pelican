@@ -659,9 +659,10 @@ RUN --mount=type=cache,id=dnf-${TARGETPLATFORM},target=/var/cache/dnf,sharing=lo
   set -eux
   set -o pipefail
 
-  # Install packages for building Pelican.
-  # gcc is also needed to enable the Go race detector (-race flag).
-  dnf install -y gcc git make
+  # Install packages for building and testing Pelican.
+  # Go's race detector (-race) requires gcc.
+  # GitHub Actions's caching infrastructure uses zstd.
+  dnf install -y gcc git make zstd
 
   # Install HTCondor for integration tests, but forcibly remove any
   # Pelican packages it pulls in so that there is zero chance tests are
