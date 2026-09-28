@@ -49,6 +49,8 @@ type autoUnpacker struct {
 	destDir      string
 	buffer       bytes.Buffer
 	writer       io.WriteCloser
+	// done is closed when the unpack goroutine returns.
+	done chan struct{}
 }
 
 type autoPacker struct {
@@ -270,6 +272,8 @@ func (ap *autoPacker) pack(tw *tar.Writer, gz *gzip.Writer, pwriter *io.PipeWrit
 
 func (aup *autoUnpacker) unpack(tr *tar.Reader, preader *io.PipeReader) {
 	log.Debugln("Beginning unpacker of type", aup.Behavior)
+	// done must close last so that Close() observes the final stored error.
+	defer close(aup.done)
 	defer preader.Close()
 	for {
 		hdr, err := tr.Next()
@@ -354,8 +358,14 @@ func (aup *autoUnpacker) configure() (err error) {
 	case zipBehavior:
 		return errors.New("zip file support has not yet been implemented")
 	}
+	aup.done = make(chan struct{})
 	go aup.unpack(tarUnpacker, preader)
 	if err = <-bufDrained; err != nil {
+		// The goroutine stores its reason before closing the pipe; report
+		// that rather than the resulting "closed pipe" error.
+		if stored := aup.Error(); stored != nil {
+			return stored
+		}
 		return errors.Wrap(err, "Failed to copy byte buffer to unpacker")
 	}
 	aup.writer = pwriter
@@ -452,13 +462,22 @@ func (aup *autoUnpacker) Write(p []byte) (n int, err error) {
 	return n, writerErr
 }
 
-func (aup autoUnpacker) Close() error {
-	if aup.buffer.Len() > 0 {
-		aup.StoreError(errors.New("AutoUnpacker was closed prior to detecting any file type; no bytes were written"))
+// Close signals EOF to the unpack goroutine, waits for it, and returns the
+// first error it recorded, including one from the final entries, which
+// Write cannot observe.
+func (aup *autoUnpacker) Close() error {
+	if aup.writer == nil {
+		// The unpack goroutine never started.
+		if aup.buffer.Len() > 0 {
+			aup.StoreError(errors.New("AutoUnpacker was closed prior to detecting any file type; no bytes were written"))
+		} else {
+			aup.StoreError(errors.New("AutoUnpacker was closed prior to any bytes written"))
+		}
+		return aup.Error()
 	}
-	if aup.Behavior == autoBehavior {
-		aup.StoreError(errors.New("AutoUnpacker was closed prior to any bytes written"))
-	}
+	// EOF to the tar reader: a truncated stream errors instead of hanging.
+	aup.writer.Close()
+	<-aup.done
 	return aup.Error()
 }
 

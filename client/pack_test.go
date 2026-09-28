@@ -155,6 +155,7 @@ func TestAutoPacker(t *testing.T) {
 		require.NoError(t, err)
 
 		require.NoError(t, aup.Error())
+		require.NoError(t, aup.Close())
 		verifyTestDirectory(t, dirnameDest)
 	})
 }
