@@ -307,7 +307,10 @@ var (
 // request-link line for the given prefix, then re-writes the registration
 // completion link file so it always holds the current set of links. The file
 // is removed once no incomplete registration remains. It returns the file's
-// new contents along with its path ("" when the file is disabled).
+// new contents along with its path. An empty Server.RegistrationCompletionLinkFile
+// disables the reminder, so watchRegistrationCompletion never starts and this
+// is not reached from a running server; the guard below only keeps a direct
+// caller from touching the disk in that case.
 func updateRegCompletionLinkFile(prefix string, line string) (contents string, path string, err error) {
 	regCompletionLinksMutex.Lock()
 	defer regCompletionLinksMutex.Unlock()
@@ -350,7 +353,17 @@ func updateRegCompletionLinkFile(prefix string, line string) (contents string, p
 // always fresh. The loop ends once the registration is complete, the registry
 // doesn't support completeness checks, or the context is done; whichever way
 // it ends, the prefix's link is retired from the file on the way out.
+//
+// An empty Server.RegistrationCompletionLinkFile disables the reminder
+// altogether: no watcher is started, so the registry is not polled for
+// completeness and nothing is logged or written. The registration status the
+// origin web UI shows is fetched separately and is not affected.
 func watchRegistrationCompletion(ctx context.Context, egrp *errgroup.Group, prefix string) {
+	if param.Server_RegistrationCompletionLinkFile.GetString() == "" {
+		log.Debugf("%s is empty; the registration completion reminder is disabled, so no completion link will be logged or written for %s",
+			param.Server_RegistrationCompletionLinkFile.GetName(), prefix)
+		return
+	}
 	egrp.Go(func() error {
 		// Retire this prefix's link whenever the watcher stops (context cancellation or group exit)
 		defer func() {
@@ -395,12 +408,8 @@ func watchRegistrationCompletion(ctx context.Context, egrp *errgroup.Group, pref
 				if msg := strings.TrimSpace(result.Msg); msg != "" {
 					log.Warningf("Registration for %s is incomplete: %s", prefix, msg)
 				}
-				dest := "the log"
-				if path != "" {
-					dest = path
-				}
 				log.Errorf("Server registration is incomplete; open the link below in a browser and log in to the registry to complete it (a fresh link is written to %s every %s):\n%s",
-					dest, regCompletionLinkInterval, strings.TrimRight(contents, "\n"))
+					path, regCompletionLinkInterval, strings.TrimRight(contents, "\n"))
 			} else {
 				// Incomplete with no link to offer: the registry could not
 				// resolve the registration (e.g. the prefix is no longer

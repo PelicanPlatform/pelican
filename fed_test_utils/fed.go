@@ -184,6 +184,12 @@ func NewFedTest(t testing.TB, originConfig string, originSetup ...func(storageDi
 	require.NoError(t, param.Registry_DbLocation.Set(filepath.Join(t.TempDir(), "ns-registry.sqlite")))
 	require.NoError(t, param.Registry_RequireOriginApproval.Set(false))
 	require.NoError(t, param.Registry_RequireCacheApproval.Set(false))
+	// Registrations made here can never be completed (nobody claims them and
+	// they carry no institution or description), so the completion reminder
+	// would only nag at error level for the life of every test server. An
+	// empty link-file path disables it: no completeness polling, no log
+	// banner, no file. See launcher_utils.watchRegistrationCompletion.
+	require.NoError(t, param.Server_RegistrationCompletionLinkFile.Set(""))
 	require.NoError(t, param.Director_CacheSortMethod.Set("distance"))
 	require.NoError(t, param.Director_DbLocation.Set(filepath.Join(t.TempDir(), "director.sqlite")))
 	require.NoError(t, param.Director_FilterCachesInErrorState.Set(false))
