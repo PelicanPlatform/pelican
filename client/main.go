@@ -716,11 +716,46 @@ func DoGet(ctx context.Context, remoteObject string, localDestination string, re
 		}
 		localDestination = localDestPath + trailingChar
 	} else if destStat.IsDir() && pUrl.Query().Get(pelican_url.QueryPack) == "" {
-		// If we have an auto-pack request, it's OK for the destination to be a directory
-		// Otherwise, get the base name of the source and append it to the destination dir.
-		// Note that we use the pUrl.Path, as this will have stripped any query params for us
-		remoteObjectFilename := path.Base(pUrl.Path)
+		// The destination is an existing directory -- a "container
+		// target".  Rows G2, G4, and G5 of docs/object-transfer-semantics.md
+		// all live in this branch:
+		//
+		//   * G2: a non-recursive get of an object infers the local
+		//     filename from the source basename.
+		//   * G4: a non-recursive get of a collection is an error.
+		//     Symmetric with the put-side P4 guard.
+		//   * G5: a recursive get of a collection lays entries FLAT
+		//     under LOCAL/ -- basename(source) is NOT interposed.
+		//     `pelican object sync` and client_agent/transfer_manager
+		//     depend on that layout, so nothing may be appended to
+		//     localDestination on the recursive path.
+		//
+		// Telling G2 from G4 requires knowing whether the source is a
+		// collection, so the non-recursive path stats it.  The
+		// recursive path needs no such decision and deliberately skips
+		// the stat, keeping the extra round trip off the sync hot path.
+		//
+		// ErrObjectNotFound is left alone: the transfer machinery
+		// surfaces a missing source with a better error than anything
+		// that can be said here.  Every other stat failure is fatal,
+		// because a G4 collection that stats as unknown would silently
+		// build the G2 layout and write a directory listing to a file.
 		if !recursive {
+			// Only G2 uses the basename; a source ending in "/.." must not name
+			// the destination's parent.
+			remoteObjectFilename, nameErr := RemoteObjectBaseName(pUrl.Path)
+			if nameErr != nil {
+				return nil, nameErr
+			}
+			stat, statErr := DoStat(ctx, pUrl.GetRawUrl().String(), options...)
+			if statErr != nil && !errors.Is(statErr, ErrObjectNotFound) {
+				return nil, errors.Wrapf(statErr,
+					"failed to stat remote source %q while deciding destination layout", remoteObject)
+			}
+			if stat != nil && stat.IsCollection {
+				return nil, errors.Errorf(
+					"remote object %q is a collection but recursive is not enabled", remoteObject)
+			}
 			localDestination = path.Join(localDestPath, remoteObjectFilename)
 		}
 	}
