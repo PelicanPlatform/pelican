@@ -1763,6 +1763,7 @@ func TestParseDestination(t *testing.T) {
 		name     string
 		transfer PluginTransfer
 		want     string
+		wantErr  bool
 	}{
 		{
 			name: "destination is a directory",
@@ -1771,6 +1772,16 @@ func TestParseDestination(t *testing.T) {
 				url:       &url.URL{Path: "/path/to/source"},
 			},
 			want: filepath.Join(tempDir, "source"),
+		},
+		{
+			// A source ending in "/.." has no usable base name; joining it onto
+			// the sandbox directory would name the sandbox's parent.
+			name: "destination is a directory and source ends in dot-dot",
+			transfer: PluginTransfer{
+				localFile: tempDir,
+				url:       &url.URL{Path: "/path/to/source/.."},
+			},
+			wantErr: true,
 		},
 		{
 			name: "destination is a file",
@@ -1792,7 +1803,12 @@ func TestParseDestination(t *testing.T) {
 
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			got := parseDestination(test.transfer)
+			got, err := parseDestination(test.transfer)
+			if test.wantErr {
+				require.Error(t, err)
+				return
+			}
+			require.NoError(t, err)
 			assert.Equal(t, test.want, got)
 		})
 	}

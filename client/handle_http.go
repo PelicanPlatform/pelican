@@ -3599,7 +3599,11 @@ func downloadObject(transfer *transferFile) (transferResults TransferResults, er
 			// Determine the final local path
 			finalLocalPath := localPath
 			if len(localPath) > 0 && os.IsPathSeparator(localPath[len(localPath)-1]) {
-				finalLocalPath = path.Join(localPath, path.Base(transfer.remoteURL.Path))
+				var baseName string
+				if baseName, err = RemoteObjectBaseName(transfer.remoteURL.Path); err != nil {
+					return
+				}
+				finalLocalPath = path.Join(localPath, baseName)
 			}
 			// Print to stdout with structured format for easy parsing
 			fmt.Printf("DOWNLOAD: %s -> %s\n", transfer.remoteURL.Path, finalLocalPath)
@@ -3621,7 +3625,11 @@ func downloadObject(transfer *transferFile) (transferResults TransferResults, er
 					directory := path.Dir(localPath)
 					if localPath != "" && os.IsPathSeparator(localPath[len(localPath)-1]) {
 						directory = localPath
-						localPath = path.Join(directory, path.Base(transfer.job.remoteURL.Path))
+						var baseName string
+						if baseName, err = RemoteObjectBaseName(transfer.job.remoteURL.Path); err != nil {
+							return
+						}
+						localPath = path.Join(directory, baseName)
 					}
 					if err = os.MkdirAll(directory, 0777); err != nil {
 						return
@@ -3658,7 +3666,11 @@ func downloadObject(transfer *transferFile) (transferResults TransferResults, er
 			}()
 		} else {
 			if info != nil && info.IsDir() {
-				localPath = path.Join(localPath, path.Base(transfer.job.remoteURL.Path))
+				var baseName string
+				if baseName, err = RemoteObjectBaseName(transfer.job.remoteURL.Path); err != nil {
+					return
+				}
+				localPath = path.Join(localPath, baseName)
 			}
 			// Determine write destination - use temporary file unless inPlace is true
 			// Special case: os.DevNull should always use inPlace mode (no temp files)
@@ -5803,6 +5815,16 @@ func validateListingName(name string) error {
 		return errors.Errorf("invalid entry name %q", name)
 	}
 	return nil
+}
+
+// RemoteObjectBaseName returns path.Base(remotePath) for use as a local file
+// name, refusing results such as ".." that would name a different directory.
+func RemoteObjectBaseName(remotePath string) (string, error) {
+	name := path.Base(remotePath)
+	if err := validateListingName(name); err != nil {
+		return "", errors.Wrapf(err, "cannot derive a local file name from remote path %q", remotePath)
+	}
+	return name, nil
 }
 
 // Helper function for the `walkDirDownload`.

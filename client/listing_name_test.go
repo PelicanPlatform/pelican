@@ -22,6 +22,7 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestValidateListingName(t *testing.T) {
@@ -49,4 +50,29 @@ func TestValidateListingName(t *testing.T) {
 			assert.Error(t, validateListingName(name), "name %q must be rejected", name)
 		})
 	}
+}
+
+func TestRemoteObjectBaseName(t *testing.T) {
+	t.Parallel()
+
+	t.Run("accept", func(t *testing.T) {
+		for remote, want := range map[string]string{
+			"/ns/dir/file.txt": "file.txt",
+			"/ns/dir/..hidden": "..hidden",
+			"/ns/dir/a..b":     "a..b",
+			"/ns/dir/sub/":     "sub",
+			"file":             "file",
+		} {
+			got, err := RemoteObjectBaseName(remote)
+			require.NoError(t, err, "remote %q", remote)
+			assert.Equal(t, want, got, "remote %q", remote)
+		}
+	})
+
+	t.Run("reject", func(t *testing.T) {
+		for _, remote := range []string{"/ns/dir/..", "/ns/dir/.", "/", "", "/ns/dir/../"} {
+			_, err := RemoteObjectBaseName(remote)
+			assert.Error(t, err, "remote %q must be rejected", remote)
+		}
+	})
 }
