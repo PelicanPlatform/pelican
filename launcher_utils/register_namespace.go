@@ -348,9 +348,16 @@ func updateRegCompletionLinkFile(prefix string, line string) (contents string, p
 // completion link file and re-writes the file on each poll cycle, then prints
 // the file to the server's log (and hence stdout) right away, so the link is
 // always fresh. The loop ends once the registration is complete, the registry
-// doesn't support completeness checks, or the context is done.
+// doesn't support completeness checks, or the context is done; whichever way
+// it ends, the prefix's link is retired from the file on the way out.
 func watchRegistrationCompletion(ctx context.Context, egrp *errgroup.Group, prefix string) {
 	egrp.Go(func() error {
+		// Retire this prefix's link whenever the watcher stops (context cancellation or group exit)
+		defer func() {
+			if _, path, err := updateRegCompletionLinkFile(prefix, ""); err != nil {
+				log.Warningf("Failed to retire the registration completion link for %s from %s: %v", prefix, path, err)
+			}
+		}()
 		ticker := time.NewTicker(regCompletionLinkInterval)
 		defer ticker.Stop()
 		for {
@@ -364,10 +371,7 @@ func watchRegistrationCompletion(ctx context.Context, egrp *errgroup.Group, pref
 				log.Warningf("Registry response does not contain the registration status for %s", prefix)
 			} else if result.Completed {
 				log.Infof("Registration for %s is complete", prefix)
-				if _, path, wErr := updateRegCompletionLinkFile(prefix, ""); wErr != nil {
-					log.Warningf("Failed to update the registration completion link file %s: %v", path, wErr)
-				}
-				return nil
+				return nil // the deferred retire removes the link
 			} else if result.EditUrl != "" {
 				link := result.EditUrl
 				line := ""
