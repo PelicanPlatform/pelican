@@ -545,6 +545,9 @@ func (te *TransferEngine) walkDirCopyHelper(job *clientTransferJob, transfers []
 	}
 
 	for _, info := range infos {
+		if err := validateListingName(info.Name()); err != nil {
+			return errors.Wrapf(err, "remote collection %s returned an invalid entry", remotePath)
+		}
 		newPath := path.Join(remotePath, info.Name())
 		if info.IsDir() {
 			err := te.walkDirCopyHelper(job, transfers, files, newPath, webdavClient, destWebDavClient)
