@@ -25,6 +25,7 @@ import (
 	"os"
 	"path"
 	"path/filepath"
+	"strings"
 	"sync"
 
 	"github.com/spf13/afero"
@@ -78,13 +79,19 @@ func NewAferoFileSystem(fs afero.Fs, prefix string, logger func(*http.Request, e
 
 // Mkdir implements webdav.FileSystem
 func (afs *AferoFileSystem) Mkdir(ctx context.Context, name string, perm os.FileMode) error {
-	fullPath := afs.FullPath(name)
+	fullPath, err := afs.FullPath(name)
+	if err != nil {
+		return err
+	}
 	return afs.Fs.MkdirAll(fullPath, perm)
 }
 
 // OpenFile implements webdav.FileSystem
 func (afs *AferoFileSystem) OpenFile(ctx context.Context, name string, flag int, perm os.FileMode) (webdav.File, error) {
-	fullPath := afs.FullPath(name)
+	fullPath, err := afs.FullPath(name)
+	if err != nil {
+		return nil, err
+	}
 
 	// WORKAROUND: When attempting to upload a file to a path that is actually a directory/collection,
 	// the underlying filesystem will correctly return EISDIR (syscall.EISDIR on Unix).
@@ -129,29 +136,47 @@ func (afs *AferoFileSystem) OpenFile(ctx context.Context, name string, flag int,
 
 // RemoveAll implements webdav.FileSystem
 func (afs *AferoFileSystem) RemoveAll(ctx context.Context, name string) error {
-	fullPath := afs.FullPath(name)
+	fullPath, err := afs.FullPath(name)
+	if err != nil {
+		return err
+	}
 	return afs.Fs.RemoveAll(fullPath)
 }
 
 // Rename implements webdav.FileSystem
 func (afs *AferoFileSystem) Rename(ctx context.Context, oldName, newName string) error {
-	oldPath := afs.FullPath(oldName)
-	newPath := afs.FullPath(newName)
+	oldPath, err := afs.FullPath(oldName)
+	if err != nil {
+		return err
+	}
+	newPath, err := afs.FullPath(newName)
+	if err != nil {
+		return err
+	}
 	return afs.Fs.Rename(oldPath, newPath)
 }
 
 // Stat implements webdav.FileSystem
 func (afs *AferoFileSystem) Stat(ctx context.Context, name string) (os.FileInfo, error) {
-	fullPath := afs.FullPath(name)
+	fullPath, err := afs.FullPath(name)
+	if err != nil {
+		return nil, err
+	}
 	return afs.Fs.Stat(fullPath)
 }
 
-// FullPath converts a webdav path to a full filesystem path
-func (afs *AferoFileSystem) FullPath(name string) string {
+// FullPath converts a webdav path to a full filesystem path, refusing (with
+// os.ErrPermission) any name whose join resolves outside the prefix.
+func (afs *AferoFileSystem) FullPath(name string) (string, error) {
 	if afs.Prefix == "" {
-		return name
+		return name, nil
 	}
-	return path.Join(afs.Prefix, name)
+	cleanPrefix := path.Clean(afs.Prefix)
+	joined := path.Join(cleanPrefix, name)
+	if cleanPrefix == "/" || joined == cleanPrefix || strings.HasPrefix(joined, cleanPrefix+"/") {
+		return joined, nil
+	}
+	return "", &os.PathError{Op: "open", Path: name, Err: os.ErrPermission}
 }
 
 // AferoFile wraps an afero.File to implement webdav.File
