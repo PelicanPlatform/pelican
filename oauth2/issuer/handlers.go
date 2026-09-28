@@ -26,15 +26,18 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/lestrrat-go/jwx/v2/jwk"
 	"github.com/ory/fosite"
 	log "github.com/sirupsen/logrus"
 	"golang.org/x/crypto/bcrypt"
 	"gorm.io/gorm"
 
+	"github.com/pelicanplatform/pelican/config"
 	"github.com/pelicanplatform/pelican/database"
 	"github.com/pelicanplatform/pelican/oa4mp"
 	"github.com/pelicanplatform/pelican/param"
 	"github.com/pelicanplatform/pelican/server_structs"
+	"github.com/pelicanplatform/pelican/server_utils"
 	"github.com/pelicanplatform/pelican/token_scopes"
 )
 
@@ -173,7 +176,9 @@ func handleDispatch(ctx *gin.Context) {
 		clientID := strings.TrimPrefix(action, "oidc-cm/")
 		ctx.Params = append(ctx.Params, gin.Param{Key: "id", Value: clientID})
 		handleClientConfigurationRead(provider)(ctx)
-	case action == ".well-known/openid-configuration":
+	case action == strings.TrimPrefix(oidcJWKSSuffix, "/") && ctx.Request.Method == http.MethodGet:
+		handleNamespaceJWKS(provider)(ctx)
+	case action == strings.TrimPrefix(oidcDiscoverySuffix, "/"):
 		handleIssuerDiscovery(provider)(ctx)
 	default:
 		ctx.JSON(http.StatusNotFound, gin.H{"error": "not_found"})
@@ -220,6 +225,84 @@ func handleDispatchDelete(ctx *gin.Context) {
 	}
 }
 
+// NamespaceJWKS returns the public key set this provider's JWKS endpoint
+// publishes: the server's exported public key set merged with any extra
+// public keys configured via ExtraJwksPath.
+//
+// The extra file is optional; if it cannot be published, this degrades to
+// the server's base keys and logs rather than failing. Only a failure to
+// load the base keys, which leaves no correct subset to serve, is returned
+// as an error, and it has already been logged when it is.
+//
+// Both conditions are standing misconfigurations on an unauthenticated
+// endpoint, and the underlying read is already cached -- failures included
+// -- so every request is handed the same error without touching the
+// filesystem. That leaves the log write as the only per-request cost a
+// client can still drive. So each condition is reported once per distinct
+// error text, and forgotten once it clears so that a later recurrence is
+// not swallowed as a duplicate.
+//
+// The origin's startup probe of IssuerJwks calls this too, rather than
+// loading and logging on its own. A fault it reports then shares the
+// endpoint's de-duplication state and wording, so the first request stays
+// quiet instead of repeating the startup line in other words.
+func (p *OIDCProvider) NamespaceJWKS() (jwk.Set, error) {
+	extraFailed := false
+	key, err := config.GetIssuerPublicJWKSForNamespace(p.ExtraJwksPath,
+		func(e error) error {
+			// Called synchronously from the line above and never retained,
+			// so the captured flag needs no synchronization.
+			extraFailed = true
+			config.ReportNamespaceExtraFault(p.Namespace, e)
+			return nil
+		})
+	if err != nil {
+		// Reported against the server's key set rather than this
+		// namespace, and shared with the server-level JWKS endpoint; see
+		// config.ReportBaseKeysFault.
+		config.ReportBaseKeysFault(err)
+		return nil, err
+	}
+	config.ForgetBaseKeysFault()
+	if !extraFailed {
+		// Either the extra file merged cleanly or there is none to merge:
+		// the callback above runs only on failure.
+		config.ForgetNamespaceExtraFault(p.Namespace)
+	}
+	return key, nil
+}
+
+// handleNamespaceJWKS serves the public-key JWKS for a per-namespace
+// issuer endpoint; see OIDCProvider.NamespaceJWKS for what it contains and
+// how its failures are reported.
+func handleNamespaceJWKS(provider *OIDCProvider) gin.HandlerFunc {
+	return func(ctx *gin.Context) {
+		key, err := provider.NamespaceJWKS()
+		if err != nil {
+			ctx.AbortWithStatusJSON(http.StatusInternalServerError, server_structs.SimpleApiResp{
+				Status: server_structs.RespFailed,
+				Msg:    "Failed to load public key",
+			})
+			return
+		}
+		// This endpoint is what the per-namespace discovery document advertises
+		// as its jwks_uri, so a browser-based OIDC client fetches it right
+		// after reading discovery. The key material is public, so any origin
+		// may read it, matching the discovery action above and the server-level
+		// JWKS endpoint in server_utils/oidc.go. Without this, those clients
+		// fail on the fetch that follows discovery. Set here rather than in
+		// corsMiddleware so only the genuinely-dispatched JWKS action gets the
+		// wildcard: a credentialed endpoint can be reached via a URL that also
+		// ends in this suffix (e.g. a client-configuration read for an id
+		// ending in ".well-known/issuer.jwks").
+		ctx.Header("Access-Control-Allow-Origin", "*")
+
+		// NamespaceJWKS already returns public keys, and this is a
+		// machine-facing endpoint, so serve the body inline.
+		server_utils.WriteJWKS(ctx, key)
+	}
+}
+
 // handleIssuerDiscovery returns the OIDC discovery document scoped to the issuer
 // prefix so that the health-check in launcher.go works identically for both
 // OA4MP and the embedded issuer.
@@ -246,7 +329,7 @@ func handleIssuerDiscovery(provider *OIDCProvider) gin.HandlerFunc {
 			"introspection_endpoint":        serviceURI + "/introspect",
 			"device_authorization_endpoint": serviceURI + "/device_authorization",
 			"registration_endpoint":         serviceURI + "/oidc-cm",
-			"jwks_uri":                      IssuerURL() + "/.well-known/issuer.jwks",
+			"jwks_uri":                      serviceURI + oidcJWKSSuffix,
 			"grant_types_supported": []string{
 				"authorization_code",
 				"refresh_token",
