@@ -58,6 +58,12 @@ jobs:
           go-version: "${{ steps.go-version.outputs.version }}"
           check-latest: true
 
+      - name: Pin the Go build cache
+        # Point every later Go build, including those run by tests,
+        # at the cache that setup-go restored.
+        shell: bash
+        run: echo "GOCACHE=$(go env GOCACHE)" >> "$GITHUB_ENV"
+
       - name: Install gotestsum
         run: |
           if (-not (Get-Command gotestsum -ErrorAction SilentlyContinue)) {
@@ -74,6 +80,7 @@ jobs:
           echo "::group::Building web UI"
           make web-build
           echo "::endgroup::"
+          # Start local_cache first, as on Linux and macOS.
           gotestsum \
             --format pkgname-and-test-fails \
             --hide-summary=output \
@@ -86,6 +93,7 @@ jobs:
             ${{ !inputs.race_detection && '-covermode=count' || '' }} \
             ${{ !inputs.race_detection && format('-coverprofile={0}', matrix.coverprofile) || '' }} \
             -tags=${{ matrix.tags }} \
+            ./local_cache \
             ./...
 
       - name: Upload JUnit report

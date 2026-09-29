@@ -105,6 +105,11 @@ jobs:
           go-version: "${{ steps.go-version.outputs.version }}"
           check-latest: true
 
+      - name: Pin the Go build cache
+        # Point every later Go build, including those run by tests,
+        # at the cache that setup-go restored.
+        run: echo "GOCACHE=$(go env GOCACHE)" >> "$GITHUB_ENV"
+
       - name: Install gotestsum
         run: |
           if ! command -v gotestsum &> /dev/null; then
@@ -123,6 +128,8 @@ jobs:
           echo "::group::Building web UI"
           make web-build
           echo "::endgroup::"
+          # e2e_fed_tests and local_cache take longest, so start them first.
+          #
           # At -p=4, concurrent federations intermittently break xrootd
           # startup ("Unable to setup primary monitor collector").
           # This is due to a concurrency limit in the macOS loopback network
@@ -139,6 +146,8 @@ jobs:
             ${{ !inputs.race_detection && '-covermode=count' || '' }} \
             ${{ !inputs.race_detection && format('-coverprofile={0}', matrix.coverprofile) || '' }} \
             -tags=${{ matrix.tags }} \
+            ./e2e_fed_tests \
+            ./local_cache \
             ./...
 
       - name: Upload JUnit report
