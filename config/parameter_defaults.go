@@ -512,16 +512,6 @@ func SetParameterDefaults(v *viper.Viper, isRoot bool, isOSDF bool) {
 	}
 	// Origin.ConcurrencyDegradedThreshold
 	v.SetDefault(param.Origin_ConcurrencyDegradedThreshold.GetName(), 90)
-	// Origin.DbLocation
-	if isRoot {
-		v.SetDefault(param.Origin_DbLocation.GetName(), "/var/lib/pelican/origin.sqlite")
-	} else {
-		{
-			val := "${ConfigBase}/origin.sqlite"
-			val = strings.ReplaceAll(val, "${ConfigBase}", v.GetString(param.ConfigBase.GetName()))
-			v.SetDefault(param.Origin_DbLocation.GetName(), val)
-		}
-	}
 	// Origin.DefaultChecksumTypes
 	v.SetDefault(param.Origin_DefaultChecksumTypes.GetName(), []string{"crc32c"})
 	// Origin.DirectorTest
@@ -1181,18 +1171,6 @@ func ApplyDerivedDefaults(v *viper.Viper, isRoot bool, isOSDF bool) {
 			val := "${ConfigBase}/oidc-client-secret"
 			val = strings.ReplaceAll(val, "${ConfigBase}", v.GetString(param.ConfigBase.GetName()))
 			v.SetDefault(param.OIDC_ClientSecretFile.GetName(), val)
-		}
-	}
-	// Origin.DbLocation
-	if isDefaultSource(param.Origin_DbLocation.GetName()) {
-		if isRoot {
-			v.SetDefault(param.Origin_DbLocation.GetName(), "/var/lib/pelican/origin.sqlite")
-		} else {
-			{
-				val := "${ConfigBase}/origin.sqlite"
-				val = strings.ReplaceAll(val, "${ConfigBase}", v.GetString(param.ConfigBase.GetName()))
-				v.SetDefault(param.Origin_DbLocation.GetName(), val)
-			}
 		}
 	}
 	// Origin.FedTokenLocation

@@ -1025,6 +1025,8 @@ description: |+
 type: filename
 root_default: /var/lib/pelican/origin.sqlite
 default: ${ConfigBase}/origin.sqlite
+deprecated: true
+replacedby: ["Server.DbLocation"]
 components: ["origin"]
 ---
 name: Origin.Url
