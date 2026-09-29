@@ -99,8 +99,7 @@ func stagePluginMain(cmd *cobra.Command, args []string) {
 
 	originPrefixUri, err := validatePrefixes(originPrefixStr, mountPrefixStr, shadowOriginPrefixStr)
 	if err != nil {
-		log.Errorln("Problem validating provided prefixes:", err)
-		os.Exit(1)
+		exitWithError(1, "Problem validating provided prefixes:", err)
 	}
 
 	originPrefixPath := path.Clean("/" + originPrefixUri.Host + "/" + originPrefixUri.Path)
@@ -125,11 +124,11 @@ func stagePluginMain(cmd *cobra.Command, args []string) {
 	if !isHook {
 		log.Debugln("Len of source:", len(args))
 		if len(args) < 1 {
-			log.Errorln("No ingest sources")
+			reportError("No ingest sources")
 			if err = cmd.Help(); err != nil {
 				log.Errorln("Failure when printing out help:", err)
 			}
-			os.Exit(1)
+			exitWithFlush(1)
 		}
 		sources = args
 		log.Debugln("Sources:", sources)
@@ -137,8 +136,7 @@ func stagePluginMain(cmd *cobra.Command, args []string) {
 		// We pass in stdin here because that is how we get the classad
 		sources, extraSources, err, exitCode = processTransferInput(os.Stdin, mountPrefixStr, originPrefixPath)
 		if err != nil {
-			log.Errorln("Failure to get sources from job's classad:", err)
-			os.Exit(exitCode)
+			exitWithError(exitCode, "Failure to get sources from job's classad:", err)
 		}
 	}
 
@@ -149,12 +147,11 @@ func stagePluginMain(cmd *cobra.Command, args []string) {
 	// Exit with failure
 	if result != nil {
 		// Print the list of errors
-		log.Errorln("Failure in staging files:", result)
+		reportError("Failure in staging files:", result)
 		if client.ShouldRetry(result) {
-			log.Errorln("Errors are retryable")
-			os.Exit(11)
+			exitWithError(11, "Errors are retryable")
 		}
-		os.Exit(1)
+		exitWithFlush(1)
 	}
 	// If we are a condor hook, we need to print the classad change out. Condor will notice it and handle the rest
 	if isHook {

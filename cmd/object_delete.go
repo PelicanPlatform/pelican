@@ -22,7 +22,6 @@ package main
 
 import (
 	"fmt"
-	"os"
 
 	log "github.com/sirupsen/logrus"
 	"github.com/spf13/cobra"
@@ -83,10 +82,9 @@ func deleteMain(cmd *cobra.Command, args []string) error {
 
 	if err != nil {
 		if handleCredentialPasswordError(err) {
-			os.Exit(1)
+			exitWithFlush(1)
 		}
-		log.Errorf("Failure deleting %s: %v", remoteDestination, err.Error())
-		os.Exit(1)
+		exitWithErrorf(1, "Failure deleting %s: %v", remoteDestination, err.Error())
 	}
 
 	return nil

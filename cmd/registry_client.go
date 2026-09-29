@@ -32,7 +32,6 @@ package main
 import (
 	"context"
 	"net/url"
-	"os"
 
 	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
@@ -72,14 +71,12 @@ func getRegistryEndpoint(ctx context.Context) (string, error) {
 func registerANamespace(cmd *cobra.Command, args []string) {
 	err := config.InitClient()
 	if err != nil {
-		log.Errorln("Failed to initialize the client: ", err)
-		os.Exit(1)
+		exitWithError(1, "Failed to initialize the client: ", err)
 	}
 
 	namespaceEndpoint, err := getRegistryEndpoint(cmd.Context())
 	if err != nil {
-		log.Errorln("Failed to get RegistryUrl from config: ", err)
-		os.Exit(1)
+		exitWithError(1, "Failed to get RegistryUrl from config: ", err)
 	}
 
 	// Parse the namespace URL to make sure it's okay
@@ -88,34 +85,31 @@ func registerANamespace(cmd *cobra.Command, args []string) {
 		log.Errorf("Failed to construction registration endpoint URL: %v", err)
 	}
 	if prefix == "" {
-		log.Error("Error: prefix is required")
-		os.Exit(1)
+		reportError("Error: prefix is required")
+		exitWithFlush(1)
 	}
 
 	// NamespaceRegister advertises every issuer key this server holds (with the
 	// signing key at index 0), and the registry records the full keyset
 	privateKey, err := config.GetIssuerPrivateJWK()
 	if err != nil {
-		log.Error("Failed to load private key", err)
-		os.Exit(1)
+		reportError("Failed to load private key", err)
+		exitWithFlush(1)
 	}
 
 	siteName := param.Xrootd_Sitename.GetString()
 	if siteName == "" {
-		log.Errorf("Server name isn't set. Please set the name via %s", param.Xrootd_Sitename.GetName())
-		os.Exit(1)
+		exitWithErrorf(1, "Server name isn't set. Please set the name via %s", param.Xrootd_Sitename.GetName())
 	}
 	if withIdentity {
 		err := registry_client.NamespaceRegisterWithIdentity(privateKey, registrationEndpointURL, prefix, siteName)
 		if err != nil {
-			log.Errorf("Failed to register prefix %s with identity: %v", prefix, err)
-			os.Exit(1)
+			exitWithErrorf(1, "Failed to register prefix %s with identity: %v", prefix, err)
 		}
 	} else {
 		err := registry_client.NamespaceRegister(privateKey, registrationEndpointURL, "", prefix, siteName)
 		if err != nil {
-			log.Errorf("Failed to register prefix %s: %v", prefix, err)
-			os.Exit(1)
+			exitWithErrorf(1, "Failed to register prefix %s: %v", prefix, err)
 		}
 	}
 }
@@ -123,14 +117,12 @@ func registerANamespace(cmd *cobra.Command, args []string) {
 func deleteANamespace(cmd *cobra.Command, args []string) {
 	err := config.InitClient()
 	if err != nil {
-		log.Errorln("Failed to initialize the client: ", err)
-		os.Exit(1)
+		exitWithError(1, "Failed to initialize the client: ", err)
 	}
 
 	namespaceEndpoint, err := getRegistryEndpoint(cmd.Context())
 	if err != nil {
-		log.Errorln("Failed to get RegistryUrl from config: ", err)
-		os.Exit(1)
+		exitWithError(1, "Failed to get RegistryUrl from config: ", err)
 	}
 
 	deletionEndpointURL, err := url.JoinPath(namespaceEndpoint, "api", "v1.0", "registry", prefix)
@@ -140,22 +132,19 @@ func deleteANamespace(cmd *cobra.Command, args []string) {
 
 	err = registry_client.NamespaceDelete(deletionEndpointURL, prefix)
 	if err != nil {
-		log.Errorf("Failed to delete prefix %s: %v", prefix, err)
-		os.Exit(1)
+		exitWithErrorf(1, "Failed to delete prefix %s: %v", prefix, err)
 	}
 }
 
 func listAllNamespaces(cmd *cobra.Command, args []string) {
 	err := config.InitClient()
 	if err != nil {
-		log.Errorln("Failed to initialize the client: ", err)
-		os.Exit(1)
+		exitWithError(1, "Failed to initialize the client: ", err)
 	}
 
 	namespaceEndpoint, err := getRegistryEndpoint(cmd.Context())
 	if err != nil {
-		log.Errorln("Failed to get RegistryUrl from config: ", err)
-		os.Exit(1)
+		exitWithError(1, "Failed to get RegistryUrl from config: ", err)
 	}
 
 	listEndpoint, err := url.JoinPath(namespaceEndpoint, "api", "v1.0", "registry")
@@ -165,8 +154,7 @@ func listAllNamespaces(cmd *cobra.Command, args []string) {
 
 	err = registry_client.NamespaceList(listEndpoint)
 	if err != nil {
-		log.Errorf("Failed to list namespace information: %v", err)
-		os.Exit(1)
+		exitWithErrorf(1, "Failed to list namespace information: %v", err)
 	}
 }
 
