@@ -43,8 +43,6 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
-        with:
-          fetch-depth: 0  # GoReleaser needs history to look up the previous tag, and so on
 
       - name: Set up Node.js
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020  # v7.0.0
@@ -125,17 +123,10 @@ jobs:
           echo "::group::Building web UI"
           make web-build
           echo "::endgroup::"
-          # macOS runs the federation test suite at -p=2 (Linux uses the default
-          # higher parallelism). At -p=4 the concurrent federations intermittently
-          # make xrootd's loopback UDP monitor-collector connect() fail with
-          # EINVAL ("Unable to setup primary monitor collector"), which is fatal
-          # to xrootd startup and fails ~30% of federation launches. This is not
-          # file-descriptor exhaustion (raising RLIMIT_NOFILE and kern.maxfiles
-          # 13-17x had no effect) nor TIME_WAIT/ephemeral-port exhaustion (peak
-          # TIME_WAIT measured at 1 with a widened range + shortened MSL); it is a
-          # concurrency limit in the macOS loopback network stack / xrootd's
-          # network init under CPU contention. -p=2 runs cleanly and is ~2x faster
-          # than the fully-serial -p=1.
+          # At -p=4, concurrent federations intermittently break xrootd
+          # startup ("Unable to setup primary monitor collector").
+          # This is due to a concurrency limit in the macOS loopback network
+          # stack / xrootd's network init under CPU contention.
           gotestsum \
             --format pkgname-and-test-fails \
             --hide-summary=output \
@@ -164,13 +155,45 @@ jobs:
         with:
           paths: junit-${{ matrix.binary_name }}.xml
 
+  goreleaser:
+    name: macOS (GoReleaser)
+    runs-on: macos-latest
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          fetch-depth: 0  # GoReleaser needs history to look up the previous tag, and so on
+
+      - name: Set Go version
+        # Determine the string to use in setup-go's "go-version" input.
+        id: go-version
+        run: |
+          version=$(grep -E '^go[[:space:]]*[0-9]+\.[0-9]+' go.mod | grep -oE '[0-9]+\.[0-9]+')
+          echo "version=${version}.x" >> $GITHUB_OUTPUT
+
+      - name: Set up Go
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e  # v7.0.0
+        with:
+          go-version: "${{ steps.go-version.outputs.version }}"
+          check-latest: true
+
+      - name: Stub out the web UI
+        # The binaries embed web_ui/frontend/out, so it must exist,
+        # but nothing in this job needs the real web UI.
+        run: |
+          mkdir -p web_ui/frontend/out
+          touch web_ui/frontend/out/index.html
+
       - name: Generate GoReleaser config
         run: |
-          make goreleaser-config
+          ./scripts/generate_goreleaser.sh .goreleaser.in.yml .goreleaser.generated.yml
 
       - name: Run GoReleaser
         uses: goreleaser/goreleaser-action@f06c13b6b1a9625abc9e6e439d9c05a8f2190e94  # v7.2.3
         with:
           distribution: goreleaser
           version: "~> v2"
-          args: build --single-target --clean --snapshot --config .goreleaser.generated.yml
+          args: build --single-target --clean --snapshot --skip=before --config .goreleaser.generated.yml
