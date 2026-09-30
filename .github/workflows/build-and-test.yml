@@ -2,8 +2,7 @@
 name: Build and Test
 
 # This workflow is responsible for building Pelican's container images and
-# running the test suite. Much of its length and complexity is a consequence
-# of trying to keep build times short by taking advantage of caching.
+# running the test suite.
 #
 # The intended behavior is that all container images are always built,
 # except for the dev image, because it matters only on `main` and anything
@@ -45,7 +44,7 @@ jobs:
   # This first job determines the work to be done:
   #
   #   - The list of images to build.
-  #   - The architectures and platforms to target for those builds.
+  #   - The platforms to target for those builds.
   #   - The list of images to push and where to push them.
 
   params:
@@ -55,7 +54,6 @@ jobs:
       # as booleans, they are actually strings. In conditionals, test their
       # values using "== 'true'" or "== 'false'".
       images-to-build: ${{ steps.params.outputs.IMAGES_TO_BUILD }}
-      architectures: ${{ steps.params.outputs.ARCHITECTURES }}
       platforms: ${{ steps.params.outputs.PLATFORMS }}
       images-to-push: ${{ steps.params.outputs.IMAGES }}
       registry-repo: ${{ steps.params.outputs.REGISTRY_REPO }}
@@ -162,29 +160,22 @@ jobs:
           IMAGES="$(to_json_list "${IMAGES[@]}")"
           IMAGES_TO_BUILD="$(to_json_list "${IMAGES_TO_BUILD[@]}")"
 
-          # In order to form the matrix in build-images below, we need
-          # the list of architectures being targeted so that we can take
-          # the Cartesian product of it with the list of images.
-          #
-          # The "platforms" list can then be used to augment each member
-          # of the product via 'matrix.include'. The 'id' is for situations
-          # where the slash in 'platform' is prohibited.
+          # The "platforms" list forms the matrix in build-images below,
+          # one job per architecture.
+          # The 'id' is for when the slash in 'platform' is prohibited.
 
           if ${PUSH_DEVTEST} || ${PUSH_RELEASE}; then
-            ARCHITECTURES='[ "amd64", "arm64" ]'
             PLATFORMS='[
               { "arch": "amd64", "id": "linux-amd64", "platform": "linux/amd64", "runner": "ubuntu-latest" },
               { "arch": "arm64", "id": "linux-arm64", "platform": "linux/arm64", "runner": "ubuntu-24.04-arm" }
             ]'
           else
             # If we're not pushing images to a registry, then save resources.
-            ARCHITECTURES='[ "amd64" ]'
             PLATFORMS='[
               { "arch": "amd64", "id": "linux-amd64", "platform": "linux/amd64", "runner": "ubuntu-latest" }
             ]'
           fi
 
-          printf 'ARCHITECTURES=%s\n'        "${ARCHITECTURES}"   >> $GITHUB_OUTPUT
           printf 'PLATFORMS<<EOF\n%s\nEOF\n' "${PLATFORMS}"       >> $GITHUB_OUTPUT
           printf 'IMAGES=%s\n'               "${IMAGES}"          >> $GITHUB_OUTPUT
           printf 'IMAGES_TO_BUILD=%s\n'      "${IMAGES_TO_BUILD}" >> $GITHUB_OUTPUT
@@ -244,26 +235,27 @@ jobs:
           echo $TAG
           echo "TAG=$TAG" >> $GITHUB_OUTPUT
 
-  # Building the Pelican binary and putting together an XRootD install
-  # are time consuming tasks that are needed by all of Pelican's images.
-  # This next job carries out those tasks, and then saves the results.
+  # Taking inspiration from
+  # https://docs.docker.com/build/ci/github-actions/multi-platform/#distribute-build-across-multiple-runners,
+  # we build the final, multi-architecture images in two steps:
   #
-  # Later jobs can then build the final images without repeating that work.
-  # If the images end up sharing layers because of this, that's a happy
-  # little accident. It is not worth the additional complexity to see that
-  # happens optimally.
+  #   1. For each architecture, use a separate runner to build and push
+  #      all the images, tagging each with its architecture.
+  #
+  #   2. In a second job, for each image, create and push a manifest that
+  #      encompasses all of the images from the first step.
+  #
+  # The first step uses `docker buildx bake` (see images/docker-bake.hcl)
+  # to build all the images in one invocation.
 
-  cache-image-layers:
-    name: Cache ${{ matrix.arch }} layers
-    needs: [params]
+  build-images:
+    name: Build ${{ matrix.arch }} images
+    needs: [params, tags]
     strategy:
       fail-fast: true
       matrix:
-        arch: ${{ fromJson(needs.params.outputs.architectures) }}
         include: ${{ fromJson(needs.params.outputs.platforms) }}
     runs-on: ${{ matrix.runner }}
-    env:
-      REGISTRY_IMAGE: ${{ needs.params.outputs.registry-repo }}/origin
     steps:
 
       # As of 2026-01-26, GitHub documents the Ubuntu runners as having
@@ -287,184 +279,66 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
 
-      - name: Set up metadata
-        id: meta
-        uses: docker/metadata-action@dc802804100637a589fabce1cb79ff13a1411302  # v6.2.0
-        with:
-          images: ${{ env.REGISTRY_IMAGE }}
-          tags: |
-            type=raw,sha-{{ sha }}-${{ matrix.arch }}
-
-      # Docker's build cache and the GitHub workspace need to be cached in
-      # tandem because each new checkout of the repository results in files
-      # in .git that contain the timestamp of when the checkout happened,
-      # which is enough to invalidate Docker's build cache.
-      #
-      # These caches are the key to keeping the overall runtime of this
-      # workflow short, and also a source of fragility if we try to be too
-      # clever. Along these lines, a couple of considerations:
-      #
-      #   - There is no way to delete layers from Docker's build cache.
-      #
-      #   - It is a challenge to predict what will happen if one cache is
-      #     already present but not the other.
-      #
-      # To address the first point, we will restrict the caches to the
-      # current Git commit.
-      #
-      # To address the second point, we will restrict the caches to the
-      # current workflow run *and* attempt.
-      #
-      # If a developer wants to re-run the workflow because of an issue
-      # during the build jobs, then they should re-run the entire workflow.
-      # The new attempt will automatically use its own, fresh caches.
-
-      - name: Create a cache for Docker Buildx
-        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9  # v6.1.0
-        with:
-          path: ${{ runner.temp }}/.base-buildx-cache
-          key: base-buildx-${{ matrix.id }}-${{ github.sha }}-${{ github.run_id }}-${{ github.run_attempt }}
-
-      - name: Create a cache for the GitHub workspace
-        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9  # v6.1.0
-        with:
-          path: ${{ github.workspace }}
-          key: github-workspace-${{ matrix.id }}-${{ github.sha }}-${{ github.run_id }}-${{ github.run_attempt }}
-
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069  # v4.4.1
         with:
           buildkitd-flags: --debug
 
       - name: Log in to OSG Harbor
-        if: ${{ contains(fromJson(needs.params.outputs.images-to-push), 'origin') }}
+        if: ${{ needs.params.outputs.images-to-push != '[]' }}
         uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f  # v4.6.0
         with:
           registry: hub.opensciencegrid.org
           username: ${{ secrets.PELICAN_HARBOR_ROBOT_USER }}
           password: ${{ secrets.PELICAN_HARBOR_ROBOT_PASSWORD }}
 
-      # The origin container image is one of the largest images we build,
-      # and the one that pulls in almost all the layers of interest. Only
-      # the testing and dev images are significantly larger.
-      #
-      # If we need to push the origin image, then we can do so here, and
-      # hopefully remove the possibility that later jobs end up uploading
-      # these layers multiple times over.
-
-      - name: Build and push origin
-        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc  # v7.4.0
+      - name: Build and push images
+        id: bake
+        uses: docker/bake-action@018cb6412ab401ebaa809aa5f85966b74628600f  # v7.4.0
+        env:
+          # Leave provenance out of Buildx's build-result metadata
+          # (steps.bake.outputs.metadata). The next step needs only the
+          # digests, and with ~11 KB per image, passing the metadata
+          # through an environment variable can exceed Linux's 128 KiB
+          # limit on a single variable (MAX_ARG_STRLEN).
+          # This does not affect the attestations pushed with the images.
+          BUILDX_METADATA_PROVENANCE: disabled
         with:
-          file: ./images/Dockerfile
-          target: origin
-          platforms: ${{ matrix.platform }}
-          tags: ${{ steps.meta.outputs.tags }}
-          push: ${{ contains(fromJson(needs.params.outputs.images-to-push), 'origin') }}
+          # Build from the checkout, not a fresh Git context,
+          # because building Pelican requires the .git directory.
+          source: .
+          files: ./images/docker-bake.hcl
+          vars: |
+            IMAGES_TO_BUILD=${{ join(fromJson(needs.params.outputs.images-to-build), ',') }}
+            IMAGES_TO_PUSH=${{ join(fromJson(needs.params.outputs.images-to-push), ',') }}
+            REGISTRY_REPO=${{ needs.params.outputs.registry-repo }}
+            PLATFORM=${{ matrix.platform }}
+            ARCH=${{ matrix.arch }}
+            GITHUB_SHA=${{ github.sha }}
+            TAG=${{ needs.tags.outputs.TAG }}
+            TIMESTAMP=${{ needs.tags.outputs.TIMESTAMP }}
+            IS_LATEST=${{ needs.tags.outputs.IS_LATEST }}
 
-          # Configure the build to use the current workspace as the context.
-          context: .
-
-          # Configure the build cache.
-          cache-from: |
-            type=local,src=${{ runner.temp }}/.base-buildx-cache
-
-          # Save Docker's build cache to the file/directory we set up
-          # earlier to be saved to the GitHub Actions cache.
-          cache-to: type=local,dest=${{ runner.temp }}/.base-buildx-cache,mode=max
-
-  # Taking inspiration from
-  # https://docs.docker.com/build/ci/github-actions/multi-platform/#distribute-build-across-multiple-runners,
-  # we now build the final, multi-architecture images.
-  #
-  # For each final image, the basic flow is this:
-  #
-  #   1. For each architecture, use a separate runner to build and push
-  #      an image, tagging it with its architecture.
-  #
-  #   2. In a second job, create and push a manifest that encompasses all
-  #      of the images from the first step.
-
-  build-images:
-    name: Build ${{ matrix.image }}-${{ matrix.arch }}
-    needs: [cache-image-layers, params, tags]
-    strategy:
-      fail-fast: true
-      matrix:
-        image: ${{ fromJson(needs.params.outputs.images-to-build) }}
-        arch: ${{ fromJson(needs.params.outputs.architectures) }}
-        include: ${{ fromJson(needs.params.outputs.platforms) }}
-    runs-on: ${{ matrix.runner }}
-    env:
-      REGISTRY_IMAGE: ${{ needs.params.outputs.registry-repo }}/${{ matrix.image }}
-    steps:
-      - name: Set up metadata
-        id: meta
-        uses: docker/metadata-action@dc802804100637a589fabce1cb79ff13a1411302  # v6.2.0
-        with:
-          images: ${{ env.REGISTRY_IMAGE }}
-          tags: |
-            type=raw,${{ needs.tags.outputs.TAG }}-${{ matrix.arch }}
-            type=raw,${{ needs.tags.outputs.TIMESTAMP }}-${{ matrix.arch }}
-            type=raw,sha-{{ sha }}-${{ matrix.arch }}
-            type=raw,enable=${{ needs.tags.outputs.IS_LATEST }},latest-${{ matrix.arch }}
-
-      - name: Restore the cache for Docker Buildx
-        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9  # v6.1.0
-        with:
-          path: ${{ runner.temp }}/.base-buildx-cache
-          key: base-buildx-${{ matrix.id }}-${{ github.sha }}-${{ github.run_id }}-${{ github.run_attempt }}
-          fail-on-cache-miss: true  # don't let cache-image-layers be for naught
-
-      - name: Restore the cache for the GitHub workspace
-        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9  # v6.1.0
-        with:
-          path: ${{ github.workspace }}
-          key: github-workspace-${{ matrix.id }}-${{ github.sha }}-${{ github.run_id }}-${{ github.run_attempt }}
-          fail-on-cache-miss: true  # don't let cache-image-layers be for naught
-
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069  # v4.4.1
-        with:
-          buildkitd-flags: --debug
-
-      - name: Log in to OSG Harbor
-        if: ${{ contains(fromJson(needs.params.outputs.images-to-push), matrix.image) }}
-        uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f  # v4.6.0
-        with:
-          registry: hub.opensciencegrid.org
-          username: ${{ secrets.PELICAN_HARBOR_ROBOT_USER }}
-          password: ${{ secrets.PELICAN_HARBOR_ROBOT_PASSWORD }}
-
-      - name: Build and push image
-        id: build
-        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc  # v7.4.0
-        with:
-          file: ./images/Dockerfile
-          target: ${{ matrix.image }}
-          platforms: ${{ matrix.platform }}
-          tags: ${{ steps.meta.outputs.tags }}
-          push: ${{ contains(fromJson(needs.params.outputs.images-to-push), matrix.image) }}
-
-          # Configure the build to use the current workspace as the context.
-          context: .
-
-          # Configure the build cache.
-          cache-from: |
-            type=local,src=${{ runner.temp }}/.base-buildx-cache
-
-      - name: Export digest
-        if: ${{ contains(fromJson(needs.params.outputs.images-to-push), matrix.image) }}
+      - name: Export digests
+        if: ${{ needs.params.outputs.images-to-push != '[]' }}
+        env:
+          IMAGES_TO_PUSH: ${{ needs.params.outputs.images-to-push }}
+          METADATA: ${{ steps.bake.outputs.metadata }}
         run: |
-          mkdir "${{ runner.temp }}/digests"
-          digest="${{ steps.build.outputs.digest }}"
-          touch "${{ runner.temp }}/digests/${digest#sha256:}"
+          set -eu
 
-      - name: Upload digest
-        if: ${{ contains(fromJson(needs.params.outputs.images-to-push), matrix.image) }}
+          for image in $(jq -r '.[]' <<< "${IMAGES_TO_PUSH}"); do
+            digest=$(jq -er --arg image "${image}" '.[$image]["containerimage.digest"]' <<< "${METADATA}")
+            mkdir -p "${RUNNER_TEMP}/digests/${image}"
+            touch "${RUNNER_TEMP}/digests/${image}/${digest#sha256:}"
+          done
+
+      - name: Upload digests
+        if: ${{ needs.params.outputs.images-to-push != '[]' }}
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7.0.1
         with:
-          name: digests-${{ matrix.image }}-${{ matrix.id }}
-          path: ${{ runner.temp }}/digests/*
+          name: digests-${{ matrix.id }}
+          path: ${{ runner.temp }}/digests/
           overwrite: true  # allow the workflow to be re-run
           retention-days: 1  # we need this artifact only for the following job
           if-no-files-found: error
@@ -502,12 +376,12 @@ jobs:
       - name: Download digests
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c  # v8.0.1
         with:
-          pattern: digests-${{ matrix.image }}-*
+          pattern: digests-*
           merge-multiple: true
           path: ${{ runner.temp }}/digests
 
       - name: Create and push manifest
-        working-directory: ${{ runner.temp }}/digests
+        working-directory: ${{ runner.temp }}/digests/${{ matrix.image }}
         run: |
           docker buildx imagetools create \
             $(jq -cr '.tags | map("-t " + .) | join(" ")' <<< "$DOCKER_METADATA_OUTPUT_JSON") \
