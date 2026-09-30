@@ -214,15 +214,11 @@ jobs:
       - name: Set the tag to use for this build
         id: tag
         run: |
-          if [ -n '${{ inputs.tag }}' ]; then
-            TAG=${{ inputs.tag }}
+          # Check for a semver tag match.
+          if [[ ${GITHUB_REF##*/} =~ v[0-9]+\.[0-9]+\.[0-9]+ ]]; then
+            TAG=${GITHUB_REF##*/}
           else
-            # Check for a semver tag match.
-            if [[ ${GITHUB_REF##*/} =~ v[0-9]+\.[0-9]+\.[0-9]+ ]]; then
-              TAG=${GITHUB_REF##*/}
-            else
-              TAG="latest-itb"
-            fi
+            TAG="latest-itb"
           fi
 
           echo "SHA for current ref:"
