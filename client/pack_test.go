@@ -227,6 +227,31 @@ func dirNames(t *testing.T, dir string) []string {
 	return names
 }
 
+func TestSanitizeTarName(t *testing.T) {
+	t.Parallel()
+
+	for name, want := range map[string]string{
+		"a/b":     "a/b",
+		"/a/b":    "a/b",
+		"//a//b/": "a/b",
+		"./a":     "a",
+		"a/../b":  "b",
+		"a/..":    ".",
+		"":        ".",
+		"/":       ".",
+		"..a/b":   "..a/b",
+	} {
+		got, err := sanitizeTarName(name)
+		require.NoError(t, err, "name %q", name)
+		assert.Equal(t, want, got, "name %q", name)
+	}
+
+	for _, name := range []string{"..", "../x", "/../x", "//..//x", "/./../x", "a/../../x", "../"} {
+		_, err := sanitizeTarName(name)
+		assert.Error(t, err, "name %q must be rejected", name)
+	}
+}
+
 // TestAutoUnpackerRejectsEscapes covers the ways an archive can try to write
 // outside the destination directory: `..` components, a sibling directory
 // sharing the destination's name as a prefix, and writing through a symlink
@@ -254,6 +279,17 @@ func TestAutoUnpackerRejectsEscapes(t *testing.T) {
 			name: "dot-dot regular file",
 			entries: func(dest, outside string) []tarEntry {
 				return []tarEntry{{Name: "../escape.txt", Typeflag: tar.TypeReg, Body: "pwned"}}
+			},
+		},
+		{
+			// "/../x" must be refused, not collapsed to "x" inside the destination.
+			name: "absolute dot-dot regular file",
+			entries: func(dest, outside string) []tarEntry {
+				return []tarEntry{{Name: "/../escape.txt", Typeflag: tar.TypeReg, Body: "pwned"}}
+			},
+			extraCheck: func(t *testing.T, parent, dest, outside string) {
+				_, err := os.Lstat(filepath.Join(dest, "escape.txt"))
+				assert.True(t, os.IsNotExist(err), "entry must not be silently renamed into the destination")
 			},
 		},
 		{
@@ -320,6 +356,18 @@ func TestAutoUnpackerRejectsEscapes(t *testing.T) {
 			entries: func(dest, outside string) []tarEntry {
 				return []tarEntry{
 					{Name: "h", Typeflag: tar.TypeLink, Linkname: "../" + filepath.Base(outside) + "/target"},
+				}
+			},
+			extraCheck: func(t *testing.T, parent, dest, outside string) {
+				_, err := os.Lstat(filepath.Join(dest, "h"))
+				assert.True(t, os.IsNotExist(err), "hard link to an outside file must not be created")
+			},
+		},
+		{
+			name: "absolute dot-dot hard link target",
+			entries: func(dest, outside string) []tarEntry {
+				return []tarEntry{
+					{Name: "h", Typeflag: tar.TypeLink, Linkname: "/../" + filepath.Base(outside) + "/target"},
 				}
 			},
 			extraCheck: func(t *testing.T, parent, dest, outside string) {
