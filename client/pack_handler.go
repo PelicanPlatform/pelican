@@ -329,7 +329,7 @@ func (aup *autoUnpacker) unpack(tr *tar.Reader, preader *io.PipeReader) {
 			// os.Root confines both paths and does not follow a symlinked target.
 			target, err := sanitizeTarName(hdr.Linkname)
 			if err != nil {
-				aup.StoreError(errors.New("Tarfile contains hard link target outside the destination directory"))
+				aup.StoreError(errors.Wrapf(err, "Invalid hard link target for %v", name))
 				return
 			}
 			if err = aup.root.Link(target, name); err != nil {
