@@ -161,19 +161,16 @@ func (aup *autoUnpacker) detect() (packerBehavior, error) {
 }
 
 // sanitizeTarName turns an archive entry name (or hard-link target) into a
-// path relative to the destination.  Clean runs before the leading slashes
-// are stripped so "../x" is kept and refused rather than collapsed to "/x".
-// os.Root is the enforcing layer; this only gives a clearer error.
+// path relative to the destination.  Leading slashes are stripped before
+// Clean so an absolute traversal such as "/../x" is refused rather than
+// collapsed to "x".  os.Root is the enforcing layer; this only gives a
+// clearer error.  Clean maps "" and "/" to ".".
 func sanitizeTarName(name string) (string, error) {
-	name = filepath.Clean(name)
-	name = strings.TrimLeft(name, "/")
-	if name == ".." || strings.HasPrefix(name, "../") {
+	cleaned := filepath.Clean(strings.TrimLeft(name, "/"))
+	if cleaned == ".." || strings.HasPrefix(cleaned, "../") {
 		return "", errors.Errorf("Tarfile contains object outside the destination directory: %q", name)
 	}
-	if name == "" {
-		name = "."
-	}
-	return name, nil
+	return cleaned, nil
 }
 
 func writeRegFile(root *os.Root, name string, perm fs.FileMode, reader io.Reader) error {
