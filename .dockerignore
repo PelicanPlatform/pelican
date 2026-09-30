@@ -14,9 +14,10 @@
 /docs/parameters.json
 /web_ui/frontend/public/data/parameters.json
 
-# Exclude the Dockerfile.
-# Docker itself will take care of propagating changes made to it.
+# Exclude the Dockerfile and the bake file.
+# Docker itself will take care of propagating changes made to them.
 /images/Dockerfile
+/images/docker-bake.hcl
 
 # Exclude temporary files created by vim.
 **/*.swp
