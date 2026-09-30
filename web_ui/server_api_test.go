@@ -346,7 +346,7 @@ func TestDowntimeRegistryCreateOwnership(t *testing.T) {
 	require.NoError(t, param.Server_WebPort.Set(0))
 	require.NoError(t, param.Server_ExternalWebUrl.Set("https://registry.example.org"))
 	dirName := t.TempDir()
-	require.NoError(t, param.ConfigBase.Set(dirName))
+	require.NoError(t, param.ConfigDir.Set(dirName))
 	require.NoError(t, param.Logging_Level.Set("debug"))
 
 	// InitServer needs federation discovery resolved.

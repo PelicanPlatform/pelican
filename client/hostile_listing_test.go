@@ -135,7 +135,14 @@ func TestRecursiveDownloadRejectsHostileListing(t *testing.T) {
 
 			ctx, cancel := context.WithCancel(context.Background())
 			t.Cleanup(cancel)
-			te := newSubmitTestEngine(ctx)
+			// The smallest engine the walk touches. Nothing drains the files
+			// channel; it is buffered so a submission would surface as a
+			// test failure below rather than a hang.
+			te := &TransferEngine{
+				ctx:     ctx,
+				files:   make(chan *clientTransferFile, 16),
+				results: make(chan *clientTransferResults, 16),
+			}
 			job := &clientTransferJob{
 				uuid: uuid.New(),
 				job: &TransferJob{
@@ -157,12 +164,14 @@ func TestRecursiveDownloadRejectsHostileListing(t *testing.T) {
 				{Url: &url.URL{Scheme: mockURL.Scheme, Host: mockURL.Host, Path: "/root"}},
 			}
 
-			err = te.walkDirDownloadHelper(job, transfers, "/root", gowebdav.NewClient(mock.URL, "", ""))
+			err = te.walkDirDownloadHelper(job, transfers, te.files, "/root", gowebdav.NewClient(mock.URL, "", ""))
 			require.Error(t, err)
 			t.Logf("walk refused: %v", err)
 			assert.Contains(t, err.Error(), "invalid entry")
 
-			// Nothing was created: dest is empty and the parent holds only dest.
+			// Nothing was submitted for transfer and nothing was created:
+			// dest is empty and the parent holds only dest.
+			assert.Empty(t, te.files)
 			assert.Empty(t, dirNames(t, dest))
 			assert.Equal(t, []string{"dest"}, dirNames(t, parent))
 		})

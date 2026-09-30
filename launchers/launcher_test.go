@@ -70,7 +70,7 @@ func TestServerTrustedProxiesFromConfigFile(t *testing.T) {
 		[]byte("Server:\n  TrustedProxies: [\"0.0.0.0/0\", \"::/0\"]\n"), 0644))
 	require.NoError(t, param.SetRaw("config", configFile))
 
-	require.NoError(t, param.ConfigBase.Set(tmpPath))
+	require.NoError(t, param.ConfigDir.Set(tmpPath))
 	require.NoError(t, param.RuntimeDir.Set(tmpPath))
 	require.NoError(t, param.Logging_Level.Set("debug"))
 	require.NoError(t, param.TLSSkipVerify.Set(false))
@@ -79,6 +79,15 @@ func TestServerTrustedProxiesFromConfigFile(t *testing.T) {
 	require.NoError(t, param.Server_DbLocation.Set(filepath.Join(t.TempDir(), "server.sqlite")))
 	require.NoError(t, param.Registry_DbLocation.Set(filepath.Join(t.TempDir(), "ns-registry.sqlite")))
 	require.NoError(t, param.Director_DbLocation.Set(filepath.Join(t.TempDir(), "director.sqlite")))
+
+	// On this branch the registry always configures the OAuth2 client (there is
+	// no Registry.EnableOIDC opt-in), so LaunchModules needs a client ID/secret.
+	oidcClientIDFile := filepath.Join(tmpPath, "oidc-client-id")
+	oidcClientSecretFile := filepath.Join(tmpPath, "oidc-client-secret")
+	require.NoError(t, os.WriteFile(oidcClientIDFile, []byte("test-client-id"), 0644))
+	require.NoError(t, os.WriteFile(oidcClientSecretFile, []byte("test-client-secret"), 0644))
+	require.NoError(t, param.OIDC_ClientIDFile.Set(oidcClientIDFile))
+	require.NoError(t, param.OIDC_ClientSecretFile.Set(oidcClientSecretFile))
 
 	// Registry alone cannot resolve federation metadata without an external
 	// discovery endpoint; including the director makes discovery self-hosted
