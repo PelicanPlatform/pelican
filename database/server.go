@@ -101,6 +101,17 @@ func InitServerDatabase(serverType server_structs.ServerType) error {
 		log.Warnf("Post-migration bootstrap incomplete: %v", err)
 	}
 
+	// Reserve the group names the Server.*AdminGroups config lists
+	// confer authority on, so an unprivileged user cannot create a
+	// group that shadows one of them. Runs here, next to the admin
+	// bootstrap, because it must happen for every server type that has
+	// a database — the module launchers each call InitServerDatabase,
+	// but there is no single launcher that runs for all of them.
+	if err := EnsureConfiguredAuthorityGroups(ServerDatabase, configuredAuthorityGroupNames()); err != nil {
+		// Unlike the admin bootstrap above, this DOES stop startup.
+		return errors.Wrap(err, "refusing to start")
+	}
+
 	// Grant Server.NewUserDefaultScopes to every existing user, ONCE.
 	// Pre-existing accounts (created before the knob existed, or on
 	// older builds) wouldn't otherwise carry the operator-configured
@@ -144,6 +155,11 @@ func InitServerDatabase(serverType server_structs.ServerType) error {
 		if err := populateNewServerTables(); err != nil {
 			log.Errorf("Failed to populate the data for the new server tables: %v", err)
 			return errors.Wrap(err, "server data migration failed")
+		}
+
+		// Migrate registrations owned by a CILogon subject to the Pelican user id carrying that subject
+		if err := migrateLegacyRegistrationOwners(ServerDatabase); err != nil {
+			log.Warnf("Legacy registration owner migration failed: %v", err)
 		}
 	}
 

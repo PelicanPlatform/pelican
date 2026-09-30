@@ -81,7 +81,13 @@ const TokenCard = ({ token, mutate, dispatch }: TokenCardProps) => {
               </Typography>
               <Box mx={1}>-</Box>
               <Typography variant={'subtitle2'}>
-                Created by {token.createdBy}
+                {/* createdBy is the creator's username, resolved
+                    server-side from the stored User.ID. It comes back
+                    empty when that account has been deleted — and such
+                    a token has already lost every scope derived from
+                    its creator's role, so say so rather than leaving a
+                    blank. */}
+                Created by {token.createdBy || 'a deleted account'}
               </Typography>
             </Box>
           </Box>

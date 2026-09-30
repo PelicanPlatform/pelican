@@ -49,6 +49,11 @@ type autoUnpacker struct {
 	destDir      string
 	buffer       bytes.Buffer
 	writer       io.WriteCloser
+	// root confines every write to destDir: neither a `..` component nor a
+	// symlink (from the archive or already on disk) can escape it.
+	root *os.Root
+	// done is closed when the unpack goroutine returns.
+	done chan struct{}
 }
 
 type autoPacker struct {
@@ -76,9 +81,16 @@ func newAutoUnpacker(destdir string, behavior packerBehavior) *autoUnpacker {
 		destDir:  destdir,
 	}
 	aup.err.Store(packedError{})
-	if os := runtime.GOOS; os == "windows" {
+	if runtime.GOOS == "windows" {
 		aup.StoreError(errors.New("Auto-unpacking functionality not supported on Windows"))
+		return aup
 	}
+	root, err := os.OpenRoot(destdir)
+	if err != nil {
+		aup.StoreError(errors.Wrapf(err, "Failed to open destination directory %v for unpacking", destdir))
+		return aup
+	}
+	aup.root = root
 	return aup
 }
 
@@ -148,8 +160,21 @@ func (aup *autoUnpacker) detect() (packerBehavior, error) {
 	return autoBehavior, nil
 }
 
-func writeRegFile(path string, mode int64, reader io.Reader) error {
-	fp, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE, fs.FileMode(mode))
+// sanitizeTarName turns an archive entry name (or hard-link target) into a
+// path relative to the destination.  Leading slashes are stripped before
+// Clean so an absolute traversal such as "/../x" is refused rather than
+// collapsed to "x".  os.Root is the enforcing layer; this only gives a
+// clearer error.  Clean maps "" and "/" to ".".
+func sanitizeTarName(name string) (string, error) {
+	cleaned := filepath.Clean(strings.TrimLeft(name, "/"))
+	if cleaned == ".." || strings.HasPrefix(cleaned, "../") {
+		return "", errors.Errorf("Tarfile contains object outside the destination directory: %q", name)
+	}
+	return cleaned, nil
+}
+
+func writeRegFile(root *os.Root, name string, perm fs.FileMode, reader io.Reader) error {
+	fp, err := root.OpenFile(name, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, perm)
 	if err != nil {
 		return err
 	}
@@ -270,56 +295,69 @@ func (ap *autoPacker) pack(tw *tar.Writer, gz *gzip.Writer, pwriter *io.PipeWrit
 
 func (aup *autoUnpacker) unpack(tr *tar.Reader, preader *io.PipeReader) {
 	log.Debugln("Beginning unpacker of type", aup.Behavior)
+	// done must close last so that Close() observes the final stored error.
+	defer close(aup.done)
 	defer preader.Close()
 	for {
 		hdr, err := tr.Next()
 		if err == io.EOF {
 			preader.CloseWithError(err)
-			break
+			return
 		}
 		if err != nil {
 			aup.StoreError(err)
-			break
+			return
 		}
-		destPath := filepath.Join(aup.destDir, hdr.Name)
-		destPath = filepath.Clean(destPath)
-		if !strings.HasPrefix(destPath, aup.destDir) {
-			aup.StoreError(errors.New("Tarfile contains object outside the destination directory"))
-			break
+		name, err := sanitizeTarName(hdr.Name)
+		if err != nil {
+			aup.StoreError(err)
+			return
 		}
+		// Drop setuid/setgid/sticky and any stray type bits from the archive.
+		perm := fs.FileMode(hdr.Mode) & fs.ModePerm
 		switch hdr.Typeflag {
 		case tar.TypeReg:
-			err = writeRegFile(destPath, hdr.Mode, tr)
-			if err != nil {
-				aup.StoreError(errors.Wrapf(err, "Failure when unpacking file to %v", destPath))
+			if name == "." {
+				aup.StoreError(errors.New("Tarfile contains a regular file entry with an empty name"))
+				return
+			}
+			if err = writeRegFile(aup.root, name, perm, tr); err != nil {
+				aup.StoreError(errors.Wrapf(err, "Failure when unpacking file to %v", name))
 				return
 			}
 		case tar.TypeLink:
-			targetPath := filepath.Join(aup.destDir, hdr.Linkname)
-			if !strings.HasPrefix(targetPath, aup.destDir) {
-				aup.StoreError(errors.New("Tarfile contains hard link target outside the destination directory"))
+			// os.Root confines both paths and does not follow a symlinked target.
+			target, err := sanitizeTarName(hdr.Linkname)
+			if err != nil {
+				aup.StoreError(errors.Wrapf(err, "Invalid hard link target for %v", name))
 				return
 			}
-			if err = os.Link(targetPath, destPath); err != nil {
-				aup.StoreError(errors.Wrapf(err, "Failure when unpacking hard link to %v", destPath))
+			if err = aup.root.Link(target, name); err != nil {
+				aup.StoreError(errors.Wrapf(err, "Failure when unpacking hard link to %v", name))
 				return
 			}
 		case tar.TypeSymlink:
-			if err = os.Symlink(hdr.Linkname, destPath); err != nil {
-				aup.StoreError(errors.Wrapf(err, "Failure when creating symlink at %v", destPath))
+			// The target is kept verbatim: the packer records absolute and `..`
+			// targets as-is, so rejecting them would break round-trips.  os.Root
+			// refuses any later write *through* a link that leaves the root.
+			if err = aup.root.Symlink(hdr.Linkname, name); err != nil {
+				aup.StoreError(errors.Wrapf(err, "Failure when creating symlink at %v", name))
 				return
 			}
 		case tar.TypeChar:
-			log.Debugln("Ignoring tar entry of type character device at", destPath)
+			log.Debugln("Ignoring tar entry of type character device at", name)
 		case tar.TypeBlock:
-			log.Debugln("Ignoring tar entry of type block device at", destPath)
+			log.Debugln("Ignoring tar entry of type block device at", name)
 		case tar.TypeDir:
-			if err = os.MkdirAll(destPath, fs.FileMode(hdr.Mode)); err != nil {
-				aup.StoreError(errors.Wrapf(err, "Failure when creating directory at %v", destPath))
+			if name == "." {
+				continue
+			}
+			if err = aup.root.MkdirAll(name, perm); err != nil {
+				aup.StoreError(errors.Wrapf(err, "Failure when creating directory at %v", name))
 				return
 			}
 		case tar.TypeFifo:
-			log.Debugln("Ignoring tar entry of type FIFO at", destPath)
+			log.Debugln("Ignoring tar entry of type FIFO at", name)
 		case 103: // pax_global_header, written by git archive.  OK to ignore
 		default:
 			log.Debugln("Ignoring unknown tar entry of type", hdr.Typeflag)
@@ -354,8 +392,14 @@ func (aup *autoUnpacker) configure() (err error) {
 	case zipBehavior:
 		return errors.New("zip file support has not yet been implemented")
 	}
+	aup.done = make(chan struct{})
 	go aup.unpack(tarUnpacker, preader)
 	if err = <-bufDrained; err != nil {
+		// The goroutine stores its reason before closing the pipe; report
+		// that rather than the resulting "closed pipe" error.
+		if stored := aup.Error(); stored != nil {
+			return stored
+		}
 		return errors.Wrap(err, "Failed to copy byte buffer to unpacker")
 	}
 	aup.writer = pwriter
@@ -452,13 +496,28 @@ func (aup *autoUnpacker) Write(p []byte) (n int, err error) {
 	return n, writerErr
 }
 
-func (aup autoUnpacker) Close() error {
-	if aup.buffer.Len() > 0 {
-		aup.StoreError(errors.New("AutoUnpacker was closed prior to detecting any file type; no bytes were written"))
+// Close signals EOF to the unpack goroutine, waits for it, and returns the
+// first error it recorded, including one from the final entries, which
+// Write cannot observe.
+func (aup *autoUnpacker) Close() error {
+	defer func() {
+		if aup.root != nil {
+			aup.root.Close()
+			aup.root = nil
+		}
+	}()
+	if aup.writer == nil {
+		// The unpack goroutine never started.
+		if aup.buffer.Len() > 0 {
+			aup.StoreError(errors.New("AutoUnpacker was closed prior to detecting any file type; no bytes were written"))
+		} else {
+			aup.StoreError(errors.New("AutoUnpacker was closed prior to any bytes written"))
+		}
+		return aup.Error()
 	}
-	if aup.Behavior == autoBehavior {
-		aup.StoreError(errors.New("AutoUnpacker was closed prior to any bytes written"))
-	}
+	// EOF to the tar reader: a truncated stream errors instead of hanging.
+	aup.writer.Close()
+	<-aup.done
 	return aup.Error()
 }
 

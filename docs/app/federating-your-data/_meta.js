@@ -1,5 +1,6 @@
 export default {
     "choosing-namespaces": "Choosing a Namespace Prefix",
+    "registration": "Service Registration & Ownership",
     "origin": "Serving an Origin",
     "s3-backend": "S3 Backend",
     "globus-backend": "Globus Backend",

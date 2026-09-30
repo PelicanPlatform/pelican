@@ -3599,7 +3599,11 @@ func downloadObject(transfer *transferFile) (transferResults TransferResults, er
 			// Determine the final local path
 			finalLocalPath := localPath
 			if len(localPath) > 0 && os.IsPathSeparator(localPath[len(localPath)-1]) {
-				finalLocalPath = path.Join(localPath, path.Base(transfer.remoteURL.Path))
+				var baseName string
+				if baseName, err = RemoteObjectBaseName(transfer.remoteURL.Path); err != nil {
+					return
+				}
+				finalLocalPath = path.Join(localPath, baseName)
 			}
 			// Print to stdout with structured format for easy parsing
 			fmt.Printf("DOWNLOAD: %s -> %s\n", transfer.remoteURL.Path, finalLocalPath)
@@ -3621,7 +3625,11 @@ func downloadObject(transfer *transferFile) (transferResults TransferResults, er
 					directory := path.Dir(localPath)
 					if localPath != "" && os.IsPathSeparator(localPath[len(localPath)-1]) {
 						directory = localPath
-						localPath = path.Join(directory, path.Base(transfer.job.remoteURL.Path))
+						var baseName string
+						if baseName, err = RemoteObjectBaseName(transfer.job.remoteURL.Path); err != nil {
+							return
+						}
+						localPath = path.Join(directory, baseName)
 					}
 					if err = os.MkdirAll(directory, 0777); err != nil {
 						return
@@ -3644,12 +3652,25 @@ func downloadObject(transfer *transferFile) (transferResults TransferResults, er
 				err = errors.Wrap(err, "failed to get absolute path for destination directory")
 				return
 			}
-			fileWriter = newAutoUnpacker(localPath, behavior)
+			unpacker := newAutoUnpacker(localPath, behavior)
+			fileWriter = unpacker
 			// Pack operations unpack in-place to the destination directory
 			writeDestination = localPath
+			// Close surfaces errors from the final archive entries.  Kept apart
+			// from the fileCloser defer, which would replace transferResults
+			// (and its attempt details) with a bare error.
+			defer func() {
+				if closeErr := unpacker.Close(); closeErr != nil && err == nil && transferResults.Error == nil {
+					err = errors.Wrap(closeErr, "failed to finish unpacking downloaded archive")
+				}
+			}()
 		} else {
 			if info != nil && info.IsDir() {
-				localPath = path.Join(localPath, path.Base(transfer.job.remoteURL.Path))
+				var baseName string
+				if baseName, err = RemoteObjectBaseName(transfer.job.remoteURL.Path); err != nil {
+					return
+				}
+				localPath = path.Join(localPath, baseName)
 			}
 			// Determine write destination - use temporary file unless inPlace is true
 			// Special case: os.DevNull should always use inPlace mode (no temp files)
@@ -4445,17 +4466,6 @@ func downloadHTTP(ctx context.Context, te *TransferEngine, callback TransferCall
 	if req, err = http.NewRequestWithContext(ctx, http.MethodGet, transferUrl.String(), nil); err != nil {
 		return
 	}
-
-	var unpacker *autoUnpacker
-	defer func() {
-		if unpacker != nil {
-			unpacker.Close()
-			if unpackerErr := unpacker.Error(); unpackerErr != nil {
-				log.WithFields(fields).Errorln("Failed to close unpacker:", err)
-				return
-			}
-		}
-	}()
 
 	rateLimit := param.Client_MaximumDownloadSpeed.GetInt()
 	if rateLimit > 0 {
@@ -5793,6 +5803,30 @@ func (te *TransferEngine) walkDirDownload(job *clientTransferJob, transfers []tr
 	return te.walkDirDownloadHelper(job, transfers, url.Path, client)
 }
 
+// validateListingName rejects a collection-listing entry name that is not a
+// single, plain path component.  Names come from a remote PROPFIND, and a
+// "..", empty, or separator-bearing name joined onto the local destination
+// would escape it.
+func validateListingName(name string) error {
+	if name == "" || name == "." || name == ".." {
+		return errors.Errorf("invalid entry name %q", name)
+	}
+	if strings.ContainsAny(name, "/\\\x00") {
+		return errors.Errorf("invalid entry name %q", name)
+	}
+	return nil
+}
+
+// RemoteObjectBaseName returns path.Base(remotePath) for use as a local file
+// name, refusing results such as ".." that would name a different directory.
+func RemoteObjectBaseName(remotePath string) (string, error) {
+	name := path.Base(remotePath)
+	if err := validateListingName(name); err != nil {
+		return "", errors.Wrapf(err, "cannot derive a local file name from remote path %q", remotePath)
+	}
+	return name, nil
+}
+
 // Helper function for the `walkDirDownload`.
 //
 // Recursively walks through the remote server collection, emitting transfer files
@@ -5902,6 +5936,9 @@ func (te *TransferEngine) walkDirDownloadHelper(job *clientTransferJob, transfer
 	}
 	localBase := strings.TrimPrefix(remotePath, job.job.remoteURL.Path)
 	for _, info := range infos {
+		if err := validateListingName(info.Name()); err != nil {
+			return errors.Wrapf(err, "remote collection %s returned an invalid entry", remotePath)
+		}
 		newPath := path.Join(remotePath, info.Name())
 		if info.IsDir() {
 			err := te.walkDirDownloadHelper(job, transfers, newPath, client)
@@ -5918,6 +5955,11 @@ func (te *TransferEngine) walkDirDownloadHelper(job *clientTransferJob, transfer
 			targetPath := job.job.localPath
 			if targetPath != os.DevNull {
 				targetPath = path.Join(job.job.localPath, localBase, info.Name())
+				// Belt and braces on top of validateListingName.
+				rel, relErr := filepath.Rel(job.job.localPath, targetPath)
+				if relErr != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+					return errors.Errorf("remote collection %s returned an invalid entry: %q resolves outside the destination directory", remotePath, info.Name())
+				}
 			}
 
 			if job.job.xferType == transferTypeDownload && skipDownload(job.job.syncLevel, info, targetPath) {

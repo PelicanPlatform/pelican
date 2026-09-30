@@ -351,8 +351,10 @@ func deleteTestFile(fileUrlStr string) error {
 	if err != nil {
 		return errors.Wrap(err, "unable to delete self-test file due to invalid URL")
 	}
-	relativePath := fileUrl.Path
-	if !strings.HasPrefix(relativePath, selfTestDir) {
+	// Clean first so the prefix check sees the same path that path.Join
+	// below will resolve; only paths strictly inside selfTestDir qualify.
+	relativePath := path.Clean(fileUrl.Path)
+	if !strings.HasPrefix(relativePath, selfTestDir+"/") {
 		return fmt.Errorf("unable to delete file '%s' because it's not a valid self-test path", relativePath)
 	}
 	filePath := path.Join(basePath, relativePath)

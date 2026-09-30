@@ -19,7 +19,6 @@
 package registry
 
 import (
-	"encoding/json"
 	"fmt"
 	"net/http"
 	"reflect"
@@ -36,8 +35,10 @@ import (
 	log "github.com/sirupsen/logrus"
 
 	"github.com/pelicanplatform/pelican/config"
+	"github.com/pelicanplatform/pelican/database"
 	"github.com/pelicanplatform/pelican/param"
 	"github.com/pelicanplatform/pelican/server_structs"
+	"github.com/pelicanplatform/pelican/server_utils"
 	"github.com/pelicanplatform/pelican/token"
 	"github.com/pelicanplatform/pelican/token_scopes"
 	"github.com/pelicanplatform/pelican/utils"
@@ -173,10 +174,11 @@ func populateRegistrationFields(prefix string, data interface{}) []registrationF
 
 		if field.Type == reflect.TypeOf(server_structs.RegistrationStatus("")) {
 			regField.Type = Enum
-			options := make([]registrationFieldOption, 3)
-			options[0] = registrationFieldOption{Name: server_structs.RegPending.String(), ID: server_structs.RegPending.LowerString()}
-			options[1] = registrationFieldOption{Name: server_structs.RegApproved.String(), ID: server_structs.RegApproved.LowerString()}
-			options[2] = registrationFieldOption{Name: server_structs.RegDenied.String(), ID: server_structs.RegDenied.LowerString()}
+			options := make([]registrationFieldOption, 4)
+			options[0] = registrationFieldOption{Name: server_structs.RegIncomplete.String(), ID: server_structs.RegIncomplete.LowerString()}
+			options[1] = registrationFieldOption{Name: server_structs.RegPending.String(), ID: server_structs.RegPending.LowerString()}
+			options[2] = registrationFieldOption{Name: server_structs.RegApproved.String(), ID: server_structs.RegApproved.LowerString()}
+			options[3] = registrationFieldOption{Name: server_structs.RegDenied.String(), ID: server_structs.RegDenied.LowerString()}
 			regField.Options = options
 			fields = append(fields, regField)
 		} else {
@@ -250,7 +252,7 @@ func listNamespaces(ctx *gin.Context) {
 			} else {
 				ctx.JSON(http.StatusBadRequest, server_structs.SimpleApiResp{
 					Status: server_structs.RespFailed,
-					Msg:    fmt.Sprintf("Invalid query parameters %s: status must be one of  'Pending', 'Approved', 'Denied', 'Unknown'", queryParams.Status)})
+					Msg:    fmt.Sprintf("Invalid query parameters %s: status must be one of 'Incomplete', 'Pending', 'Approved', 'Denied', 'Unknown'", queryParams.Status)})
 			}
 		}
 	} else {
@@ -276,6 +278,7 @@ func listNamespaces(ctx *gin.Context) {
 // GET /namespaces/user
 func listNamespacesForUser(ctx *gin.Context) {
 	user := ctx.GetString("User")
+	userId := ctx.GetString("UserId")
 	if user == "" {
 		ctx.JSON(http.StatusUnauthorized, server_structs.SimpleApiResp{
 			Status: server_structs.RespFailed,
@@ -290,7 +293,11 @@ func listNamespacesForUser(ctx *gin.Context) {
 		return
 	}
 
-	filterNs := server_structs.Registration{AdminMetadata: server_structs.AdminMetadata{UserID: user}}
+	filterNs := server_structs.Registration{AdminMetadata: server_structs.AdminMetadata{UserID: userId}}
+	// A session without User ID (e.g. the CLI admin token) fallbacks to use "user" to build filter.
+	if userId == "" {
+		filterNs = server_structs.Registration{AdminMetadata: server_structs.AdminMetadata{UserID: user}}
+	}
 
 	if queryParams.Status != "" {
 		if server_structs.IsValidRegStatus(queryParams.Status) {
@@ -298,13 +305,13 @@ func listNamespacesForUser(ctx *gin.Context) {
 		} else {
 			ctx.JSON(http.StatusBadRequest, server_structs.SimpleApiResp{
 				Status: server_structs.RespFailed,
-				Msg:    fmt.Sprintf("Invalid query parameters %s: status must be one of 'Pending', 'Approved', 'Denied', 'Unknown'", queryParams.Status)})
+				Msg:    fmt.Sprintf("Invalid query parameters %s: status must be one of 'Incomplete', 'Pending', 'Approved', 'Denied', 'Unknown'", queryParams.Status)})
 		}
 	}
 
 	namespaces, err := getRegistrationsByFilter(filterNs, "", false)
 	if err != nil {
-		log.Error("Error getting namespaces for user ", user)
+		log.Error("Error getting namespaces for user ID ", userId)
 		ctx.JSON(http.StatusInternalServerError, server_structs.SimpleApiResp{
 			Status: server_structs.RespFailed,
 			Msg:    "Error getting namespaces by user ID"})
@@ -330,6 +337,22 @@ func getNamespaceRegFields(ctx *gin.Context) {
 		}
 	}
 	ctx.JSON(http.StatusOK, registrationFields)
+}
+
+// resolveRegistrationOwnership answers "does the caller user own this registration id?"
+func resolveRegistrationOwnership(ctx *gin.Context, id int, userId string, isAdmin bool) (belongsTo bool, ok bool) {
+	if isAdmin {
+		return false, true
+	}
+	belongsTo, err := registrationBelongsToUser(id, userId)
+	if err != nil {
+		log.Error("Error checking if namespace belongs to the user: ", err)
+		ctx.JSON(http.StatusInternalServerError, server_structs.SimpleApiResp{
+			Status: server_structs.RespFailed,
+			Msg:    "Error checking if namespace belongs to the user"})
+		return false, false
+	}
+	return belongsTo, true
 }
 
 // Create a new namespace registration or update existing namespace registration.
@@ -388,7 +411,7 @@ func createUpdateNamespace(ctx *gin.Context, isUpdate bool) {
 		return
 	}
 	if !isUpdate { // create
-		ns.AdminMetadata.UserID = user
+		ns.AdminMetadata.UserID = userId
 	}
 	// Assign ID from path param because the request data doesn't have ID set
 	ns.ID = id
@@ -545,18 +568,28 @@ func createUpdateNamespace(ctx *gin.Context, isUpdate bool) {
 			return
 		}
 
+		existingNs, err := getRegistrationById(ns.ID)
+		if err != nil {
+			log.Error("Error checking namespace status: ", err)
+			ctx.JSON(http.StatusInternalServerError, server_structs.SimpleApiResp{
+				Status: server_structs.RespFailed,
+				Msg:    "Error checking namespace status"})
+			return
+		}
+		existingStatus := existingNs.AdminMetadata.Status
+
+		// Ownership can never be set or changed through the request body.
+		// The tokenized-claim leg below overrides this for the one transition
+		// it explicitly authorizes: unowned -> caller via claimRegistration.
+		ns.AdminMetadata.UserID = existingNs.AdminMetadata.UserID
+
 		// Then check if the user has privilege to update
-		belongsTo := false
+		belongsTo, ok := resolveRegistrationOwnership(ctx, ns.ID, userId, isAdmin)
+		if !ok {
+			return
+		}
 
 		if !isAdmin { // Not admin, need to check if the namespace belongs to the user
-			belongsTo, err = registrationBelongsToUserId(ns.ID, user)
-			if err != nil {
-				log.Error("Error checking if namespace belongs to the user: ", err)
-				ctx.JSON(http.StatusInternalServerError, server_structs.SimpleApiResp{
-					Status: server_structs.RespFailed,
-					Msg:    "Error checking if namespace belongs to the user"})
-				return
-			}
 			if !belongsTo {
 				// If the user doesn't own the namespace, they can't edit it
 				// but if they have an access token generated by the private key
@@ -569,14 +602,6 @@ func createUpdateNamespace(ctx *gin.Context, isUpdate bool) {
 						Msg:    "You do not have permissions to access this namespace registration. Check the id or if you own the namespace"})
 					return
 				}
-			}
-			existingNs, err := getRegistrationById(ns.ID)
-			if err != nil {
-				log.Error("Error loading existing registration: ", err)
-				ctx.JSON(http.StatusInternalServerError, server_structs.SimpleApiResp{
-					Status: server_structs.RespFailed,
-					Msg:    "Error loading existing registration"})
-				return
 			}
 			if existingNs.AdminMetadata.Status == server_structs.RegApproved {
 				log.Errorf("User '%s' is trying to modify approved namespace registration with id=%d", user, ns.ID)
@@ -624,7 +649,35 @@ func createUpdateNamespace(ctx *gin.Context, isUpdate bool) {
 
 				// Proof of possession succeeded on an unowned registration: the
 				// key-holder claims it. The request-body user_id is ignored.
-				ns.AdminMetadata.UserID = user
+				if userId == "" {
+					ctx.JSON(http.StatusForbidden, server_structs.SimpleApiResp{
+						Status: server_structs.RespFailed,
+						Msg:    "Claiming a registration requires a session with a Pelican user ID; log in through the web interface"})
+					return
+				}
+				// Bind ownership through the guarded claim primitive claimRegistration() before
+				// applying the field edits in updateRegistration(), because the latter deliberately
+				// never writes ownership. Claim-first ordering keeps the failure mode benign: an
+				// owned row with unsaved fields the caller can retry as owner, rather than an
+				// unowned row with request-provided fields.
+				if err := claimRegistration(ns.ID, userId); err != nil {
+					if errors.Is(err, errRegistrationAlreadyOwned) {
+						// Lost a race with a concurrent claim of the same registration
+						log.Errorf("User %q (ID %q) lost a concurrent claim of namespace %q (ID %d)", user, userId, existingNs.Prefix, ns.ID)
+						ctx.JSON(http.StatusForbidden, server_structs.SimpleApiResp{
+							Status: server_structs.RespFailed,
+							Msg:    "You do not have permission to modify a registration that already belongs to another user"})
+						return
+					}
+					log.Errorf("Failed to claim registration %d for user %q (ID %q): %v", ns.ID, user, userId, err)
+					ctx.JSON(http.StatusInternalServerError, server_structs.SimpleApiResp{
+						Status: server_structs.RespFailed,
+						Msg:    "Failed to claim the registration"})
+					return
+				}
+				// In-memory only, so the required-field validation below sees
+				// the owner claimRegistration just recorded.
+				ns.AdminMetadata.UserID = userId
 			}
 		}
 
@@ -635,8 +688,7 @@ func createUpdateNamespace(ctx *gin.Context, isUpdate bool) {
 			errMsg := "Validation failed: "
 			totalErr := 0
 			for _, err := range validationErrs {
-				// Skip UserID check for the admin otherwise they won't be
-				// able to update a namespace without userID
+				// Registry admin can correct an unclaimed registration
 				if err.Field() == "UserID" && err.Tag() == "required" && isAdmin {
 					continue
 				}
@@ -659,6 +711,25 @@ func createUpdateNamespace(ctx *gin.Context, isUpdate bool) {
 				Status: server_structs.RespFailed,
 				Msg:    "Fail to update namespace"})
 			return
+		}
+
+		// A fully-valid submission moves an auto-registered (Incomplete)
+		// registration into the admin review queue. The only way an update
+		// reaches this point while still failing validation is the admin
+		// UserID bypass above: an admin correcting an unowned registration
+		// leaves it Incomplete until someone claims it. Denial is likewise not
+		// final: editing a Denied registration (e.g. to fix the problem that
+		// led to the denial) resubmits it as Pending for another round of review.
+		if existingStatus == server_structs.RegIncomplete || existingStatus == server_structs.RegDenied {
+			if verr := config.GetValidate().Struct(ns); verr == nil {
+				if serr := updateRegistrationStatusById(ns.ID, server_structs.RegPending, ""); serr != nil {
+					log.Errorf("Failed to promote registration %d from %s to Pending: %v", ns.ID, existingStatus, serr)
+					ctx.JSON(http.StatusInternalServerError, server_structs.SimpleApiResp{
+						Status: server_structs.RespFailed,
+						Msg:    "Registration was updated but could not be submitted for review"})
+					return
+				}
+			}
 		}
 	}
 }
@@ -709,30 +780,20 @@ func getNamespace(ctx *gin.Context) {
 		Sub:      ctx.GetString("OIDCSub"),
 	}
 	isAdmin, _ := web_ui.CheckAdmin(identity)
-	belongsTo := false
+	belongsTo, ok := resolveRegistrationOwnership(ctx, id, userId, isAdmin)
+	if !ok {
+		return
+	}
 
-	if !isAdmin { // Not admin, need to check if the namespace belongs to the user
-		belongsTo, err = registrationBelongsToUserId(id, user)
-		if err != nil {
-			log.Error("Error checking if namespace belongs to the user: ", err)
-			ctx.JSON(http.StatusInternalServerError, server_structs.SimpleApiResp{
-				Status: server_structs.RespFailed,
-				Msg:    "Error checking if namespace belongs to the user"})
-			return
-		}
-		if !belongsTo {
-			// If the user doesn't own the namespace, they can't view it
-			// but if they have an access token generated by the private key
-			// that corresponds to the public key of the namespace they are trying to access,
-			//  we allow them to do it so that admin can fill out the rest of the registration if the user_id is empty
-			if accessToken == "" {
-				log.Errorf("Access denied from user %s for namespace with id=%d", user, id)
-				ctx.JSON(http.StatusForbidden, server_structs.SimpleApiResp{
-					Status: server_structs.RespFailed,
-					Msg:    "You do not have permissions to access this namespace registration. Check the id or if you own the namespace"})
-				return
-			}
-		}
+	// A non-owner can't view the registration unless they present an access
+	// token signed by the private key matching the registration's public key,
+	// which lets the key holder fill out the rest of an unowned registration.
+	if !isAdmin && !belongsTo && accessToken == "" {
+		log.Errorf("Access denied from user %s for namespace with id=%d", user, id)
+		ctx.JSON(http.StatusForbidden, server_structs.SimpleApiResp{
+			Status: server_structs.RespFailed,
+			Msg:    "You do not have permissions to access this namespace registration. Check the id or if you own the namespace"})
+		return
 	}
 
 	ns, err := getRegistrationById(id)
@@ -769,6 +830,256 @@ func getNamespace(ctx *gin.Context) {
 	}
 
 	ctx.JSON(http.StatusOK, ns)
+}
+
+// Claim an unowned registration: after verifying the access token minted by
+// the registering server against the registration's public key, bind the
+// registration to the logged-in user. The stable Pelican user ID is recorded
+// as the owner; a session without one is refused (403). Re-claiming a
+// registration the caller already owns succeeds idempotently.
+//
+// POST /namespaces/:id/claim?access_token=<token>
+func claimNamespace(ctx *gin.Context) {
+	accessToken := ctx.Query("access_token")
+	user, userId, _, err := web_ui.GetUserGroups(ctx)
+	if err != nil {
+		log.Error("Failed to get user groups: ", err)
+		ctx.JSON(http.StatusInternalServerError, server_structs.SimpleApiResp{
+			Status: server_structs.RespFailed,
+			Msg:    "Failed to get user groups"})
+		return
+	}
+	if user == "" {
+		ctx.JSON(http.StatusUnauthorized, server_structs.SimpleApiResp{
+			Status: server_structs.RespFailed,
+			Msg:    "You need to login to perform this action"})
+		return
+	}
+	// The owner is recorded as the immutable Pelican user ID; a session
+	// without one (e.g. the CLI admin token) cannot take ownership.
+	if userId == "" {
+		ctx.JSON(http.StatusForbidden, server_structs.SimpleApiResp{
+			Status: server_structs.RespFailed,
+			Msg:    "Claiming a registration requires a session with a Pelican user ID; log in through the web interface"})
+		return
+	}
+	idStr := ctx.Param("id")
+	id, err := strconv.Atoi(idStr)
+	if err != nil || id <= 0 {
+		ctx.JSON(http.StatusBadRequest, server_structs.SimpleApiResp{
+			Status: server_structs.RespFailed,
+			Msg:    "Invalid ID format. ID must a positive integer"})
+		return
+	}
+	if accessToken == "" {
+		ctx.JSON(http.StatusBadRequest, server_structs.SimpleApiResp{
+			Status: server_structs.RespFailed,
+			Msg:    "An access_token generated by the registered server is required to claim a registration"})
+		return
+	}
+	ns, err := getRegistrationById(id)
+	if err != nil {
+		if errors.Is(err, errRegistrationNotFound) {
+			ctx.JSON(http.StatusNotFound, server_structs.SimpleApiResp{
+				Status: server_structs.RespFailed,
+				Msg:    "Namespace not found"})
+			return
+		}
+		log.Error("Error getting namespace: ", err)
+		ctx.JSON(http.StatusInternalServerError, server_structs.SimpleApiResp{
+			Status: server_structs.RespFailed,
+			Msg:    "Error getting namespace"})
+		return
+	}
+	if ns.AdminMetadata.UserID != "" {
+		if ns.AdminMetadata.UserID == userId {
+			// Idempotent: the caller already owns this registration
+			ctx.JSON(http.StatusOK, server_structs.SimpleApiResp{
+				Status: server_structs.RespOK,
+				Msg:    "success",
+			})
+			return
+		}
+		ctx.JSON(http.StatusConflict, server_structs.SimpleApiResp{
+			Status: server_structs.RespFailed,
+			Msg:    "This registration has already been claimed. Contact the current owner or a federation administrator to transfer it"})
+		return
+	}
+
+	// Possession of a token signed by the registration's private key is the
+	// proof that the caller operates the registered server.
+	jwks, err := jwk.Parse([]byte(ns.Pubkey))
+	if err != nil {
+		log.Errorf("Error parsing the public key of the namespace %s with ID %d: %v", ns.Prefix, ns.ID, err)
+		ctx.JSON(http.StatusInternalServerError, server_structs.SimpleApiResp{
+			Status: server_structs.RespFailed,
+			Msg:    fmt.Sprintf("Error parsing the public key of the namespace %s with ID %d: %v", ns.Prefix, ns.ID, err),
+		})
+		return
+	}
+	scopeValidator := token_scopes.CreateScopeValidator([]token_scopes.TokenScope{token_scopes.Registry_EditRegistration}, false)
+	if _, err := token.VerifyWithKeyset(accessToken, jwks, jwt.WithValidator(scopeValidator)); err != nil {
+		log.Errorf("Failed to verify access token to claim namespace %q (ID %d) by user %q: %v", ns.Prefix, ns.ID, user, err)
+		ctx.JSON(http.StatusForbidden,
+			server_structs.SimpleApiResp{
+				Status: server_structs.RespFailed,
+				Msg:    fmt.Sprint("Invalid access token: ", err),
+			})
+		return
+	}
+
+	if err := claimRegistration(id, userId); err != nil {
+		if errors.Is(err, errRegistrationAlreadyOwned) {
+			// Lost a race with a concurrent claim between the pre-check
+			// above and the guarded write.
+			ctx.JSON(http.StatusConflict, server_structs.SimpleApiResp{
+				Status: server_structs.RespFailed,
+				Msg:    "This registration has already been claimed. Contact the current owner or a federation administrator to transfer it"})
+			return
+		}
+		log.Errorf("Failed to set the owner of registration %d to %s: %v", id, userId, err)
+		ctx.JSON(http.StatusInternalServerError, server_structs.SimpleApiResp{
+			Status: server_structs.RespFailed,
+			Msg:    "Failed to claim the registration"})
+		return
+	}
+	ctx.JSON(http.StatusOK, server_structs.SimpleApiResp{
+		Status: server_structs.RespOK,
+		Msg:    "success",
+	})
+}
+
+// createRegistrationOwnershipInviteReq is the body for
+// POST /namespaces/:id/ownership-invites. ExpiresIn is a Go duration
+// string; absent or empty defaults to 7 days. The link is always
+// single-use — ownership transfer is a one-shot operation.
+type createRegistrationOwnershipInviteReq struct {
+	ExpiresIn string `json:"expiresIn,omitempty"`
+}
+
+// createRegistrationOwnershipInviteRes mirrors the collection-ownership
+// invite response shape so the frontend's link displayer can consume it
+// without a kind-specific adapter.
+type createRegistrationOwnershipInviteRes struct {
+	ID          string    `json:"id"`
+	InviteToken string    `json:"inviteToken"`
+	ExpiresAt   time.Time `json:"expiresAt"`
+	IsSingleUse bool      `json:"isSingleUse"`
+}
+
+// maxOwnershipInviteExpiry caps how long an ownership-transfer invite stays
+// redeemable, keeping it from becoming effectively permanent.
+const maxOwnershipInviteExpiry = 30 * 24 * time.Hour
+
+// Mint a single-use invite that, when redeemed by an authenticated user,
+// transfers ownership of the registration to that user. Only the current
+// owner or a registry admin may mint one.
+//
+// POST /namespaces/:id/ownership-invites
+func createRegistrationOwnershipInvite(ctx *gin.Context) {
+	user, userId, groups, err := web_ui.GetUserGroups(ctx)
+	if err != nil {
+		log.Error("Failed to get user groups: ", err)
+		ctx.JSON(http.StatusInternalServerError, server_structs.SimpleApiResp{
+			Status: server_structs.RespFailed,
+			Msg:    "Failed to get user groups"})
+		return
+	}
+	if user == "" {
+		ctx.JSON(http.StatusUnauthorized, server_structs.SimpleApiResp{
+			Status: server_structs.RespFailed,
+			Msg:    "You need to login to perform this action"})
+		return
+	}
+	idStr := ctx.Param("id")
+	id, err := strconv.Atoi(idStr)
+	if err != nil || id <= 0 {
+		ctx.JSON(http.StatusBadRequest, server_structs.SimpleApiResp{
+			Status: server_structs.RespFailed,
+			Msg:    "Invalid ID format. ID must a positive integer"})
+		return
+	}
+	exists, err := registrationExistsById(id)
+	if err != nil {
+		log.Error("Error checking if namespace exists: ", err)
+		ctx.JSON(http.StatusInternalServerError, server_structs.SimpleApiResp{
+			Status: server_structs.RespFailed,
+			Msg:    "Error checking if namespace exists"})
+		return
+	}
+	if !exists {
+		ctx.JSON(http.StatusNotFound, server_structs.SimpleApiResp{
+			Status: server_structs.RespFailed,
+			Msg:    "Namespace not found"})
+		return
+	}
+
+	identity := web_ui.UserIdentity{
+		Username: user,
+		ID:       userId,
+		Groups:   groups,
+		Sub:      ctx.GetString("OIDCSub"),
+	}
+	isAdmin, _ := web_ui.CheckAdmin(identity)
+	belongsTo, ok := resolveRegistrationOwnership(ctx, id, userId, isAdmin)
+	if !ok {
+		return
+	}
+	if !isAdmin && !belongsTo {
+		ctx.JSON(http.StatusForbidden, server_structs.SimpleApiResp{
+			Status: server_structs.RespFailed,
+			Msg:    "Only the owner of a registration or an admin can transfer its ownership"})
+		return
+	}
+
+	req := createRegistrationOwnershipInviteReq{}
+	if ctx.Request.ContentLength > 0 {
+		if err := ctx.ShouldBindJSON(&req); err != nil {
+			ctx.JSON(http.StatusBadRequest, server_structs.SimpleApiResp{
+				Status: server_structs.RespFailed,
+				Msg:    "Invalid request body: " + err.Error()})
+			return
+		}
+	}
+	expiry := 7 * 24 * time.Hour
+	if req.ExpiresIn != "" {
+		d, parseErr := time.ParseDuration(req.ExpiresIn)
+		if parseErr != nil {
+			ctx.JSON(http.StatusBadRequest, server_structs.SimpleApiResp{
+				Status: server_structs.RespFailed,
+				Msg:    fmt.Sprintf("Invalid expiresIn (Go duration): %v", parseErr)})
+			return
+		}
+		if d <= 0 || d > maxOwnershipInviteExpiry {
+			ctx.JSON(http.StatusBadRequest, server_structs.SimpleApiResp{
+				Status: server_structs.RespFailed,
+				Msg:    "expiresIn must be positive and at most 720h (30 days)"})
+			return
+		}
+		expiry = d
+	}
+
+	authMethod, authMethodID := web_ui.CaptureAuthMethod(ctx)
+	creator := userId
+	if creator == "" {
+		creator = user
+	}
+	link, plaintext, err := database.CreateRegistrationOwnershipInviteLink(
+		database.ServerDatabase, id, creator, time.Now().Add(expiry), authMethod, authMethodID,
+	)
+	if err != nil {
+		log.Errorf("Failed to mint ownership invite for registration %d: %v", id, err)
+		ctx.JSON(http.StatusInternalServerError, server_structs.SimpleApiResp{
+			Status: server_structs.RespFailed,
+			Msg:    "Failed to mint ownership invite"})
+		return
+	}
+	ctx.JSON(http.StatusCreated, createRegistrationOwnershipInviteRes{
+		ID:          link.ID,
+		InviteToken: plaintext,
+		ExpiresAt:   link.ExpiresAt,
+		IsSingleUse: link.IsSingleUse,
+	})
 }
 
 func updateNamespaceStatus(ctx *gin.Context, status server_structs.RegistrationStatus) {
@@ -844,18 +1155,19 @@ func getNamespaceJWKS(ctx *gin.Context) {
 			Msg:    fmt.Sprint("Error getting jwks by id:", err)})
 		return
 	}
-	jsonData, err := json.MarshalIndent(jwks, "", "  ")
+	// This is a human-facing UI download, so name the attachment; sanitize
+	// best-effort so one malformed stored key does not fail the download. If
+	// every stored key is unpublishable, fail loudly rather than hand back an
+	// empty key file that looks like a successful download.
+	pub, err := publicJWKSForServing(jwks)
 	if err != nil {
-		log.Errorf("Failed to marshall jwks. %v", err)
+		log.Errorf("Refusing to serve JWKS for namespace id %d: %v", id, err)
 		ctx.JSON(http.StatusInternalServerError, server_structs.SimpleApiResp{
 			Status: server_structs.RespFailed,
-			Msg:    "Failed to marshal JWKS"})
+			Msg:    "server has no publishable keys for this namespace"})
 		return
 	}
-	// Append a new line to the JSON data
-	jsonData = append(jsonData, '\n')
-	ctx.Header("Content-Disposition", fmt.Sprintf("attachment; filename=public-key-server-%v.jwks", id))
-	ctx.Data(200, "application/json", jsonData)
+	server_utils.WriteJWKS(ctx, pub, fmt.Sprintf("public-key-server-%v.jwks", id))
 }
 
 func deleteNamespace(ctx *gin.Context) {
@@ -1039,6 +1351,8 @@ func RegisterRegistryWebAPI(router *gin.RouterGroup) error {
 		})
 		registryWebAPI.DELETE("/namespaces/:id", web_ui.AuthHandler, web_ui.AdminAuthHandler, deleteNamespace)
 		registryWebAPI.GET("/namespaces/:id/pubkey", getNamespaceJWKS)
+		registryWebAPI.POST("/namespaces/:id/claim", web_ui.AuthHandler, claimNamespace)
+		registryWebAPI.POST("/namespaces/:id/ownership-invites", web_ui.AuthHandler, createRegistrationOwnershipInvite)
 		registryWebAPI.PATCH("/namespaces/:id/approve", web_ui.AuthHandler, web_ui.AdminAuthHandler, func(ctx *gin.Context) {
 			updateNamespaceStatus(ctx, server_structs.RegApproved)
 		})

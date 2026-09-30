@@ -35,6 +35,8 @@ import (
 	"github.com/pelicanplatform/pelican/config"
 	"github.com/pelicanplatform/pelican/server_structs"
 	"github.com/pelicanplatform/pelican/server_utils"
+	"github.com/pelicanplatform/pelican/token"
+	"github.com/pelicanplatform/pelican/token_scopes"
 )
 
 type (
@@ -82,6 +84,33 @@ const (
 
 func SetNamespacesStatus(key string, val RegistrationStatus, ttl time.Duration) {
 	registrationsStatus.Set(key, val, ttl)
+}
+
+// RegEditTokenLifetime is the lifetime of the registration edit tokens
+// minted by MintRegistrationEditToken.
+const RegEditTokenLifetime = 15 * time.Minute
+
+// MintRegistrationEditToken creates a short-lived (RegEditTokenLifetime)
+// token, signed with this server's issuer key, that authorizes editing this
+// server's registration(s) at the registry. The registry verifies the token
+// against the public key stored with the registration, so it only works for
+// registrations created with this server's keypair.
+func MintRegistrationEditToken(ctx context.Context) (string, error) {
+	issuerUrl, err := config.GetServerIssuerURL()
+	if err != nil {
+		return "", errors.Wrap(err, "failed to get server issuer URL")
+	}
+	fed, err := config.GetFederation(ctx)
+	if err != nil {
+		return "", errors.Wrap(err, "failed to get federation information")
+	}
+	tc := token.NewWLCGToken()
+	tc.Issuer = issuerUrl
+	tc.Lifetime = RegEditTokenLifetime
+	tc.Subject = issuerUrl
+	tc.AddScopes(token_scopes.Registry_EditRegistration)
+	tc.AddAudiences(fed.RegistryEndpoint)
+	return tc.CreateToken()
 }
 
 // Fetch the registration status for an array of namespace prefixes

@@ -43,8 +43,6 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
-        with:
-          fetch-depth: 0  # GoReleaser needs history to look up the previous tag, and so on
 
       - name: Set up Node.js
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020  # v7.0.0
@@ -107,6 +105,11 @@ jobs:
           go-version: "${{ steps.go-version.outputs.version }}"
           check-latest: true
 
+      - name: Pin the Go build cache
+        # Point every later Go build, including those run by tests,
+        # at the cache that setup-go restored.
+        run: echo "GOCACHE=$(go env GOCACHE)" >> "$GITHUB_ENV"
+
       - name: Install gotestsum
         run: |
           if ! command -v gotestsum &> /dev/null; then
@@ -122,6 +125,7 @@ jobs:
           echo "::group::Building web UI"
           make web-build
           echo "::endgroup::"
+          # e2e_fed_tests and local_cache take longest, so start them first.
           gotestsum \
             --format pkgname-and-test-fails \
             --hide-summary=output \
@@ -134,6 +138,8 @@ jobs:
             ${{ !inputs.race_detection && '-covermode=count' || '' }} \
             ${{ !inputs.race_detection && format('-coverprofile={0}', matrix.coverprofile) || '' }} \
             -tags=${{ matrix.tags }} \
+            ./e2e_fed_tests \
+            ./local_cache \
             ./...
 
       - name: Upload JUnit report
@@ -165,6 +171,20 @@ jobs:
         if: github.event_name == 'pull_request'
         run: echo 'Code coverage ${{ steps.cc.outputs.cc_total }}%' >> $GITHUB_STEP_SUMMARY
 
+  goreleaser:
+    name: Linux (GoReleaser, end-to-end)
+    runs-on: ubuntu-latest
+    container:
+      image: ${{ inputs.image }}
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          fetch-depth: 0  # GoReleaser needs history to look up the previous tag, and so on
+
       - name: Mark the checkout as safe
         # Because we're using a custom container image to run this workflow,
         # we trigger Git's "dubious ownership" warning when trying to interact
@@ -174,37 +194,50 @@ jobs:
           # definitions, but '$GITHUB_WORKSPACE' in scripts.
           git config --global --add safe.directory "$GITHUB_WORKSPACE"
 
+      - name: Set Go version
+        # Determine the string to use in setup-go's "go-version" input.
+        id: go-version
+        run: |
+          version=$(grep -E '^go[[:space:]]*[0-9]+\.[0-9]+' go.mod | grep -oE '[0-9]+\.[0-9]+')
+          echo "version=${version}.x" >> $GITHUB_OUTPUT
+
+      - name: Set up Go
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e  # v7.0.0
+        with:
+          go-version: "${{ steps.go-version.outputs.version }}"
+          check-latest: true
+
+      - name: Stub out the web UI
+        # The binaries embed web_ui/frontend/out, so it must exist,
+        # but nothing in this job needs the real web UI.
+        run: |
+          mkdir -p web_ui/frontend/out
+          touch web_ui/frontend/out/index.html
+
       - name: Generate GoReleaser config
         run: |
-          make goreleaser-config
+          ./scripts/generate_goreleaser.sh .goreleaser.in.yml .goreleaser.generated.yml
 
       - name: Run GoReleaser
         uses: goreleaser/goreleaser-action@f06c13b6b1a9625abc9e6e439d9c05a8f2190e94  # v7.2.3
         with:
           distribution: goreleaser
           version: "~> v2"
-          args: build --single-target --clean --snapshot --config .goreleaser.generated.yml
+          args: build --single-target --clean --snapshot --skip=before --config .goreleaser.generated.yml
 
       - name: Copy the pelican binaries for the end-to-end tests
-        if: matrix.binary_name == 'pelican-server'
         run: |
           cp dist/pelican_linux_amd64_v1/pelican ./pelican
           cp dist/pelican-server_linux_amd64_v1/pelican-server ./pelican-server
       - name: Run integration tests
-        if: matrix.binary_name == 'pelican-server'
         run: ./github_scripts/citests.sh
       - name: Run end-to-end test for object get/put
-        if: matrix.binary_name == 'pelican-server'
         run: ./github_scripts/get_put_test.sh
       - name: Run end-to-end test for director stat
-        if: matrix.binary_name == 'pelican-server'
         run: ./github_scripts/stat_test.sh
       - name: Run end-to-end test for --version flag
-        if: matrix.binary_name == 'pelican-server'
         run: ./github_scripts/version_test.sh
       - name: Run end-to-end test for site-local cache standup
-        if: matrix.binary_name == 'pelican-server'
         run: ./github_scripts/site_local_cache_test.sh
       - name: Run end-to-end test for Cache Availability/Stat weighting
-        if: matrix.binary_name == 'pelican-server'
         run: ./github_scripts/cache_availability_test.sh

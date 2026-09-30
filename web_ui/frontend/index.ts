@@ -5,6 +5,10 @@ export interface User {
   authenticated: boolean;
   role?: 'admin' | 'user' | 'guest';
   user?: string;
+  // user_id is the stable Pelican user ID from the user database,
+  // surfaced by /whoami. Records like registry registrations reference
+  // their owner by this ID (claim flow) in ownership checks.
+  user_id?: string;
   // displayName is the human label from the User row, surfaced by
   // /whoami so the navbar / other always-mounted UI can render it
   // without a separate /me round-trip. Empty when the row has no

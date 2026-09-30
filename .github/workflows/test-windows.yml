@@ -40,8 +40,6 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
-        with:
-          fetch-depth: 0  # GoReleaser needs history to look up the previous tag, and so on
 
       # Unlike the Linux and macOS workflows, we do not need to set up
       # Node.js, because we do not do a real build of the web UI on Windows.
@@ -49,7 +47,6 @@ jobs:
       - name: Set Go version
         # Determine the string to use in setup-go's "go-version" input.
         id: go-version
-        # Use `bash` instead of PowerShell.
         shell: bash
         run: |
           version=$(grep -E '^go[[:space:]]*[0-9]+\.[0-9]+' go.mod | grep -oE '[0-9]+\.[0-9]+')
@@ -60,6 +57,12 @@ jobs:
         with:
           go-version: "${{ steps.go-version.outputs.version }}"
           check-latest: true
+
+      - name: Pin the Go build cache
+        # Point every later Go build, including those run by tests,
+        # at the cache that setup-go restored.
+        shell: bash
+        run: echo "GOCACHE=$(go env GOCACHE)" >> "$GITHUB_ENV"
 
       - name: Install gotestsum
         run: |
@@ -74,12 +77,10 @@ jobs:
           JUNIT_FILE: junit-${{ matrix.binary_name }}.xml
         shell: bash
         run: |
-          # Building the web UI on Windows merely creates an empty file at
-          # web_ui/frontend/out/index.html. Nevertheless, we'll go through
-          # the same steps as for other OSes, in case that changes.
           echo "::group::Building web UI"
           make web-build
           echo "::endgroup::"
+          # Start local_cache first, as on Linux and macOS.
           gotestsum \
             --format pkgname-and-test-fails \
             --hide-summary=output \
@@ -92,6 +93,7 @@ jobs:
             ${{ !inputs.race_detection && '-covermode=count' || '' }} \
             ${{ !inputs.race_detection && format('-coverprofile={0}', matrix.coverprofile) || '' }} \
             -tags=${{ matrix.tags }} \
+            ./local_cache \
             ./...
 
       - name: Upload JUnit report
@@ -108,16 +110,45 @@ jobs:
         with:
           paths: junit-${{ matrix.binary_name }}.xml
 
-      - name: Generate GoReleaser config
-        # Use bash (from Git for Windows) so we can run the shell script
-        # directly. WSL is not available on GitHub Actions Windows runners,
-        # so `make goreleaser-config` (which invokes a .sh script) fails.
+  goreleaser:
+    name: Windows (GoReleaser)
+    runs-on: windows-latest
+    defaults:
+      run:
         shell: bash
-        run: ./scripts/generate_goreleaser.sh .goreleaser.in.yml .goreleaser.generated.yml
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          fetch-depth: 0  # GoReleaser needs history to look up the previous tag, and so on
+
+      - name: Set Go version
+        # Determine the string to use in setup-go's "go-version" input.
+        id: go-version
+        run: |
+          version=$(grep -E '^go[[:space:]]*[0-9]+\.[0-9]+' go.mod | grep -oE '[0-9]+\.[0-9]+')
+          echo "version=${version}.x" >> $GITHUB_OUTPUT
+
+      - name: Set up Go
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e  # v7.0.0
+        with:
+          go-version: "${{ steps.go-version.outputs.version }}"
+          check-latest: true
+
+      - name: Stub out the web UI
+        # The binaries embed web_ui/frontend/out, so it must exist,
+        # but nothing in this job needs the real web UI.
+        run: |
+          mkdir -p web_ui/frontend/out
+          touch web_ui/frontend/out/index.html
+
+      - name: Generate GoReleaser config
+        run: |
+          ./scripts/generate_goreleaser.sh .goreleaser.in.yml .goreleaser.generated.yml
 
       - name: Run GoReleaser
         uses: goreleaser/goreleaser-action@f06c13b6b1a9625abc9e6e439d9c05a8f2190e94  # v7.2.3
         with:
           distribution: goreleaser
           version: "~> v2"
-          args: build --single-target --clean --snapshot --config .goreleaser.generated.yml
+          args: build --single-target --clean --snapshot --skip=before --config .goreleaser.generated.yml

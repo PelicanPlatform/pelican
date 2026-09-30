@@ -137,6 +137,18 @@ export interface User {
   aupAgreedAt: string | null;
   createdAt: string;
   updatedAt: string;
+  // What the server has established about this account's group-derived
+  // administrator privileges. Read-only, and only ever a reason to
+  // WITHHOLD an action from a caller holding server.user_admin — never
+  // a reason to offer one. 'unknown' (the default until the account's
+  // groups are first observed) and 'possible' (observed holding an
+  // administrative group; sticky) both mean a user-administrator may
+  // not act; only 'ruled-out' means they may. Optional so an unmigrated
+  // backend doesn't trip TypeScript.
+  groupAdminStatus?: 'unknown' | 'possible' | 'ruled-out';
+  // When the account's provider-asserted groups were last reconciled;
+  // absent if never.
+  groupsObservedAt?: string;
 }
 
 export type UserPost = Omit<
@@ -198,6 +210,17 @@ export interface Group {
   // backend that hasn't been migrated yet (or a partial response that
   // doesn't include the field) doesn't trip TypeScript.
   authTemplateEligible?: boolean;
+  // Which provider this group came from. 'pelican' groups were created
+  // through this API and their membership lives in the database. Every
+  // other value names a provider that asserts the group (same
+  // vocabulary as the Issuer.GroupSource config): those are recorded
+  // automatically the first time the name is observed, are owned by the
+  // built-in admin, cannot be renamed, and their membership is whatever
+  // the provider says — there is nothing local to add or remove.
+  // 'unknown' is a migration-backfilled record whose asserting provider
+  // was never recorded. Optional so an unmigrated backend doesn't trip
+  // TypeScript; treat a missing value as 'pelican'.
+  source?: 'pelican' | 'oidc' | 'file' | 'github' | 'unknown';
   // Resolved server-side; absent if the referenced user/group no longer
   // exists. The UI falls back to the raw id in that case.
   ownerUser?: UserCard;
@@ -208,6 +231,7 @@ export interface Group {
 
 export type GroupPost = Omit<
   Group,
+  | 'source'
   | 'members'
   | 'createdBy'
   | 'createdAt'
@@ -223,6 +247,16 @@ export interface GroupMember {
   user: User;
   createdBy: string;
   createdAt: string;
+  // 'pelican' for a membership an administrator created here. Any other
+  // value names the identity provider that asserts it: those are
+  // mirrored automatically at login and cannot be removed through
+  // Pelican — the user has to be removed at the provider. Optional so
+  // an unmigrated backend doesn't trip TypeScript; treat a missing
+  // value as 'pelican'.
+  source?: 'pelican' | 'oidc' | 'file' | 'github' | 'unknown';
+  // When the provider last asserted a mirrored membership; absent on
+  // 'pelican' ones, which do not expire.
+  assertedAt?: string;
 }
 
 export type GroupMemberPost = Omit<

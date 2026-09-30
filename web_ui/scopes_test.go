@@ -52,14 +52,7 @@ func setupScopesTestDB(t *testing.T) *gorm.DB {
 
 	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
 	require.NoError(t, err)
-	require.NoError(t, db.AutoMigrate(
-		&database.User{},
-		&database.Group{},
-		&database.GroupMember{},
-		&database.UserScope{},
-		&database.GroupScope{},
-	))
-	require.NoError(t, database.AutoMigrateCredentialsForTests(db))
+	migrateTestDBHandle(t, db)
 
 	database.ServerDatabase = db
 	t.Cleanup(func() { database.ServerDatabase = prev })

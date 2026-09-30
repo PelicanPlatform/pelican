@@ -1,0 +1,215 @@
+import { Callout } from 'nextra/components'
+
+# Managing Users and Groups
+
+The origin grants access to [**collections**](/managing-data-access/collections-and-shares) based on **group membership**; so, to provide an individual with
+access to data, the origin's administrator - or the delegated [user administrator](/managing-data-access/permissions-reference#user-administration) - must configure
+user accounts and manage group membership.
+
+This page covers:
+
+* Adding a user to the origin
+* Deactivating a user
+* Creating a group and managing membership
+* Delegating group management
+* Authorizing other access beyond data
+
+There is also a section covering how a user may manage their own account.
+
+<Callout type="info">
+* For the model behind these tasks (what a user is, what a group is, and how a scope reaches a caller) read [How Access Control Works](/managing-data-access/access-control-model).
+* For more details on what can be granted, and to whom, read the [Permissions Reference](/managing-data-access/permissions-reference).
+</Callout>
+
+## Before you start
+
+Each guide below uses the origin's **web interface**; to follow along, you must know the origin's URL and have an existing account with the user administrator
+privilege (`server.admin` or `server.user_admin`; see [User administration](/managing-data-access/permissions-reference#user-administration)).
+
+<Callout>
+Most of these tasks can also be driven from the **command line**, via
+
+* `pelican-server server user` ([reference page](/commands-reference/pelican-server/server/user))
+* `pelican-server server group` ([reference page](/commands-reference/pelican-server/server/group))
+
+These operations are also available via the **REST API interface**; see [API docs](/api-docs).
+</Callout>
+
+<Callout type="warning">
+In several tasks below, Pelican **creates an invite link and displays it exactly once (!)**.
+Furthermore, it is the administrator's responsibility to send it securely to the target user, as *Pelican does not send email.*
+</Callout>
+
+## Add a user
+
+Most origins are integrated with Single Sign On (SSO) and are set to auto-create an account the first time a user logs in via SSO.  However, an
+administrator can pre-create an account, enabling logins via a password reset link or through providing SSO information.
+
+Pre-creating allows one to add the person to groups or grant permissions before the first login.
+
+1. In the browser, go to **Settings** → **Users** and click **ADD USER**.
+2. Choose **Local (username + password)** or **External (OIDC)**.  The latter only appears if the origin has SSO enabled.
+3. Fill in **Username** and, optionally, **Display name**.
+    * For a SSO-based user, also fill in **Sub** ("subject"; typically, it's the SSO username) and **Issuer** (URL of the SSO) from your identity provider.
+4. Click **CREATE USER**.
+5. For a local account, the page offers **GENERATE PASSWORD-SET INVITE**. Click it and copy the URL, or click **SKIP FOR NOW** and mint the invite later.
+
+## Let a user set a password
+
+Administrators never set passwords for users; instead they mint a single-use, time-bounded invite and hand over the link (typically,
+emailing it to an individual).  The person sets their own password when they redeem it.
+The link lifetime defaults to the value of [`Server.GroupInviteLinkExpiration`](/parameters#Server-GroupInviteLinkExpiration).
+
+1. Go to **Settings** → **Users** and click the edit icon on the user's row.
+2. Under **Password setup**, click **GENERATE PASSWORD-SET INVITE**.
+3. Copy the URL from the box that appears and deliver it. It is shown only once.
+4. To disable password login, click **CLEAR LOCAL PASSWORD** under **Local password** and confirm.
+
+The same panel lists every invite ever issued for that user, so you can see whether one is already outstanding before minting another.
+
+## Creating a group onboarding link
+
+Use an onboarding link when you want to invite someone to use the origin whose SSO identity is not currently known; while some SSO's use human-friendly usernames,
+the default provider for Pelican (CILogon) randomly generates names.  A CILogon name may be of the form `http://cilogon.org/serverA/users/67294` and not known to
+the user or administrator.
+
+By using an onboarding link, a new account is created and associated with the SSO account of the individual who clicked on the link.
+After clicking on the link, the recipient signs in through the identity provider first, and then accepts the invite.
+
+1. Open **Groups** from the sidebar, or **Settings** → **Groups**.
+2. Search for and expand the group you wish to onboard the user to.
+3. Navigate to the **Invite links** section.
+4. Toggle **Single use** if you want just one person to use this link, adjust the expiration of the link as needed and click **GENERATE INVITE LINK**.
+5. Copy and send the URL to the user you wish to onboard.
+
+## Delete a user
+
+<Callout type="important">
+  **Deleting a user is *not* reversible.**
+  There is no "undelete" functionality.
+</Callout>
+
+To delete:
+
+1. Go to **Settings** → **Users**.
+2. Find the user's row in the listing.
+3. Use the **Delete** control on that user's row.
+
+The account's status is rechecked on every request to the origin's web interface and management API, so a signed-in session stops working on its next request rather than when its cookie expires.
+An access token the user already holds for *data* is not re-checked, and keeps working until it expires; see [Revoke access](/managing-data-access/collections-and-shares#revoke-access).
+
+## Create a group
+
+*Any signed-in user can create a group; see [Group administration](/managing-data-access/permissions-reference#group-administration).*
+
+Group creation is open to any user, allowing them to grant access to their own collections and shares.
+Groups created by unprivileged users, however, cannot be used for Pelican's authorization templates mechanism or be referenced from the configuration variables granting administrator access.
+
+The group **name** is the machine-readable name (such as `reyes-lab-writers`); it is 2 to 64 characters drawn from letters, digits, `.`, `_`, `@`, and `-` and must start with a letter or digit.
+Names that appear in the server's admin-group settings, or that the identity provider asserts, are reserved; creating a group with one of those names is refused.
+The **display name** and **description** are free-form labels for human readability.
+
+Once the group exists, use it to grant access to a collection: see [Grant read or write access to a group](/managing-data-access/collections-and-shares#grant-read-or-write-access-to-a-group).
+
+1. Open **Groups** from the sidebar, or **Settings** → **Groups**.
+2. Click **CREATE GROUP**.
+3. Fill in **Group Name** and, optionally, **Description**.
+4. Leave **Add me as a member of this group** checked if you want to be a member as well as the owner. Creating a group makes you its owner but does not make you a member.
+5. Click **CREATE**.
+
+## Add and remove group members
+
+*Requires group ownership/administrator privilege or server administrator privilege; see [Group administration](/managing-data-access/permissions-reference#group-administration).*
+
+Each group has an owner (an individual user account); optionally, it may also have an administrator, which can be either another user or a group.
+Either the owner or the administrator can manage group membership.
+
+1. Open **Groups** and expand the group, or open its detail page.
+2. If you are a server administrator, under **Members** click **ADD MEMBER**, pick the user, and click **ADD MEMBER** again in the dialog.
+3. To remove someone, click the remove icon beside their row and confirm.
+
+The **ADD MEMBER** button and its user picker appear only for server administrators.
+A group owner or administrator without that privilege brings people in with an invite link (see [Invite people to a group with a link](#invite-people-to-a-group-with-a-link)) or, for themselves, the **Join this group** button.
+
+Members whose membership was asserted by the identity provider are listed like any other, but cannot be removed here; remove them at the provider.
+
+Removing a member does not relinquish ownership; the owner remains the owner even after their membership is deleted.
+
+## Invite people to a group with a link
+
+*Requires group ownership/administrator privilege or server administrator privilege; see [Group administration](/managing-data-access/permissions-reference#group-administration).*
+
+An invite link is how a group owner brings in people they cannot look up.
+A single-use link admits one person; a multi-use link admits everyone who holds it until it expires or you revoke it.
+Expiration time defaults to [`Server.GroupInviteLinkExpiration`](/parameters#Server-GroupInviteLinkExpiration).
+
+The recipient must sign in to their user account and, if your server has an Acceptable Use Policy (AUP), agree to it.  Once signed in, the user may accept the invite to join the group.
+
+1. Open the group's detail page. The **Invite links** panel appears for owners and group administrators only.
+2. Set **Single use** on or off, and set **Expires in** to a duration such as `168h`, `24h`, or `30m`.
+3. Click **GENERATE INVITE LINK** and copy the URL. It is shown only once.
+4. To withdraw a link, click the revoke icon on its row.
+
+Listed links show a short ID rather than the token; the ID is safe to quote in a ticket or an audit log.
+
+## Transfer group ownership or delegate a group administrator
+
+*Requires group ownership or server administration privilege; see [Group administration](/managing-data-access/permissions-reference#group-administration).*
+
+A group has exactly one owner; only the owner can transfer ownership, name an administrator group, or delete it.
+
+A group administrator manages group membership on behalf of the owner.
+An administrator cannot transfer ownership and cannot delete the group.
+
+1. Open the group's detail page and find the **Ownership** section.
+2. Click the edit icon beside **Owner**, pick the new owner, and save.
+3. Click the edit icon beside **Administrator**, choose **None**, **User**, or **Group**, pick the target, and save.
+
+## Make a group usable in authorization templates and admin lists
+
+*Turning the flag on for an existing group requires server administrator privileges — see [Group administration](/managing-data-access/permissions-reference#group-administration).*
+
+[`Issuer.AuthorizationTemplates`](/parameters#Issuer-AuthorizationTemplates) and the `Server.*AdminGroups` settings provide groups with special privileges to access data or administer the server.
+Since unprivileged users can create groups as well, the administrator must mark groups as compatible with these settings; this is the special `auth-template-eligibility` flag.
+For more information, see [Where a scope can come from?](/managing-data-access/access-control-model#where-a-scope-can-come-from).
+
+You can set the flag at creation time if you are a server administrator.
+
+- **At creation:** in the **Create New Group** dialog, tick **Auth-template eligible**. The checkbox is rendered only for callers who can set it.
+- **Afterwards:** open the group's detail page and flip the **Auth template** switch. Everyone else sees the current state as a read-only `eligible` or `ineligible` chip.
+
+## Delete a group
+
+*Requires group ownership or server administrator privileges — a group administrator cannot delete the group; see [Group administration](/managing-data-access/permissions-reference#group-administration).*
+
+Deleting a group removes the group itself along with its memberships, any open invite links, and every collection or share grant that names the group.
+Users who had access to a collection only through that group lose it on their next request to the Origin; a data access token they already hold keeps working until it expires. See [Revoke access](/managing-data-access/collections-and-shares#revoke-access).
+If the group was named as the administrator of a collection or of another group, that record simply has no administrator; its owner is unaffected.
+
+A group whose name appears in [`Server.AdminGroups`](/parameters#Server-AdminGroups), [`Server.UserAdminGroups`](/parameters#Server-UserAdminGroups), or [`Server.CollectionAdminGroups`](/parameters#Server-CollectionAdminGroups) cannot be deleted by anyone, server administrators included, until the entry is removed from the configuration.
+
+1. Open **Groups** from the sidebar.
+2. Find the group's row in the listing.
+3. Click the trash icon on that row, then click the check mark to confirm. The icon is shown only to the group's owner and to server administrators.
+
+## Grant a scope to a user or group
+
+*Requires server administrator privilege; see [Management scopes](/managing-data-access/permissions-reference#management-scopes).*
+
+Scopes provide specific permissions to a user or group beyond data access.  Scopes may allow access to monitoring, collection management, or user management.
+
+1. For a user: **Settings** → **Users**, edit the user, and scroll to **Scopes**. For a group: open the group's detail page and find its scopes panel. Both panels are rendered for system administrators only.
+2. Pick an entry from **Pick a scope to grant** — the picker offers only scopes the management API will accept — and click **GRANT**.
+3. To revoke, click the × on the scope's chip.
+
+## Manage your own account
+
+*Any signed-in user.*
+
+Open the user menu and choose **Profile**.
+
+- **Display name** — edit the field and click **SAVE**. Your username is read-only; changing it is an administrator's job.
+- **Local password** — **RESET PASSWORD** asks for your current password and a new one; **REMOVE PASSWORD** disables username-and-password login while leaving linked OIDC identities working. Both appear only when a password is already set.
+- **Effective scopes** — the full set the server computes for you right now.
+- **Linked identities** — unlink a secondary identity with the unlink icon. Your primary identity is marked `managed by admin`.
+- **Your groups** — click **LEAVE**, then **CONFIRM LEAVE**. You cannot leave a group you own; transfer ownership first. You also cannot leave a group the identity provider placed you in; that change belongs at the provider.

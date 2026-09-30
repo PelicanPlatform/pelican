@@ -185,6 +185,13 @@ func handleLeaveMyGroup(ctx *gin.Context) {
 				Status: server_structs.RespFailed,
 				Msg:    "the group's owner cannot leave the group; transfer ownership first",
 			})
+		case errors.Is(err, database.ErrMembershipNotLocal):
+			// Deleting the row would appear to work and be undone at the
+			// next login, because the identity provider still asserts it.
+			ctx.JSON(http.StatusConflict, server_structs.SimpleApiResp{
+				Status: server_structs.RespFailed,
+				Msg:    err.Error() + "; ask an administrator to remove you at the identity provider",
+			})
 		default:
 			ctx.JSON(http.StatusInternalServerError, server_structs.SimpleApiResp{
 				Status: server_structs.RespFailed,

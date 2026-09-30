@@ -51,6 +51,7 @@ import (
 	"github.com/pelicanplatform/pelican/oauth2"
 	"github.com/pelicanplatform/pelican/param"
 	"github.com/pelicanplatform/pelican/server_structs"
+	"github.com/pelicanplatform/pelican/server_utils"
 	"github.com/pelicanplatform/pelican/token"
 	"github.com/pelicanplatform/pelican/token_scopes"
 	"github.com/pelicanplatform/pelican/utils"
@@ -389,13 +390,13 @@ func keySignChallengeCommit(ctx *gin.Context, data *registrationData) (bool, map
 			log.Errorln("Failed to decode non-empty Identity field:", err)
 			return false, nil, err
 		}
-		sub, ok := idMap["sub"]
-		if ok {
-			val, ok := sub.(string)
-			if ok {
-				ns.AdminMetadata.UserID = val
-			}
-		}
+		// The owner column holds Pelican user IDs only, not the raw OIDC
+		// subject; map the presented identity onto the matching Pelican
+		// account when one exists, and otherwise leave the registration
+		// unowned so the regular claim flow applies.
+		sub, _ := idMap["sub"].(string)
+		iss, _ := idMap["iss"].(string)
+		ns.AdminMetadata.UserID = ownerIdFromOidcIdentity(sub, iss)
 		if inTopo {
 			topoNssStr := GetTopoPrefixString(topoNss)
 			ns.AdminMetadata.Description = fmt.Sprintf("[ Attention: A superspace or subspace of this prefix exists in OSDF topology: %s ] ", topoNssStr)
@@ -435,8 +436,10 @@ func keySignChallengeCommit(ctx *gin.Context, data *registrationData) (bool, map
 		}
 	}
 
-	// Overwrite status to Pending to filter malicious request
-	ns.AdminMetadata.Status = server_structs.RegPending
+	// Registrations coming through the automated flow/CLI carry only the basic info;
+	// the additional fields (institution, etc.) hasn't been filled in yet, so they
+	// start as Incomplete. Submitting the web form promotes them to Pending.
+	ns.AdminMetadata.Status = server_structs.RegIncomplete
 
 	if server_structs.IsServerPrefix(data.Prefix) {
 		if ns.CustomFields == nil {
@@ -919,7 +922,21 @@ func wildcardHandler(ctx *gin.Context) {
 				}
 			}
 		}
-		ctx.JSON(http.StatusOK, jwks)
+		// Registry-stored keys should already be public, but sanitize
+		// best-effort so a single malformed stored key is skipped rather
+		// than turning this federation-critical endpoint into a 500. Serve
+		// inline: the consumers here are machines, not browsers. If every
+		// stored key is unpublishable, fail loudly rather than serve an empty
+		// JWKS that would silently break token verification.
+		pub, err := publicJWKSForServing(jwks)
+		if err != nil {
+			log.Errorf("Refusing to serve JWKS for prefix %s: %v", prefix, err)
+			ctx.JSON(http.StatusInternalServerError, server_structs.SimpleApiResp{
+				Status: server_structs.RespFailed,
+				Msg:    "server has no publishable keys for this namespace"})
+			return
+		}
+		server_utils.WriteJWKS(ctx, pub)
 		return
 	} else if strings.HasSuffix(path, "/.well-known/openid-configuration") {
 		// Check that the namespace exists before constructing config JSON
@@ -936,6 +953,7 @@ func wildcardHandler(ctx *gin.Context) {
 			ctx.JSON(http.StatusNotFound, server_structs.SimpleApiResp{
 				Status: server_structs.RespFailed,
 				Msg:    fmt.Sprintf("The requested prefix %s does not exist in the registry's database", prefix)})
+			return
 		}
 		// Construct the openid-configuration JSON and return to the requester
 		// For a given namespace "foo", the jwks should be located at <registry url>/api/v1.0/registry/foo/.well-known/issuer.jwks
@@ -1200,7 +1218,11 @@ func checkStatusHandler(ctx *gin.Context) {
 				Msg:    "Server error when getting federation information: " + err.Error(),
 			})
 		}
-		if server_structs.IsCacheNS(prefix) {
+		if ns.AdminMetadata.UserID == "" {
+			// Unowned registrations go through the claim page first, which
+			// binds the registration to the logged-in user before editing.
+			complete.EditUrl = fmt.Sprintf("%s/view/registry/claim/?id=%d", fed.RegistryEndpoint, ns.ID)
+		} else if server_structs.IsCacheNS(prefix) {
 			complete.EditUrl = fmt.Sprintf("%s/view/registry/cache/edit/?id=%d", fed.RegistryEndpoint, ns.ID)
 		} else if server_structs.IsOriginNS(prefix) {
 			complete.EditUrl = fmt.Sprintf("%s/view/registry/origin/edit/?id=%d", fed.RegistryEndpoint, ns.ID)

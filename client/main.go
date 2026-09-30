@@ -1120,8 +1120,13 @@ func DoGet(ctx context.Context, remoteObject string, localDestination string, re
 		// that can be said here.  Every other stat failure is fatal,
 		// because a G4 collection that stats as unknown would silently
 		// build the G2 layout and write a directory listing to a file.
-		remoteObjectFilename := path.Base(pUrl.Path)
 		if !recursive {
+			// Only G2 uses the basename; a source ending in "/.." must not name
+			// the destination's parent.
+			remoteObjectFilename, nameErr := RemoteObjectBaseName(pUrl.Path)
+			if nameErr != nil {
+				return nil, nameErr
+			}
 			stat, statErr := DoStat(ctx, pUrl.GetRawUrl().String(), options...)
 			if statErr != nil && !errors.Is(statErr, ErrObjectNotFound) {
 				return nil, errors.Wrapf(statErr,

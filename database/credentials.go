@@ -57,18 +57,49 @@ type userCredential struct {
 // just project a much narrower column set out of it.
 func (userCredential) TableName() string { return "users" }
 
-// AutoMigrateCredentialsForTests runs GORM AutoMigrate on the
-// credential view of the users table so test setups (which build their
-// schema from struct tags rather than running goose migrations) end
-// up with the password_hash column. The User struct intentionally has
-// no PasswordHash field; this is the only public way for tests
-// outside the database package to get the column without reaching
-// into the migration files.
+// applyPartialIndexesForTests rebuilds the uniqueness indexes that
+// production scopes to LIVE rows, for test setups that build their
+// schema from GORM struct tags instead of running the goose migrations.
 //
-// Production code should not call this — production schema is created
-// by the goose migrations under database/universal_migrations.
-func AutoMigrateCredentialsForTests(db *gorm.DB) error {
-	return db.AutoMigrate(&userCredential{})
+// This is not cosmetic. GORM can only emit a FULL unique index, so
+// without this a soft-deleted user keeps reserving its username and
+// identity forever — which means the account-reuse paths cannot be
+// exercised at all, and a test written against the reuse vulnerabilities
+// of issues #3752 / #3753 passes vacuously because the second account
+// can never be created. The same applies to a deleted group's name.
+//
+// Mirrors migrations 20260503120000, 20260812000000, 20260916120000 and
+// 20260917120000. Call after AutoMigrate; production schema comes from
+// the migrations and must not call this.
+//
+// Unexported deliberately. Test setups outside this package run the
+// real migrations instead (see database.EmbedUniversalMigrations with
+// utils.MigrateDB), which is both higher fidelity and avoids a
+// test-only function in the package's public API.
+func applyPartialIndexesForTests(db *gorm.DB) error {
+	for _, stmt := range []string{
+		// users: a soft-deleted account releases its username and its
+		// (sub, issuer) identity so the person can re-enrol.
+		"DROP INDEX IF EXISTS idx_user_username_live",
+		"CREATE UNIQUE INDEX idx_user_username_live ON users (username) WHERE deleted_at IS NULL",
+		"DROP INDEX IF EXISTS idx_user_issuer",
+		"DROP INDEX IF EXISTS idx_user_sub_issuer",
+		"CREATE UNIQUE INDEX idx_user_sub_issuer ON users (sub, issuer) WHERE deleted_at IS NULL",
+		// groups: a soft-deleted group releases its name; its ID stays
+		// spent because the tombstone keeps the primary key.
+		"DROP INDEX IF EXISTS uni_groups_name",
+		"DROP INDEX IF EXISTS idx_groups_name_live",
+		"CREATE UNIQUE INDEX idx_groups_name_live ON groups (name) WHERE deleted_at IS NULL",
+		// collections: one owner may not hold two collections of the
+		// same name, but ownerless legacy rows do not collide.
+		"DROP INDEX IF EXISTS idx_owner_name",
+		"CREATE UNIQUE INDEX idx_owner_name ON collections (owner_id, name) WHERE owner_id <> ''",
+	} {
+		if err := db.Exec(stmt).Error; err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // SetUserPassword stores a bcrypt hash of plaintext as the user's local

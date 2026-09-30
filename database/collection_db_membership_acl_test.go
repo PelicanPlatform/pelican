@@ -64,11 +64,12 @@ func TestACLViaDBMembership(t *testing.T) {
 
 		coll := &Collection{
 			ID: "c-alpha", Name: "alpha",
-			Owner: "bob", OwnerID: "u-bob",
+			OwnerID:   "u-bob",
 			Namespace: "/data/alpha", Visibility: VisibilityPrivate,
 			ACLs: []CollectionACL{{
 				CollectionID: "c-alpha",
-				GroupID:      "alpha-writers",
+				SubjectType:  ACLSubjectGroup,
+				SubjectID:    "g-writers",
 				Role:         AclRoleWrite,
 				GrantedBy:    "u-bob",
 			}},
@@ -104,10 +105,11 @@ func TestACLViaDBMembership(t *testing.T) {
 		require.NoError(t, db.Create(writers).Error)
 		require.NoError(t, db.Create(&Collection{
 			ID: "c-private", Name: "p",
-			Owner: "owner", OwnerID: "u-x",
+			OwnerID:   "u-x",
 			Namespace: "/p", Visibility: VisibilityPrivate,
 			ACLs: []CollectionACL{{
-				CollectionID: "c-private", GroupID: "w",
+				CollectionID: "c-private",
+				SubjectType:  ACLSubjectGroup, SubjectID: "g-w",
 				Role: AclRoleRead, GrantedBy: "u-x",
 			}},
 		}).Error)

@@ -37,14 +37,23 @@ import (
 )
 
 func TestGetUserCollectionScopes_DBMembership(t *testing.T) {
+	// groups and group_members come from the migrations, like the rest
+	// of the schema.
 	db := newCollectionTestDB(t)
-	// Need group_members + groups for the membership lookup.
-	require.NoError(t, db.AutoMigrate(&database.Group{}, &database.GroupMember{}))
 
 	// Bob owns "alpha" and grants writers ACL to "alpha-writers".
 	// Carol is added to alpha-writers via the management UI — her
 	// wlcg.groups (cookie-asserted) is intentionally empty in this
 	// test to simulate htpasswd login.
+	// group_members carries a real FOREIGN KEY to users(id) under the
+	// production schema, so the people have to exist before the
+	// membership does.
+	for _, u := range []struct{ id, name string }{{"u-bob", "bob"}, {"u-carol", "carol"}} {
+		require.NoError(t, db.Create(&database.User{
+			ID: u.id, Username: u.name, Sub: u.name,
+			Issuer: "https://idp.example.com", Status: database.UserStatusActive,
+		}).Error)
+	}
 	require.NoError(t, db.Create(&database.Group{
 		ID: "g-w", Name: "alpha-writers", CreatedBy: "u-bob", OwnerID: "u-bob",
 	}).Error)

@@ -85,6 +85,10 @@ func setupMockRegistryDB(t *testing.T) {
 		&database.UserIdentity{},
 	)
 	require.NoError(t, err, "Failed to migrate DB tables")
+	// User.AfterFind reads the password_hash column, which only the
+	// (unexported) credential projection declares; add it the way the real
+	// migrations do so loading a *database.User works here too.
+	require.NoError(t, database.ServerDatabase.Exec("ALTER TABLE users ADD COLUMN password_hash TEXT NOT NULL DEFAULT ''").Error)
 }
 
 func resetMockRegistryDB(t *testing.T) {
@@ -961,4 +965,97 @@ func TestGetTopoPrefixString(t *testing.T) {
 		re := GetTopoPrefixString([]Topology{{Prefix: "/foo"}, {Prefix: "/bar"}, {Prefix: "/barz"}})
 		assert.Equal(t, "/foo, /bar, /barz", re)
 	})
+}
+
+// TestClaimRegistration pins the contract of the one place ownership is
+// written: only unowned rows can be claimed, only for a non-empty owner, and
+// a repeated claim conflicts instead of silently overwriting the first owner.
+func TestClaimRegistration(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
+	setupMockRegistryDB(t)
+	defer teardownMockRegistryDB(t)
+
+	insertUnowned := func(t *testing.T) int {
+		require.NoError(t, insertMockDBData([]server_structs.Registration{{Prefix: "/foo", Pubkey: "mock-key"}}))
+		id, err := getLastNamespaceId()
+		require.NoError(t, err)
+		return id
+	}
+
+	t.Run("empty-owner-is-refused", func(t *testing.T) {
+		resetMockRegistryDB(t)
+		id := insertUnowned(t)
+
+		require.Error(t, claimRegistration(id, ""))
+
+		got, err := getRegistrationById(id)
+		require.NoError(t, err)
+		assert.Equal(t, "", got.AdminMetadata.UserID, "a refused claim must not write an owner")
+	})
+
+	t.Run("unowned-row-is-claimed", func(t *testing.T) {
+		resetMockRegistryDB(t)
+		id := insertUnowned(t)
+
+		require.NoError(t, claimRegistration(id, "u-owner-id"))
+
+		got, err := getRegistrationById(id)
+		require.NoError(t, err)
+		assert.Equal(t, "u-owner-id", got.AdminMetadata.UserID)
+	})
+
+	t.Run("second-claim-conflicts-and-does-not-overwrite", func(t *testing.T) {
+		resetMockRegistryDB(t)
+		id := insertUnowned(t)
+
+		require.NoError(t, claimRegistration(id, "u-first-id"))
+		require.ErrorIs(t, claimRegistration(id, "u-second-id"), errRegistrationAlreadyOwned)
+
+		got, err := getRegistrationById(id)
+		require.NoError(t, err)
+		assert.Equal(t, "u-first-id", got.AdminMetadata.UserID, "the losing claim must not overwrite the first owner")
+	})
+
+	t.Run("missing-registration", func(t *testing.T) {
+		resetMockRegistryDB(t)
+		require.ErrorIs(t, claimRegistration(404404, "u-owner-id"), errRegistrationNotFound)
+	})
+}
+
+// TestOwnerIdFromOidcIdentity covers the mapping the CLI --with-identity
+// registration path uses so the owner column only ever holds Pelican user IDs.
+func TestOwnerIdFromOidcIdentity(t *testing.T) {
+	setupMockRegistryDB(t)
+	t.Cleanup(func() { teardownMockRegistryDB(t) })
+
+	const issA = "https://idp-a.example"
+	const issB = "https://idp-b.example"
+	alice, err := database.CreateUser(database.ServerDatabase, "alice", "sub-alice", issA, database.CreatorSelf())
+	require.NoError(t, err)
+	// A secondary identity linked to alice's account (inserted directly: the
+	// mock DB lacks the credential view database.CreateUserIdentity consults)
+	require.NoError(t, database.ServerDatabase.Create(&database.UserIdentity{
+		ID: "ident-alice-b", UserID: alice.ID, Sub: "sub-alice-linked", Issuer: issB,
+	}).Error)
+	// The same subject under two providers belongs to two distinct accounts
+	bobA, err := database.CreateUser(database.ServerDatabase, "bob-a", "sub-bob", issA, database.CreatorSelf())
+	require.NoError(t, err)
+	bobB, err := database.CreateUser(database.ServerDatabase, "bob-b", "sub-bob", issB, database.CreatorSelf())
+	require.NoError(t, err)
+	// A deactivated account
+	carol, err := database.CreateUser(database.ServerDatabase, "carol", "sub-carol", issA, database.CreatorSelf())
+	require.NoError(t, err)
+	require.NoError(t, database.ServerDatabase.Model(&database.User{}).Where("id = ?", carol.ID).Update("status", database.UserStatusInactive).Error)
+
+	assert.Equal(t, "", ownerIdFromOidcIdentity("", issA), "no subject, no owner")
+	assert.Equal(t, "", ownerIdFromOidcIdentity("sub-alice", ""), "no issuer, no owner")
+	assert.Equal(t, "", ownerIdFromOidcIdentity("sub-nobody", issA), "unknown identity stays unowned")
+	assert.Equal(t, "", ownerIdFromOidcIdentity("sub-alice", issB), "same subject under another issuer is a different identity")
+
+	assert.Equal(t, alice.ID, ownerIdFromOidcIdentity("sub-alice", issA), "primary identity resolves")
+	assert.Equal(t, alice.ID, ownerIdFromOidcIdentity("sub-alice-linked", issB), "linked identity resolves to its account")
+	assert.Equal(t, bobA.ID, ownerIdFromOidcIdentity("sub-bob", issA), "issuer disambiguates a shared subject")
+	assert.Equal(t, bobB.ID, ownerIdFromOidcIdentity("sub-bob", issB), "issuer disambiguates a shared subject")
+
+	assert.Equal(t, "", ownerIdFromOidcIdentity("sub-carol", issA), "an inactive account cannot become owner")
 }

@@ -84,6 +84,11 @@ jobs:
           go-version: "${{ steps.go-version.outputs.version }}"
           check-latest: true
 
+      - name: Pin the Go build cache
+        # Point every later Go build, including those run by tests,
+        # at the cache that setup-go restored.
+        run: echo "GOCACHE=$(go env GOCACHE)" >> "$GITHUB_ENV"
+
       - name: Mark the checkout as safe
         # The custom container image runs as a different user than the checkout
         # owner, which trips Git's "dubious ownership" guard (and thus Go's
@@ -95,6 +100,7 @@ jobs:
           echo "::group::Building web UI"
           make web-build
           echo "::endgroup::"
+          # e2e_fed_tests and local_cache take longest, so start them first.
           go test \
             -p=4 \
             -timeout=15m \
@@ -102,6 +108,8 @@ jobs:
             -covermode=count \
             -coverprofile=${{ matrix.coverprofile }} \
             -tags=${{ matrix.tags }} \
+            ./e2e_fed_tests \
+            ./local_cache \
             ./...
 
       # A failing or flaky test makes "go test" exit non-zero, which would

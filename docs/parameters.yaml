@@ -1025,6 +1025,8 @@ description: |+
 type: filename
 root_default: /var/lib/pelican/origin.sqlite
 default: ${ConfigBase}/origin.sqlite
+deprecated: true
+replacedby: ["Server.DbLocation"]
 components: ["origin"]
 ---
 name: Origin.Url
@@ -1072,6 +1074,26 @@ description: |+
       When set, only these templates are used for scope calculation in this namespace;
       the global templates are ignored entirely (no merging).
       The template format is the same as `Issuer.AuthorizationTemplates`.
+  - IssuerJwks: [OPTIONAL] Path to a JWKS-formatted file containing additional
+      public keys to include in this namespace's per-namespace JWKS endpoint.
+      These keys are merged with the server's exported public key set
+      (see `Server.IssuerJwks` for details on that key set).
+      If unset, only the server's exported public key set is served.
+      This field mirrors `Server.IssuerJwks` but is scoped to a single export.
+      It only takes effect when the origin uses the embedded OAuth2 issuer,
+      the export requires authorization, and the export does not set its own
+      `IssuerUrls` (an export that names its issuers explicitly does not
+      advertise the per-namespace issuer, so nothing consults these keys).
+      A startup warning is logged when the setting cannot take effect.
+      If a key in this file carries the same `kid` as one of the server's own
+      published keys, the key in this file wins and the server's key with that
+      `kid` is not published for this namespace; the override is logged.
+      Every key in this file is published as a trusted signing key for this
+      namespace, so write access to the file is the authority to mint tokens
+      this origin accepts: keep it owned by the Pelican user and not
+      world-writable. The file is re-read at most once every few seconds, is
+      not read past 1 MiB, and if it is ever unreadable or unparsable the
+      last version that loaded successfully continues to be served.
 
     Example:
 
@@ -1089,6 +1111,7 @@ description: |+
             - actions: ["read"]
               prefix: /data/$GROUP
               groups: ["/physics"]
+          IssuerJwks: /etc/pelican/extra-keys/ns.jwks
     ```
 
   If Origin.StorageType == "s3", the following additional fields are available:
@@ -4305,6 +4328,16 @@ description: |+
   A filepath to a JWKS-formatted file containing pre-generated public keys. These keys will be
   appended to the public keys dynamically generated from the private keys in [Server.IssuerKeysDirectory](https://docs.pelicanplatform.org/parameters#IssuerKeysDirectory)
   and [Server.IssuerKey](https://docs.pelicanplatform.org/parameters#IssuerKey) (deprecated), to form the final exported public keys JWKS.
+
+  Private key material in this file is stripped before publication, and symmetric keys (`kty=oct`)
+  are rejected outright because they are shared secrets with no public half; a symmetric key here
+  will prevent the server from starting.
+
+  Every key in this file is published as a trusted signing key, so write access to the file is the
+  authority to mint tokens this server accepts: keep it owned by the Pelican user and not
+  world-writable. The file is re-read at most once every few seconds, is not read past 1 MiB, and
+  if it is ever unreadable or unparsable the last version that loaded successfully continues to be
+  served.
 type: filename
 default: none
 components: ["cache", "director", "origin", "registry"]
@@ -4369,6 +4402,17 @@ description: |+
   was failed.
 type: duration
 default: 10s
+components: ["cache", "origin"]
+---
+name: Server.RegistrationCompletionLinkFile
+description: |+
+  While any of this server's registrations at the federation registry is incomplete, the
+  "complete server registration" request link (carrying a fresh short-lived access token)
+  is re-written to this file on every registration completeness poll cycle and echoed to
+  the server's logs. The file is removed once no incomplete registration remains.
+  Set to an empty string to disable writing the file; the link is then only logged.
+type: filename
+default: ${ConfigBase}/server-registration-completion-link
 components: ["cache", "origin"]
 ---
 name: Server.UILoginRateLimit
@@ -4877,6 +4921,75 @@ type: bool
 default: false
 components: ["origin"]
 ---
+name: Issuer.DisableGroupAutoCreation
+description: |+
+  Disable recording a group in the internal database for every group
+  name observed from the provider named by `Issuer.GroupSource`
+  (e.g., the OIDC group claim, the group file, or GitHub organizations).
+
+  By default, the first time a user logs in asserting membership in a
+  group Pelican has no record of, Pelican creates one owned by the
+  built-in `admin` user and stamped with the source that asserted it.
+  The record exists so other users cannot create an overlapping group
+  within the database.
+
+  Membership of these records is cached locally; the asserting
+  provider is the source of truth for who belongs to them.
+
+  Set this to `true` only if you do not want Pelican writing groups it
+  did not create. With auto-creation disabled, these groups cannot be
+  named in a collection ACL.
+
+  This knob does not affect the group names listed in
+  `Server.AdminGroups`, `Server.UserAdminGroups`, or
+  `Server.CollectionAdminGroups`. Pelican always records them at
+  startup.
+type: bool
+default: false
+components: ["origin", "registry", "director", "cache"]
+---
+name: Issuer.AssertedGroupMembershipTTL
+description: |+
+  How long a group membership mirrored from `Issuer.GroupSource` may
+  still grant access after the last observation.
+
+  When group membership comes from an outside provider, Pelican caches
+  the information for authorization lookups (e.g., whether the owner of
+  a share still has access to the parent collection).
+
+  Past this window Pelican will no longer grant access based on the cached
+  information. Logging in refreshes the copy again.
+
+  Expiry governs *authorization*, not retention: a stale copy is kept so a
+  check that asks whether an account might hold a privilege (such as
+  determining whether a user could possibly be an administrator).
+
+  Only the `file` group source can be refreshed without the user
+  present, and Pelican re-reads it on `Issuer.GroupFileRefreshInterval`;
+  `oidc` and `github` memberships refresh only at login.
+
+  Set to 0 to disable mirrored memberships as an authorization input —
+  the copies are still recorded and shown in the UI but aren't used.
+type: duration
+default: 168h
+components: ["origin", "registry", "director", "cache"]
+---
+name: Issuer.GroupFileRefreshInterval
+description: |+
+  How often to re-read `Issuer.GroupFile` and refresh the group
+  memberships mirrored from it.
+
+  Unlike the `oidc` and `github` group sources, the group file is local
+  so Pelican can refresh it. That keeps mirrored memberships from this
+  source continuously fresh.
+
+  Only takes effect when `Issuer.GroupSource` is `file` and
+  `Issuer.GroupFile` is set. Set to 0 to disable the periodic refresh,
+  in which case file-derived memberships only refresh at login.
+type: duration
+default: 15m
+components: ["origin", "registry", "director", "cache"]
+---
 name: Issuer.GroupSource
 description: |+
   How the issuer should determine group information based on the authenticated identity.  Valid values are:
@@ -4908,6 +5021,8 @@ description: |+
   The location of a file containing group information.  The file should contain a single JSON object with
   keys corresponding to the "user" name and the value a list of strings that are interpreted as the user's
   groups.
+
+  Only consulted when `Issuer.GroupSource` is set to `file`.
 type: string
 default: none
 components: ["origin"]

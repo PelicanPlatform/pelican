@@ -94,7 +94,7 @@ ARG XROOTD_S3_HTTP_VER=0.6.9
 ARG XROOTD_S3_HTTP_RELEASE=
 # ARG XROOTD_S3_HTTP_RELEASE=".osg${OSG_SERIES}.${BASE_OS}"
 ARG XRDHTTP_PELICAN_SRC_BUILD=false
-ARG XRDHTTP_PELICAN_VER=0.0.11
+ARG XRDHTTP_PELICAN_VER=0.0.13
 ARG XRDHTTP_PELICAN_RELEASE=
 # ARG XRDHTTP_PELICAN_RELEASE="1.osg${OSG_SERIES}.${BASE_OS}"
 ARG XROOTD_MULTIUSER_SRC_BUILD=false
@@ -659,15 +659,25 @@ RUN --mount=type=cache,id=dnf-${TARGETPLATFORM},target=/var/cache/dnf,sharing=lo
   set -eux
   set -o pipefail
 
-  # Install packages for building Pelican.
-  # gcc is also needed to enable the Go race detector (-race flag).
-  dnf install -y gcc git make
+  # Install packages for building and testing Pelican.
+  # Go's race detector (-race) requires gcc.
+  # GitHub Actions's caching infrastructure uses zstd.
+  dnf install -y gcc git make zstd
 
-  # Install HTCondor for integration tests, but forcibly remove the
-  # Pelican packages that it pulls in so that there is zero chance tests
-  # are run using the wrong binary.
+  # Install HTCondor for integration tests, but forcibly remove any
+  # Pelican packages it pulls in so that there is zero chance tests are
+  # run using the wrong binary.
+  #
+  # Checked per package rather than removed blind: condor no longer
+  # depends on these, so `rpm -e` on the whole list aborts the build
+  # under `set -e` with "package pelican is not installed". Removal
+  # itself is still allowed to fail loudly.
   dnf install -y --enablerepo=${OSG_REPO} condor
-  rpm -e --nodeps pelican pelican-osdf-compat
+  for pkg in pelican pelican-osdf-compat; do
+    if rpm -q "${pkg}" >/dev/null 2>&1; then
+      rpm -e --nodeps "${pkg}"
+    fi
+  done
 
   # Add some normal user accounts for testing.
   # The inspiration for their names: https://en.wikipedia.org/wiki/Alice_and_Bob#Cast_of_characters.

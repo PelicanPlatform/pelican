@@ -692,6 +692,11 @@ const TransferViaInvite: React.FC<{ collectionID: string }> = ({
   );
 };
 
+// aclKey identifies one ACL row for React keys and in-flight tracking.
+// Built from the stored triple, which is the row's actual primary key.
+const aclKey = (acl: CollectionAcl) =>
+  `${acl.subjectType}:${acl.subjectId}:${acl.role}`;
+
 const AclSection: React.FC<{
   collectionID: string;
   acls: CollectionAcl[];
@@ -710,15 +715,13 @@ const AclSection: React.FC<{
   const [granting, setGranting] = useState(false);
   const [revokingKey, setRevokingKey] = useState<string | null>(null);
 
-  // Index visible groups by name so we can resolve an ACL row's
-  // groupId (a name, per GrantCollectionAcl in database/collection.go)
-  // back to a Group record and link to its management page. Mirrors
-  // the same lookup the owned-collections page does — see
-  // app/origin/owned/page.tsx.
-  const groupByName = React.useMemo(() => {
-    const m = new Map<string, Group>();
-    for (const g of groups) m.set(g.name, g);
-    return m;
+  // ACL rows carry the target's ID. This index only answers "can the
+  // caller open this group's page", so we don't mint a link that would
+  // land them on a permission-denied screen.
+  const visibleGroupIds = React.useMemo(() => {
+    const ids = new Set<string>();
+    for (const g of groups) ids.add(g.id);
+    return ids;
   }, [groups]);
 
   // pickerOptions injects the all-authenticated-users virtual group at
@@ -764,15 +767,20 @@ const AclSection: React.FC<{
   };
 
   const revoke = async (acl: CollectionAcl) => {
-    const key = `${acl.groupId}:${acl.role}`;
+    const key = aclKey(acl);
     setRevokingKey(key);
     const ok = await alertOnError(
       () =>
+        // Revoke by the stored (subjectType, subjectId) pair rather
+        // than by name: a row whose group or user has been deleted has
+        // no name left to resolve, and it is exactly the row an admin
+        // needs to be able to clear.
         CollectionService.revokeAcl(collectionID, {
-          groupId: acl.groupId,
+          subjectType: acl.subjectType,
+          subjectId: acl.subjectId,
           role: acl.role,
         }).then(() => true),
-      `Failed to revoke ${acl.role} from "${acl.groupId}"`,
+      `Failed to revoke ${acl.role} from "${labelForACLTarget(acl)}"`,
       dispatch
     );
     setRevokingKey(null);
@@ -798,7 +806,7 @@ const AclSection: React.FC<{
       ) : (
         <Stack divider={<Divider />} mb={2}>
           {acls.map((acl) => {
-            const key = `${acl.groupId}:${acl.role}`;
+            const key = aclKey(acl);
             const legacy = acl.role === 'owner';
             return (
               <Box key={key} display='flex' alignItems='center' gap={2} py={1}>
@@ -816,31 +824,31 @@ const AclSection: React.FC<{
                   sx={{ textTransform: 'capitalize' }}
                 />
                 {(() => {
-                  // Render the virtual all-authenticated-users
-                  // sentinel as a friendly label rather than the raw
-                  // `@authenticated` wire value, and skip the link to
-                  // /groups/view (no real group to navigate to).
-                  if (acl.groupId === ALL_AUTHENTICATED_USERS_ACL_GROUP) {
+                  // Only a row that names a real group gets a link to
+                  // /groups/view. The all-authenticated sentinel and
+                  // personal grants have nothing to navigate to, and a
+                  // group outside the caller's visibility would 403.
+                  const label = labelForACLTarget(acl);
+                  if (acl.subjectType !== 'group') {
                     return (
                       <Typography sx={{ fontStyle: 'italic' }}>
-                        {labelForACLTarget(acl.groupId)}
+                        {label}
                       </Typography>
                     );
                   }
-                  const grp = groupByName.get(acl.groupId);
-                  return grp ? (
+                  return visibleGroupIds.has(acl.subjectId) ? (
                     <Link
-                      href={`/groups/view/?id=${encodeURIComponent(grp.id)}`}
+                      href={`/groups/view/?id=${encodeURIComponent(acl.subjectId)}`}
                       style={{
                         fontFamily: 'monospace',
                         textDecoration: 'underline',
                       }}
                     >
-                      {acl.groupId}
+                      {label}
                     </Link>
                   ) : (
                     <Typography sx={{ fontFamily: 'monospace' }}>
-                      {acl.groupId}
+                      {label}
                     </Typography>
                   );
                 })()}
@@ -855,7 +863,7 @@ const AclSection: React.FC<{
                     color='warning'
                     onClick={() => revoke(acl)}
                     disabled={revokingKey === key}
-                    aria-label={`Revoke ${acl.role} from ${acl.groupId}`}
+                    aria-label={`Revoke ${acl.role} from ${labelForACLTarget(acl)}`}
                   >
                     <DeleteIcon fontSize='small' />
                   </IconButton>

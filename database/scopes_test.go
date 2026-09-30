@@ -66,8 +66,11 @@ func seedScopeFixtures(t *testing.T, db *gorm.DB) scopeFixtures {
 		require.NoError(t, db.Create(&users[i]).Error)
 	}
 
-	ops := Group{ID: "g-ops", Name: "ops", CreatedBy: "u-alice", OwnerID: "u-alice"}
-	other := Group{ID: "g-other", Name: "other", CreatedBy: "u-alice", OwnerID: "u-alice"}
+	// Source matters: a provider-asserted name only resolves to a group
+	// the provider is allowed to speak for. A `pelican` group's
+	// membership is this server's own, so an assertion cannot claim it.
+	ops := Group{ID: "g-ops", Name: "ops", CreatedBy: "u-alice", OwnerID: "u-alice", Source: GroupSourceOIDC}
+	other := Group{ID: "g-other", Name: "other", CreatedBy: "u-alice", OwnerID: "u-alice", Source: GroupSourceOIDC}
 	require.NoError(t, db.Create(&ops).Error)
 	require.NoError(t, db.Create(&other).Error)
 

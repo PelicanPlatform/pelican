@@ -284,14 +284,20 @@ func SetParameterDefaults(v *viper.Viper, isRoot bool, isOSDF bool) {
 	}
 	// Issuer.AccessTokenLifetime
 	v.SetDefault(param.Issuer_AccessTokenLifetime.GetName(), "1h")
+	// Issuer.AssertedGroupMembershipTTL
+	v.SetDefault(param.Issuer_AssertedGroupMembershipTTL.GetName(), "168h")
 	// Issuer.AuthenticationSource
 	v.SetDefault(param.Issuer_AuthenticationSource.GetName(), "OIDC")
 	// Issuer.AuthorizationCodeLifetime
 	v.SetDefault(param.Issuer_AuthorizationCodeLifetime.GetName(), "10m")
+	// Issuer.DisableGroupAutoCreation
+	v.SetDefault(param.Issuer_DisableGroupAutoCreation.GetName(), false)
 	// Issuer.DynamicClientStaleTimeout
 	v.SetDefault(param.Issuer_DynamicClientStaleTimeout.GetName(), "336h")
 	// Issuer.DynamicClientUnusedTimeout
 	v.SetDefault(param.Issuer_DynamicClientUnusedTimeout.GetName(), "1h")
+	// Issuer.GroupFileRefreshInterval
+	v.SetDefault(param.Issuer_GroupFileRefreshInterval.GetName(), "15m")
 	// Issuer.IDTokenLifetime
 	v.SetDefault(param.Issuer_IDTokenLifetime.GetName(), "1h")
 	// Issuer.OIDCGroupClaim
@@ -506,16 +512,6 @@ func SetParameterDefaults(v *viper.Viper, isRoot bool, isOSDF bool) {
 	}
 	// Origin.ConcurrencyDegradedThreshold
 	v.SetDefault(param.Origin_ConcurrencyDegradedThreshold.GetName(), 90)
-	// Origin.DbLocation
-	if isRoot {
-		v.SetDefault(param.Origin_DbLocation.GetName(), "/var/lib/pelican/origin.sqlite")
-	} else {
-		{
-			val := "${ConfigBase}/origin.sqlite"
-			val = strings.ReplaceAll(val, "${ConfigBase}", v.GetString(param.ConfigBase.GetName()))
-			v.SetDefault(param.Origin_DbLocation.GetName(), val)
-		}
-	}
 	// Origin.DefaultChecksumTypes
 	v.SetDefault(param.Origin_DefaultChecksumTypes.GetName(), []string{"crc32c"})
 	// Origin.DirectorTest
@@ -813,6 +809,12 @@ func SetParameterDefaults(v *viper.Viper, isRoot bool, isOSDF bool) {
 	v.SetDefault(param.Server_HealthMonitoringPublic.GetName(), false)
 	// Server.NewUserDefaultScopes
 	v.SetDefault(param.Server_NewUserDefaultScopes.GetName(), []string{"web_ui.access"})
+	// Server.RegistrationCompletionLinkFile
+	{
+		val := "${ConfigBase}/server-registration-completion-link"
+		val = strings.ReplaceAll(val, "${ConfigBase}", v.GetString(param.ConfigBase.GetName()))
+		v.SetDefault(param.Server_RegistrationCompletionLinkFile.GetName(), val)
+	}
 	// Server.RegistrationRetryInterval
 	v.SetDefault(param.Server_RegistrationRetryInterval.GetName(), "10s")
 	// Server.SSRFProtection.Disabled
@@ -1171,18 +1173,6 @@ func ApplyDerivedDefaults(v *viper.Viper, isRoot bool, isOSDF bool) {
 			v.SetDefault(param.OIDC_ClientSecretFile.GetName(), val)
 		}
 	}
-	// Origin.DbLocation
-	if isDefaultSource(param.Origin_DbLocation.GetName()) {
-		if isRoot {
-			v.SetDefault(param.Origin_DbLocation.GetName(), "/var/lib/pelican/origin.sqlite")
-		} else {
-			{
-				val := "${ConfigBase}/origin.sqlite"
-				val = strings.ReplaceAll(val, "${ConfigBase}", v.GetString(param.ConfigBase.GetName()))
-				v.SetDefault(param.Origin_DbLocation.GetName(), val)
-			}
-		}
-	}
 	// Origin.FedTokenLocation
 	if isDefaultSource(param.Origin_FedTokenLocation.GetName()) {
 		{
@@ -1238,6 +1228,14 @@ func ApplyDerivedDefaults(v *viper.Viper, isRoot bool, isOSDF bool) {
 				val = strings.ReplaceAll(val, "${ConfigBase}", v.GetString(param.ConfigBase.GetName()))
 				v.SetDefault(param.Server_DbLocation.GetName(), val)
 			}
+		}
+	}
+	// Server.RegistrationCompletionLinkFile
+	if isDefaultSource(param.Server_RegistrationCompletionLinkFile.GetName()) {
+		{
+			val := "${ConfigBase}/server-registration-completion-link"
+			val = strings.ReplaceAll(val, "${ConfigBase}", v.GetString(param.ConfigBase.GetName()))
+			v.SetDefault(param.Server_RegistrationCompletionLinkFile.GetName(), val)
 		}
 	}
 	// Server.SessionSecretFile

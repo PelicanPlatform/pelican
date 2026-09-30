@@ -63,6 +63,7 @@ import {
   Me,
   MeService,
 } from '@/helpers/api';
+import { labelForACLTarget } from '@/helpers/api/Collection/types';
 // Use the API package's Group type (the one GroupService.getAll
 // returns), not the global types.ts copy. The two have drifted in
 // minor ways (member-row shape) and useSWR's generic inference picks
@@ -104,18 +105,13 @@ const OwnedCollectionsHome: React.FC = () => {
   );
 
   // Filter to collections this user owns. ownerId (the User.ID slug) is
-  // the authoritative ownership handle: on an ownership transfer the
-  // backend rewrites ownerId but deliberately leaves the legacy
-  // Collection.owner username field untouched (it's an audit trail), so
-  // matching on username would hide every collection this user received
-  // via transfer or an ownership invite. Match ownerId first, and fall
-  // back to the username only for pre-migration rows that never had an
-  // ownerId populated.
+  // the only ownership handle — the `owner` field on the response is
+  // just that user's current username, resolved server-side for
+  // display, so matching on it would be both redundant and wrong for a
+  // row whose owner has been renamed.
   const ownedCollections = useMemo(() => {
     if (!me || !allCollections) return undefined;
-    return allCollections.filter((c) =>
-      c.ownerId ? c.ownerId === me.id : c.owner === me.username
-    );
+    return allCollections.filter((c) => !!c.ownerId && c.ownerId === me.id);
   }, [me, allCollections]);
 
   if (meLoading || collectionsLoading || groupsLoading || !me) {
@@ -276,10 +272,9 @@ const CollectionCard: React.FC<{
   );
 };
 
-// Render ACLs grouped by role. Each row resolves the ACL's groupId
-// (which is a group *name*) against the visible groups list; when the
-// group is in scope we link to its management page, otherwise we fall
-// back to the bare name so the row still has a label.
+// Render ACLs grouped by role. Each row carries the target's stored ID;
+// when it names a group the caller can see we link to its management
+// page, otherwise we just label the row.
 const AclList: React.FC<{ acls: CollectionAcl[]; groups: Group[] }> = ({
   acls,
   groups,
@@ -302,12 +297,11 @@ const AclList: React.FC<{ acls: CollectionAcl[]; groups: Group[] }> = ({
     byRole.get(acl.role)!.push(acl);
   }
   for (const r of byRole.values())
-    r.sort((a, b) => a.groupId.localeCompare(b.groupId));
+    r.sort((a, b) => labelForACLTarget(a).localeCompare(labelForACLTarget(b)));
 
-  // Index groups by name for the slug lookup. Group.name is what
-  // ACLs reference (per GrantCollectionAcl in database/collection.go).
-  const byName = new Map<string, Group>();
-  for (const g of groups) byName.set(g.name, g);
+  // Index the visible groups by ID — ACL rows reference group IDs.
+  const byId = new Map<string, Group>();
+  for (const g of groups) byId.set(g.id, g);
 
   return (
     <Stack spacing={1.5}>
@@ -335,11 +329,14 @@ const AclList: React.FC<{ acls: CollectionAcl[]; groups: Group[] }> = ({
             </Box>
             <Stack spacing={0.5} sx={{ pl: 1 }}>
               {rows.map((acl) => {
-                const grp = byName.get(acl.groupId);
+                const grp =
+                  acl.subjectType === 'group'
+                    ? byId.get(acl.subjectId)
+                    : undefined;
                 const memberCount = grp?.members?.length;
                 return (
                   <Box
-                    key={`${acl.role}:${acl.groupId}`}
+                    key={`${acl.role}:${acl.subjectType}:${acl.subjectId}`}
                     display='flex'
                     alignItems='center'
                     gap={1}
@@ -349,7 +346,7 @@ const AclList: React.FC<{ acls: CollectionAcl[]; groups: Group[] }> = ({
                       fontFamily='monospace'
                       sx={{ wordBreak: 'break-all' }}
                     >
-                      {acl.groupId}
+                      {labelForACLTarget(acl)}
                     </Typography>
                     {typeof memberCount === 'number' && (
                       <Chip
@@ -367,7 +364,9 @@ const AclList: React.FC<{ acls: CollectionAcl[]; groups: Group[] }> = ({
                         </Link>
                       ) : (
                         <Typography variant='caption' color='text.disabled'>
-                          (group not visible)
+                          {acl.subjectType === 'group'
+                            ? '(group not visible)'
+                            : ''}
                         </Typography>
                       )}
                     </Box>

@@ -24,6 +24,7 @@ import React, { useContext, useMemo } from 'react';
 import {
   Card,
   CreateNamespaceCard,
+  IncompleteCard,
   NamespaceCardList,
   PendingCard,
 } from '@/components';
@@ -33,7 +34,9 @@ import { getUser } from '@/helpers/login';
 import { Add } from '@mui/icons-material';
 import useSWR from 'swr';
 import { CardProps } from '@/components/Namespace/Card';
+import { userOwnsNamespace } from '@/components/Namespace';
 import { PendingCardProps } from '@/components/Namespace/PendingCard';
+import { IncompleteCardProps } from '@/components/Namespace/IncompleteCard';
 import { AlertDispatchContext } from '@/components/AlertProvider';
 import { alertOnError } from '@/helpers/util';
 import { getExtendedNamespaces } from '@/helpers/get';
@@ -66,8 +69,14 @@ export default function Home() {
     return data?.filter(
       ({ namespace }) =>
         namespace.admin_metadata.status === 'Pending' &&
-        (user?.user == namespace.admin_metadata.user_id ||
-          user?.role == 'admin')
+        (userOwnsNamespace(user, namespace) || user?.role == 'admin')
+    );
+  }, [data, user]);
+  const incompleteData = useMemo(() => {
+    return data?.filter(
+      ({ namespace }) =>
+        namespace.admin_metadata.status === 'Incomplete' &&
+        (userOwnsNamespace(user, namespace) || user?.role == 'admin')
     );
   }, [data, user]);
   const approvedOriginData = useMemo(
@@ -133,6 +142,40 @@ export default function Home() {
                 <NamespaceCardList<PendingCardProps>
                   data={pendingData}
                   Card={PendingCard}
+                  cardProps={{
+                    authenticated: user,
+                    onUpdate: () => mutateNamespaces(),
+                  }}
+                />
+              </Paper>
+            </Grid>
+          )}
+
+          {incompleteData && incompleteData.length > 0 && (
+            <Grid size={12} mt={pendingData && pendingData.length > 0 ? 2 : 0}>
+              <Paper
+                sx={{
+                  p: 2,
+                  borderColor: 'warning.main',
+                  borderWidth: '3px',
+                  borderType: 'solid',
+                }}
+                elevation={3}
+              >
+                <Typography variant={'h5'} pb={2}>
+                  Incomplete Registrations
+                </Typography>
+                <Typography variant={'subtitle1'} pb={2}>
+                  {user !== undefined &&
+                    user?.role == 'admin' &&
+                    'Awaiting completion by their creators before they can be reviewed by you.'}
+                  {user !== undefined &&
+                    user?.role != 'admin' &&
+                    'Awaiting completion by their creators.'}
+                </Typography>
+                <NamespaceCardList<IncompleteCardProps>
+                  data={incompleteData}
+                  Card={IncompleteCard}
                   cardProps={{
                     authenticated: user,
                     onUpdate: () => mutateNamespaces(),

@@ -4,6 +4,7 @@ import { fetchApi } from '@/helpers/api';
 import {
   CollectionAcl,
   CollectionAclGrant,
+  CollectionAclGrantBySubject,
   CollectionPost,
   CollectionSummary,
 } from './types';
@@ -89,12 +90,12 @@ const CollectionService = {
     return await r.json();
   },
 
-  // Grant a single (group, role) ACL on a collection. The backend
-  // accepts either group slug OR group name and canonicalises to the
-  // name on write — pass either, the resulting row will store the name.
+  // Grant a single (group, role) ACL on a collection. `groupId` is a
+  // NAME despite the field name; a group ID is not accepted there. To
+  // address a principal by ID, send subjectType + subjectId instead.
   grantAcl: async (
     collectionId: string,
-    grant: CollectionAclGrant
+    grant: CollectionAclGrant | CollectionAclGrantBySubject
   ): Promise<void> => {
     await fetchApi(
       async () =>
@@ -177,7 +178,12 @@ const CollectionService = {
   // may carry both `read` and `write` rows.
   revokeAcl: async (
     collectionId: string,
-    revoke: { groupId: string; role: string }
+    // Either name the target (`groupId`) or address the stored row
+    // directly (`subjectType` + `subjectId`). The latter is the only
+    // way to clear a grant whose group or user has been deleted.
+    revoke:
+      | { groupId: string; role: string }
+      | { subjectType: string; subjectId: string; role: string }
   ): Promise<void> => {
     await fetchApi(
       async () =>
