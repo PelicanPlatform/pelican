@@ -30,6 +30,9 @@ jobs:
     runs-on: ubuntu-latest
     container:
       image: ${{ inputs.image }}
+      volumes:
+        # Expose directories on the host that we'd like to empty.
+        - /usr/local/lib/android:/host/usr/local/lib/android
     strategy:
       fail-fast: false
       matrix:
@@ -41,6 +44,24 @@ jobs:
             coverprofile: coverage-server.out
             tags: server
     steps:
+
+      # As of 2026-01-26, GitHub documents the Ubuntu runners as having
+      # only 14 GB of storage. In practice, that is not always sufficient
+      # to run the full test suite.
+
+      - name: Free disk space
+        run: |
+          echo "::group::Before"
+          df -h
+          echo "::endgroup::"
+
+          # A mount point cannot be removed, only emptied.
+          find /host/usr/local/lib/android -mindepth 1 -maxdepth 1 -exec rm -rf {} +
+
+          echo "::group::After"
+          df -h
+          echo "::endgroup::"
+
       - name: Checkout repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
 
