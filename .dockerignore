@@ -4,10 +4,10 @@
 
 # Exclude build outputs and caches.
 # These can get quite large and should be built from scratch, anyway.
+**/.pnpm-store/
 /dist/
 /web_ui/frontend/.next/
 /web_ui/frontend/node_modules/
-**/.pnpm-store/
 /web_ui/frontend/out/*
 !/web_ui/frontend/out/placeholder
 
