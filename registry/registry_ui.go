@@ -720,7 +720,7 @@ func createUpdateNamespace(ctx *gin.Context, isUpdate bool) {
 		}
 
 		// If the user has privilege to update, go ahead
-		if err := updateRegistration(&ns); err != nil {
+		if err := updateRegistration(&ns, ownerEditOfApproved); err != nil {
 			log.Errorf("Failed to update namespace with id %d. %v", ns.ID, err)
 			ctx.JSON(http.StatusInternalServerError, server_structs.SimpleApiResp{
 				Status: server_structs.RespFailed,
