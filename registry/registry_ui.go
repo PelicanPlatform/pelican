@@ -358,7 +358,6 @@ func resolveRegistrationOwnership(ctx *gin.Context, id int, userId string, isAdm
 // applyOwnerEdits restricts owner-editable fields of an approved registration
 func applyOwnerEdits(stored server_structs.Registration, edited server_structs.Registration) server_structs.Registration {
 	stored.AdminMetadata.Description = edited.AdminMetadata.Description
-	stored.AdminMetadata.SiteName = edited.AdminMetadata.SiteName
 	stored.AdminMetadata.Institution = edited.AdminMetadata.Institution
 	stored.AdminMetadata.SecurityContactUserID = edited.AdminMetadata.SecurityContactUserID
 	return stored
