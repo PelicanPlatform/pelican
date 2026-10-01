@@ -33,7 +33,6 @@ interface FormProps {
 // the administrator's approval keeps meaning what was reviewed.
 const OWNER_EDITABLE_APPROVED_FIELDS = [
   'admin_metadata.description',
-  'admin_metadata.site_name',
   'admin_metadata.institution',
   'admin_metadata.security_contact_user_id',
 ];
@@ -134,9 +133,9 @@ const Form = ({ namespace, onSubmit }: FormProps) => {
       )}
       {restrictedEdit && (
         <Alert severity={'info'} sx={{ mb: 2 }}>
-          This registration is approved. You can update its description, site
-          name, institution, and security contact; the remaining fields are
-          locked and can only be changed by a registry administrator.
+          This registration is approved. You can update its description,
+          institution, and security contact; the remaining fields are locked and
+          can only be changed by a registry administrator.
         </Alert>
       )}
       {fields &&

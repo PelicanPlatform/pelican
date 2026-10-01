@@ -1364,11 +1364,11 @@ func TestUpdateNamespaceHandler(t *testing.T) {
 		require.NoError(t, err)
 		// The allowed edits went through
 		assert.Equal(t, "newDescription", got.AdminMetadata.Description)
-		assert.Equal(t, "new-site-name", got.AdminMetadata.SiteName)
 		assert.Equal(t, "1001", got.AdminMetadata.Institution)
 		assert.Equal(t, "u-new-contact", got.AdminMetadata.SecurityContactUserID)
 		// The pinned fields kept their stored values
 		assert.Equal(t, "/foo", got.Prefix)
+		assert.Equal(t, "test-site-name", got.AdminMetadata.SiteName)
 		assert.Equal(t, pubKeyStr, got.Pubkey)
 		assert.Equal(t, map[string]interface{}{"reviewed_note": "set-by-admin"}, got.CustomFields)
 		assert.Equal(t, "u-mock-id", got.AdminMetadata.UserID)
