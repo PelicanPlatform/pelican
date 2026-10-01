@@ -147,11 +147,12 @@ const Form = ({ namespace, onSubmit }: FormProps) => {
                   onChange(field.name, value, setFormNamespace)
                 }
                 value={getValue(formNamespace, calculateKeys(field.name))}
+                {...field}
+                // Last, so nothing in the field definition can re-enable a locked field
                 disabled={
                   restrictedEdit &&
                   !OWNER_EDITABLE_APPROVED_FIELDS.includes(field.name)
                 }
-                {...field}
               />
             </Box>
           );
