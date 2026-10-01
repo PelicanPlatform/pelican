@@ -355,12 +355,19 @@ func resolveRegistrationOwnership(ctx *gin.Context, id int, userId string, isAdm
 	return belongsTo, true
 }
 
+// applyOwnerEdits restricts owner-editable fields of an approved registration
+func applyOwnerEdits(stored server_structs.Registration, edited server_structs.Registration) server_structs.Registration {
+	stored.AdminMetadata.Description = edited.AdminMetadata.Description
+	stored.AdminMetadata.SiteName = edited.AdminMetadata.SiteName
+	stored.AdminMetadata.Institution = edited.AdminMetadata.Institution
+	stored.AdminMetadata.SecurityContactUserID = edited.AdminMetadata.SecurityContactUserID
+	return stored
+}
+
 // Create a new namespace registration or update existing namespace registration.
 //
 // For update, an admin can change any field of any registration. The owner of an approved
-// registration can change only its descriptive fields (description, site name, institution,
-// security contact); the prefix, public key, custom fields, and ownership stay pinned to
-// their stored values.
+// registration can change specific fields (see applyOwnerEdits).
 //
 // One caveat in updating is that if the namespace to update was a legacy registration, i.e. It doesn't have
 // AdminMetaData populated, an update __will__ populate the AdminMetaData field and update
@@ -437,9 +444,7 @@ func createUpdateNamespace(ctx *gin.Context, isUpdate bool) {
 	ownerEditOfApproved := isUpdate && !isAdmin &&
 		existingNs.AdminMetadata.Status == server_structs.RegApproved
 	if ownerEditOfApproved {
-		ns.Prefix = existingNs.Prefix
-		ns.Pubkey = existingNs.Pubkey
-		ns.CustomFields = existingNs.CustomFields
+		ns = applyOwnerEdits(*existingNs, ns)
 	}
 
 	// Check that Prefix is a valid prefix
