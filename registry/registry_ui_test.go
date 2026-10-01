@@ -1375,15 +1375,16 @@ func TestUpdateNamespaceHandler(t *testing.T) {
 		assert.Equal(t, server_structs.RegApproved, got.AdminMetadata.Status)
 	})
 
-	t.Run("reg-user-edit-of-approved-ignores-required-custom-field", func(t *testing.T) {
+	t.Run("reg-user-edit-of-approved-still-validates-custom-fields", func(t *testing.T) {
 		resetMockRegistryDB(t)
 		mockInsts := []registrationFieldOption{{ID: "1000"}}
 		require.NoError(t, param.Registry_Institutions.Set(mockInsts))
 		// A custom field made required AFTER the registration was approved:
-		// the stored row does not have it, and the owner's form does not let
-		// them add it because custom fields are locked for an approved edit
+		// the stored row does not have it. Custom fields are pinned to the
+		// stored values for an owner's edit, but they are still validated, so
+		// the edit is rejected until an administrator fills the field in.
 		customFieldsConf := []map[string]interface{}{
-			{"name": "reviewed_note", "type": "string", "required": true},
+			{"name": "example", "type": "string", "required": true},
 		}
 		require.NoError(t, param.Registry_CustomRegistrationFields.Set(customFieldsConf))
 		origRegFields := registrationFields
@@ -1422,30 +1423,26 @@ func TestUpdateNamespaceHandler(t *testing.T) {
 			return w.Result().StatusCode, string(body)
 		}
 
-		// Changing a descriptive field must not be rejected over the missing
-		// required custom field the owner cannot set
+		// The stored custom fields fail validation, so a descriptive edit is rejected
 		updatedNs := mockNs
 		updatedNs.AdminMetadata.Description = "newDescription"
 		code, body := putAsOwner(updatedNs)
-		assert.Equal(t, http.StatusOK, code, body)
+		assert.Equal(t, http.StatusBadRequest, code, body)
+		assert.Contains(t, body, `\"Example\" is required`)
 
+		// Supplying the field in the request does not get around it either:
+		// custom fields stay pinned to the stored (empty) value
+		updatedNs.CustomFields = map[string]interface{}{"example": "supplied-by-owner"}
+		code, body = putAsOwner(updatedNs)
+		assert.Equal(t, http.StatusBadRequest, code, body)
+		assert.Contains(t, body, `\"Example\" is required`)
+
+		// Nothing was written
 		got, err := getRegistrationById(id)
 		require.NoError(t, err)
-		assert.Equal(t, "newDescription", got.AdminMetadata.Description)
+		assert.Equal(t, "oldDescription", got.AdminMetadata.Description)
 		assert.Empty(t, got.CustomFields)
 		assert.Equal(t, server_structs.RegApproved, got.AdminMetadata.Status)
-
-		// Supplying the field in the request does not smuggle it in either:
-		// custom fields stay pinned to the stored (empty) value
-		updatedNs.CustomFields = map[string]interface{}{"reviewed_note": "supplied-by-owner"}
-		updatedNs.AdminMetadata.Description = "newerDescription"
-		code, body = putAsOwner(updatedNs)
-		assert.Equal(t, http.StatusOK, code, body)
-
-		got, err = getRegistrationById(id)
-		require.NoError(t, err)
-		assert.Equal(t, "newerDescription", got.AdminMetadata.Description)
-		assert.Empty(t, got.CustomFields)
 	})
 
 	t.Run("non-owner-with-key-token-cant-change-after-approv", func(t *testing.T) {

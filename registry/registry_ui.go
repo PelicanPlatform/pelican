@@ -526,24 +526,17 @@ func createUpdateNamespace(ctx *gin.Context, isUpdate bool) {
 
 	formatCustomFields(ns.CustomFields)
 
-	// The custom fields of an owner's edit of an approved registration are
-	// pinned to the stored values, which were validated when they were
-	// written and cannot change in this request, so they are not validated
-	// again: a custom field that became required after the approval must not
-	// lock the owner out of the fields they are allowed to change.
-	if !ownerEditOfApproved {
-		if validCF, err := validateCustomFields(ns.CustomFields); !validCF {
-			if !validCF && err != nil {
-				ctx.JSON(http.StatusBadRequest, server_structs.SimpleApiResp{
-					Status: server_structs.RespFailed,
-					Msg:    fmt.Sprintf("Validation failed: %v", err)})
-				return
-			} else if !validCF {
-				ctx.JSON(http.StatusBadRequest, server_structs.SimpleApiResp{
-					Status: server_structs.RespFailed,
-					Msg:    "Invalid custom fields without a validation error returned"})
-				return
-			}
+	if validCF, err := validateCustomFields(ns.CustomFields); !validCF {
+		if !validCF && err != nil {
+			ctx.JSON(http.StatusBadRequest, server_structs.SimpleApiResp{
+				Status: server_structs.RespFailed,
+				Msg:    fmt.Sprintf("Validation failed: %v", err)})
+			return
+		} else if !validCF {
+			ctx.JSON(http.StatusBadRequest, server_structs.SimpleApiResp{
+				Status: server_structs.RespFailed,
+				Msg:    "Invalid custom fields without a validation error returned"})
+			return
 		}
 	}
 
