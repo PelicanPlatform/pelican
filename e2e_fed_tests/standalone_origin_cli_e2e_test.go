@@ -41,6 +41,7 @@ import (
 	"gopkg.in/yaml.v3"
 
 	"github.com/pelicanplatform/pelican/param"
+	"github.com/pelicanplatform/pelican/test_utils"
 )
 
 // This file is the binary-vs-binary counterpart to cmd/origin_standalone_test.go.
@@ -48,7 +49,7 @@ import (
 // The in-process test proves the standalone origin's *handlers* behave; it does
 // so with the origin's own config, key material, and client library loaded into
 // the test process.  That arrangement cannot detect the failures that matter
-// most to an operator who types `pelican origin serve`: config that is only
+// most to an operator who types `pelican-server origin serve`: config that is only
 // reachable through the parameter API, key material the client can only get at
 // through a file, and federation discovery that would silently work because the
 // test process already knew the answer.
@@ -79,7 +80,7 @@ func pelicanEnv(extra ...string) []string {
 	return append(env, extra...)
 }
 
-// standaloneOriginProcess is a running `pelican origin serve` child.
+// standaloneOriginProcess is a running `pelican-server origin serve` child.
 type standaloneOriginProcess struct {
 	webUrl        string
 	storageDir    string
@@ -94,14 +95,14 @@ type standaloneOriginProcess struct {
 }
 
 // startStandaloneOrigin writes a config file that describes a standalone origin
-// -- and nothing else -- then launches the pelican binary against it and waits
-// for it to serve.
+// -- and nothing else -- then launches the pelican-server binary against it
+// and waits for it to serve.
 //
 // The config deliberately omits Federation.DiscoveryUrl.  A federated origin
 // cannot start without one (the negative control at the bottom of this file
 // demonstrates that with the very same config file), so the origin reaching a
 // healthy state is itself the assertion that no federation touchpoint ran.
-func startStandaloneOrigin(t *testing.T, ctx context.Context, cliPath string) *standaloneOriginProcess {
+func startStandaloneOrigin(t *testing.T, ctx context.Context, serverPath string) *standaloneOriginProcess {
 	t.Helper()
 
 	root := t.TempDir()
@@ -117,7 +118,7 @@ func startStandaloneOrigin(t *testing.T, ctx context.Context, cliPath string) *s
 
 	var output bytes.Buffer
 	var outputMu sync.Mutex
-	cmd := exec.CommandContext(ctx, cliPath, "origin", "serve", "--config", configPath)
+	cmd := exec.CommandContext(ctx, serverPath, "origin", "serve", "--config", configPath)
 	cmd.Env = pelicanEnv()
 	cmd.Stdout = &lockedWriter{w: &output, mu: &outputMu}
 	cmd.Stderr = cmd.Stdout
@@ -357,12 +358,13 @@ func createToken(t *testing.T, ctx context.Context, cliPath, clientConfigDir, to
 // process and drives it entirely with the pelican client binary run as further
 // OS processes.
 func TestStandaloneOriginCliEndToEnd(t *testing.T) {
-	cliPath := getPelicanBinary(t)
+	serverPath := test_utils.GetPelicanServerBinary(t)
+	cliPath := test_utils.GetPelicanBinary(t)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	t.Cleanup(cancel)
 
-	origin := startStandaloneOrigin(t, ctx, cliPath)
+	origin := startStandaloneOrigin(t, ctx, serverPath)
 	clientConfigDir := t.TempDir()
 	tokenDir := t.TempDir()
 
@@ -567,7 +569,7 @@ func TestStandaloneOriginCliEndToEnd(t *testing.T) {
 // would be consistent with an origin that tolerates a missing federation for
 // reasons having nothing to do with the feature under test.
 func TestStandaloneOriginCliFederatedControl(t *testing.T) {
-	cliPath := getPelicanBinary(t)
+	serverPath := test_utils.GetPelicanServerBinary(t)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	t.Cleanup(cancel)
@@ -582,7 +584,7 @@ func TestStandaloneOriginCliFederatedControl(t *testing.T) {
 	}
 	configPath := writeStandaloneConfig(t, configDir, runtimeDir, storageDir, issuerKeysDir, false)
 
-	cmd := exec.CommandContext(ctx, cliPath, "origin", "serve", "--config", configPath)
+	cmd := exec.CommandContext(ctx, serverPath, "origin", "serve", "--config", configPath)
 	cmd.Env = pelicanEnv()
 
 	var output bytes.Buffer

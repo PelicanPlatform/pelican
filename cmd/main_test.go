@@ -25,7 +25,6 @@ import (
 	"io"
 	"os"
 	"os/exec"
-	"path/filepath"
 	"runtime"
 	"strings"
 	"sync"
@@ -37,69 +36,13 @@ import (
 
 	"github.com/pelicanplatform/pelican/cmd/config_printer"
 	"github.com/pelicanplatform/pelican/config"
+	"github.com/pelicanplatform/pelican/test_utils"
 )
-
-var (
-	// testPelicanBinary holds the path to the built pelican binary for tests
-	testPelicanBinary string
-	// testTempDir holds the temp directory for the test binary
-	testTempDir string
-	// buildOnce ensures we only build the binary once across all tests
-	buildOnce sync.Once
-	// buildErr stores any error from building the binary
-	buildErr error
-)
-
-// getPelicanBinary builds the pelican binary once and returns its path
-func getPelicanBinary(t *testing.T) string {
-	buildOnce.Do(func() {
-		binaryName := "pelican"
-		if runtime.GOOS == "windows" {
-			binaryName = "pelican.exe"
-		}
-		testPelicanBinary = filepath.Join(testTempDir, binaryName)
-
-		// On Windows CI, build tags are restricted to "client" so we build
-		// the child binary with matching tags.  A client-only build covers
-		// all of the alias dispatch paths tested here (stashcp, *_plugin)
-		// and completes much faster than a full client+server build, keeping
-		// the test well within the 15-minute CI timeout.
-		buildTags := "client,server"
-		if runtime.GOOS == "windows" {
-			buildTags = "client"
-		}
-		buildCmd := exec.Command("go", "build", "-tags", buildTags, "-buildvcs=false", "-o", testPelicanBinary, ".")
-		buildOutput, err := buildCmd.CombinedOutput()
-		if err != nil {
-			buildErr = fmt.Errorf("failed to build pelican binary: %w\nOutput: %s", err, string(buildOutput))
-		}
-	})
-
-	if buildErr != nil {
-		t.Fatalf("Failed to build pelican binary: %v", buildErr)
-	}
-
-	return testPelicanBinary
-}
 
 // TestMain handles test setup and cleanup
 func TestMain(m *testing.M) {
-	// Create temp directory for test binary
-	var err error
-	testTempDir, err = os.MkdirTemp("", "pelican-test-*")
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "Failed to create temp directory: %v\n", err)
-		os.Exit(1)
-	}
-
-	// Run tests
 	code := m.Run()
-
-	// Cleanup: remove the temp directory and its contents
-	if testTempDir != "" {
-		os.RemoveAll(testTempDir)
-	}
-
+	test_utils.RemoveTestBinaries()
 	os.Exit(code)
 }
 
@@ -284,8 +227,8 @@ func TestHandleCLIExecutableAlias(t *testing.T) {
 		aliasTestMutex.Lock()
 		defer aliasTestMutex.Unlock()
 
-		// Get the pelican binary (built once via sync.Once)
-		pelicanBinary := getPelicanBinary(t)
+		// Get the pelican binary
+		pelicanBinary := test_utils.GetPelicanBinary(t)
 
 		if _, err := os.Stat(arguments[0]); err != nil { // Binary not found, copy it
 			if err := exec.Command("cp", pelicanBinary, arguments[0]).Run(); err != nil {

@@ -21,65 +21,15 @@
 package origin_serve_test
 
 import (
-	"fmt"
 	"os"
-	"os/exec"
-	"path/filepath"
-	"runtime"
-	"sync"
 	"testing"
+
+	"github.com/pelicanplatform/pelican/test_utils"
 )
-
-var (
-	// testPelicanBinary holds the path to the built pelican binary for tests
-	testPelicanBinary string
-	// testTempDir holds the temp directory for the test binary
-	testTempDir string
-	// buildOnce ensures we only build the binary once across all tests
-	buildOnce sync.Once
-	// buildErr stores any error from building the binary
-	buildErr error
-)
-
-// getPelicanBinary builds the pelican binary once and returns its path.
-func getPelicanBinary(t *testing.T) string {
-	t.Helper()
-	buildOnce.Do(func() {
-		binaryName := "pelican"
-		if runtime.GOOS == "windows" {
-			binaryName = "pelican.exe"
-		}
-		testPelicanBinary = filepath.Join(testTempDir, binaryName)
-
-		buildCmd := exec.Command("go", "build", "-tags", "client,server", "-buildvcs=false", "-o", testPelicanBinary, "../cmd")
-		buildCmd.Env = os.Environ()
-		buildOutput, err := buildCmd.CombinedOutput()
-		if err != nil {
-			buildErr = fmt.Errorf("failed to build pelican binary: %w\nOutput: %s", err, string(buildOutput))
-		}
-	})
-
-	if buildErr != nil {
-		t.Fatalf("Failed to build pelican binary: %v", buildErr)
-	}
-
-	return testPelicanBinary
-}
 
 // TestMain handles test setup and cleanup for the origin_serve_test package.
 func TestMain(m *testing.M) {
-	var err error
-	testTempDir, err = os.MkdirTemp("", "pelican-origin-serve-test-*")
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "Failed to create temp directory: %v\n", err)
-		os.Exit(1)
-	}
-
 	code := m.Run()
-
-	if testTempDir != "" {
-		os.RemoveAll(testTempDir)
-	}
-
+	test_utils.RemoveTestBinaries()
 	os.Exit(code)
 }

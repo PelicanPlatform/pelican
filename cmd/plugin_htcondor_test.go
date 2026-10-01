@@ -155,10 +155,8 @@ Origin:
 
 	t.Logf("Federation URL: %s", federationURL)
 
-	// Build the pelican binary to use as the plugin
-	t.Log("Building pelican binary for plugin...")
-	// Get the pelican binary (built once via sync.Once)
-	pelicanBinary := getPelicanBinary(t)
+	// Get the pelican binary to use as the plugin
+	pelicanBinary := test_utils.GetPelicanBinary(t)
 
 	// Create temporary plugin directory in /tmp
 	pluginDir, err := os.MkdirTemp("/tmp", "pelican-libexec-*")
