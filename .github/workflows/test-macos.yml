@@ -28,21 +28,19 @@ permissions:
 
 jobs:
   run-tests:
-    name: macOS (${{ matrix.binary_name }})
+    name: macOS
     runs-on: macos-latest
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - binary_name: pelican
-            coverprofile: coverage.out
-            tags: client
-          - binary_name: pelican-server
-            coverprofile: coverage-server.out
-            tags: server
+    defaults:
+      run:
+        shell: bash
+    env:
+      # GoReleaser always builds without cgo.
+      CGO_ENABLED: ${{ inputs.race_detection && '1' || '0' }}
     steps:
       - name: Checkout repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          fetch-depth: 0  # GoReleaser needs history to look up the previous tag, and so on
 
       - name: Set up Node.js
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020  # v7.0.0
@@ -114,20 +112,48 @@ jobs:
         run: |
           if ! command -v gotestsum &> /dev/null; then
             go install gotest.tools/gotestsum@latest
-            # Ensure that ~/go/bin is in PATH for subsequent steps.
-            echo "$HOME/go/bin" >> $GITHUB_PATH
+            # Ensure that GOPATH/bin is in PATH for subsequent steps.
+            echo "$(go env GOPATH)/bin" >> "$GITHUB_PATH"
           fi
 
       - name: Install macOS dependencies
         run: ./github_scripts/osx_install.sh
 
-      - name: Run "go test"
-        env:
-          JUNIT_FILE: junit-${{ matrix.binary_name }}.xml
+      - name: Check which packages depend on the build tags
+        id: tags
+        # List the packages to test again with -tags=server. The script
+        # explains why the others can be skipped, and fails if they can't.
         run: |
-          echo "::group::Building web UI"
-          make web-build
-          echo "::endgroup::"
+          packages=$(./.github/scripts/go-test/build_tag_packages.sh)
+          echo "packages=$packages" >> "$GITHUB_OUTPUT"
+
+      - name: Build web UI
+        run: make web-build
+
+      - name: Generate GoReleaser config
+        run: |
+          ./scripts/generate_goreleaser.sh .goreleaser.in.yml .goreleaser.generated.yml
+
+      - name: Run GoReleaser
+        id: goreleaser
+        uses: goreleaser/goreleaser-action@f06c13b6b1a9625abc9e6e439d9c05a8f2190e94  # v7.2.3
+        with:
+          distribution: goreleaser
+          version: "~> v2"
+          args: build --single-target --clean --snapshot --skip=before --config .goreleaser.generated.yml --id pelican --id pelican-server
+
+      - name: Point the tests at the GoReleaser binaries
+        id: binaries
+        # See test_utils/binaries.go. The script fails if dist/artifacts.json
+        # lacks any binary named here.
+        run: |
+          ./.github/scripts/go-test/goreleaser_binaries.sh \
+            TEST_PELICAN_BINARY TEST_PELICAN_SERVER_BINARY |
+            tee -a "$GITHUB_ENV"
+
+      - name: Run "go test" on shared and client-specific code
+        if: ${{ !cancelled() && steps.binaries.outcome == 'success' }}
+        run: |
           # e2e_fed_tests and local_cache take longest, so start them first.
           #
           # At -p=4, concurrent federations intermittently break xrootd
@@ -137,72 +163,76 @@ jobs:
           gotestsum \
             --format pkgname-and-test-fails \
             --hide-summary=output \
-            --junitfile "$JUNIT_FILE" \
+            --junitfile junit-client.xml \
             -- \
             -p=2 \
             -timeout=${{ inputs.race_detection && '45m' || '30m' }} \
             ${{ inputs.race_detection && '-race' || '' }} \
-            ${{ !inputs.race_detection && '-coverpkg=./...' || '' }} \
-            ${{ !inputs.race_detection && '-covermode=count' || '' }} \
-            ${{ !inputs.race_detection && format('-coverprofile={0}', matrix.coverprofile) || '' }} \
-            -tags=${{ matrix.tags }} \
+            -tags=client \
             ./e2e_fed_tests \
             ./local_cache \
             ./...
 
-      - name: Upload JUnit report
-        if: always()
+      - name: Run "go test" on server-specific code
+        if: ${{ !cancelled() && steps.binaries.outcome == 'success' }}
+        env:
+          PACKAGES: ${{ steps.tags.outputs.packages }}
+        run: |
+          # The check step found that only these packages differ from the
+          # client run above.
+          # shellcheck disable=SC2086  # PACKAGES is a list
+          gotestsum \
+            --format pkgname-and-test-fails \
+            --hide-summary=output \
+            --junitfile junit-server.xml \
+            -- \
+            -p=2 \
+            -timeout=${{ inputs.race_detection && '45m' || '30m' }} \
+            ${{ inputs.race_detection && '-race' || '' }} \
+            -tags=server \
+            $PACKAGES
+
+      - name: Upload the JUnit report for shared and client-specific code
+        if: ${{ always() && hashFiles('junit-client.xml') != '' }}
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7.0.1
         with:
-          name: junit-${{ matrix.binary_name }}-${{ runner.os }}
-          path: junit-${{ matrix.binary_name }}.xml
+          name: junit-pelican-${{ runner.os }}
+          path: junit-client.xml
           overwrite: true  # allow the workflow to be re-run, e.g., for flakey tests
 
-      - name: Publish JUnit summary
-        if: always()
+      - name: Upload the JUnit report for server-specific code
+        if: ${{ always() && hashFiles('junit-server.xml') != '' }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7.0.1
+        with:
+          name: junit-pelican-server-${{ runner.os }}
+          path: junit-server.xml
+          overwrite: true  # allow the workflow to be re-run, e.g., for flakey tests
+
+      - name: Summarize "go test" on shared and client-specific code
+        if: ${{ always() && hashFiles('junit-client.xml') != '' }}
         uses: test-summary/action@37b508cfee6d4d080eedd00b5bb240a6a784a6a5  # v2.6
         with:
-          paths: junit-${{ matrix.binary_name }}.xml
+          paths: junit-client.xml
+          output: summary-client.md
 
-  goreleaser:
-    name: macOS (GoReleaser)
-    runs-on: macos-latest
-    defaults:
-      run:
-        shell: bash
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+      - name: Summarize "go test" on server-specific code
+        if: ${{ always() && hashFiles('junit-server.xml') != '' }}
+        uses: test-summary/action@37b508cfee6d4d080eedd00b5bb240a6a784a6a5  # v2.6
         with:
-          fetch-depth: 0  # GoReleaser needs history to look up the previous tag, and so on
+          paths: junit-server.xml
+          output: summary-server.md
 
-      - name: Set Go version
-        # Determine the string to use in setup-go's "go-version" input.
-        id: go-version
+      - name: Publish the test summaries
+        if: always()
         run: |
-          version=$(grep -E '^go[[:space:]]*[0-9]+\.[0-9]+' go.mod | grep -oE '[0-9]+\.[0-9]+')
-          echo "version=${version}.x" >> $GITHUB_OUTPUT
-
-      - name: Set up Go
-        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e  # v7.0.0
-        with:
-          go-version: "${{ steps.go-version.outputs.version }}"
-          check-latest: true
-
-      - name: Stub out the web UI
-        # The binaries embed web_ui/frontend/out, so it must exist,
-        # but nothing in this job needs the real web UI.
-        run: |
-          mkdir -p web_ui/frontend/out
-          touch web_ui/frontend/out/index.html
-
-      - name: Generate GoReleaser config
-        run: |
-          ./scripts/generate_goreleaser.sh .goreleaser.in.yml .goreleaser.generated.yml
-
-      - name: Run GoReleaser
-        uses: goreleaser/goreleaser-action@f06c13b6b1a9625abc9e6e439d9c05a8f2190e94  # v7.2.3
-        with:
-          distribution: goreleaser
-          version: "~> v2"
-          args: build --single-target --clean --snapshot --skip=before --config .goreleaser.generated.yml
+          # test-summary/action has no title input, so head each run's
+          # summary with the name of the step that ran the tests.
+          publish() {
+            printf '### Run "go test" on %s\n\n' "$1"
+            if [ -f "$2" ]; then cat "$2"; else echo "No test results."; fi
+            printf '\n\n'
+          }
+          {
+            publish "shared and client-specific code" summary-client.md
+            publish "server-specific code" summary-server.md
+          } >> "$GITHUB_STEP_SUMMARY"
