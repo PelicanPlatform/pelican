@@ -602,7 +602,8 @@ func TestUpdateRegCompletionLinkFile(t *testing.T) {
 	_, _, err = updateRegCompletionLinkFile("/foo", "")
 	require.NoError(t, err)
 
-	// An empty path disables the file but still returns the contents for logging
+	// An empty path (the reminder is disabled; the watcher is never started in
+	// that case) must not touch the disk even when called directly
 	require.NoError(t, param.Server_RegistrationCompletionLinkFile.Set(""))
 	contents, path, err = updateRegCompletionLinkFile("/foo", lineFoo)
 	require.NoError(t, err)
@@ -721,6 +722,28 @@ func TestWatchRegistrationCompletion(t *testing.T) {
 		}
 	}
 
+	t.Run("empty-link-file-param-disables-the-reminder", func(t *testing.T) {
+		logHook.Reset()
+		requests.Store(0)
+		setResponse(statusResponse(server_structs.CheckNamespaceCompleteRes{
+			Results: map[string]server_structs.NamespaceCompletenessResult{
+				prefix: {EditUrl: editUrl, Msg: "Incomplete registration: Institution is a required field"},
+			},
+		}))
+		require.NoError(t, param.Server_RegistrationCompletionLinkFile.Set(""))
+		defer func() { require.NoError(t, param.Server_RegistrationCompletionLinkFile.Set(linkFile)) }()
+
+		wctx, wcancel, wegrp := test_utils.TestContext(ctx, t)
+		defer wcancel()
+		watchRegistrationCompletion(wctx, wegrp, prefix)
+		// No goroutine was started, so the group is already done.
+		waitForExit(t, wegrp)
+
+		assert.Zero(t, requests.Load(), "a disabled reminder must not poll the registry")
+		assert.True(t, fileAbsent())
+		assert.False(t, logged(logrus.ErrorLevel, "Server registration is incomplete"))
+	})
+
 	t.Run("registry-without-endpoint-stops-quietly", func(t *testing.T) {
 		logHook.Reset()
 		requests.Store(0)
@@ -837,6 +860,67 @@ func TestWatchRegistrationCompletion(t *testing.T) {
 		stop()
 
 		assert.True(t, logged(logrus.WarnLevel, "Failed to check registration completeness"))
+		assert.True(t, fileAbsent())
+	})
+
+	// Regression test for #3778: a watcher that stops because its context is
+	// cancelled (server shutdown, fed-test teardown) must retire its link.
+	// Before the fix the line stayed in the package-global set, and every
+	// later banner in the process echoed it, so one origin per fed test grew
+	// the banner to hundreds of lines.
+	t.Run("cancelled-watcher-retires-its-link", func(t *testing.T) {
+		logHook.Reset()
+		requests.Store(0)
+		const otherPrefix = "/origins/other.example.org"
+		const otherEditUrl = "https://registry.example/view/registry/claim/?id=8"
+		setResponse(statusResponse(server_structs.CheckNamespaceCompleteRes{
+			Results: map[string]server_structs.NamespaceCompletenessResult{
+				prefix:      {EditUrl: editUrl, Msg: "Incomplete registration: Institution is a required field"},
+				otherPrefix: {EditUrl: otherEditUrl, Msg: "Incomplete registration: Institution is a required field"},
+			},
+		}))
+		fileLines := func() []string {
+			contents, err := os.ReadFile(linkFile)
+			if err != nil {
+				return nil
+			}
+			trimmed := strings.TrimSpace(string(contents))
+			if trimmed == "" {
+				return nil
+			}
+			return strings.Split(trimmed, "\n")
+		}
+
+		// The first watcher writes its link; a second watcher for another
+		// prefix (as a second server in the same process would) adds its own.
+		stop := start(t)
+		require.Eventually(t, func() bool { return len(fileLines()) == 1 }, 5*time.Second, 10*time.Millisecond)
+		wctx2, wcancel2, wegrp2 := test_utils.TestContext(ctx, t)
+		defer wcancel2()
+		watchRegistrationCompletion(wctx2, wegrp2, otherPrefix)
+		require.Eventually(t, func() bool { return len(fileLines()) == 2 }, 5*time.Second, 10*time.Millisecond)
+
+		// Cancelling the first watcher must leave only the survivor's line...
+		stop()
+		require.Eventually(t, func() bool {
+			lines := fileLines()
+			return len(lines) == 1 && strings.Contains(lines[0], "id=8")
+		}, 5*time.Second, 10*time.Millisecond, "the cancelled watcher's link must be retired from the file")
+
+		// ...and the survivor's later banners must not echo the retired link.
+		logHook.Reset()
+		require.Eventually(t, func() bool { return logged(logrus.ErrorLevel, "Server registration is incomplete") }, 5*time.Second, 10*time.Millisecond)
+		for _, e := range logHook.AllEntries() {
+			if e.Level != logrus.ErrorLevel || !strings.Contains(e.Message, "Server registration is incomplete") {
+				continue
+			}
+			assert.Equal(t, 1, strings.Count(e.Message, "Complete server registration at "), e.Message)
+			assert.NotContains(t, e.Message, "id=7", "a banner must not carry a link whose watcher already stopped")
+		}
+
+		// Stopping the last watcher removes the file altogether.
+		wcancel2()
+		require.NoError(t, wegrp2.Wait())
 		assert.True(t, fileAbsent())
 	})
 }
