@@ -343,7 +343,7 @@ func TestUpdateNamespace(t *testing.T) {
 	t.Run("update-on-dne-entry-returns-error", func(t *testing.T) {
 		defer resetMockRegistryDB(t)
 		mockNs := mockNamespace("/test", "", "", server_structs.AdminMetadata{})
-		err := updateRegistration(&mockNs)
+		err := updateRegistration(&mockNs, false)
 		assert.Error(t, err)
 	})
 
@@ -363,7 +363,7 @@ func TestUpdateNamespace(t *testing.T) {
 		initialNs.AdminMetadata.Status = server_structs.RegApproved
 		initialNs.AdminMetadata.ApproverID = "hacker"
 		initialNs.AdminMetadata.ApprovedAt = time.Now().Add(10 * time.Hour)
-		err = updateRegistration(initialNs)
+		err = updateRegistration(initialNs, false)
 		require.NoError(t, err)
 		finalNss, err := getAllRegistrations()
 		require.NoError(t, err)
@@ -378,6 +378,45 @@ func TestUpdateNamespace(t *testing.T) {
 		// DB first changes initialNs.AdminMetadata.UpdatedAt then commit
 		assert.Equal(t, initialNs.AdminMetadata.UpdatedAt.Unix(), finalNs.AdminMetadata.UpdatedAt.Unix())
 	})
+}
+
+func TestUpdateNamespaceOwnerEditPinsToRowInTransaction(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
+	setupMockRegistryDB(t)
+	defer teardownMockRegistryDB(t)
+	defer resetMockRegistryDB(t)
+
+	storedKey, err := test_utils.GenerateJWKS()
+	require.NoError(t, err)
+	rotatedKey, err := test_utils.GenerateJWKS()
+	require.NoError(t, err)
+
+	mockNs := mockNamespace("/foo", storedKey, "", server_structs.AdminMetadata{
+		UserID:      "owner",
+		Description: "old description",
+		Institution: "1000",
+		Status:      server_structs.RegApproved,
+	})
+	require.NoError(t, insertMockDBData([]server_structs.Registration{mockNs}))
+	id, err := getLastNamespaceId()
+	require.NoError(t, err)
+
+	// The handler reads the row, then builds the owner's edit from it...
+	edit, err := getRegistrationById(id)
+	require.NoError(t, err)
+	edit.AdminMetadata.Description = "new description"
+
+	// ...and before it writes, the server pushes a rotated key for the prefix
+	require.NoError(t, setRegistrationPubKey("/foo", rotatedKey))
+
+	require.NoError(t, updateRegistration(edit, true))
+
+	got, err := getRegistrationById(id)
+	require.NoError(t, err)
+	assert.Equal(t, "new description", got.AdminMetadata.Description, "the owner's edit lands")
+	assert.Equal(t, rotatedKey, got.Pubkey, "the key rotated in between is not reverted by the owner's stale copy")
+	assert.Equal(t, "owner", got.AdminMetadata.UserID)
+	assert.Equal(t, server_structs.RegApproved, got.AdminMetadata.Status)
 }
 
 func TestUpdateNamespaceStatusById(t *testing.T) {

@@ -920,7 +920,14 @@ func reapOrphanedPendingNamespaces(staleServers []serverIdentity) error {
 	return nil
 }
 
-func updateRegistration(ns *server_structs.Registration) error {
+// updateRegistration replaces the stored registration with the same ID as ns.
+//
+// With ownerEditOfApproved set, only the fields the owner of an approved
+// registration may change are taken from ns (see applyOwnerEdits); everything
+// else comes from the stored row as read inside the transaction, so a write that
+// committed between the handler's read and this call (an admin's edit, or the
+// server pushing a rotated key through updateNamespacesPubKey) is not reverted.
+func updateRegistration(ns *server_structs.Registration, ownerEditOfApproved bool) error {
 	// Wrap all database operations in a transaction
 	// If any operation fails, all changes are reverted. No partial records left.
 	// The read of the stored row happens INSIDE the transaction: the pinned
@@ -932,6 +939,9 @@ func updateRegistration(ns *server_structs.Registration) error {
 		existingNs, err := getRegistrationByIdTx(tx, ns.ID)
 		if err != nil || existingNs == nil {
 			return errors.Wrap(err, "Failed to get registration")
+		}
+		if ownerEditOfApproved {
+			*ns = applyOwnerEdits(*existingNs, *ns)
 		}
 		if ns.Prefix == "" {
 			ns.Prefix = existingNs.Prefix
