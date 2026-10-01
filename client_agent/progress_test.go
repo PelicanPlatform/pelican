@@ -44,6 +44,7 @@ import (
 	"github.com/pelicanplatform/pelican/fed_test_utils"
 	"github.com/pelicanplatform/pelican/param"
 	"github.com/pelicanplatform/pelican/server_utils"
+	"github.com/pelicanplatform/pelican/test_utils"
 )
 
 // TestAsyncTransferProgressReporting tests that async transfers report progress correctly
@@ -119,7 +120,7 @@ Director:
 	logFile := filepath.Join(agentTempDir, "agent.log")
 
 	t.Logf("Starting client agent daemon...")
-	pelicanBin := buildPelicanBinary(t)
+	pelicanBin := test_utils.GetPelicanBinary(t)
 
 	config := client_agent.DaemonConfig{
 		SocketPath:  socketPath,

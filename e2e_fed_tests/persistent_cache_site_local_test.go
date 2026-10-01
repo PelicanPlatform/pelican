@@ -111,8 +111,8 @@ func TestPersistentCacheSiteLocalFetchesFromCache(t *testing.T) {
 	server_utils.ResetTestState()
 	defer server_utils.ResetTestState()
 
-	// Build the pelican binary used for the site-local cache child process.
-	cliPath := getPelicanBinary(t)
+	// Get the pelican-server binary used for the site-local cache child process.
+	serverPath := test_utils.GetPelicanServerBinary(t)
 
 	// Enable the persistent cache for the in-process (upstream) cache.
 	require.NoError(t, param.Cache_EnableV2.Set(true))
@@ -189,7 +189,7 @@ func TestPersistentCacheSiteLocalFetchesFromCache(t *testing.T) {
 	// context so it is torn down when the test's context is cancelled.
 	var childOutput bytes.Buffer
 	var outputMu sync.Mutex
-	cmd := exec.CommandContext(ft.Ctx, cliPath, "cache", "serve", "--config", childConfigPath)
+	cmd := exec.CommandContext(ft.Ctx, serverPath, "cache", "serve", "--config", childConfigPath)
 	cmd.Env = os.Environ()
 	cmd.Stdout = &lockedWriter{w: &childOutput, mu: &outputMu}
 	cmd.Stderr = cmd.Stdout
