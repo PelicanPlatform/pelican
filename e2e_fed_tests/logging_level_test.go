@@ -45,7 +45,7 @@ func TestCLILoggingLevelChanges(t *testing.T) {
 
 	ft := fed_test_utils.NewFedTest(t, bothPubNamespaces)
 
-	cliPath := getPelicanBinary(t)
+	serverPath := test_utils.GetPelicanServerBinary(t)
 	srvURL := param.Server_ExternalWebUrl.GetString()
 
 	// Write current config to a temporary file so the subprocess can access issuer keys
@@ -65,7 +65,7 @@ func TestCLILoggingLevelChanges(t *testing.T) {
 	require.NoError(t, err, "Failed to write config file for subprocess")
 
 	runSetLevel := func(paramName string, level string, duration string) {
-		args := []string{cliPath, "server", "set-logging-level", level, duration}
+		args := []string{serverPath, "server", "set-logging-level", level, duration}
 		if paramName != "" {
 			args = append(args, "--param", paramName)
 		}
@@ -85,7 +85,7 @@ func TestCLILoggingLevelChanges(t *testing.T) {
 
 	// Test 0: Verify invalid parameter names are rejected.
 	t.Log("Test 0: Verify invalid parameter names are rejected")
-	args := []string{cliPath, "server", "set-logging-level", "debug", "10s", "--param", "Logging.Origin.foo"}
+	args := []string{serverPath, "server", "set-logging-level", "debug", "10s", "--param", "Logging.Origin.foo"}
 	cmd := exec.CommandContext(ft.Ctx, args[0], args[1:]...)
 	cmd.Env = append(os.Environ(), "PELICAN_CONFIG="+configFile.Name())
 	output, err := cmd.CombinedOutput()

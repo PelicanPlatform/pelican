@@ -30,7 +30,6 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
-	"sync"
 	"testing"
 	"time"
 
@@ -50,43 +49,11 @@ import (
 	"github.com/pelicanplatform/pelican/token_scopes"
 )
 
-var (
-	buildOnce      sync.Once
-	pelicanBinPath string
-	binaryTempDir  string
-)
-
 // TestMain sets up fixtures that persist across all tests
 func TestMain(m *testing.M) {
-	// Run all tests
 	code := m.Run()
-
-	// Cleanup binary temp directory if it was created
-	if binaryTempDir != "" {
-		os.RemoveAll(binaryTempDir)
-	}
+	test_utils.RemoveTestBinaries()
 	os.Exit(code)
-}
-
-// buildPelicanBinary builds the pelican binary on first call and returns its path
-func buildPelicanBinary(t *testing.T) string {
-	buildOnce.Do(func() {
-		var err error
-		binaryTempDir, err = os.MkdirTemp("", "pelican-cli-test-*")
-		if err != nil {
-			t.Fatalf("Failed to create temp directory: %v", err)
-		}
-
-		pelicanBinPath = filepath.Join(binaryTempDir, "pelican")
-		cmd := exec.Command("go", "build", "-tags", "client", "-buildvcs=false", "-o", pelicanBinPath, "../cmd")
-		output, err := cmd.CombinedOutput()
-		if err != nil {
-			os.RemoveAll(binaryTempDir)
-			t.Fatalf("Failed to build pelican binary: %s", output)
-		}
-	})
-
-	return pelicanBinPath
 }
 
 // TestCLIAsyncGet tests the pelican object get --async command
@@ -151,8 +118,8 @@ func TestCLIAsyncGet(t *testing.T) {
 		assert.NoError(t, err)
 	})
 
-	// Build pelican binary
-	pelicanBin := buildPelicanBinary(t)
+	// Get the pelican binary
+	pelicanBin := test_utils.GetPelicanBinary(t)
 
 	// Create test file and upload it first
 	testContent := []byte("Test file for async get\n")
@@ -325,10 +292,8 @@ func TestCLIAsyncPut(t *testing.T) {
 	})
 	t.Logf("Server setup took %s", time.Since(serverStart))
 
-	// Build pelican binary
-	buildStart := time.Now()
-	pelicanBin := buildPelicanBinary(t)
-	t.Logf("Binary build took %s", time.Since(buildStart))
+	// Get the pelican binary
+	pelicanBin := test_utils.GetPelicanBinary(t)
 
 	// Create test file
 	testContent := []byte("Test file for async put\n")
@@ -442,8 +407,8 @@ func TestCLIAsyncPrestage(t *testing.T) {
 		assert.NoError(t, err)
 	})
 
-	// Build pelican binary
-	pelicanBin := buildPelicanBinary(t)
+	// Get the pelican binary
+	pelicanBin := test_utils.GetPelicanBinary(t)
 
 	// Create test file and upload it first
 	testContent := []byte("Test file for async prestage\n")
@@ -596,8 +561,8 @@ func TestCLIJobCommands(t *testing.T) {
 		assert.NoError(t, err)
 	})
 
-	// Build pelican binary
-	pelicanBin := buildPelicanBinary(t)
+	// Get the pelican binary
+	pelicanBin := test_utils.GetPelicanBinary(t)
 
 	// Create test file and create a job
 	testContent := []byte("Test file for job commands\n")
@@ -743,8 +708,8 @@ func TestCLIJobCommands(t *testing.T) {
 func TestCLIAsyncAutoSpawn(t *testing.T) {
 	tempDir := t.TempDir()
 
-	// Build pelican binary
-	pelicanBin := buildPelicanBinary(t)
+	// Get the pelican binary
+	pelicanBin := test_utils.GetPelicanBinary(t)
 
 	// Create a test file
 	testFile := filepath.Join(tempDir, "test.txt")

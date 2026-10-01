@@ -35,9 +35,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
-	"runtime"
 	"strings"
-	"sync"
 	"testing"
 	"time"
 
@@ -56,17 +54,6 @@ import (
 	"github.com/pelicanplatform/pelican/token_scopes"
 )
 
-var (
-	// testPelicanBinary holds the path to the built pelican binary for tests
-	testPelicanBinary string
-	// testTempDir holds the temp directory for the test binary
-	testTempDir string
-	// buildOnce ensures we only build the binary once across all tests
-	buildOnce sync.Once
-	// buildErr stores any error from building the binary
-	buildErr error
-)
-
 // deviceApproval carries an intercepted device user_code together with the
 // issuer namespace it belongs to, so the test approves it against the correct
 // embedded-issuer provider (e.g. /pelican/local-issuer for transfer-auth, /data
@@ -74,41 +61,6 @@ var (
 type deviceApproval struct {
 	userCode  string
 	namespace string
-}
-
-// getPelicanBinary builds the pelican binary once and returns its path.
-func getPelicanBinary(t testing.TB) string {
-	t.Helper()
-	buildOnce.Do(func() {
-		binaryName := "pelican"
-		if runtime.GOOS == "windows" {
-			binaryName = "pelican.exe"
-		}
-		var err error
-		testTempDir, err = os.MkdirTemp("", "pelican-tpc-test-*")
-		if err != nil {
-			buildErr = fmt.Errorf("failed to create temp directory: %w", err)
-			return
-		}
-		testPelicanBinary = filepath.Join(testTempDir, binaryName)
-
-		// The cmd package is gated behind the client/server build tags. Build with
-		// both so the binary has the client-only `object copy` command AND the
-		// server-only `origin serve` command (the cross-origin test launches a
-		// second origin as a subprocess); `transfer *` are available under either.
-		buildCmd := exec.Command("go", "build", "-tags", "client,server", "-buildvcs=false", "-o", testPelicanBinary, "../cmd")
-		buildCmd.Env = os.Environ()
-		buildOutput, err := buildCmd.CombinedOutput()
-		if err != nil {
-			buildErr = fmt.Errorf("failed to build pelican binary: %w\nOutput: %s", err, string(buildOutput))
-		}
-	})
-
-	if buildErr != nil {
-		t.Fatalf("Failed to build pelican binary: %v", buildErr)
-	}
-
-	return testPelicanBinary
 }
 
 // randomString generates a cryptographically random alphanumeric string.
@@ -566,7 +518,7 @@ func TestTransferTPCViaOriginE2E(t *testing.T) {
 	}
 
 	// ---- Step 4: Launch CLI subprocess ----
-	cliPath := getPelicanBinary(t)
+	cliPath := test_utils.GetPelicanBinary(t)
 	dstURL := fmt.Sprintf("pelican://%s:%d/data/testuser/tpc_dest.txt", hostname, port)
 
 	// Use directread to bypass the cache (the test cache may not be fully functional).

@@ -403,8 +403,8 @@ func TestTPCCrossOrigin(t *testing.T) {
 	host := param.Server_Hostname.GetString()
 	port := strconv.Itoa(param.Server_WebPort.GetInt())
 
-	// Build the pelican binary for the second origin.
-	pelicanBinary := getPelicanBinary(t)
+	// Get the pelican-server binary for the second origin.
+	serverPath := test_utils.GetPelicanServerBinary(t)
 
 	// Prepare directories and config for the second origin (source).
 	origin2Dir := t.TempDir()
@@ -498,7 +498,7 @@ Xrootd:
 	// Launch origin #2 as a subprocess.
 	ctx, cancel := context.WithCancel(fed.Ctx)
 
-	cmd := exec.CommandContext(ctx, pelicanBinary, "origin", "serve", "--config", origin2ConfigFile)
+	cmd := exec.CommandContext(ctx, serverPath, "origin", "serve", "--config", origin2ConfigFile)
 	cmd.Env = append(os.Environ(),
 		"PELICAN_CONFIGDIR="+origin2ConfigDir,
 	)

@@ -405,8 +405,8 @@ func TestClientAcquireTokenE2E(t *testing.T) {
 	serverURL := param.Server_ExternalWebUrl.GetString()
 	discoveryURL := param.Federation_DiscoveryUrl.GetString()
 
-	// Get the once-built pelican CLI binary
-	cliPath := getPelicanBinary(t)
+	// Get the pelican CLI binary
+	cliPath := test_utils.GetPelicanBinary(t)
 
 	// Prepare a local file to upload
 	localTmpDir := t.TempDir()
