@@ -267,8 +267,8 @@ func TestSSHPosixv2OriginUploadDownload(t *testing.T) {
 		t.Skip("sshd not available, skipping SSH E2E test")
 	}
 
-	// Build the pelican binary (built once and shared across tests)
-	pelicanBinary := getPelicanBinary(t)
+	// Get the pelican-server binary, which provides ssh-helper
+	serverPath := test_utils.GetPelicanServerBinary(t)
 
 	// Start the test SSH server
 	sshServer, err := startTestSSHD(t)
@@ -278,7 +278,7 @@ func TestSSHPosixv2OriginUploadDownload(t *testing.T) {
 	t.Logf("Started test SSH server on port %d with storage at %s", sshServer.port, sshServer.storageDir)
 
 	// Configure origin with SSH storage
-	originConfig := sshOriginConfig(sshServer.port, sshServer.storageDir, sshServer.knownHostsFile, sshServer.privateKeyFile, pelicanBinary)
+	originConfig := sshOriginConfig(sshServer.port, sshServer.storageDir, sshServer.knownHostsFile, sshServer.privateKeyFile, serverPath)
 
 	// Set up the federation test with the SSH origin config
 	ft := fed_test_utils.NewFedTest(t, originConfig)
@@ -334,14 +334,14 @@ func TestSSHPosixv2OriginStat(t *testing.T) {
 		t.Skip("sshd not available, skipping SSH E2E test")
 	}
 
-	// Build the pelican binary (built once and shared across tests)
-	pelicanBinary := getPelicanBinary(t)
+	// Get the pelican-server binary, which provides ssh-helper
+	serverPath := test_utils.GetPelicanServerBinary(t)
 
 	sshServer, err := startTestSSHD(t)
 	require.NoError(t, err, "Failed to start test SSH server")
 	t.Cleanup(sshServer.stop)
 
-	originConfig := sshOriginConfig(sshServer.port, sshServer.storageDir, sshServer.knownHostsFile, sshServer.privateKeyFile, pelicanBinary)
+	originConfig := sshOriginConfig(sshServer.port, sshServer.storageDir, sshServer.knownHostsFile, sshServer.privateKeyFile, serverPath)
 
 	ft := fed_test_utils.NewFedTest(t, originConfig)
 	require.NotNil(t, ft)
@@ -391,14 +391,14 @@ func TestSSHPosixv2OriginLargeFile(t *testing.T) {
 		t.Skip("sshd not available, skipping SSH E2E test")
 	}
 
-	// Build the pelican binary (built once and shared across tests)
-	pelicanBinary := getPelicanBinary(t)
+	// Get the pelican-server binary, which provides ssh-helper
+	serverPath := test_utils.GetPelicanServerBinary(t)
 
 	sshServer, err := startTestSSHD(t)
 	require.NoError(t, err, "Failed to start test SSH server")
 	t.Cleanup(sshServer.stop)
 
-	originConfig := sshOriginConfig(sshServer.port, sshServer.storageDir, sshServer.knownHostsFile, sshServer.privateKeyFile, pelicanBinary)
+	originConfig := sshOriginConfig(sshServer.port, sshServer.storageDir, sshServer.knownHostsFile, sshServer.privateKeyFile, serverPath)
 
 	ft := fed_test_utils.NewFedTest(t, originConfig)
 	require.NotNil(t, ft)
@@ -452,14 +452,14 @@ func TestSSHPosixv2OriginDirectoryListing(t *testing.T) {
 		t.Skip("sshd not available, skipping SSH E2E test")
 	}
 
-	// Build the pelican binary (built once and shared across tests)
-	pelicanBinary := getPelicanBinary(t)
+	// Get the pelican-server binary, which provides ssh-helper
+	serverPath := test_utils.GetPelicanServerBinary(t)
 
 	sshServer, err := startTestSSHD(t)
 	require.NoError(t, err, "Failed to start test SSH server")
 	t.Cleanup(sshServer.stop)
 
-	originConfig := sshOriginConfig(sshServer.port, sshServer.storageDir, sshServer.knownHostsFile, sshServer.privateKeyFile, pelicanBinary)
+	originConfig := sshOriginConfig(sshServer.port, sshServer.storageDir, sshServer.knownHostsFile, sshServer.privateKeyFile, serverPath)
 
 	ft := fed_test_utils.NewFedTest(t, originConfig)
 	require.NotNil(t, ft)
@@ -531,14 +531,14 @@ func TestSSHPosixv2OriginMultipleFiles(t *testing.T) {
 		t.Skip("sshd not available, skipping SSH E2E test")
 	}
 
-	// Build the pelican binary (built once and shared across tests)
-	pelicanBinary := getPelicanBinary(t)
+	// Get the pelican-server binary, which provides ssh-helper
+	serverPath := test_utils.GetPelicanServerBinary(t)
 
 	sshServer, err := startTestSSHD(t)
 	require.NoError(t, err, "Failed to start test SSH server")
 	t.Cleanup(sshServer.stop)
 
-	originConfig := sshOriginConfig(sshServer.port, sshServer.storageDir, sshServer.knownHostsFile, sshServer.privateKeyFile, pelicanBinary)
+	originConfig := sshOriginConfig(sshServer.port, sshServer.storageDir, sshServer.knownHostsFile, sshServer.privateKeyFile, serverPath)
 
 	ft := fed_test_utils.NewFedTest(t, originConfig)
 	require.NotNil(t, ft)
@@ -597,14 +597,14 @@ func TestSSHPosixv2OriginConnectionStress(t *testing.T) {
 		t.Skip("sshd not available, skipping SSH E2E test")
 	}
 
-	// Build the pelican binary (built once and shared across tests)
-	pelicanBinary := getPelicanBinary(t)
+	// Get the pelican-server binary, which provides ssh-helper
+	serverPath := test_utils.GetPelicanServerBinary(t)
 
 	sshServer, err := startTestSSHD(t)
 	require.NoError(t, err, "Failed to start test SSH server")
 	t.Cleanup(sshServer.stop)
 
-	originConfig := sshOriginConfig(sshServer.port, sshServer.storageDir, sshServer.knownHostsFile, sshServer.privateKeyFile, pelicanBinary)
+	originConfig := sshOriginConfig(sshServer.port, sshServer.storageDir, sshServer.knownHostsFile, sshServer.privateKeyFile, serverPath)
 
 	ft := fed_test_utils.NewFedTest(t, originConfig)
 	require.NotNil(t, ft)
@@ -795,8 +795,8 @@ func TestSSHPosixv2OriginTunnelMode(t *testing.T) {
 		t.Skip("sshd not available, skipping SSH E2E test")
 	}
 
-	// Build the pelican binary (built once and shared across tests)
-	pelicanBinary := getPelicanBinary(t)
+	// Get the pelican-server binary, which provides ssh-helper
+	serverPath := test_utils.GetPelicanServerBinary(t)
 
 	// Start the test SSH server
 	sshServer, err := startTestSSHD(t)
@@ -806,7 +806,7 @@ func TestSSHPosixv2OriginTunnelMode(t *testing.T) {
 	t.Logf("Started test SSH server on port %d with storage at %s (tunnel mode)", sshServer.port, sshServer.storageDir)
 
 	// Configure origin with SSH storage in tunnel mode
-	originConfig := sshOriginConfigTunnel(sshServer.port, sshServer.storageDir, sshServer.knownHostsFile, sshServer.privateKeyFile, pelicanBinary)
+	originConfig := sshOriginConfigTunnel(sshServer.port, sshServer.storageDir, sshServer.knownHostsFile, sshServer.privateKeyFile, serverPath)
 
 	// Set up the federation test with the SSH tunnel origin config
 	ft := fed_test_utils.NewFedTest(t, originConfig)
