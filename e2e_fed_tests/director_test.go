@@ -28,6 +28,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"sort"
 	"strings"
 	"testing"
 	"time"
@@ -168,115 +169,141 @@ func updateAllowedPrefixesForCache(t *testing.T, dbPath string, cacheHost string
 // Test that registered services can grab a token from the Director
 // using a valid advertise token. For now this only tests Caches because
 // we aren't actively using fed tokens in the Origin yet.
+// fedTokenScopes returns the "scope" claim of a freshly created cache
+// federation token, split into its individual scopes.
+func fedTokenScopes(ctx context.Context, t *testing.T) ([]string, string) {
+	t.Helper()
+	cache := cache.CacheServer{}
+	tokStr, err := server_utils.CreateFedTok(ctx, &cache)
+	require.NoError(t, err, "Failed to get cache's advertisement token")
+	require.NotEmpty(t, tokStr, "Got an empty token")
+	tok, err := token.UnsafeParseClaims(tokStr)
+	require.NoError(t, err, "Failed to parse token")
+
+	var scopes []string
+	if rawScopes, exists := tok.Get("scope"); exists {
+		if scopeStr, ok := rawScopes.(string); ok && scopeStr != "" {
+			scopes = strings.Split(scopeStr, " ")
+		}
+	}
+	return scopes, tok.Issuer()
+}
+
+// requireFedTokenScopes waits for the director to pick up the latest
+// AllowedPrefixes from the registry (it re-queries every
+// Director.RegistryQueryInterval) and then checks the token it issues.
+func requireFedTokenScopes(ctx context.Context, t *testing.T, want []string) {
+	t.Helper()
+	var scopes []string
+	var issuer string
+	require.Eventually(t, func() bool {
+		scopes, issuer = fedTokenScopes(ctx, t)
+		return assert.ObjectsAreEqual(sortedCopy(want), sortedCopy(scopes))
+	}, 10*time.Second, 250*time.Millisecond,
+		"director never issued a token with scopes %v (last saw %v)", want, scopes)
+
+	// The fed-test utility uses a separate HTTP server for hosting federation metadata,
+	// and sets it as the Discovery endpoint -- tokens need to be issued by that endpoint
+	fedInfo, err := config.GetFederation(ctx)
+	require.NoError(t, err, "Failed to get federation info")
+	assert.Equal(t, fedInfo.DiscoveryEndpoint, issuer)
+	assert.ElementsMatch(t, want, scopes)
+}
+
+func sortedCopy(in []string) []string {
+	out := append([]string(nil), in...)
+	sort.Strings(out)
+	return out
+}
+
+// TestDirectorFedTokenCacheAPI changes the cache's AllowedPrefixes in the
+// registry and checks the scopes the director puts in the cache's federation
+// token. The cases share one federation, so each must expect a different
+// scope set from the one before it; otherwise a stale token could satisfy it.
+// NoCustomField runs first because updateAllowedPrefixesForCache leaves the
+// field alone for an empty list, and the field is only absent at startup.
 func TestDirectorFedTokenCacheAPI(t *testing.T) {
 	t.Cleanup(test_utils.SetupTestLogging(t))
 	server_utils.ResetTestState()
 	t.Cleanup(server_utils.ResetTestState)
 
+	require.NoError(t, param.Director_RegistryQueryInterval.SetString("1s"))
+	_ = fed_test_utils.NewFedTest(t, bothPubNamespaces)
+
+	// If the sitename is not set, this fetches the server's hostname.
+	// Since all servers running in the fed test have the same hostname,
+	// this lets us inject allowed prefixes in the registry database.
+	registrationName := param.Xrootd_Sitename.GetString()
+	require.NotEmpty(t, registrationName, "Failed to determine server's XRootD sitename")
+	dbLoc := param.Server_DbLocation.GetString()
+	require.NotEmpty(t, dbLoc, "Failed to determine registry database location")
+
+	ctx := context.Background()
+	ctx, _, _ = test_utils.TestContext(ctx, t)
+
 	testCases := []struct {
-		name               string
-		shouldSetSitename  bool
-		allowedPrefixes    []string
-		scopeShouldHave    []string
-		scopeShouldNotHave []string
+		name            string
+		allowedPrefixes []string
+		scopeShouldHave []string
 	}{
 		{
-			name:               "AllowFirstNamespace",
-			shouldSetSitename:  false,
-			allowedPrefixes:    []string{"/first/namespace"},
-			scopeShouldHave:    []string{"storage.read:/first/namespace"},
-			scopeShouldNotHave: []string{"/second/namespace"},
+			name:            "NoCustomField",
+			allowedPrefixes: []string{},
+			scopeShouldHave: []string{"storage.read:/"}, // Absence of field means no namespace restrictions
 		},
 		{
-			name:               "WithSitename",
-			shouldSetSitename:  true,
-			allowedPrefixes:    []string{"/first/namespace"},
-			scopeShouldHave:    []string{"storage.read:/first/namespace"},
-			scopeShouldNotHave: []string{"/second/namespace"},
+			name:            "AllowFirstNamespace",
+			allowedPrefixes: []string{"/first/namespace"},
+			scopeShouldHave: []string{"storage.read:/first/namespace"},
 		},
 		{
-			name:               "AllowBothNamespaces",
-			shouldSetSitename:  false,
-			allowedPrefixes:    []string{"/first/namespace", "/second/namespace"},
-			scopeShouldHave:    []string{"storage.read:/first/namespace", "storage.read:/second/namespace"},
-			scopeShouldNotHave: []string{},
+			name:            "AllowBothNamespaces",
+			allowedPrefixes: []string{"/first/namespace", "/second/namespace"},
+			scopeShouldHave: []string{"storage.read:/first/namespace", "storage.read:/second/namespace"},
 		},
 		{
-			name:               "NoCustomField",
-			shouldSetSitename:  false,
-			allowedPrefixes:    []string{},
-			scopeShouldHave:    []string{"storage.read:/"}, // Absence of field means no namespace restrictions
-			scopeShouldNotHave: []string{},
+			name:            "EmptyCustomField",
+			allowedPrefixes: []string{""},
+			scopeShouldHave: []string{}, // Empty field means no read permissions
 		},
 		{
-			name:               "EmptyCustomField",
-			shouldSetSitename:  false,
-			allowedPrefixes:    []string{""},
-			scopeShouldHave:    []string{}, // Empty field means no read permissions
-			scopeShouldNotHave: []string{},
-		},
-		{
-			name:               "GlobNamespace",
-			shouldSetSitename:  false,
-			allowedPrefixes:    []string{"*"},
-			scopeShouldHave:    []string{"storage.read:/"},
-			scopeShouldNotHave: []string{},
+			name:            "GlobNamespace",
+			allowedPrefixes: []string{"*"},
+			scopeShouldHave: []string{"storage.read:/"},
 		},
 		// After some discussion with Sarthak, we decided there's no point in testing
 		// the case where the Registry is configured with an invalid namespace -- we
 		// make the assumption that namespace info is validated by the Registry before
 		// insertion in its database.
 	}
-
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
-			if tc.shouldSetSitename {
-				require.NoError(t, param.Xrootd_Sitename.Set("fed-test"))
-			}
-
-			require.NoError(t, param.Director_RegistryQueryInterval.SetString("1s"))
-			_ = fed_test_utils.NewFedTest(t, bothPubNamespaces)
-
-			// If the sitename is not set, this fetches the server's hostname.
-			// Since all servers running in the fed test have the same hostname,
-			// this lets us inject allowed prefixes in the registry database.
-			registrationName := param.Xrootd_Sitename.GetString()
-			require.NotEmpty(t, registrationName, "Failed to determine server's XRootD sitename")
-
 			// Inject our "AllowedPrefixes" data into the registry database under
 			// the /caches/<registration name> namespace
-			dbLoc := param.Server_DbLocation.GetString()
-			require.NotEmpty(t, dbLoc, "Failed to determine registry database location")
 			updateAllowedPrefixesForCache(t, dbLoc, registrationName, tc.allowedPrefixes)
-
-			// Now sleep for 2 seconds so the Director has time to populate the changes
-			time.Sleep(2 * time.Second)
-
-			// Grab the service's key and create an advertise token
-			ctx := context.Background()
-			ctx, _, _ = test_utils.TestContext(ctx, t)
-			cache := cache.CacheServer{}
-			tokStr, err := server_utils.CreateFedTok(ctx, &cache)
-			require.NoError(t, err, "Failed to get cache's advertisement token")
-			require.NotEmpty(t, tokStr, "Got an empty token")
-
-			tok, err := token.UnsafeParseClaims(tokStr)
-			require.NoError(t, err, "Failed to parse token")
-			// The fed-test utility uses a separate HTTP server for hosting federation metadata,
-			// and sets it as the Discovery endpoint -- tokens need to be issued by that endpoint
-			fedInfo, err := config.GetFederation(ctx)
-			require.NoError(t, err, "Failed to get federation info")
-			discoveryUrlStr := fedInfo.DiscoveryEndpoint
-			assert.Equal(t, discoveryUrlStr, tok.Issuer())
-			var scopes []string
-			if rawScopes, exists := tok.Get("scope"); exists {
-				if scopeStr, ok := rawScopes.(string); ok {
-					scopes = strings.Split(scopeStr, " ")
-				}
-			}
-			assert.ElementsMatch(t, tc.scopeShouldHave, scopes)
+			requireFedTokenScopes(ctx, t, tc.scopeShouldHave)
 		})
 	}
+}
+
+// TestDirectorFedTokenCacheAPIWithSitename is the explicit-sitename variant.
+// The sitename is fixed when the cache registers, so it needs its own federation.
+func TestDirectorFedTokenCacheAPIWithSitename(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
+	server_utils.ResetTestState()
+	t.Cleanup(server_utils.ResetTestState)
+
+	require.NoError(t, param.Xrootd_Sitename.Set("fed-test"))
+	require.NoError(t, param.Director_RegistryQueryInterval.SetString("1s"))
+	_ = fed_test_utils.NewFedTest(t, bothPubNamespaces)
+
+	dbLoc := param.Server_DbLocation.GetString()
+	require.NotEmpty(t, dbLoc, "Failed to determine registry database location")
+	updateAllowedPrefixesForCache(t, dbLoc, "fed-test", []string{"/first/namespace"})
+
+	ctx := context.Background()
+	ctx, _, _ = test_utils.TestContext(ctx, t)
+	requireFedTokenScopes(ctx, t, []string{"storage.read:/first/namespace"})
 }
 
 // Test that the Director.EnableFederationMetadataHosting knob correctly
