@@ -32,6 +32,7 @@ import (
 	"gorm.io/gorm"
 
 	databaseutils "github.com/pelicanplatform/pelican/database/utils"
+	"github.com/pelicanplatform/pelican/test_utils"
 )
 
 // newFileBackedTestDB opens a real file-backed SQLite handle using the SAME
@@ -69,9 +70,7 @@ func newFileBackedTestDB(t *testing.T) *gorm.DB {
 // The assertion is simply: every committed event is delivered and the queue
 // returns to empty.
 func TestEventual_BatcherBackedQueue_FileDB(t *testing.T) {
-	if testing.Short() {
-		t.Skip("skipping: file-backed DB contention test")
-	}
+	test_utils.SkipIfShort(t, "file-backed DB contention test")
 
 	var delivered int64
 	receiver := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

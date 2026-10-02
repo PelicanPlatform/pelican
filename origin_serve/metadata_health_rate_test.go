@@ -29,6 +29,8 @@ import (
 	"time"
 
 	"github.com/prometheus/client_golang/prometheus/testutil"
+
+	"github.com/pelicanplatform/pelican/test_utils"
 )
 
 // TestComputeHealthState_Boundaries locks down the pure age→state mapping at
@@ -129,9 +131,7 @@ func TestRefreshHealthMetrics_GaugeTransitions(t *testing.T) {
 // batch of events cannot drain faster than the rate allows. Without the
 // limiter these publishes would complete near-instantly.
 func TestEventual_RatePerSecondThrottles(t *testing.T) {
-	if testing.Short() {
-		t.Skip("skipping: timing-sensitive")
-	}
+	test_utils.SkipIfShort(t, "timing-sensitive rate limiter test")
 
 	var delivered int64
 	receiver := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
