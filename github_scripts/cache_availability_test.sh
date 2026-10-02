@@ -1,5 +1,5 @@
 #!/bin/bash -xe
-
+#
 # Copyright (C) 2026, Pelican Project, Morgridge Institute for Research
 #
 # Licensed under the Apache License, Version 2.0 (the "License"); you
@@ -15,438 +15,253 @@
 # limitations under the License.
 #
 
-# This tests the Director's cache availability weighting.
+# This tests the director's cache availability weighting.
 #
-# It starts a Director, Registry, a public-reads Origin, and 5 isolated caches.
-# Then it primes a subset of caches (caches 1-2) by curling them directly, and
-# kills cache 5 entirely (including its XRootD subprocess) so that it becomes
+# It starts a federation (director + registry + origin) and 5 caches. Then
+# it primes caches 1-2 by fetching an object through each of them, and kills
+# cache 5 entirely (including its XRootD process), so that it becomes
 # unreachable and gets a median-imputed availability weight.
 #
-# A debug query to the Director with X-Pelican-Debug should show:
-#   - Primed caches (Age > 0):   availabilityWeight == 2.0  (objAvailabilityFactor)
-#   - Cold caches   (Age == 0):  availabilityWeight == 0.5  (1 / objAvailabilityFactor)
+# A debug query to the director with X-Pelican-Debug should show:
+#   - Primed caches (Age > 0):     availabilityWeight == 2.0  (objAvailabilityFactor)
+#   - Cold caches   (Age == 0):    availabilityWeight == 0.5  (1 / objAvailabilityFactor)
 #   - Stopped cache (unreachable): availabilityWeight == 1.25 (median of [0.5,0.5,2.0,2.0])
-
-set -e
-
-NUM_CACHES=5
-NUM_PRIMED=2          # caches 1..2 will be primed
-STOPPED_CACHE_IDX=5   # cache 5 is killed before the Director query to mock "unknown" availability
-
-TEST_ROOT="$(mktemp -d "/tmp/pel-avail.XXXXXX")"
-chmod 755 "${TEST_ROOT}"
+#
+# The test keeps to a temporary directory of its own, which it removes on
+# exit, and its servers listen on ports that the OS picks, so that it can
+# run alongside other tests.
 
 # ---------------------------------------------------------------------------
-# Directory layout
+# Setup
 # ---------------------------------------------------------------------------
-FED_CONFIG_DIR="${TEST_ROOT}/fed_cfg"
-FED_RUNTIME_DIR="${TEST_ROOT}/fed_rt"
+
+# shellcheck source=github_scripts/e2e_common.sh
+source "$(dirname "${BASH_SOURCE[0]}")/e2e_common.sh"
+
+require_binaries ./pelican-server
+setup_test_root availability 60
+
+export PELICAN_SERVER_ENABLEUI=false
+export PELICAN_TLSSKIPVERIFY=true
+
+# Give the registry OIDC client credentials, which this test never uses.
+echo "placeholder-oidc-client-secret" > "${TEST_ROOT}/oidc-client-secret"
+export PELICAN_OIDC_CLIENTID="placeholder-oidc-client-id"
+export PELICAN_OIDC_CLIENTSECRETFILE="${TEST_ROOT}/oidc-client-secret"
+
 ORIGIN_DIR="${TEST_ROOT}/origin"
-ORIGIN_RUN="${TEST_ROOT}/orun"
-
-mkdir -p "${FED_CONFIG_DIR}" "${FED_RUNTIME_DIR}" "${ORIGIN_DIR}" "${ORIGIN_RUN}"
-chmod 755 "${FED_CONFIG_DIR}" "${FED_RUNTIME_DIR}" "${ORIGIN_DIR}" "${ORIGIN_RUN}"
+mkdir -p "${ORIGIN_DIR}"
 if [ "$(id -u)" -eq 0 ]; then
     chown xrootd: "${ORIGIN_DIR}"
 fi
 
-echo "fake-oidc-secret" > "${FED_CONFIG_DIR}/oidc-secret"
-
-# Per-cache directories
-for i in $(seq 1 ${NUM_CACHES}); do
-    mkdir -p "${TEST_ROOT}/cache${i}_cfg" "${TEST_ROOT}/cache${i}_rt" \
-             "${TEST_ROOT}/cache${i}_run" "${TEST_ROOT}/cache${i}_data"
-    chmod 755 "${TEST_ROOT}/cache${i}_cfg" "${TEST_ROOT}/cache${i}_rt" \
-              "${TEST_ROOT}/cache${i}_run"
-    chmod 777 "${TEST_ROOT}/cache${i}_data"
-done
-
-# ---------------------------------------------------------------------------
-# Common env for the federation (director + registry + origin)
-# ---------------------------------------------------------------------------
-export PELICAN_TLSSKIPVERIFY=true
-export PELICAN_SERVER_ENABLEUI=false
+export PELICAN_ORIGIN_PORT=0
+export PELICAN_ORIGIN_RUNLOCATION="${TEST_ROOT}/origin-run"
+export PELICAN_ORIGIN_FEDERATIONPREFIX="/test"
+export PELICAN_ORIGIN_STORAGEPREFIX="${ORIGIN_DIR}"
 export PELICAN_ORIGIN_ENABLEPUBLICREADS=true
 export PELICAN_ORIGIN_ENABLEVOMS=false
 export PELICAN_REGISTRY_REQUIRECACHEAPPROVAL=false
 export PELICAN_REGISTRY_REQUIREORIGINAPPROVAL=false
-export PELICAN_LOGGING_LEVEL=debug
 export PELICAN_DIRECTOR_STATTIMEOUT=5s
 export PELICAN_DIRECTOR_CACHESORTMETHOD=adaptive
-# Prevent the Director from filtering the killed cache out of the working set
-# before we stat it — the health-test poller may mark it as "error" within
+# Keep the director from filtering the killed cache out of the working set
+# before we stat it: the health-test poller may mark it as "error" within
 # seconds of the kill.
 export PELICAN_DIRECTOR_FILTERCACHESINERRORSTATE=false
 
-# Federation process config
-export PELICAN_CONFIGBASE="${FED_CONFIG_DIR}"
-export PELICAN_RUNTIMEDIR="${FED_RUNTIME_DIR}"
-export PELICAN_SERVER_DBLOCATION="${FED_CONFIG_DIR}/registry.sql"
-export PELICAN_SERVER_WEBPORT=0
-export PELICAN_ORIGIN_PORT=0
-export PELICAN_ORIGIN_RUNLOCATION="${ORIGIN_RUN}"
-export PELICAN_OIDC_CLIENTID="sometexthere"
-export PELICAN_OIDC_CLIENTSECRETFILE="${FED_CONFIG_DIR}/oidc-secret"
-export PELICAN_ORIGIN_FEDERATIONPREFIX="/test"
-export PELICAN_ORIGIN_STORAGEPREFIX="${ORIGIN_DIR}"
+NUM_CACHES=5
+NUM_PRIMED=2          # caches 1..2 will be primed
+STOPPED_CACHE_IDX=5   # cache 5 is killed before the director query to mock "unknown" availability
 
-# Create a small test file
+# Keep the director from truncating any cache from the working set, so that
+# every cache must appear in the debug response.
+export PELICAN_DIRECTOR_ADAPTIVESORTTRUNCATECONSTANT="${NUM_CACHES}"
+
+for i in $(seq 1 ${NUM_CACHES}); do
+    mkdir -p "${TEST_ROOT}/cache${i}/config" "${TEST_ROOT}/cache${i}/runtime" \
+             "${TEST_ROOT}/cache${i}/run" "${TEST_ROOT}/cache${i}/data"
+    chmod 755 "${TEST_ROOT}/cache${i}"
+    chmod 777 "${TEST_ROOT}/cache${i}/data"
+done
+
+# ---------------------------------------------------------------------------
+# 1. Start the federation
+# ---------------------------------------------------------------------------
+
 echo "hello-availability-test" > "${ORIGIN_DIR}/avail.txt"
-touch "${FED_CONFIG_DIR}/empty.yaml"
 
-# ---------------------------------------------------------------------------
-# Cleanup
-# ---------------------------------------------------------------------------
-CACHE_PIDS=()
-
-# Collect all descendant PIDs of a process (children, grandchildren, etc.)
-# then SIGKILL the entire tree.  This is necessary because `pelican cache serve`
-# spawns an XRootD child process that survives a simple `kill -9` of the parent
-# (it gets reparented to init and keeps serving).
-kill_tree() {
-    local root_pid="$1"
-    local descendants
-    descendants=$(pgrep -P "${root_pid}" 2>/dev/null) || true
-    # Recurse into children first so we collect grandchildren while the tree is intact
-    local all_pids="${root_pid}"
-    for child in ${descendants}; do
-        local grandchildren
-        grandchildren=$(pgrep -P "${child}" 2>/dev/null) || true
-        all_pids="${all_pids} ${child} ${grandchildren}"
-    done
-    # Kill everything at once
-    # shellcheck disable=SC2086
-    kill -9 ${all_pids} 2>/dev/null || true
-}
-
-# shellcheck disable=SC2329  # invoked indirectly via trap
-cleanup() {
-    echo "============================================"
-    echo "Cleaning up..."
-    echo "============================================"
-
-    if [ -n "${FED_PID:-}" ]; then
-        kill -SIGINT "${FED_PID}" 2>/dev/null || true
-        sleep 1
-        kill_tree "${FED_PID}"
-    fi
-
-    for pid in "${CACHE_PIDS[@]}"; do
-        kill_tree "${pid}"
-    done
-
-    rm -rf "${TEST_ROOT}"
-
-    unset PELICAN_TLSSKIPVERIFY PELICAN_SERVER_ENABLEUI
-    unset PELICAN_ORIGIN_ENABLEPUBLICREADS PELICAN_ORIGIN_ENABLEVOMS
-    unset PELICAN_REGISTRY_REQUIRECACHEAPPROVAL PELICAN_REGISTRY_REQUIREORIGINAPPROVAL
-    unset PELICAN_LOGGING_LEVEL PELICAN_DIRECTOR_STATTIMEOUT PELICAN_DIRECTOR_CACHESORTMETHOD PELICAN_DIRECTOR_FILTERCACHESINERRORSTATE
-    unset PELICAN_CONFIGBASE PELICAN_RUNTIMEDIR PELICAN_SERVER_DBLOCATION
-    unset PELICAN_SERVER_WEBPORT PELICAN_ORIGIN_PORT PELICAN_ORIGIN_RUNLOCATION
-    unset PELICAN_OIDC_CLIENTID PELICAN_OIDC_CLIENTSECRETFILE
-    unset PELICAN_ORIGIN_FEDERATIONPREFIX PELICAN_ORIGIN_STORAGEPREFIX
-    unset PELICAN_FEDERATION_DIRECTORURL PELICAN_FEDERATION_REGISTRYURL
-    echo "Cleanup done."
-}
-
-trap cleanup EXIT
-
-# ---------------------------------------------------------------------------
-# Helper: wait for an address file; sets ADDRESS_CONTENTS afterwards
-# ---------------------------------------------------------------------------
-wait_for_address_file() {
-    local file="$1"
-    local label="$2"
-    local pid="$3"
-    local tries=0
-    echo "Waiting for ${label} address file: ${file}"
-    while [ ! -f "${file}" ]; do
-        if ! kill -0 "${pid}" 2>/dev/null; then
-            echo "${label} process exited before address file was created"
-            echo "TEST FAILED"
-            exit 1
-        fi
-        sleep 0.5
-        tries=$((tries + 1))
-        if [ "${tries}" -gt 60 ]; then
-            echo "${label} address file not created after 30 s"
-            echo "TEST FAILED"
-            exit 1
-        fi
-    done
-}
-
-# ---------------------------------------------------------------------------
-# Helper: wait for health endpoint to return 200
-# ---------------------------------------------------------------------------
-wait_for_healthy() {
-    local url="$1"
-    local label="$2"
-    local tries=0
-    echo "Waiting for ${label} health at ${url} ..."
-    while true; do
-        code=$(curl -m 5 -k -s -o /dev/null -w "%{http_code}" "${url}") || true
-        if [ "${code}" = "200" ]; then
-            echo "${label} is healthy."
-            return 0
-        fi
-        sleep 0.5
-        tries=$((tries + 1))
-        if [ "${tries}" -gt 60 ]; then
-            echo "${label} not healthy after 30 s"
-            echo "TEST FAILED"
-            exit 1
-        fi
-    done
-}
-
-# ---------------------------------------------------------------------------
-# 1. Start federation (director + registry + origin, NO built-in cache)
-# ---------------------------------------------------------------------------
-echo "Starting federation (director + registry + origin) ..."
 ./pelican-server serve --module director --module registry --module origin -d &
-FED_PID=$!
+PIDS+=($!)
 
-FED_ADDR_FILE="${FED_RUNTIME_DIR}/pelican.addresses"
-wait_for_address_file "${FED_ADDR_FILE}" "federation" "${FED_PID}"
-# shellcheck source=/dev/null
-source "${FED_ADDR_FILE}"
-FED_WEB_URL="${SERVER_EXTERNAL_WEB_URL}"
+wait_for_address_file "${PELICAN_RUNTIMEDIR}/pelican.addresses" "federation" "${PIDS[-1]}"
+FED_WEB_URL="$(read_address "${PELICAN_RUNTIMEDIR}/pelican.addresses" SERVER_EXTERNAL_WEB_URL)"
+wait_for_healthy "${FED_WEB_URL}" "federation"
 
 export PELICAN_FEDERATION_DIRECTORURL="${FED_WEB_URL}"
 export PELICAN_FEDERATION_REGISTRYURL="${FED_WEB_URL}"
 
-wait_for_healthy "${FED_WEB_URL}/api/v1.0/health" "federation"
-
-echo "Federation URL: ${FED_WEB_URL}"
-
 # ---------------------------------------------------------------------------
-# 2. Start 5 isolated caches
+# 2. Start the caches
 # ---------------------------------------------------------------------------
+
+CACHE_PIDS=()
 CACHE_URLS=()       # XRootD data URLs (e.g. https://host:port)
 CACHE_WEB_URLS=()   # Web/API URLs
 
 for i in $(seq 1 ${NUM_CACHES}); do
-    echo "Starting cache ${i} ..."
+    CACHE_DIR="${TEST_ROOT}/cache${i}"
 
-    CACHE_CFG="${TEST_ROOT}/cache${i}_cfg/pelican.yaml"
-    CACHE_RT="${TEST_ROOT}/cache${i}_rt"
-
-    cat > "${CACHE_CFG}" <<EOF
-RuntimeDir: ${CACHE_RT}
-ConfigBase: ${TEST_ROOT}/cache${i}_cfg
+    # The cache inherits the federation's exported settings, which take
+    # precedence over its configuration file, so the file sets only what
+    # the environment does not, or sets to the same value.
+    cat > "${CACHE_DIR}/config/pelican.yaml" <<EOF
+RuntimeDir: ${CACHE_DIR}/runtime
 Server:
   WebPort: 0
-  DbLocation: ${TEST_ROOT}/cache${i}_cfg/cache.sql
-  TLSSkipVerify: true
   EnableUI: false
 Cache:
   Port: 0
-  RunLocation: ${TEST_ROOT}/cache${i}_run
-  StorageLocation: ${TEST_ROOT}/cache${i}_data
+  RunLocation: ${CACHE_DIR}/run
+  StorageLocation: ${CACHE_DIR}/data
   EnableVoms: false
 Federation:
   DirectorUrl: ${FED_WEB_URL}
   RegistryUrl: ${FED_WEB_URL}
-OIDC:
-  ClientID: "cache${i}-client"
 Registry:
   RequireCacheApproval: false
 Logging:
   Level: debug
 EOF
 
-    # Each cache runs in its own PELICAN_RUNTIMEDIR so address files don't collide.
-    PELICAN_RUNTIMEDIR="${CACHE_RT}" \
-        ./pelican-server cache serve --config "${CACHE_CFG}" -d &
+    # The exported PELICAN_RUNTIMEDIR would take precedence over the
+    # configuration file, and the address files must not collide.
+    PELICAN_RUNTIMEDIR="${CACHE_DIR}/runtime" \
+        ./pelican-server cache serve --config "${CACHE_DIR}/config/pelican.yaml" -d &
+    PIDS+=($!)
     CACHE_PIDS+=($!)
 
-    CACHE_ADDR_FILE="${CACHE_RT}/pelican.addresses"
-    wait_for_address_file "${CACHE_ADDR_FILE}" "cache-${i}" "${CACHE_PIDS[-1]}"
-
-    # Parse address file (don't source — variables would clobber each other)
-    CACHE_WEB=""
-    CACHE_DATA=""
-    while IFS='=' read -r key val; do
-        case "${key}" in
-            SERVER_EXTERNAL_WEB_URL) CACHE_WEB="${val}" ;;
-            CACHE_URL)               CACHE_DATA="${val}" ;;
-        esac
-    done < "${CACHE_ADDR_FILE}"
-
-    if [ -z "${CACHE_DATA}" ] || [ -z "${CACHE_WEB}" ]; then
-        echo "Cache ${i} address file incomplete."
-        echo "TEST FAILED"
-        exit 1
-    fi
-
-    CACHE_URLS+=("${CACHE_DATA}")
-    CACHE_WEB_URLS+=("${CACHE_WEB}")
-
-    wait_for_healthy "${CACHE_WEB}/api/v1.0/health" "cache-${i}"
-    echo "  cache-${i}: data=${CACHE_DATA}  web=${CACHE_WEB}"
+    wait_for_address_file "${CACHE_DIR}/runtime/pelican.addresses" "cache ${i}" "${PIDS[-1]}"
+    CACHE_WEB_URLS+=("$(read_address "${CACHE_DIR}/runtime/pelican.addresses" SERVER_EXTERNAL_WEB_URL)")
+    CACHE_URLS+=("$(read_address "${CACHE_DIR}/runtime/pelican.addresses" CACHE_URL)")
+    wait_for_healthy "${CACHE_WEB_URLS[-1]}" "cache ${i}"
+    echo "cache ${i}: data=${CACHE_URLS[-1]}  web=${CACHE_WEB_URLS[-1]}"
 done
 
-echo "All ${NUM_CACHES} caches are running."
+# ---------------------------------------------------------------------------
+# 3. Wait for all caches to advertise to the director
+# ---------------------------------------------------------------------------
 
-# ---------------------------------------------------------------------------
-# 3. Wait for all caches to be advertising at the Director
-# ---------------------------------------------------------------------------
-echo "Waiting for all caches to appear in the Director's server list ..."
-TOTAL_WAIT=0
-while true; do
-    DIRECTOR_SERVERS=$(curl -k -s "${FED_WEB_URL}/api/v1.0/director_ui/servers" 2>/dev/null || echo "[]")
-    # Count how many of our cache data URLs appear in the listing
+# Succeed if the director lists all of the caches, and set FOUND to the
+# number of them that it lists.
+all_caches_advertised() {
+    local servers u
+    servers="$(e2e_curl "${FED_WEB_URL}/api/v1.0/director_ui/servers" || echo "[]")"
     FOUND=0
     for u in "${CACHE_URLS[@]}"; do
-        if echo "${DIRECTOR_SERVERS}" | grep -q "${u}"; then
+        if echo "${servers}" | grep -q "${u}"; then
             FOUND=$((FOUND + 1))
         fi
     done
-    if [ "${FOUND}" -ge "${NUM_CACHES}" ]; then
-        echo "All ${NUM_CACHES} caches are advertising."
-        break
-    fi
-    sleep 1
-    TOTAL_WAIT=$((TOTAL_WAIT + 1))
-    if [ "${TOTAL_WAIT}" -gt 60 ]; then
-        echo "Only ${FOUND}/${NUM_CACHES} caches advertising after 60 s"
-        echo "TEST FAILED"
-        exit 1
-    fi
-done
+    [ "${FOUND}" -ge "${NUM_CACHES}" ]
+}
+
+if ! retry_for 30 1 all_caches_advertised; then
+    echo "TEST FAILED: Only ${FOUND} of ${NUM_CACHES} caches advertised within 30 seconds"
+    exit 1
+fi
 
 # ---------------------------------------------------------------------------
-# 4. Prime caches 1..NUM_PRIMED by fetching the test object through each
+# 4. Prime caches 1..NUM_PRIMED by fetching the object through each
 # ---------------------------------------------------------------------------
+
 OBJECT_PATH="/test/avail.txt"
 
-# Helper: poll HEAD until Age > 0 (object written to local disk) or timeout.
-# A fixed sleep is too fragile — on loaded CI a 1 s window may not be enough
-# for XRootD to flush the newly-fetched object.
-wait_for_age_positive() {
-    local url="$1"
-    local label="$2"
-    local tries=0
-    local max_tries=60   # 60 × 0.5 s = 30 s max
-    while true; do
-        local age
-        age=$(curl -sk --head "${url}" 2>/dev/null \
-              | grep -i "^age:" | awk '{print $2}' | tr -d '\r')
-        if [ -n "${age}" ] && [ "${age}" -gt 0 ] 2>/dev/null; then
-            echo "  ${label}: Age=${age} s (object locally stored — good)"
-            return 0
-        fi
-        tries=$((tries + 1))
-        if [ "${tries}" -ge "${max_tries}" ]; then
-            return 1
-        fi
-        sleep 0.5
-    done
+# Succeed if a cache reports Age > 0 for an object, which means that the
+# object is on its local disk.
+age_positive() {
+    local url="$1" label="$2" age
+    age="$(e2e_curl --head "${url}" | grep -i "^age:" | awk '{print $2}' | tr -d '\r')"
+    if [ -n "${age}" ] && [ "${age}" -gt 0 ] 2>/dev/null; then
+        echo "${label}: Age=${age} s (object locally stored)"
+        return 0
+    fi
+    return 1
 }
 
 for i in $(seq 1 ${NUM_PRIMED}); do
-    echo "Priming cache ${i} at ${CACHE_URLS[$((i-1))]} ..."
-    RESULT=$(curl -sk "${CACHE_URLS[$((i-1))]}${OBJECT_PATH}" 2>&1)
+    echo "Priming cache ${i} at ${CACHE_URLS[$((i-1))]}"
+    RESULT="$(e2e_curl "${CACHE_URLS[$((i-1))]}${OBJECT_PATH}")" || true
     if [ "${RESULT}" != "hello-availability-test" ]; then
-        echo "Unexpected response from cache ${i}: ${RESULT}"
-        echo "TEST FAILED"
+        echo "TEST FAILED: Unexpected response from cache ${i}: ${RESULT}"
         exit 1
     fi
 
-    # Block until XRootD reports Age > 0 for this object.  We must confirm
-    # local storage before querying the Director, otherwise the cache will
-    # still report Age=0 and receive availabilityWeight=0.5 instead of 2.0.
-    if ! wait_for_age_positive "${CACHE_URLS[$((i-1))]}${OBJECT_PATH}" "cache-${i}"; then
-        echo "cache-${i} never returned Age > 0 after 30 s."
+    # The director must not be queried until the object is stored locally:
+    # otherwise the cache still reports Age=0 and gets availabilityWeight=0.5
+    # instead of 2.0. A fixed sleep is too fragile: on a loaded CI runner,
+    # XRootD may take more than a second to store the object.
+    if ! retry_for 30 0.5 age_positive "${CACHE_URLS[$((i-1))]}${OBJECT_PATH}" "cache ${i}"; then
         echo "Your XRootD build may not report the Age header on HEAD responses."
-        echo "TEST FAILED"
+        echo "TEST FAILED: Cache ${i} did not report Age > 0 within 30 seconds"
         exit 1
     fi
 done
 
-echo "Primed caches 1-${NUM_PRIMED} — all confirmed Age > 0."
+# ---------------------------------------------------------------------------
+# 5. Kill cache STOPPED_CACHE_IDX to force an error/unknown stat result
+# ---------------------------------------------------------------------------
 
-# ---------------------------------------------------------------------------
-# 5. Stop cache STOPPED_CACHE_IDX to force an error/unknown stat result
-# ---------------------------------------------------------------------------
-# We kill the entire process tree (pelican + xrootd) and wait until the cache's
-# HTTPS port no longer accepts connections.
-echo "Stopping cache ${STOPPED_CACHE_IDX} (PID ${CACHE_PIDS[$((STOPPED_CACHE_IDX-1))]}) ..."
 STOPPED_CACHE_DATA_URL="${CACHE_URLS[$((STOPPED_CACHE_IDX-1))]}"
 STOPPED_CACHE_WEB_URL="${CACHE_WEB_URLS[$((STOPPED_CACHE_IDX-1))]}"
-kill_tree "${CACHE_PIDS[$((STOPPED_CACHE_IDX-1))]}"
 
-# Wait until the cache's web port is closed (max 15 s).
-TRIES=0
-while true; do
-    CODE=$(curl -m 2 -k -s -o /dev/null -w "%{http_code}" "${STOPPED_CACHE_WEB_URL}/api/v1.0/health" 2>/dev/null) || true
-    if [ "${CODE}" != "200" ]; then
-        echo "  cache-${STOPPED_CACHE_IDX} is confirmed down (HTTP ${CODE})."
-        break
-    fi
-    TRIES=$((TRIES + 1))
-    if [ "${TRIES}" -gt 30 ]; then
-        echo "WARNING: cache-${STOPPED_CACHE_IDX} still responding after 15 s; proceeding anyway."
-        break
-    fi
-    sleep 0.5
-done
+# Kill it outright, rather than stopping it cleanly, so that it remains in
+# the director's working set.
+# shellcheck disable=SC2046
+kill -9 $(tree_pids "${CACHE_PIDS[$((STOPPED_CACHE_IDX-1))]}") 2>/dev/null || true
 
-# Also verify the data port is down — this is what the Director stats.
-TRIES=0
-while true; do
-    CODE=$(curl -m 2 -k -s -o /dev/null -w "%{http_code}" "${STOPPED_CACHE_DATA_URL}/test/avail.txt" 2>/dev/null) || true
-    if [ "${CODE}" = "000" ] || [ "${CODE}" = "" ]; then
-        echo "  cache-${STOPPED_CACHE_IDX} data port is confirmed down."
-        break
-    fi
-    TRIES=$((TRIES + 1))
-    if [ "${TRIES}" -gt 30 ]; then
-        echo "WARNING: cache-${STOPPED_CACHE_IDX} data port still responding after 15 s."
-        break
-    fi
-    sleep 0.5
-done
+# Succeed if a URL's port accepts no connections.
+port_closed() {
+    [ "$(e2e_curl -o /dev/null -w "%{http_code}" "$1")" = "000" ]
+}
+
+# Wait up to 15 seconds each for its web port and its data port, which is
+# what the director stats, to close. The expected weight of the stopped
+# cache depends on its being unreachable.
+if ! retry_for 15 0.5 port_closed "${STOPPED_CACHE_WEB_URL}/api/v1.0/health"; then
+    echo "TEST FAILED: Cache ${STOPPED_CACHE_IDX}'s web port is still open 15 seconds after it was killed"
+    exit 1
+fi
+if ! retry_for 15 0.5 port_closed "${STOPPED_CACHE_DATA_URL}${OBJECT_PATH}"; then
+    echo "TEST FAILED: Cache ${STOPPED_CACHE_IDX}'s data port is still open 15 seconds after it was killed"
+    exit 1
+fi
 
 # ---------------------------------------------------------------------------
-# 6. Query the Director with X-Pelican-Debug to get the redirect JSON
+# 6. Query the director with X-Pelican-Debug to get the redirect JSON
 # ---------------------------------------------------------------------------
-echo "Querying Director for debug redirect info ..."
 
-# The Director may need a brief moment before stat caches are complete,
-# so retry with a short backoff for 429 (rate limit) responses.
-MAX_RETRIES=15
-RETRY=0
+# Query the director, and succeed and set DEBUG_JSON if it redirects.
+query_director() {
+    local response code
+    response="$(e2e_curl -w "\n%{http_code}" -H "X-Pelican-Debug: true" "${FED_WEB_URL}${OBJECT_PATH}")"
+    code="$(echo "${response}" | tail -n1)"
+    if [ "${code}" = "307" ] || [ "${code}" = "200" ]; then
+        DEBUG_JSON="$(echo "${response}" | sed '$d')"
+        return 0
+    fi
+    echo "The director returned HTTP ${code}"
+    return 1
+}
+
+# The director may need a moment before its stat results are complete,
+# so retry 429 (rate limit) and other unexpected responses for up to
+# 30 seconds.
 DEBUG_JSON=""
-
-while [ "${RETRY}" -lt "${MAX_RETRIES}" ]; do
-    HTTP_RESP=$(curl -sk -w "\n%{http_code}" \
-        -H "X-Pelican-Debug: true" \
-        "${FED_WEB_URL}${OBJECT_PATH}" 2>/dev/null)
-    HTTP_CODE=$(echo "${HTTP_RESP}" | tail -n1)
-    BODY=$(echo "${HTTP_RESP}" | sed '$d')
-
-    if [ "${HTTP_CODE}" = "429" ]; then
-        echo "  429 — Director not ready yet, retrying (${RETRY}/${MAX_RETRIES}) ..."
-        RETRY=$((RETRY + 1))
-        sleep 2
-        continue
-    fi
-
-    if [ "${HTTP_CODE}" = "307" ] || [ "${HTTP_CODE}" = "200" ]; then
-        DEBUG_JSON="${BODY}"
-        break
-    fi
-
-    echo "  Unexpected HTTP ${HTTP_CODE}, retrying ..."
-    RETRY=$((RETRY + 1))
-    sleep 2
-done
+retry_for 30 2 query_director || true
 
 if [ -z "${DEBUG_JSON}" ]; then
-    echo "Failed to get debug redirect JSON from Director after ${MAX_RETRIES} attempts."
-    echo "TEST FAILED"
+    echo "TEST FAILED: The director returned no debug redirect JSON"
     exit 1
 fi
 
@@ -454,35 +269,31 @@ echo "Director debug response:"
 echo "${DEBUG_JSON}" | python3 -m json.tool 2>/dev/null || echo "${DEBUG_JSON}"
 
 # ---------------------------------------------------------------------------
-# 7. Validate availabilityWeight for each cache
+# 7. Check the availabilityWeight of each cache
 # ---------------------------------------------------------------------------
+
 # Expected weights (objAvailabilityFactor = 2.0):
-#   primed  (Age > 0):    2.0
-#   cold    (Age == 0):   0.5
+#   primed  (Age > 0):     2.0
+#   cold    (Age == 0):    0.5
 #   stopped (unreachable): median of [0.5, 0.5, 2.0, 2.0] = 1.25
 #
 # The JSON structure is:
 #   { "serversInfo": { "<url>": { "RedirectWeights": { "availabilityWeight": N } } } }
 
+# The number of failed checks that did not stop the test.
 FAILURES=0
 
-check_weight() {
-    local cache_idx="$1"
-    local expected="$2"
-    local tolerance="$3"   # absolute tolerance for float compare
-    local url="${CACHE_URLS[$((cache_idx - 1))]}"
-
-    # The URL in serversInfo may not have a trailing slash, but otherwise should
-    # match the CACHE_URL from the address file.  Try both.
-    local weight
-    weight=$(echo "${DEBUG_JSON}" | python3 -c "
+# Print a cache's availabilityWeight from the debug JSON, or NOT_FOUND.
+availability_weight() {
+    local url="$1"
+    echo "${DEBUG_JSON}" | python3 -c "
 import json, sys
 from urllib.parse import urlparse
 data = json.load(sys.stdin)
-si = data.get('serversInfo', {})
+si = data.get('serversInfo') or {}
 target = urlparse('${url}')
 target_hp = target.hostname + ':' + str(target.port) if target.port else target.hostname
-# Match by host:port since URL schemes/paths may differ slightly
+# Match by host:port, since URL schemes and paths may differ slightly.
 for k, v in si.items():
     pk = urlparse(k)
     pk_hp = pk.hostname + ':' + str(pk.port) if pk.port else pk.hostname
@@ -492,88 +303,49 @@ for k, v in si.items():
             print(w)
             sys.exit(0)
 print('NOT_FOUND')
-" 2>/dev/null)
+"
+}
 
+# Usage: check_weight CACHE_IDX EXPECTED [LABEL]
+#
+# Check a cache's availabilityWeight. LABEL, such as "(stopped)", follows
+# the cache's name in the messages.
+check_weight() {
+    local cache_idx="$1" expected="$2" url weight name
+    url="${CACHE_URLS[$((cache_idx - 1))]}"
+    name="cache ${cache_idx}${3:+ $3}"
+    weight="$(availability_weight "${url}")"
     if [ "${weight}" = "NOT_FOUND" ]; then
-        echo "  cache-${cache_idx} (${url}): not found in serversInfo (may not be in working set — OK if cache was truncated)"
-        return 0
-    fi
-
-    local diff
-    diff=$(python3 -c "print(abs(${weight} - ${expected}))" 2>/dev/null)
-    local ok
-    ok=$(python3 -c "print('yes' if ${diff} <= ${tolerance} else 'no')" 2>/dev/null)
-
-    if [ "${ok}" = "yes" ]; then
-        echo "  PASS  cache-${cache_idx}: availabilityWeight=${weight} (expected ${expected} ±${tolerance})"
+        echo "CHECK FAILED: ${name} (${url}) is not in serversInfo"
+        FAILURES=$((FAILURES + 1))
+    elif python3 -c "import sys; sys.exit(abs(${weight} - ${expected}) > 0.01)"; then
+        echo "${name}: availabilityWeight=${weight} (expected ${expected})"
     else
-        echo "  FAIL  cache-${cache_idx}: availabilityWeight=${weight} (expected ${expected} ±${tolerance})"
+        echo "CHECK FAILED: ${name}: availabilityWeight=${weight} (expected ${expected})"
         FAILURES=$((FAILURES + 1))
     fi
 }
 
-echo ""
-echo "Checking availabilityWeight values ..."
-
-# Primed caches (1..NUM_PRIMED) should have weight = 2.0
+# Primed caches (1..NUM_PRIMED) should have weight 2.0.
 for i in $(seq 1 ${NUM_PRIMED}); do
-    check_weight "${i}" "2.0" "0.01"
+    check_weight "${i}" "2.0"
 done
 
-# Cold (unprimed, still running) caches should have weight = 0.5
-# Skip the stopped cache in this loop.
+# Cold (unprimed, still running) caches should have weight 0.5.
 for i in $(seq $((NUM_PRIMED + 1)) ${NUM_CACHES}); do
-    if [ "${i}" -eq "${STOPPED_CACHE_IDX}" ]; then
-        continue
+    if [ "${i}" -ne "${STOPPED_CACHE_IDX}" ]; then
+        check_weight "${i}" "0.5"
     fi
-    check_weight "${i}" "0.5" "0.01"
 done
 
-# Stopped cache should get median-imputed weight.
-# The 4 valid weights are:
-#   primed caches 1-2: 2.0 each  →  [2.0, 2.0]
-#   cold   caches 3-4: 0.5 each  →  [0.5, 0.5]
-# Sorted: [0.5, 0.5, 2.0, 2.0] → median = (0.5 + 2.0) / 2 = 1.25
-echo ""
-echo "Checking stopped cache ${STOPPED_CACHE_IDX} (expect median-imputed weight = 1.25) ..."
-STOPPED_WEIGHT=$(echo "${DEBUG_JSON}" | python3 -c "
-import json, sys
-from urllib.parse import urlparse
-data = json.load(sys.stdin)
-si = data.get('serversInfo', {})
-target = urlparse('${STOPPED_CACHE_DATA_URL}')
-target_hp = target.hostname + ':' + str(target.port) if target.port else target.hostname
-for k, v in si.items():
-    pk = urlparse(k)
-    pk_hp = pk.hostname + ':' + str(pk.port) if pk.port else pk.hostname
-    if pk_hp == target_hp:
-        w = v.get('RedirectWeights', {}).get('availabilityWeight', None)
-        if w is not None:
-            print(w)
-            sys.exit(0)
-print('NOT_IN_SET')
-" 2>/dev/null)
+# The stopped cache should get the median-imputed weight, and must be in
+# the working set, since FilterCachesInErrorState=false. The 4 valid
+# weights, sorted, are [0.5, 0.5, 2.0, 2.0], so the median is 1.25.
+check_weight "${STOPPED_CACHE_IDX}" "1.25" "(stopped)"
 
-if [ "${STOPPED_WEIGHT}" = "NOT_IN_SET" ]; then
-    echo "  FAIL  stopped cache-${STOPPED_CACHE_IDX} not found in serversInfo"
-    echo "        Expected it in working set (FilterCachesInErrorState=false)"
-    FAILURES=$((FAILURES + 1))
-else
-    OK=$(python3 -c "print('yes' if abs(${STOPPED_WEIGHT} - 1.25) <= 0.01 else 'no')" 2>/dev/null)
-    if [ "${OK}" = "yes" ]; then
-        echo "  PASS  cache-${STOPPED_CACHE_IDX} (stopped): availabilityWeight=${STOPPED_WEIGHT} (expected 1.25 median-imputed)"
-    else
-        echo "  FAIL  cache-${STOPPED_CACHE_IDX} (stopped): availabilityWeight=${STOPPED_WEIGHT} (expected 1.25 median-imputed)"
-        FAILURES=$((FAILURES + 1))
-    fi
-fi
-
-echo ""
-echo "============================================"
 if [ "${FAILURES}" -gt 0 ]; then
-    echo "TEST FAILED (${FAILURES} assertion(s) failed)"
+    echo "TEST FAILED: ${FAILURES} checks failed"
     exit 1
-else
-    echo "TEST PASSED"
-    exit 0
 fi
+
+echo "TEST PASSED"
