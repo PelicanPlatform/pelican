@@ -259,6 +259,7 @@ jobs:
       # to build XRootD and Pelican.
 
       - name: Free disk space
+        background: true
         run: |
           # Use `df` to quickly check how much space is available.
 
@@ -279,6 +280,7 @@ jobs:
         uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069  # v4.4.1
         with:
           buildkitd-flags: --debug
+          cleanup: false
 
       - name: Log in to OSG Harbor
         if: ${{ needs.params.outputs.images-to-push != '[]' }}
