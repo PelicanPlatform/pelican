@@ -43,227 +43,294 @@ import (
 	"github.com/pelicanplatform/pelican/test_utils"
 )
 
-// TestStatAPI tests the Stat/StatCachedOnly API methods on PersistentCache.
-func TestStatAPI(t *testing.T) {
+// TestStatThroughCache runs each case below against one shared federation. Starting a
+// federation (five services plus XRootD) dominates the run time of these
+// cases, so they share one and keep their object names distinct instead.
+func TestStatThroughCache(t *testing.T) {
 	t.Cleanup(test_utils.SetupTestLogging(t))
 	server_utils.ResetTestState()
+	t.Cleanup(server_utils.ResetTestState)
 
 	ft := fed_test_utils.NewFedTest(t, pubOriginCfg)
 
-	testCacheDir := t.TempDir()
-	pc, err := local_cache.NewPersistentCache(ft.Ctx, ft.Egrp, local_cache.PersistentCacheConfig{
-		BaseDir: testCacheDir,
-	})
-	require.NoError(t, err)
-	defer pc.Close()
-
-	t.Run("stat-before-download-queries-origin", func(t *testing.T) {
-		// Stat on an uncached object should query the origin and return the size
-		size, err := pc.Stat("/test/hello_world.txt", "")
-		require.NoError(t, err)
-		assert.Equal(t, uint64(13), size) // "Hello, World!" is 13 bytes
-	})
-
-	t.Run("stat-cached-only-miss", func(t *testing.T) {
-		// A new file that hasn't been downloaded yet
-		require.NoError(t, os.WriteFile(
-			filepath.Join(ft.Exports[0].StoragePrefix, "stat_miss.txt"),
-			[]byte("uncached content"),
-			0644,
-		))
-
-		_, err := pc.StatCachedOnly("/test/stat_miss.txt", "")
-		assert.ErrorIs(t, err, local_cache.ErrNotCached)
-	})
-
-	t.Run("stat-after-download-uses-cache", func(t *testing.T) {
-		// Download the object first
-		reader, err := pc.Get(ft.Ctx, "/test/hello_world.txt", "")
-		require.NoError(t, err)
-		data, err := io.ReadAll(reader)
-		require.NoError(t, err)
-		reader.Close()
-		assert.Equal(t, "Hello, World!", string(data))
-
-		// Now StatCachedOnly should find it
-		size, err := pc.StatCachedOnly("/test/hello_world.txt", "")
-		require.NoError(t, err)
-		assert.Equal(t, uint64(13), size)
-	})
-
-	t.Run("stat-nonexistent-file", func(t *testing.T) {
-		_, err := pc.Stat("/test/no_such_file_12345.txt", "")
-		assert.Error(t, err)
-	})
-}
-
-// TestStatHTTP tests HEAD requests to the cache's Unix socket listener.
-func TestStatHTTP(t *testing.T) {
-	t.Cleanup(test_utils.SetupTestLogging(t))
-	server_utils.ResetTestState()
-
-	ft := fed_test_utils.NewFedTest(t, pubOriginCfg)
-
-	transport := config.GetTransport().Clone()
-	transport.DialContext = func(_ context.Context, _, _ string) (net.Conn, error) {
-		return net.Dial("unix", param.LocalCache_Socket.GetString())
-	}
-	httpClient := &http.Client{Transport: transport}
-
-	t.Run("head-does-not-download", func(t *testing.T) {
-		// A HEAD request should query the origin for metadata (size)
-		// but must NOT trigger a download or cache the object.
-		req, err := http.NewRequest("HEAD", "http://localhost/test/hello_world.txt", nil)
-		require.NoError(t, err)
-
-		resp, err := httpClient.Do(req)
-		require.NoError(t, err)
-		defer resp.Body.Close()
-
-		assert.Equal(t, http.StatusOK, resp.StatusCode)
-		assert.Equal(t, "13", resp.Header.Get("Content-Length"))
-		assert.Contains(t, resp.Header.Get("Accept-Ranges"), "bytes")
-
-		// Verify the object was NOT cached — only stat'd.
+	// StatAPI tests the Stat/StatCachedOnly API methods on PersistentCache.
+	t.Run("StatAPI", func(t *testing.T) {
 		testCacheDir := t.TempDir()
-		pc, pcErr := local_cache.NewPersistentCache(ft.Ctx, ft.Egrp, local_cache.PersistentCacheConfig{
+		pc, err := local_cache.NewPersistentCache(ft.Ctx, ft.Egrp, local_cache.PersistentCacheConfig{
 			BaseDir: testCacheDir,
 		})
-		require.NoError(t, pcErr)
+		require.NoError(t, err)
 		defer pc.Close()
 
-		_, statErr := pc.StatCachedOnly("/test/hello_world.txt", "")
-		assert.ErrorIs(t, statErr, local_cache.ErrNotCached,
-			"HEAD should not have cached the object")
+		t.Run("stat-before-download-queries-origin", func(t *testing.T) {
+			// Stat on an uncached object should query the origin and return the size
+			size, err := pc.Stat("/test/hello_world.txt", "")
+			require.NoError(t, err)
+			assert.Equal(t, uint64(13), size) // "Hello, World!" is 13 bytes
+		})
+
+		t.Run("stat-cached-only-miss", func(t *testing.T) {
+			// A new file that hasn't been downloaded yet
+			require.NoError(t, os.WriteFile(
+				filepath.Join(ft.Exports[0].StoragePrefix, "stat_miss.txt"),
+				[]byte("uncached content"),
+				0644,
+			))
+
+			_, err := pc.StatCachedOnly("/test/stat_miss.txt", "")
+			assert.ErrorIs(t, err, local_cache.ErrNotCached)
+		})
+
+		t.Run("stat-after-download-uses-cache", func(t *testing.T) {
+			// Download the object first
+			reader, err := pc.Get(ft.Ctx, "/test/hello_world.txt", "")
+			require.NoError(t, err)
+			data, err := io.ReadAll(reader)
+			require.NoError(t, err)
+			reader.Close()
+			assert.Equal(t, "Hello, World!", string(data))
+
+			// Now StatCachedOnly should find it
+			size, err := pc.StatCachedOnly("/test/hello_world.txt", "")
+			require.NoError(t, err)
+			assert.Equal(t, uint64(13), size)
+		})
+
+		t.Run("stat-nonexistent-file", func(t *testing.T) {
+			_, err := pc.Stat("/test/no_such_file_12345.txt", "")
+			assert.Error(t, err)
+		})
 	})
 
-	t.Run("only-if-cached-head-miss", func(t *testing.T) {
-		// Create a file at the origin but don't download it
-		require.NoError(t, os.WriteFile(
-			filepath.Join(ft.Exports[0].StoragePrefix, "head_miss.txt"),
-			[]byte("not cached yet"),
-			0644,
-		))
+	// StatHTTP tests HEAD requests to the cache's Unix socket listener.
+	t.Run("StatHTTP", func(t *testing.T) {
+		transport := config.GetTransport().Clone()
+		transport.DialContext = func(_ context.Context, _, _ string) (net.Conn, error) {
+			return net.Dial("unix", param.LocalCache_Socket.GetString())
+		}
+		httpClient := &http.Client{Transport: transport}
 
-		req, err := http.NewRequest("HEAD", "http://localhost/test/head_miss.txt", nil)
-		require.NoError(t, err)
-		req.Header.Set("Cache-Control", "only-if-cached")
+		t.Run("head-does-not-download", func(t *testing.T) {
+			// A HEAD request should query the origin for metadata (size)
+			// but must NOT trigger a download or cache the object.
+			req, err := http.NewRequest("HEAD", "http://localhost/test/hello_world.txt", nil)
+			require.NoError(t, err)
 
-		resp, err := httpClient.Do(req)
-		require.NoError(t, err)
-		defer resp.Body.Close()
+			resp, err := httpClient.Do(req)
+			require.NoError(t, err)
+			defer resp.Body.Close()
 
-		// RFC 7234 §5.2.1.7: 504 Gateway Timeout when not cached
-		assert.Equal(t, http.StatusGatewayTimeout, resp.StatusCode)
+			assert.Equal(t, http.StatusOK, resp.StatusCode)
+			assert.Equal(t, "13", resp.Header.Get("Content-Length"))
+			assert.Contains(t, resp.Header.Get("Accept-Ranges"), "bytes")
+
+			// Verify the object was NOT cached — only stat'd.
+			testCacheDir := t.TempDir()
+			pc, pcErr := local_cache.NewPersistentCache(ft.Ctx, ft.Egrp, local_cache.PersistentCacheConfig{
+				BaseDir: testCacheDir,
+			})
+			require.NoError(t, pcErr)
+			defer pc.Close()
+
+			_, statErr := pc.StatCachedOnly("/test/hello_world.txt", "")
+			assert.ErrorIs(t, statErr, local_cache.ErrNotCached,
+				"HEAD should not have cached the object")
+		})
+
+		t.Run("only-if-cached-head-miss", func(t *testing.T) {
+			// Create a file at the origin but don't download it
+			require.NoError(t, os.WriteFile(
+				filepath.Join(ft.Exports[0].StoragePrefix, "head_miss.txt"),
+				[]byte("not cached yet"),
+				0644,
+			))
+
+			req, err := http.NewRequest("HEAD", "http://localhost/test/head_miss.txt", nil)
+			require.NoError(t, err)
+			req.Header.Set("Cache-Control", "only-if-cached")
+
+			resp, err := httpClient.Do(req)
+			require.NoError(t, err)
+			defer resp.Body.Close()
+
+			// RFC 7234 §5.2.1.7: 504 Gateway Timeout when not cached
+			assert.Equal(t, http.StatusGatewayTimeout, resp.StatusCode)
+		})
+
+		t.Run("only-if-cached-head-hit", func(t *testing.T) {
+			// First, download the object via GET
+			req, err := http.NewRequest("GET", "http://localhost/test/hello_world.txt", nil)
+			require.NoError(t, err)
+
+			resp, err := httpClient.Do(req)
+			require.NoError(t, err)
+			_, _ = io.Copy(io.Discard, resp.Body)
+			resp.Body.Close()
+			require.Equal(t, http.StatusOK, resp.StatusCode)
+
+			// HEAD with only-if-cached should hit the cache
+			req, err = http.NewRequest("HEAD", "http://localhost/test/hello_world.txt", nil)
+			require.NoError(t, err)
+			req.Header.Set("Cache-Control", "only-if-cached")
+
+			resp, err = httpClient.Do(req)
+			require.NoError(t, err)
+			defer resp.Body.Close()
+
+			assert.Equal(t, http.StatusOK, resp.StatusCode)
+			assert.Equal(t, "13", resp.Header.Get("Content-Length"))
+		})
+
+		t.Run("only-if-cached-get-miss", func(t *testing.T) {
+			// GET with only-if-cached for an uncached object returns 504
+			req, err := http.NewRequest("GET", "http://localhost/test/head_miss.txt", nil)
+			require.NoError(t, err)
+			req.Header.Set("Cache-Control", "only-if-cached")
+
+			resp, err := httpClient.Do(req)
+			require.NoError(t, err)
+			defer resp.Body.Close()
+
+			assert.Equal(t, http.StatusGatewayTimeout, resp.StatusCode)
+		})
+
+		t.Run("only-if-cached-get-hit", func(t *testing.T) {
+			// hello_world.txt was cached by the head-hit subtest above;
+			// GET with only-if-cached should return the cached data.
+			req, err := http.NewRequest("GET", "http://localhost/test/hello_world.txt", nil)
+			require.NoError(t, err)
+			req.Header.Set("Cache-Control", "only-if-cached")
+
+			resp, err := httpClient.Do(req)
+			require.NoError(t, err)
+			defer resp.Body.Close()
+
+			assert.Equal(t, http.StatusOK, resp.StatusCode)
+			body, err := io.ReadAll(resp.Body)
+			require.NoError(t, err)
+			assert.Equal(t, "Hello, World!", string(body))
+		})
+
+		t.Run("head-returns-cache-control", func(t *testing.T) {
+			// HEAD response should include a Cache-Control header
+			req, err := http.NewRequest("HEAD", "http://localhost/test/hello_world.txt", nil)
+			require.NoError(t, err)
+
+			resp, err := httpClient.Do(req)
+			require.NoError(t, err)
+			defer resp.Body.Close()
+
+			assert.Equal(t, http.StatusOK, resp.StatusCode)
+			// The cache always sets a Cache-Control header (either from origin or default)
+			assert.NotEmpty(t, resp.Header.Get("Cache-Control"))
+		})
+
+		t.Run("age-header-increases-with-time", func(t *testing.T) {
+			// hello_world.txt was cached by a previous subtest. We need the
+			// Age header (integer seconds since caching) to become non-zero.
+			// Wait just over 1 second — this is not an arbitrary sleep waiting
+			// for an async condition; it is waiting for real time to elapse so
+			// the Age measurement (whose granularity is 1 s) becomes non-zero.
+			time.Sleep(1100 * time.Millisecond)
+
+			// HEAD should now report Age ≥ 1
+			req, err := http.NewRequest("HEAD", "http://localhost/test/hello_world.txt", nil)
+			require.NoError(t, err)
+
+			resp, err := httpClient.Do(req)
+			require.NoError(t, err)
+			defer resp.Body.Close()
+
+			assert.Equal(t, http.StatusOK, resp.StatusCode)
+
+			ageStr := resp.Header.Get("Age")
+			require.NotEmpty(t, ageStr, "Age header must be present after data has aged")
+			ageVal, convErr := strconv.Atoi(ageStr)
+			require.NoError(t, convErr)
+			assert.GreaterOrEqual(t, ageVal, 1, "Age should be at least 1 second")
+
+			// GET should also carry the Age header
+			req, err = http.NewRequest("GET", "http://localhost/test/hello_world.txt", nil)
+			require.NoError(t, err)
+
+			resp, err = httpClient.Do(req)
+			require.NoError(t, err)
+			_, _ = io.Copy(io.Discard, resp.Body)
+			resp.Body.Close()
+
+			assert.Equal(t, http.StatusOK, resp.StatusCode)
+			ageStr = resp.Header.Get("Age")
+			require.NotEmpty(t, ageStr, "GET response must include Age header")
+			ageVal, convErr = strconv.Atoi(ageStr)
+			require.NoError(t, convErr)
+			assert.GreaterOrEqual(t, ageVal, 1, "GET Age should be at least 1 second")
+		})
 	})
 
-	t.Run("only-if-cached-head-hit", func(t *testing.T) {
-		// First, download the object via GET
-		req, err := http.NewRequest("GET", "http://localhost/test/hello_world.txt", nil)
+	// StatLargeFile tests that Stat works correctly for a file larger than the
+	// inline threshold, which exercises the disk-mode storage path.
+	t.Run("StatLargeFile", func(t *testing.T) {
+		// Create a 1 MB file
+		originPath := filepath.Join(ft.Exports[0].StoragePrefix, "stat_large.bin")
+		fp, err := os.OpenFile(originPath, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0644)
 		require.NoError(t, err)
+		size := test_utils.WriteBigBuffer(t, fp, 1) // 1 MB
 
-		resp, err := httpClient.Do(req)
+		testCacheDir := t.TempDir()
+		pc, err := local_cache.NewPersistentCache(ft.Ctx, ft.Egrp, local_cache.PersistentCacheConfig{
+			BaseDir: testCacheDir,
+		})
 		require.NoError(t, err)
-		_, _ = io.Copy(io.Discard, resp.Body)
-		resp.Body.Close()
-		require.Equal(t, http.StatusOK, resp.StatusCode)
+		defer pc.Close()
 
-		// HEAD with only-if-cached should hit the cache
-		req, err = http.NewRequest("HEAD", "http://localhost/test/hello_world.txt", nil)
-		require.NoError(t, err)
-		req.Header.Set("Cache-Control", "only-if-cached")
+		t.Run("stat-before-download", func(t *testing.T) {
+			gotSize, err := pc.Stat("/test/stat_large.bin", "")
+			require.NoError(t, err)
+			assert.Equal(t, uint64(size), gotSize)
+		})
 
-		resp, err = httpClient.Do(req)
-		require.NoError(t, err)
-		defer resp.Body.Close()
+		t.Run("stat-after-download", func(t *testing.T) {
+			// Download the object via the HTTP handler (Unix socket) which
+			// uses GetSeekableReader and handles on-demand block fetching.
+			// The direct pc.Get() API for disk-mode files returns an
+			// ObjectReader that expects all blocks already present.
+			transport := config.GetTransport().Clone()
+			transport.DialContext = func(_ context.Context, _, _ string) (net.Conn, error) {
+				return net.Dial("unix", param.LocalCache_Socket.GetString())
+			}
+			httpClient := &http.Client{Transport: transport}
 
-		assert.Equal(t, http.StatusOK, resp.StatusCode)
-		assert.Equal(t, "13", resp.Header.Get("Content-Length"))
-	})
+			req, err := http.NewRequest("GET", "http://localhost/test/stat_large.bin", nil)
+			require.NoError(t, err)
+			resp, err := httpClient.Do(req)
+			require.NoError(t, err)
+			n, err := io.Copy(io.Discard, resp.Body)
+			resp.Body.Close()
+			require.NoError(t, err)
+			assert.Equal(t, int64(size), n)
 
-	t.Run("only-if-cached-get-miss", func(t *testing.T) {
-		// GET with only-if-cached for an uncached object returns 504
-		req, err := http.NewRequest("GET", "http://localhost/test/head_miss.txt", nil)
-		require.NoError(t, err)
-		req.Header.Set("Cache-Control", "only-if-cached")
+			gotSize, err := pc.Stat("/test/stat_large.bin", "")
+			require.NoError(t, err)
+			assert.Equal(t, uint64(size), gotSize)
+		})
 
-		resp, err := httpClient.Do(req)
-		require.NoError(t, err)
-		defer resp.Body.Close()
+		t.Run("http-head-content-length", func(t *testing.T) {
+			transport := config.GetTransport().Clone()
+			transport.DialContext = func(_ context.Context, _, _ string) (net.Conn, error) {
+				return net.Dial("unix", param.LocalCache_Socket.GetString())
+			}
+			httpClient := &http.Client{Transport: transport}
 
-		assert.Equal(t, http.StatusGatewayTimeout, resp.StatusCode)
-	})
+			req, err := http.NewRequest("HEAD", "http://localhost/test/stat_large.bin", nil)
+			require.NoError(t, err)
 
-	t.Run("only-if-cached-get-hit", func(t *testing.T) {
-		// hello_world.txt was cached by the head-hit subtest above;
-		// GET with only-if-cached should return the cached data.
-		req, err := http.NewRequest("GET", "http://localhost/test/hello_world.txt", nil)
-		require.NoError(t, err)
-		req.Header.Set("Cache-Control", "only-if-cached")
+			resp, err := httpClient.Do(req)
+			require.NoError(t, err)
+			defer resp.Body.Close()
 
-		resp, err := httpClient.Do(req)
-		require.NoError(t, err)
-		defer resp.Body.Close()
-
-		assert.Equal(t, http.StatusOK, resp.StatusCode)
-		body, err := io.ReadAll(resp.Body)
-		require.NoError(t, err)
-		assert.Equal(t, "Hello, World!", string(body))
-	})
-
-	t.Run("head-returns-cache-control", func(t *testing.T) {
-		// HEAD response should include a Cache-Control header
-		req, err := http.NewRequest("HEAD", "http://localhost/test/hello_world.txt", nil)
-		require.NoError(t, err)
-
-		resp, err := httpClient.Do(req)
-		require.NoError(t, err)
-		defer resp.Body.Close()
-
-		assert.Equal(t, http.StatusOK, resp.StatusCode)
-		// The cache always sets a Cache-Control header (either from origin or default)
-		assert.NotEmpty(t, resp.Header.Get("Cache-Control"))
-	})
-
-	t.Run("age-header-increases-with-time", func(t *testing.T) {
-		// hello_world.txt was cached by a previous subtest. We need the
-		// Age header (integer seconds since caching) to become non-zero.
-		// Wait just over 1 second — this is not an arbitrary sleep waiting
-		// for an async condition; it is waiting for real time to elapse so
-		// the Age measurement (whose granularity is 1 s) becomes non-zero.
-		time.Sleep(1100 * time.Millisecond)
-
-		// HEAD should now report Age ≥ 1
-		req, err := http.NewRequest("HEAD", "http://localhost/test/hello_world.txt", nil)
-		require.NoError(t, err)
-
-		resp, err := httpClient.Do(req)
-		require.NoError(t, err)
-		defer resp.Body.Close()
-
-		assert.Equal(t, http.StatusOK, resp.StatusCode)
-
-		ageStr := resp.Header.Get("Age")
-		require.NotEmpty(t, ageStr, "Age header must be present after data has aged")
-		ageVal, convErr := strconv.Atoi(ageStr)
-		require.NoError(t, convErr)
-		assert.GreaterOrEqual(t, ageVal, 1, "Age should be at least 1 second")
-
-		// GET should also carry the Age header
-		req, err = http.NewRequest("GET", "http://localhost/test/hello_world.txt", nil)
-		require.NoError(t, err)
-
-		resp, err = httpClient.Do(req)
-		require.NoError(t, err)
-		_, _ = io.Copy(io.Discard, resp.Body)
-		resp.Body.Close()
-
-		assert.Equal(t, http.StatusOK, resp.StatusCode)
-		ageStr = resp.Header.Get("Age")
-		require.NotEmpty(t, ageStr, "GET response must include Age header")
-		ageVal, convErr = strconv.Atoi(ageStr)
-		require.NoError(t, convErr)
-		assert.GreaterOrEqual(t, ageVal, 1, "GET Age should be at least 1 second")
+			assert.Equal(t, http.StatusOK, resp.StatusCode)
+			assert.Equal(t, strconv.Itoa(size), resp.Header.Get("Content-Length"))
+		})
 	})
 }
 
@@ -390,76 +457,5 @@ func TestPropfindPassthrough(t *testing.T) {
 
 		assert.True(t, strings.Contains(string(body), "propfind_new.txt"),
 			"new file should appear in listing immediately")
-	})
-}
-
-// TestStatLargeFile tests that Stat works correctly for a file larger than the
-// inline threshold, which exercises the disk-mode storage path.
-func TestStatLargeFile(t *testing.T) {
-	t.Cleanup(test_utils.SetupTestLogging(t))
-	server_utils.ResetTestState()
-
-	ft := fed_test_utils.NewFedTest(t, pubOriginCfg)
-
-	// Create a 1 MB file
-	originPath := filepath.Join(ft.Exports[0].StoragePrefix, "stat_large.bin")
-	fp, err := os.OpenFile(originPath, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0644)
-	require.NoError(t, err)
-	size := test_utils.WriteBigBuffer(t, fp, 1) // 1 MB
-
-	testCacheDir := t.TempDir()
-	pc, err := local_cache.NewPersistentCache(ft.Ctx, ft.Egrp, local_cache.PersistentCacheConfig{
-		BaseDir: testCacheDir,
-	})
-	require.NoError(t, err)
-	defer pc.Close()
-
-	t.Run("stat-before-download", func(t *testing.T) {
-		gotSize, err := pc.Stat("/test/stat_large.bin", "")
-		require.NoError(t, err)
-		assert.Equal(t, uint64(size), gotSize)
-	})
-
-	t.Run("stat-after-download", func(t *testing.T) {
-		// Download the object via the HTTP handler (Unix socket) which
-		// uses GetSeekableReader and handles on-demand block fetching.
-		// The direct pc.Get() API for disk-mode files returns an
-		// ObjectReader that expects all blocks already present.
-		transport := config.GetTransport().Clone()
-		transport.DialContext = func(_ context.Context, _, _ string) (net.Conn, error) {
-			return net.Dial("unix", param.LocalCache_Socket.GetString())
-		}
-		httpClient := &http.Client{Transport: transport}
-
-		req, err := http.NewRequest("GET", "http://localhost/test/stat_large.bin", nil)
-		require.NoError(t, err)
-		resp, err := httpClient.Do(req)
-		require.NoError(t, err)
-		n, err := io.Copy(io.Discard, resp.Body)
-		resp.Body.Close()
-		require.NoError(t, err)
-		assert.Equal(t, int64(size), n)
-
-		gotSize, err := pc.Stat("/test/stat_large.bin", "")
-		require.NoError(t, err)
-		assert.Equal(t, uint64(size), gotSize)
-	})
-
-	t.Run("http-head-content-length", func(t *testing.T) {
-		transport := config.GetTransport().Clone()
-		transport.DialContext = func(_ context.Context, _, _ string) (net.Conn, error) {
-			return net.Dial("unix", param.LocalCache_Socket.GetString())
-		}
-		httpClient := &http.Client{Transport: transport}
-
-		req, err := http.NewRequest("HEAD", "http://localhost/test/stat_large.bin", nil)
-		require.NoError(t, err)
-
-		resp, err := httpClient.Do(req)
-		require.NoError(t, err)
-		defer resp.Body.Close()
-
-		assert.Equal(t, http.StatusOK, resp.StatusCode)
-		assert.Equal(t, strconv.Itoa(size), resp.Header.Get("Content-Length"))
 	})
 }
