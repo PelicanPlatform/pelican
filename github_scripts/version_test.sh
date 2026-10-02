@@ -1,6 +1,6 @@
 #!/bin/bash -xe
-
-# Copyright (C) 2024, Pelican Project, Morgridge Institute for Research
+#
+# Copyright (C) 2026, Pelican Project, Morgridge Institute for Research
 #
 # Licensed under the Apache License, Version 2.0 (the "License"); you
 # may not use this file except in compliance with the License.  You may
@@ -15,66 +15,35 @@
 # limitations under the License.
 #
 
-# This tests the --version flag of various Pelican binaries (pelican/stash/osdf)
+# This tests the --version flag of the pelican binary, including when it
+# runs under the names "stash" and "osdf".
+#
+# The test keeps to a temporary directory of its own, which it removes on
+# exit, so that it can run alongside other tests.
 
-set -e
+# ---------------------------------------------------------------------------
+# Setup
+# ---------------------------------------------------------------------------
 
-mkdir -p /tmp/pelican-test/version-test
+# shellcheck source=github_scripts/e2e_common.sh
+source "$(dirname "${BASH_SOURCE[0]}")/e2e_common.sh"
 
-export PELICAN_CONFIGBASE=/tmp/pelican-test/version-test
+require_binaries ./pelican
+setup_test_root version 10
 
-# Function to cleanup after test ends
-cleanup() {
-    # Clean up temporary files
-    rm -rf /tmp/pelican-test/version-test
-    rm -f ./stash
-    rm -f ./osdf
-    unset PELICAN_CONFIGBASE
-}
+# ---------------------------------------------------------------------------
+# 1. Check the version that each name prints
+# ---------------------------------------------------------------------------
 
-# Setup trap with the PID as an argument to the cleanup function
-trap 'cleanup' EXIT
+mkdir -p "${TEST_ROOT}/bin"
+cp ./pelican "${TEST_ROOT}/bin/stash"
+cp ./pelican "${TEST_ROOT}/bin/osdf"
 
-if [ ! -f "./stash" ]; then
-    cp ./pelican ./stash
-fi
+for bin in ./pelican "${TEST_ROOT}/bin/stash" "${TEST_ROOT}/bin/osdf"; do
+    if ! stdout="$(within_budget "${bin}" --version)" || [[ "${stdout}" != *"Version: "* ]]; then
+        echo "TEST FAILED: ${bin} --version did not print a version"
+        exit 1
+    fi
+done
 
-if [ ! -f "./osdf" ]; then
-    cp ./pelican ./osdf
-fi
-
-stdout=$(./pelican --version)
-
-# Use variables for comparison or matching
-if [[ "$stdout" == *"Version: "* ]]; then
-    echo "pelican --version Version found in stdout"
-else
-    echo "Version not found in stdout running pelican --version"
-    echo "Test failed"
-    exit 1
-fi
-
-stdout=$(./stash --version)
-
-# Use variables for comparison or matching
-if [[ "$stdout" == *"Version: "* ]]; then
-    echo "stash --version Version found in stdout"
-else
-    echo "Version not found in stdout running stash --version"
-    echo "Test failed"
-    exit 1
-fi
-
-stdout=$(./osdf --version)
-
-# Use variables for comparison or matching
-if [[ "$stdout" == *"Version: "* ]]; then
-    echo "osdf --version Version found in stdout"
-else
-    echo "Version not found in stdout running osdf --version"
-    echo "Test failed"
-    exit 1
-fi
-
-echo "Test succeeded"
-exit 0
+echo "TEST PASSED"
