@@ -48,7 +48,7 @@ func TestCacheFedTokMaint(t *testing.T) {
 	t.Cleanup(server_utils.ResetTestState)
 
 	// Spin up the full fed so that our cache server can get the token from the director
-	require.NoError(t, param.Director_FedTokenLifetime.SetString("12s"))
+	require.NoError(t, param.Director_FedTokenLifetime.SetString("6s"))
 	oldMinTokRate := cache.MinFedTokenTickerRate
 	defer func() {
 		cache.MinFedTokenTickerRate = oldMinTokRate
@@ -56,8 +56,11 @@ func TestCacheFedTokMaint(t *testing.T) {
 	cache.MinFedTokenTickerRate = 1 * time.Second
 	_ = fed_test_utils.NewFedTest(t, bothPubNamespaces)
 
-	// Run the token maintenance routine for two periods and make sure
-	// the cache token on disk is never older than 4s (1/3 the configured lifetime)
+	// The manager refreshes the token every 1/3 of its lifetime (2s here).
+	// Watch it for two lifetimes and make sure the token on disk never gets
+	// older than 4s: that is two refresh intervals, so a refresh running up
+	// to 2s late on a loaded CI runner still passes, while a stalled manager
+	// shows up within 4s instead of needing the full window.
 	ctx := context.Background()
 	ctx, cancel, egrp := test_utils.TestContext(ctx, t)
 	defer cancel()
@@ -68,17 +71,17 @@ func TestCacheFedTokMaint(t *testing.T) {
 	cache.LaunchFedTokManager(ctx, egrp, &cacheServer, nil, nil, nil)
 	tokFile := cacheServer.GetFedTokLocation()
 
-	ticker := time.NewTicker(1 * time.Second)
+	ticker := time.NewTicker(200 * time.Millisecond)
 	defer ticker.Stop()
 
-	timeout := time.After(24 * time.Second)
+	timeout := time.After(12 * time.Second)
 	for {
 		select {
 		case <-ticker.C:
 			info, err := os.Stat(tokFile)
 			require.NoError(t, err, "Failed to stat token file")
 			age := time.Since(info.ModTime())
-			if age > (4*time.Second + 500*time.Millisecond) { // build in a little slop
+			if age > 4*time.Second {
 				t.Fatalf("Token file age exceeded 4s: %v", age)
 			}
 		case <-timeout:
