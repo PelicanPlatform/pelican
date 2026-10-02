@@ -24,8 +24,10 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 
 	"github.com/pelicanplatform/pelican/config"
+	"github.com/pelicanplatform/pelican/error_codes"
 )
 
 func TestBearerAuthenticator_Authorize(t *testing.T) {
@@ -71,6 +73,12 @@ func TestBearerAuthenticator_Verify(t *testing.T) {
 		assert.Error(t, err)
 		assert.Contains(t, err.Error(), "the server refused the credential")
 		assert.NotContains(t, err.Error(), "retrying", "the message must not claim this request is being retried")
+		// Classified, so the refusal carries its documented exit code instead
+		// of reaching the caller as an untyped error.
+		require.ErrorIs(t, err, error_codes.ErrAuthorization)
+		code, ok := error_codes.ExitCodeFor(err)
+		require.True(t, ok)
+		assert.Equal(t, 7, code)
 		assert.True(t, redo, "unauthorized attempt %d should trigger a retry", i+1)
 	}
 
