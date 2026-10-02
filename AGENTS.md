@@ -152,6 +152,15 @@ To run the widest possible set of unit tests locally (a superset of both CI pass
 go test -tags "client,server" ./...
 ```
 
+**Test tiers:** CI runs every push with `-short`; the scheduled nightly workflows run without it (and with `-race`).
+A test that takes tens of seconds on its own, or that needs sshd, minio, HTCondor, multi-gigabyte uploads, or child pelican processes, should call `test_utils.SkipIfShort(t, "reason")` as its first statement so that it runs nightly rather than on every push.
+Core federation behavior (posix/posixv2 origins, caches, the director) must stay in the quick tier; reserve the marker for backend variants, stress tests, and tests with long waits.
+To reproduce what a push runs, add `-short`:
+
+```bash
+go test -short -tags "client,server" ./...
+```
+
 **Test individual modules (use whichever tags apply to that module):**
 
 ```bash

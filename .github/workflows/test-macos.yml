@@ -142,6 +142,7 @@ jobs:
             -p=2 \
             -timeout=${{ inputs.race_detection && '45m' || '30m' }} \
             ${{ inputs.race_detection && '-race' || '' }} \
+            ${{ !inputs.race_detection && '-short' || '' }} \
             ${{ !inputs.race_detection && '-coverpkg=./...' || '' }} \
             ${{ !inputs.race_detection && '-covermode=count' || '' }} \
             ${{ !inputs.race_detection && format('-coverprofile={0}', matrix.coverprofile) || '' }} \
