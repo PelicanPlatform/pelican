@@ -359,6 +359,7 @@ func TestTPCWithPOSIXv2(t *testing.T) {
 //   - The destination token is independently verified
 //   - TPC works across trust boundaries (separate issuers)
 func TestTPCCrossOrigin(t *testing.T) {
+	test_utils.SkipIfShort(t, "launches a second origin as a child process")
 	t.Cleanup(test_utils.SetupTestLogging(t))
 
 	// Start the federation with origin #1 (the destination).

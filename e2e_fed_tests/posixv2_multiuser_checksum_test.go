@@ -55,6 +55,7 @@ import (
 // Requires Linux + CAP_SETUID/CAP_SETGID and the test user "alice"; skips
 // automatically when those aren't available.
 func TestPosixv2_MultiuserPreservesChecksums(t *testing.T) {
+	test_utils.SkipIfShort(t, "multiuser origin needs root and a full federation")
 	test_utils.SkipUnlessPrivileged(t)
 	test_utils.SkipUnlessTestUsers(t, "alice")
 

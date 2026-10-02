@@ -588,6 +588,7 @@ func TestSSHPosixv2OriginMultipleFiles(t *testing.T) {
 // This exercises the helper broker's ability to cycle through connections
 // quickly without leaks, panics, or EOF errors.
 func TestSSHPosixv2OriginConnectionStress(t *testing.T) {
+	test_utils.SkipIfShort(t, "starts an sshd and a full federation per test")
 	t.Cleanup(test_utils.SetupTestLogging(t))
 	server_utils.ResetTestState()
 	t.Cleanup(server_utils.ResetTestState)
