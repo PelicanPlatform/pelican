@@ -1,6 +1,6 @@
 #!/bin/bash -xe
 #
-# Copyright (C) 2024, University of Nebraska-Lincoln
+# Copyright (C) 2026, Pelican Project, Morgridge Institute for Research
 #
 # Licensed under the Apache License, Version 2.0 (the "License"); you
 # may not use this file except in compliance with the License.  You may
@@ -15,172 +15,190 @@
 # limitations under the License.
 #
 
-cp pelican stashcp
-cp pelican stash_plugin
+# This tests stashcp and the HTCondor file transfer plugin against the real
+# OSDF, both directly and through a local cache.
+#
+# The test keeps to a temporary directory of its own, which it removes on
+# exit, and its servers listen on ports that the OS picks, so that it can
+# run alongside other tests.
 
-to_exit=0
-./stashcp -d osdf:///pelicanplatform/test/hello-world.txt ./query1
-rm query1
+# ---------------------------------------------------------------------------
+# Setup
+# ---------------------------------------------------------------------------
 
-# Test the plugin interface
-classad_output=$(./stash_plugin -classad)
+# shellcheck source=github_scripts/e2e_common.sh
+source "$(dirname "${BASH_SOURCE[0]}")/e2e_common.sh"
 
-if ! [[ $classad_output =~ "PluginType = \"FileTransfer\"" ]]; then
-  echo "PluginType not in classad output"
-  to_exit=1
+require_binaries ./pelican ./pelican-server
+setup_test_root citests 300
+
+# The pelican binary acts as stashcp or the plugin when run under that name.
+mkdir -p "${TEST_ROOT}/bin"
+cp ./pelican "${TEST_ROOT}/bin/stashcp"
+cp ./pelican "${TEST_ROOT}/bin/stash_plugin"
+
+OBJECT_URL="osdf:///pelicanplatform/test/hello-world.txt"
+
+# The number of failed checks that did not stop the test.
+FAILURES=0
+
+# ---------------------------------------------------------------------------
+# 1. Download an object with stashcp
+# ---------------------------------------------------------------------------
+
+if ! within_budget "${TEST_ROOT}/bin/stashcp" -d "${OBJECT_URL}" "${TEST_ROOT}/stashcp-output" \
+    || [ ! -s "${TEST_ROOT}/stashcp-output" ]; then
+    echo "TEST FAILED: stashcp did not download the object"
+    exit 1
 fi
 
-if ! [[ $classad_output =~ "SupportedMethods = \"stash, osdf, pelican\"" ]]; then
-  echo "SupportedMethods not in classad output"
-  to_exit=1
+# ---------------------------------------------------------------------------
+# 2. Use the plugin interface
+# ---------------------------------------------------------------------------
+
+classad_output="$(within_budget "${TEST_ROOT}/bin/stash_plugin" -classad)"
+
+if [[ "${classad_output}" != *'PluginType = "FileTransfer"'* ]]; then
+    echo "CHECK FAILED: PluginType is not in the classad output"
+    FAILURES=$((FAILURES + 1))
 fi
 
-plugin_output=$(./stash_plugin osdf:///pelicanplatform/test/hello-world.txt query1)
-rm query1
-
-# shellcheck disable=SC2076
-if ! [[ $plugin_output =~ "TransferUrl = \"osdf:///pelicanplatform/test/hello-world.txt\"" ]]; then
-  echo "TransferUrl not in plugin output"
-  to_exit=1
+if [[ "${classad_output}" != *'SupportedMethods = "stash, osdf, pelican"'* ]]; then
+    echo "CHECK FAILED: SupportedMethods is not in the classad output"
+    FAILURES=$((FAILURES + 1))
 fi
 
-if ! [[ $plugin_output =~ "TransferSuccess = true" ]]; then
-  echo "TransferSuccess not in plugin output"
-  to_exit=1
+if ! plugin_output="$(within_budget "${TEST_ROOT}/bin/stash_plugin" "${OBJECT_URL}" "${TEST_ROOT}/plugin-output")" \
+    || [ ! -s "${TEST_ROOT}/plugin-output" ]; then
+    echo "${plugin_output}"
+    echo "TEST FAILED: The plugin did not download the object"
+    exit 1
 fi
 
-cat > infile <<EOF
-[ LocalFileName = "$PWD/query1"; Url = "osdf:///pelicanplatform/test/hello-world.txt" ]
+if [[ "${plugin_output}" != *"TransferUrl = \"${OBJECT_URL}\""* ]]; then
+    echo "CHECK FAILED: TransferUrl is not in the plugin output"
+    FAILURES=$((FAILURES + 1))
+fi
+
+if [[ "${plugin_output}" != *"TransferSuccess = true"* ]]; then
+    echo "CHECK FAILED: TransferSuccess is not in the plugin output"
+    FAILURES=$((FAILURES + 1))
+fi
+
+cat > "${TEST_ROOT}/plugin-infile" <<EOF
+[ LocalFileName = "${TEST_ROOT}/plugin-infile-output"; Url = "${OBJECT_URL}" ]
 EOF
 
-./stash_plugin -infile $PWD/infile -outfile $PWD/outfile
+if ! within_budget "${TEST_ROOT}/bin/stash_plugin" -infile "${TEST_ROOT}/plugin-infile" -outfile "${TEST_ROOT}/plugin-outfile" \
+    || [ ! -s "${TEST_ROOT}/plugin-infile-output" ]; then
+    echo "TEST FAILED: The plugin did not download the object named in its -infile"
+    exit 1
+fi
 
+# ---------------------------------------------------------------------------
+# 3. Start a local cache in front of the OSDF
+# ---------------------------------------------------------------------------
 
-#####################################
-## Test LocalCache in front of OSDF #
-#####################################
-SOCKET_DIR="`mktemp -d -t pelican-citest-XXXXXX`"
-export PELICAN_LOCALCACHE_SOCKET=$SOCKET_DIR/socket
-export PELICAN_LOCALCACHE_DATALOCATION=$SOCKET_DIR/data
-export PELICAN_CONFIG=${SOCKET_DIR}/pelican.yaml
 export PELICAN_SERVER_ENABLEUI=false
-export PELICAN_TLSSKIPVERIFY=true
-touch ${PELICAN_CONFIG}
+export PELICAN_LOCALCACHE_RUNLOCATION="${TEST_ROOT}/localcache"
+export PELICAN_LOCALCACHE_SOCKET="${PELICAN_LOCALCACHE_RUNLOCATION}/cache.sock"
+export PELICAN_LOCALCACHE_DATALOCATION="${PELICAN_LOCALCACHE_RUNLOCATION}/cache"
 
-./pelican-server serve --config ${PELICAN_CONFIG} -d -f osg-htc.org --module localcache &
-PELICAN_PID=$!
+./pelican-server serve -d -f osg-htc.org --module localcache &
+PIDS+=($!)
 
-cleanup() {
-    # Kill the process first, then wait for it to exit before deleting data.
-    # BadgerDB can hang indefinitely if its data directory is removed while
-    # it's still running.
-    kill $PELICAN_PID 2>/dev/null || :
-    # Wait up to 10 seconds for graceful shutdown, then force kill
-    for _i in {1..20}; do
-        if ! kill -0 $PELICAN_PID 2>/dev/null; then
-            break
-        fi
-        sleep 0.5
-    done
-    # Force kill if still running
-    kill -9 $PELICAN_PID 2>/dev/null || :
-    wait $PELICAN_PID 2>/dev/null || :
-    # Now safe to remove the data directory
-    rm -rf -- "$SOCKET_DIR"
+wait_for_address_file "${PELICAN_RUNTIMEDIR}/pelican.addresses" "local cache" "${PIDS[-1]}"
+LOCAL_CACHE_WEB_URL="$(read_address "${PELICAN_RUNTIMEDIR}/pelican.addresses" SERVER_EXTERNAL_WEB_URL)"
+wait_for_healthy "${LOCAL_CACHE_WEB_URL}" "local cache"
+
+# The local cache opens its socket only after writing its address file.
+if ! retry_for 10 0.5 test -e "${PELICAN_LOCALCACHE_SOCKET}"; then
+    echo "TEST FAILED: The local cache did not open its socket within 10 seconds"
+    exit 1
+fi
+
+# ---------------------------------------------------------------------------
+# 4. Download an object through the local cache
+# ---------------------------------------------------------------------------
+
+# Print the HTTP status that the local cache returns for an object without
+# fetching it.
+cached_status() {
+    e2e_curl -o /dev/null -w "%{http_code}" \
+        --unix-socket "${PELICAN_LOCALCACHE_SOCKET}" \
+        -H "Cache-Control: only-if-cached" \
+        -I "http://localhost$1"
 }
-trap cleanup EXIT
 
-for _idx in {1..20}; do
-  if [ -e "$SOCKET_DIR/socket" ]; then
-    break
-  fi
-  sleep 0.3
+OBJECT_PATH="/pelicanplatform/test/hello-world.txt"
+
+if [ "$(cached_status "${OBJECT_PATH}")" != "504" ]; then
+    echo "TEST FAILED: The local cache did not return 504 before the download"
+    exit 1
+fi
+
+# The object reaches the local cache only if the plugin downloads it through
+# the cache that Client.PreferredCaches names.
+within_budget env PELICAN_CLIENT_PREFERREDCACHES="unix://${PELICAN_LOCALCACHE_SOCKET}" \
+    "${TEST_ROOT}/bin/stash_plugin" -d "${OBJECT_URL}" /dev/null
+
+if [ "$(cached_status "${OBJECT_PATH}")" != "200" ]; then
+    echo "TEST FAILED: The object is not in the local cache after the download"
+    exit 1
+fi
+
+# A list of preferred caches without a trailing "+" restricts the plugin to
+# those caches, so a download through a missing one must fail. If the plugin
+# ignored the variable, the download would succeed through the OSDF.
+# Check that the download fails because the plugin tries the missing cache.
+for var in PELICAN_CLIENT_PREFERREDCACHES PELICAN_NEAREST_CACHE; do
+    if output="$(within_budget env "${var}=unix://${TEST_ROOT}/no-such-cache.sock" \
+        "${TEST_ROOT}/bin/stash_plugin" -d "${OBJECT_URL}" /dev/null 2>&1)" \
+        || [[ "${output}" != *"dial unix ${TEST_ROOT}/no-such-cache.sock"* ]]; then
+        echo "${output}"
+        echo "CHECK FAILED: The plugin did not try the cache that ${var} names"
+        FAILURES=$((FAILURES + 1))
+    fi
 done
-if [ ! -e "$SOCKET_DIR/socket" ]; then
-  echo "pelican serve never dropped localcache socket"
-  exit 1
+
+# ---------------------------------------------------------------------------
+# 5. Download an object without a usable home directory
+# ---------------------------------------------------------------------------
+
+# The plugin derives its configuration directory from HOME only when it is
+# not root and when PELICAN_CONFIGBASE and PELICAN_CONFIG are unset, so run
+# these downloads under those conditions.
+
+# The prefix of a command that runs as an unprivileged user. runuser resets
+# HOME, so the command must set HOME itself, for example by way of env.
+UNPRIVILEGED=()
+mkdir "${TEST_ROOT}/unprivileged"
+if [ "$(id -u)" -eq 0 ]; then
+    UNPRIVILEGED=(runuser -u nobody --)
+    # The unprivileged user must be able to write the plugin's output.
+    chown nobody "${TEST_ROOT}/unprivileged"
 fi
 
-# Helper function to check cache status using only-if-cached header.
-# Args: $1 = object_path, $2 = expected_status_code
-# Returns 0 if status code matches expected, 1 otherwise.
-check_cache_status() {
-  local object_path="$1"
-  local expected="$2"
-  local status_code
-  status_code=$(curl -s -o /dev/null -w "%{http_code}" \
-    --connect-timeout 5 --max-time 10 \
-    --unix-socket "$SOCKET_DIR/socket" \
-    -H "Cache-Control: only-if-cached" \
-    -X HEAD "http://localhost${object_path}")
-  [ "$status_code" = "$expected" ]
-}
-
-# Verify object is NOT cached before download (should return 504)
-if ! check_cache_status "/pelicanplatform/test/hello-world.txt" "504"; then
-  echo "Object should return 504 before first download"
-  exit 1
+if ! within_budget "${UNPRIVILEGED[@]}" env -u HOME -u PELICAN_CONFIGBASE -u PELICAN_CONFIG \
+    "${TEST_ROOT}/bin/stash_plugin" "${OBJECT_URL}" "${TEST_ROOT}/unprivileged/no-home-output" \
+    || [ ! -s "${TEST_ROOT}/unprivileged/no-home-output" ]; then
+    echo "CHECK FAILED: The plugin failed when HOME was unset"
+    FAILURES=$((FAILURES + 1))
 fi
 
-NEAREST_CACHE="unix://$SOCKET_DIR/socket" ./stash_plugin -d osdf:///pelicanplatform/test/hello-world.txt /dev/null
-exit_status=$?
-
-if ! [[ "$exit_status" = 0 ]]; then
-  echo "Cache plugin download failed"
-  exit 1
+mkdir "${TEST_ROOT}/unwritable-home"
+chmod a-w "${TEST_ROOT}/unwritable-home"
+if ! within_budget "${UNPRIVILEGED[@]}" env -u PELICAN_CONFIGBASE -u PELICAN_CONFIG \
+    HOME="${TEST_ROOT}/unwritable-home" \
+    "${TEST_ROOT}/bin/stash_plugin" "${OBJECT_URL}" "${TEST_ROOT}/unprivileged/unwritable-home-output" \
+    || [ ! -s "${TEST_ROOT}/unprivileged/unwritable-home-output" ]; then
+    echo "CHECK FAILED: The plugin failed when HOME was an unwritable directory"
+    FAILURES=$((FAILURES + 1))
 fi
 
-if ! check_cache_status "/pelicanplatform/test/hello-world.txt" "200"; then
-  echo "Test file not in local cache"
-  exit 1
+if [ "${FAILURES}" -gt 0 ]; then
+    echo "TEST FAILED: ${FAILURES} checks failed"
+    exit 1
 fi
 
-# Test we work with PELICAN_NEAREST_CACHE as well
-PELICAN_PREFFERREDCACHES="unix://$SOCKET_DIR/socket" ./stash_plugin -d osdf:///pelicanplatform/test/hello-world.txt /dev/null
-exit_status=$?
-
-if ! [[ "$exit_status" = 0 ]]; then
-  echo "Cache plugin download failed"
-  exit 1
-fi
-
-if ! check_cache_status "/pelicanplatform/test/hello-world.txt" "200"; then
-  echo "Test file not in local cache"
-  exit 1
-fi
-
-########################################
-# Test we return 0 when HOME is not set
-########################################
-OLDHOME=$HOME
-unset HOME
-./stash_plugin -classad
-exit_status=$?
-
-if ! [[ "$exit_status" = 0 ]]; then
-  echo "Plugin did not return 0 when HOME is not set"
-  to_exit=1
-fi
-
-export HOME=$OLDHOME
-
-# Test we return 0 when HOME points to a nonwritable directory
-OLDHOME=$HOME
-unset HOME
-mkdir unwritable_dir
-chmod u-w,a-w unwritable_dir
-export HOME=unwriteable_dir
-
-./stash_plugin -classad
-exit_status=$?
-
-if ! [[ "$exit_status" = 0 ]]; then
-  echo "Plugin did not return 0 when HOME is set to an unwritable dir"
-  to_exit=1
-fi
-
-unset HOME
-export HOME=$OLDHOME
-rm -r unwritable_dir
-
-exit $to_exit
+echo "TEST PASSED"
