@@ -320,6 +320,7 @@ func TestS3v2MemOrigin(t *testing.T) {
 // redirect → origin HTTP handler → gocloud.dev/blob/s3blob → MinIO. Skipped
 // if minio is not installed.
 func TestS3v2MinioOriginUploadDownload(t *testing.T) {
+	test_utils.SkipIfShort(t, "needs minio; the in-memory s3v2 cases in TestS3v2MemOrigin run on every push")
 	test_utils.SkipIfNoMinio(t)
 	t.Cleanup(test_utils.SetupTestLogging(t))
 	server_utils.ResetTestState()
