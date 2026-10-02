@@ -96,472 +96,404 @@ func makeRequest(ctx context.Context, t *testing.T, url string, headers map[stri
 // If-None-Match Tests (ETag-based conditional requests)
 // ============================================================================
 
-// TestOrigin_IfNoneMatch_MatchingETag tests that origin returns 304 when ETag matches
-func TestOrigin_IfNoneMatch_MatchingETag(t *testing.T) {
+// TestConditionalRequests runs each case below against one shared federation. Starting a
+// federation (five services plus XRootD) dominates the run time of these
+// cases, so they share one and keep their object names distinct instead.
+func TestConditionalRequests(t *testing.T) {
 	t.Cleanup(test_utils.SetupTestLogging(t))
 	server_utils.ResetTestState()
-	defer server_utils.ResetTestState()
+	t.Cleanup(server_utils.ResetTestState)
 
 	require.NoError(t, param.Cache_EnableV2.Set(true))
 	ft := fed_test_utils.NewFedTest(t, persistentCacheConfig)
 
-	// Setup test file
-	content, objectPath := setupTestFileOnOrigin(ft.Ctx, t, ft, "if_none_match_test.txt", "Test content for If-None-Match")
-	originURL := getOriginURL(t, objectPath)
+	// Origin_IfNoneMatch_MatchingETag tests that origin returns 304 when ETag matches
+	t.Run("Origin_IfNoneMatch_MatchingETag", func(t *testing.T) {
+		// Setup test file
+		content, objectPath := setupTestFileOnOrigin(ft.Ctx, t, ft, "if_none_match_test.txt", "Test content for If-None-Match")
+		originURL := getOriginURL(t, objectPath)
 
-	// First request - get the ETag
-	resp1 := makeRequest(ft.Ctx, t, originURL, nil)
-	defer resp1.Body.Close()
-	require.Equal(t, http.StatusOK, resp1.StatusCode)
+		// First request - get the ETag
+		resp1 := makeRequest(ft.Ctx, t, originURL, nil)
+		defer resp1.Body.Close()
+		require.Equal(t, http.StatusOK, resp1.StatusCode)
 
-	etag := resp1.Header.Get("ETag")
-	require.NotEmpty(t, etag, "Origin should return ETag header")
+		etag := resp1.Header.Get("ETag")
+		require.NotEmpty(t, etag, "Origin should return ETag header")
 
-	body1, _ := io.ReadAll(resp1.Body)
-	assert.Equal(t, content, string(body1))
+		body1, _ := io.ReadAll(resp1.Body)
+		assert.Equal(t, content, string(body1))
 
-	// Second request - with matching If-None-Match
-	resp2 := makeRequest(ft.Ctx, t, originURL, map[string]string{
-		"If-None-Match": etag,
+		// Second request - with matching If-None-Match
+		resp2 := makeRequest(ft.Ctx, t, originURL, map[string]string{
+			"If-None-Match": etag,
+		})
+		defer resp2.Body.Close()
+
+		assert.Equal(t, http.StatusNotModified, resp2.StatusCode,
+			"Origin should return 304 Not Modified for matching ETag")
+
+		// Body should be empty for 304
+		body2, _ := io.ReadAll(resp2.Body)
+		assert.Empty(t, body2, "304 response should have empty body")
+
+		// ETag header should still be present in 304 response
+		assert.Equal(t, etag, resp2.Header.Get("ETag"), "304 response should include ETag")
 	})
-	defer resp2.Body.Close()
 
-	assert.Equal(t, http.StatusNotModified, resp2.StatusCode,
-		"Origin should return 304 Not Modified for matching ETag")
+	// Origin_IfNoneMatch_NonMatchingETag tests that origin returns 200 when ETag doesn't match
+	t.Run("Origin_IfNoneMatch_NonMatchingETag", func(t *testing.T) {
+		// Setup test file
+		content, objectPath := setupTestFileOnOrigin(ft.Ctx, t, ft, "if_none_match_nonmatch_test.txt", "Test content for non-matching ETag")
+		originURL := getOriginURL(t, objectPath)
 
-	// Body should be empty for 304
-	body2, _ := io.ReadAll(resp2.Body)
-	assert.Empty(t, body2, "304 response should have empty body")
+		// Request with non-matching ETag
+		resp := makeRequest(ft.Ctx, t, originURL, map[string]string{
+			"If-None-Match": `"definitely-wrong-etag"`,
+		})
+		defer resp.Body.Close()
 
-	// ETag header should still be present in 304 response
-	assert.Equal(t, etag, resp2.Header.Get("ETag"), "304 response should include ETag")
-}
+		assert.Equal(t, http.StatusOK, resp.StatusCode,
+			"Origin should return 200 OK for non-matching ETag")
 
-// TestOrigin_IfNoneMatch_NonMatchingETag tests that origin returns 200 when ETag doesn't match
-func TestOrigin_IfNoneMatch_NonMatchingETag(t *testing.T) {
-	t.Cleanup(test_utils.SetupTestLogging(t))
-	server_utils.ResetTestState()
-	defer server_utils.ResetTestState()
-
-	require.NoError(t, param.Cache_EnableV2.Set(true))
-	ft := fed_test_utils.NewFedTest(t, persistentCacheConfig)
-
-	// Setup test file
-	content, objectPath := setupTestFileOnOrigin(ft.Ctx, t, ft, "if_none_match_nonmatch_test.txt", "Test content for non-matching ETag")
-	originURL := getOriginURL(t, objectPath)
-
-	// Request with non-matching ETag
-	resp := makeRequest(ft.Ctx, t, originURL, map[string]string{
-		"If-None-Match": `"definitely-wrong-etag"`,
+		body, _ := io.ReadAll(resp.Body)
+		assert.Equal(t, content, string(body))
 	})
-	defer resp.Body.Close()
 
-	assert.Equal(t, http.StatusOK, resp.StatusCode,
-		"Origin should return 200 OK for non-matching ETag")
+	// Origin_IfNoneMatch_MultipleETags tests If-None-Match with multiple ETags
+	t.Run("Origin_IfNoneMatch_MultipleETags", func(t *testing.T) {
+		// Setup test file
+		_, objectPath := setupTestFileOnOrigin(ft.Ctx, t, ft, "if_none_match_multi_test.txt", "Test content")
+		originURL := getOriginURL(t, objectPath)
 
-	body, _ := io.ReadAll(resp.Body)
-	assert.Equal(t, content, string(body))
-}
+		// Get the actual ETag
+		resp1 := makeRequest(ft.Ctx, t, originURL, nil)
+		etag := resp1.Header.Get("ETag")
+		resp1.Body.Close()
+		require.NotEmpty(t, etag)
 
-// TestOrigin_IfNoneMatch_MultipleETags tests If-None-Match with multiple ETags
-func TestOrigin_IfNoneMatch_MultipleETags(t *testing.T) {
-	t.Cleanup(test_utils.SetupTestLogging(t))
-	server_utils.ResetTestState()
-	defer server_utils.ResetTestState()
+		// Test with multiple ETags (matching one in the middle)
+		resp2 := makeRequest(ft.Ctx, t, originURL, map[string]string{
+			"If-None-Match": `"wrong1", ` + etag + `, "wrong2"`,
+		})
+		defer resp2.Body.Close()
 
-	require.NoError(t, param.Cache_EnableV2.Set(true))
-	ft := fed_test_utils.NewFedTest(t, persistentCacheConfig)
-
-	// Setup test file
-	_, objectPath := setupTestFileOnOrigin(ft.Ctx, t, ft, "if_none_match_multi_test.txt", "Test content")
-	originURL := getOriginURL(t, objectPath)
-
-	// Get the actual ETag
-	resp1 := makeRequest(ft.Ctx, t, originURL, nil)
-	etag := resp1.Header.Get("ETag")
-	resp1.Body.Close()
-	require.NotEmpty(t, etag)
-
-	// Test with multiple ETags (matching one in the middle)
-	resp2 := makeRequest(ft.Ctx, t, originURL, map[string]string{
-		"If-None-Match": `"wrong1", ` + etag + `, "wrong2"`,
+		assert.Equal(t, http.StatusNotModified, resp2.StatusCode,
+			"Origin should return 304 when one of multiple ETags matches")
 	})
-	defer resp2.Body.Close()
 
-	assert.Equal(t, http.StatusNotModified, resp2.StatusCode,
-		"Origin should return 304 when one of multiple ETags matches")
-}
+	// Origin_IfNoneMatch_Wildcard tests If-None-Match with wildcard (*)
+	t.Run("Origin_IfNoneMatch_Wildcard", func(t *testing.T) {
+		// Setup test file
+		_, objectPath := setupTestFileOnOrigin(ft.Ctx, t, ft, "if_none_match_wildcard_test.txt", "Test content")
+		originURL := getOriginURL(t, objectPath)
 
-// TestOrigin_IfNoneMatch_Wildcard tests If-None-Match with wildcard (*)
-func TestOrigin_IfNoneMatch_Wildcard(t *testing.T) {
-	t.Cleanup(test_utils.SetupTestLogging(t))
-	server_utils.ResetTestState()
-	defer server_utils.ResetTestState()
+		// Request with wildcard If-None-Match
+		resp := makeRequest(ft.Ctx, t, originURL, map[string]string{
+			"If-None-Match": "*",
+		})
+		defer resp.Body.Close()
 
-	require.NoError(t, param.Cache_EnableV2.Set(true))
-	ft := fed_test_utils.NewFedTest(t, persistentCacheConfig)
-
-	// Setup test file
-	_, objectPath := setupTestFileOnOrigin(ft.Ctx, t, ft, "if_none_match_wildcard_test.txt", "Test content")
-	originURL := getOriginURL(t, objectPath)
-
-	// Request with wildcard If-None-Match
-	resp := makeRequest(ft.Ctx, t, originURL, map[string]string{
-		"If-None-Match": "*",
+		assert.Equal(t, http.StatusNotModified, resp.StatusCode,
+			"Origin should return 304 for If-None-Match: * on existing resource")
 	})
-	defer resp.Body.Close()
 
-	assert.Equal(t, http.StatusNotModified, resp.StatusCode,
-		"Origin should return 304 for If-None-Match: * on existing resource")
-}
+	// Origin_IfNoneMatch_WeakETag tests weak ETag comparison
+	t.Run("Origin_IfNoneMatch_WeakETag", func(t *testing.T) {
+		// Setup test file
+		_, objectPath := setupTestFileOnOrigin(ft.Ctx, t, ft, "if_none_match_weak_test.txt", "Test content")
+		originURL := getOriginURL(t, objectPath)
 
-// TestOrigin_IfNoneMatch_WeakETag tests weak ETag comparison
-func TestOrigin_IfNoneMatch_WeakETag(t *testing.T) {
-	t.Cleanup(test_utils.SetupTestLogging(t))
-	server_utils.ResetTestState()
-	defer server_utils.ResetTestState()
+		// Get the actual ETag
+		resp1 := makeRequest(ft.Ctx, t, originURL, nil)
+		etag := resp1.Header.Get("ETag")
+		resp1.Body.Close()
+		require.NotEmpty(t, etag)
 
-	require.NoError(t, param.Cache_EnableV2.Set(true))
-	ft := fed_test_utils.NewFedTest(t, persistentCacheConfig)
+		// Test with weak ETag prefix (W/...)
+		// Per RFC 7232, weak comparison for GET should match
+		weakETag := "W/" + etag
+		resp2 := makeRequest(ft.Ctx, t, originURL, map[string]string{
+			"If-None-Match": weakETag,
+		})
+		defer resp2.Body.Close()
 
-	// Setup test file
-	_, objectPath := setupTestFileOnOrigin(ft.Ctx, t, ft, "if_none_match_weak_test.txt", "Test content")
-	originURL := getOriginURL(t, objectPath)
-
-	// Get the actual ETag
-	resp1 := makeRequest(ft.Ctx, t, originURL, nil)
-	etag := resp1.Header.Get("ETag")
-	resp1.Body.Close()
-	require.NotEmpty(t, etag)
-
-	// Test with weak ETag prefix (W/...)
-	// Per RFC 7232, weak comparison for GET should match
-	weakETag := "W/" + etag
-	resp2 := makeRequest(ft.Ctx, t, originURL, map[string]string{
-		"If-None-Match": weakETag,
+		assert.Equal(t, http.StatusNotModified, resp2.StatusCode,
+			"Origin should use weak comparison for GET requests with W/ prefix")
 	})
-	defer resp2.Body.Close()
 
-	assert.Equal(t, http.StatusNotModified, resp2.StatusCode,
-		"Origin should use weak comparison for GET requests with W/ prefix")
-}
+	// Origin_IfModifiedSince_NotModified tests that origin returns 304 when file hasn't changed
+	t.Run("Origin_IfModifiedSince_NotModified", func(t *testing.T) {
+		// Setup test file
+		_, objectPath := setupTestFileOnOrigin(ft.Ctx, t, ft, "if_modified_since_test.txt", "Test content for If-Modified-Since")
+		originURL := getOriginURL(t, objectPath)
 
-// ============================================================================
-// If-Modified-Since Tests
-// ============================================================================
+		// First request - get Last-Modified
+		resp1 := makeRequest(ft.Ctx, t, originURL, nil)
+		defer resp1.Body.Close()
+		require.Equal(t, http.StatusOK, resp1.StatusCode)
 
-// TestOrigin_IfModifiedSince_NotModified tests that origin returns 304 when file hasn't changed
-func TestOrigin_IfModifiedSince_NotModified(t *testing.T) {
-	t.Cleanup(test_utils.SetupTestLogging(t))
-	server_utils.ResetTestState()
-	defer server_utils.ResetTestState()
+		lastModified := resp1.Header.Get("Last-Modified")
+		require.NotEmpty(t, lastModified, "Origin should return Last-Modified header")
+		_, _ = io.ReadAll(resp1.Body)
 
-	require.NoError(t, param.Cache_EnableV2.Set(true))
-	ft := fed_test_utils.NewFedTest(t, persistentCacheConfig)
+		// Second request - with If-Modified-Since (using same time - should return 304)
+		resp2 := makeRequest(ft.Ctx, t, originURL, map[string]string{
+			"If-Modified-Since": lastModified,
+		})
+		defer resp2.Body.Close()
 
-	// Setup test file
-	_, objectPath := setupTestFileOnOrigin(ft.Ctx, t, ft, "if_modified_since_test.txt", "Test content for If-Modified-Since")
-	originURL := getOriginURL(t, objectPath)
-
-	// First request - get Last-Modified
-	resp1 := makeRequest(ft.Ctx, t, originURL, nil)
-	defer resp1.Body.Close()
-	require.Equal(t, http.StatusOK, resp1.StatusCode)
-
-	lastModified := resp1.Header.Get("Last-Modified")
-	require.NotEmpty(t, lastModified, "Origin should return Last-Modified header")
-	_, _ = io.ReadAll(resp1.Body)
-
-	// Second request - with If-Modified-Since (using same time - should return 304)
-	resp2 := makeRequest(ft.Ctx, t, originURL, map[string]string{
-		"If-Modified-Since": lastModified,
+		assert.Equal(t, http.StatusNotModified, resp2.StatusCode,
+			"Origin should return 304 when file hasn't been modified since the given time")
 	})
-	defer resp2.Body.Close()
 
-	assert.Equal(t, http.StatusNotModified, resp2.StatusCode,
-		"Origin should return 304 when file hasn't been modified since the given time")
-}
+	// Origin_IfModifiedSince_Modified tests that origin returns 200 when file is newer
+	t.Run("Origin_IfModifiedSince_Modified", func(t *testing.T) {
+		// Setup test file
+		content, objectPath := setupTestFileOnOrigin(ft.Ctx, t, ft, "if_modified_since_modified_test.txt", "Test content")
+		originURL := getOriginURL(t, objectPath)
 
-// TestOrigin_IfModifiedSince_Modified tests that origin returns 200 when file is newer
-func TestOrigin_IfModifiedSince_Modified(t *testing.T) {
-	t.Cleanup(test_utils.SetupTestLogging(t))
-	server_utils.ResetTestState()
-	defer server_utils.ResetTestState()
+		// Request with old If-Modified-Since (file should be newer)
+		oldTime := time.Now().Add(-24 * time.Hour).UTC().Format(http.TimeFormat)
+		resp := makeRequest(ft.Ctx, t, originURL, map[string]string{
+			"If-Modified-Since": oldTime,
+		})
+		defer resp.Body.Close()
 
-	require.NoError(t, param.Cache_EnableV2.Set(true))
-	ft := fed_test_utils.NewFedTest(t, persistentCacheConfig)
+		assert.Equal(t, http.StatusOK, resp.StatusCode,
+			"Origin should return 200 when file has been modified since the given time")
 
-	// Setup test file
-	content, objectPath := setupTestFileOnOrigin(ft.Ctx, t, ft, "if_modified_since_modified_test.txt", "Test content")
-	originURL := getOriginURL(t, objectPath)
-
-	// Request with old If-Modified-Since (file should be newer)
-	oldTime := time.Now().Add(-24 * time.Hour).UTC().Format(http.TimeFormat)
-	resp := makeRequest(ft.Ctx, t, originURL, map[string]string{
-		"If-Modified-Since": oldTime,
+		body, _ := io.ReadAll(resp.Body)
+		assert.Equal(t, content, string(body))
 	})
-	defer resp.Body.Close()
 
-	assert.Equal(t, http.StatusOK, resp.StatusCode,
-		"Origin should return 200 when file has been modified since the given time")
+	// Origin_IfModifiedSince_FutureDate tests If-Modified-Since with a future date
+	t.Run("Origin_IfModifiedSince_FutureDate", func(t *testing.T) {
+		// Setup test file
+		_, objectPath := setupTestFileOnOrigin(ft.Ctx, t, ft, "if_modified_since_future_test.txt", "Test content")
+		originURL := getOriginURL(t, objectPath)
 
-	body, _ := io.ReadAll(resp.Body)
-	assert.Equal(t, content, string(body))
-}
+		// Request with future If-Modified-Since (should return 304)
+		futureTime := time.Now().Add(24 * time.Hour).UTC().Format(http.TimeFormat)
+		resp := makeRequest(ft.Ctx, t, originURL, map[string]string{
+			"If-Modified-Since": futureTime,
+		})
+		defer resp.Body.Close()
 
-// TestOrigin_IfModifiedSince_FutureDate tests If-Modified-Since with a future date
-func TestOrigin_IfModifiedSince_FutureDate(t *testing.T) {
-	t.Cleanup(test_utils.SetupTestLogging(t))
-	server_utils.ResetTestState()
-	defer server_utils.ResetTestState()
-
-	require.NoError(t, param.Cache_EnableV2.Set(true))
-	ft := fed_test_utils.NewFedTest(t, persistentCacheConfig)
-
-	// Setup test file
-	_, objectPath := setupTestFileOnOrigin(ft.Ctx, t, ft, "if_modified_since_future_test.txt", "Test content")
-	originURL := getOriginURL(t, objectPath)
-
-	// Request with future If-Modified-Since (should return 304)
-	futureTime := time.Now().Add(24 * time.Hour).UTC().Format(http.TimeFormat)
-	resp := makeRequest(ft.Ctx, t, originURL, map[string]string{
-		"If-Modified-Since": futureTime,
+		assert.Equal(t, http.StatusNotModified, resp.StatusCode,
+			"Origin should return 304 when If-Modified-Since is in the future")
 	})
-	defer resp.Body.Close()
 
-	assert.Equal(t, http.StatusNotModified, resp.StatusCode,
-		"Origin should return 304 when If-Modified-Since is in the future")
-}
+	// Origin_IfModifiedSince_InvalidDate tests that invalid dates are ignored
+	t.Run("Origin_IfModifiedSince_InvalidDate", func(t *testing.T) {
+		// Setup test file
+		content, objectPath := setupTestFileOnOrigin(ft.Ctx, t, ft, "if_modified_since_invalid_test.txt", "Test content")
+		originURL := getOriginURL(t, objectPath)
 
-// TestOrigin_IfModifiedSince_InvalidDate tests that invalid dates are ignored
-func TestOrigin_IfModifiedSince_InvalidDate(t *testing.T) {
-	t.Cleanup(test_utils.SetupTestLogging(t))
-	server_utils.ResetTestState()
-	defer server_utils.ResetTestState()
+		// Request with invalid date format
+		resp := makeRequest(ft.Ctx, t, originURL, map[string]string{
+			"If-Modified-Since": "not-a-valid-date",
+		})
+		defer resp.Body.Close()
 
-	require.NoError(t, param.Cache_EnableV2.Set(true))
-	ft := fed_test_utils.NewFedTest(t, persistentCacheConfig)
+		assert.Equal(t, http.StatusOK, resp.StatusCode,
+			"Origin should ignore invalid If-Modified-Since and return 200")
 
-	// Setup test file
-	content, objectPath := setupTestFileOnOrigin(ft.Ctx, t, ft, "if_modified_since_invalid_test.txt", "Test content")
-	originURL := getOriginURL(t, objectPath)
-
-	// Request with invalid date format
-	resp := makeRequest(ft.Ctx, t, originURL, map[string]string{
-		"If-Modified-Since": "not-a-valid-date",
+		body, _ := io.ReadAll(resp.Body)
+		assert.Equal(t, content, string(body))
 	})
-	defer resp.Body.Close()
 
-	assert.Equal(t, http.StatusOK, resp.StatusCode,
-		"Origin should ignore invalid If-Modified-Since and return 200")
+	// Origin_CombinedHeaders_IfNoneMatchTakesPrecedence tests RFC 7232 precedence rules
+	t.Run("Origin_CombinedHeaders_IfNoneMatchTakesPrecedence", func(t *testing.T) {
+		// Setup test file
+		content, objectPath := setupTestFileOnOrigin(ft.Ctx, t, ft, "combined_headers_test.txt", "Test content")
+		originURL := getOriginURL(t, objectPath)
 
-	body, _ := io.ReadAll(resp.Body)
-	assert.Equal(t, content, string(body))
-}
+		// Get ETag
+		resp1 := makeRequest(ft.Ctx, t, originURL, nil)
+		etag := resp1.Header.Get("ETag")
+		resp1.Body.Close()
+		require.NotEmpty(t, etag)
 
-// ============================================================================
-// Combined Conditional Headers Tests
-// ============================================================================
+		// Test: If-None-Match matches, If-Modified-Since doesn't matter (should be 304)
+		oldTime := time.Now().Add(-24 * time.Hour).UTC().Format(http.TimeFormat)
+		resp2 := makeRequest(ft.Ctx, t, originURL, map[string]string{
+			"If-None-Match":     etag,
+			"If-Modified-Since": oldTime, // This would normally return 200 alone
+		})
+		defer resp2.Body.Close()
 
-// TestOrigin_CombinedHeaders_IfNoneMatchTakesPrecedence tests RFC 7232 precedence rules
-func TestOrigin_CombinedHeaders_IfNoneMatchTakesPrecedence(t *testing.T) {
-	t.Cleanup(test_utils.SetupTestLogging(t))
-	server_utils.ResetTestState()
-	defer server_utils.ResetTestState()
+		assert.Equal(t, http.StatusNotModified, resp2.StatusCode,
+			"If-None-Match should take precedence per RFC 7232")
 
-	require.NoError(t, param.Cache_EnableV2.Set(true))
-	ft := fed_test_utils.NewFedTest(t, persistentCacheConfig)
+		// Test: If-None-Match doesn't match - should return 200 regardless of If-Modified-Since
+		futureTime := time.Now().Add(24 * time.Hour).UTC().Format(http.TimeFormat)
+		resp3 := makeRequest(ft.Ctx, t, originURL, map[string]string{
+			"If-None-Match":     `"wrong-etag"`,
+			"If-Modified-Since": futureTime, // This would return 304 alone
+		})
+		defer resp3.Body.Close()
 
-	// Setup test file
-	content, objectPath := setupTestFileOnOrigin(ft.Ctx, t, ft, "combined_headers_test.txt", "Test content")
-	originURL := getOriginURL(t, objectPath)
+		assert.Equal(t, http.StatusOK, resp3.StatusCode,
+			"Non-matching If-None-Match should return 200, ignoring If-Modified-Since")
 
-	// Get ETag
-	resp1 := makeRequest(ft.Ctx, t, originURL, nil)
-	etag := resp1.Header.Get("ETag")
-	resp1.Body.Close()
-	require.NotEmpty(t, etag)
-
-	// Test: If-None-Match matches, If-Modified-Since doesn't matter (should be 304)
-	oldTime := time.Now().Add(-24 * time.Hour).UTC().Format(http.TimeFormat)
-	resp2 := makeRequest(ft.Ctx, t, originURL, map[string]string{
-		"If-None-Match":     etag,
-		"If-Modified-Since": oldTime, // This would normally return 200 alone
+		body, _ := io.ReadAll(resp3.Body)
+		assert.Equal(t, content, string(body))
 	})
-	defer resp2.Body.Close()
 
-	assert.Equal(t, http.StatusNotModified, resp2.StatusCode,
-		"If-None-Match should take precedence per RFC 7232")
+	// Cache_IfNoneMatch_CachedContent tests that cache returns 304 for matching ETag
+	t.Run("Cache_IfNoneMatch_CachedContent", func(t *testing.T) {
+		// Setup test file
+		content, objectPath := setupTestFileOnOrigin(ft.Ctx, t, ft, "cache_if_none_match_test.txt", "Test content for cache conditional request")
 
-	// Test: If-None-Match doesn't match - should return 200 regardless of If-Modified-Since
-	futureTime := time.Now().Add(24 * time.Hour).UTC().Format(http.TimeFormat)
-	resp3 := makeRequest(ft.Ctx, t, originURL, map[string]string{
-		"If-None-Match":     `"wrong-etag"`,
-		"If-Modified-Since": futureTime, // This would return 304 alone
+		// Populate cache through Pelican client
+		localTmpDir := t.TempDir()
+		uploadURL := fmt.Sprintf("pelican://%s:%d%s",
+			param.Server_Hostname.GetString(), param.Server_WebPort.GetInt(), objectPath)
+		downloadFile := filepath.Join(localTmpDir, "downloaded.txt")
+		_, err := client.DoGet(ft.Ctx, uploadURL, downloadFile, false, client.WithToken(ft.Token))
+		require.NoError(t, err)
+
+		// Get cache URL
+		testToken := getTempTokenForTest(t)
+		cacheURL := getCacheRedirectURL(ft.Ctx, t, objectPath, testToken)
+
+		// First request to cache - get ETag
+		resp1 := makeRequest(ft.Ctx, t, cacheURL, nil)
+		defer resp1.Body.Close()
+		require.Equal(t, http.StatusOK, resp1.StatusCode)
+
+		etag := resp1.Header.Get("ETag")
+		require.NotEmpty(t, etag, "Cache should return ETag header")
+
+		body1, _ := io.ReadAll(resp1.Body)
+		assert.Equal(t, content, string(body1))
+
+		// Second request with matching If-None-Match
+		resp2 := makeRequest(ft.Ctx, t, cacheURL, map[string]string{
+			"If-None-Match": etag,
+		})
+		defer resp2.Body.Close()
+
+		assert.Equal(t, http.StatusNotModified, resp2.StatusCode,
+			"Cache should return 304 Not Modified for matching ETag")
 	})
-	defer resp3.Body.Close()
 
-	assert.Equal(t, http.StatusOK, resp3.StatusCode,
-		"Non-matching If-None-Match should return 200, ignoring If-Modified-Since")
+	// Cache_IfModifiedSince_CachedContent tests that cache returns 304 for If-Modified-Since
+	t.Run("Cache_IfModifiedSince_CachedContent", func(t *testing.T) {
+		// Setup test file
+		_, objectPath := setupTestFileOnOrigin(ft.Ctx, t, ft, "cache_if_modified_since_test.txt", "Test content")
 
-	body, _ := io.ReadAll(resp3.Body)
-	assert.Equal(t, content, string(body))
-}
+		// Populate cache
+		localTmpDir := t.TempDir()
+		uploadURL := fmt.Sprintf("pelican://%s:%d%s",
+			param.Server_Hostname.GetString(), param.Server_WebPort.GetInt(), objectPath)
+		downloadFile := filepath.Join(localTmpDir, "downloaded.txt")
+		_, err := client.DoGet(ft.Ctx, uploadURL, downloadFile, false, client.WithToken(ft.Token))
+		require.NoError(t, err)
 
-// ============================================================================
-// Cache Conditional Request Tests
-// ============================================================================
+		// Get cache URL
+		testToken := getTempTokenForTest(t)
+		cacheURL := getCacheRedirectURL(ft.Ctx, t, objectPath, testToken)
 
-// TestCache_IfNoneMatch_CachedContent tests that cache returns 304 for matching ETag
-func TestCache_IfNoneMatch_CachedContent(t *testing.T) {
-	t.Cleanup(test_utils.SetupTestLogging(t))
-	server_utils.ResetTestState()
-	defer server_utils.ResetTestState()
+		// Get Last-Modified from cache
+		resp1 := makeRequest(ft.Ctx, t, cacheURL, nil)
+		lastModified := resp1.Header.Get("Last-Modified")
+		resp1.Body.Close()
+		require.NotEmpty(t, lastModified, "Cache should return Last-Modified header")
 
-	require.NoError(t, param.Cache_EnableV2.Set(true))
-	ft := fed_test_utils.NewFedTest(t, persistentCacheConfig)
+		// Request with matching If-Modified-Since
+		resp2 := makeRequest(ft.Ctx, t, cacheURL, map[string]string{
+			"If-Modified-Since": lastModified,
+		})
+		defer resp2.Body.Close()
 
-	// Setup test file
-	content, objectPath := setupTestFileOnOrigin(ft.Ctx, t, ft, "cache_if_none_match_test.txt", "Test content for cache conditional request")
-
-	// Populate cache through Pelican client
-	localTmpDir := t.TempDir()
-	uploadURL := fmt.Sprintf("pelican://%s:%d%s",
-		param.Server_Hostname.GetString(), param.Server_WebPort.GetInt(), objectPath)
-	downloadFile := filepath.Join(localTmpDir, "downloaded.txt")
-	_, err := client.DoGet(ft.Ctx, uploadURL, downloadFile, false, client.WithToken(ft.Token))
-	require.NoError(t, err)
-
-	// Get cache URL
-	testToken := getTempTokenForTest(t)
-	cacheURL := getCacheRedirectURL(ft.Ctx, t, objectPath, testToken)
-
-	// First request to cache - get ETag
-	resp1 := makeRequest(ft.Ctx, t, cacheURL, nil)
-	defer resp1.Body.Close()
-	require.Equal(t, http.StatusOK, resp1.StatusCode)
-
-	etag := resp1.Header.Get("ETag")
-	require.NotEmpty(t, etag, "Cache should return ETag header")
-
-	body1, _ := io.ReadAll(resp1.Body)
-	assert.Equal(t, content, string(body1))
-
-	// Second request with matching If-None-Match
-	resp2 := makeRequest(ft.Ctx, t, cacheURL, map[string]string{
-		"If-None-Match": etag,
+		assert.Equal(t, http.StatusNotModified, resp2.StatusCode,
+			"Cache should return 304 when content hasn't been modified")
 	})
-	defer resp2.Body.Close()
 
-	assert.Equal(t, http.StatusNotModified, resp2.StatusCode,
-		"Cache should return 304 Not Modified for matching ETag")
-}
+	// Origin_ETagFormat tests that ETag format is valid and consistent
+	t.Run("Origin_ETagFormat", func(t *testing.T) {
+		// Setup test file
+		_, objectPath := setupTestFileOnOrigin(ft.Ctx, t, ft, "etag_format_test.txt", "Test content for ETag format")
+		originURL := getOriginURL(t, objectPath)
 
-// TestCache_IfModifiedSince_CachedContent tests that cache returns 304 for If-Modified-Since
-func TestCache_IfModifiedSince_CachedContent(t *testing.T) {
-	t.Cleanup(test_utils.SetupTestLogging(t))
-	server_utils.ResetTestState()
-	defer server_utils.ResetTestState()
+		// Make multiple requests and verify ETag format and consistency
+		var previousETag string
+		for i := 0; i < 3; i++ {
+			resp := makeRequest(ft.Ctx, t, originURL, nil)
+			etag := resp.Header.Get("ETag")
+			resp.Body.Close()
 
-	require.NoError(t, param.Cache_EnableV2.Set(true))
-	ft := fed_test_utils.NewFedTest(t, persistentCacheConfig)
+			require.NotEmpty(t, etag, "ETag should be present")
 
-	// Setup test file
-	_, objectPath := setupTestFileOnOrigin(ft.Ctx, t, ft, "cache_if_modified_since_test.txt", "Test content")
+			// Verify ETag format: should be quoted string (strong) or W/"..." (weak)
+			isStrong := strings.HasPrefix(etag, `"`) && strings.HasSuffix(etag, `"`)
+			isWeak := strings.HasPrefix(etag, `W/"`) && strings.HasSuffix(etag, `"`)
+			assert.True(t, isStrong || isWeak, "ETag should be properly quoted: %s", etag)
 
-	// Populate cache
-	localTmpDir := t.TempDir()
-	uploadURL := fmt.Sprintf("pelican://%s:%d%s",
-		param.Server_Hostname.GetString(), param.Server_WebPort.GetInt(), objectPath)
-	downloadFile := filepath.Join(localTmpDir, "downloaded.txt")
-	_, err := client.DoGet(ft.Ctx, uploadURL, downloadFile, false, client.WithToken(ft.Token))
-	require.NoError(t, err)
-
-	// Get cache URL
-	testToken := getTempTokenForTest(t)
-	cacheURL := getCacheRedirectURL(ft.Ctx, t, objectPath, testToken)
-
-	// Get Last-Modified from cache
-	resp1 := makeRequest(ft.Ctx, t, cacheURL, nil)
-	lastModified := resp1.Header.Get("Last-Modified")
-	resp1.Body.Close()
-	require.NotEmpty(t, lastModified, "Cache should return Last-Modified header")
-
-	// Request with matching If-Modified-Since
-	resp2 := makeRequest(ft.Ctx, t, cacheURL, map[string]string{
-		"If-Modified-Since": lastModified,
-	})
-	defer resp2.Body.Close()
-
-	assert.Equal(t, http.StatusNotModified, resp2.StatusCode,
-		"Cache should return 304 when content hasn't been modified")
-}
-
-// ============================================================================
-// ETag Format and Consistency Tests
-// ============================================================================
-
-// TestOrigin_ETagFormat tests that ETag format is valid and consistent
-func TestOrigin_ETagFormat(t *testing.T) {
-	t.Cleanup(test_utils.SetupTestLogging(t))
-	server_utils.ResetTestState()
-	defer server_utils.ResetTestState()
-
-	require.NoError(t, param.Cache_EnableV2.Set(true))
-	ft := fed_test_utils.NewFedTest(t, persistentCacheConfig)
-
-	// Setup test file
-	_, objectPath := setupTestFileOnOrigin(ft.Ctx, t, ft, "etag_format_test.txt", "Test content for ETag format")
-	originURL := getOriginURL(t, objectPath)
-
-	// Make multiple requests and verify ETag format and consistency
-	var previousETag string
-	for i := 0; i < 3; i++ {
-		resp := makeRequest(ft.Ctx, t, originURL, nil)
-		etag := resp.Header.Get("ETag")
-		resp.Body.Close()
-
-		require.NotEmpty(t, etag, "ETag should be present")
-
-		// Verify ETag format: should be quoted string (strong) or W/"..." (weak)
-		isStrong := strings.HasPrefix(etag, `"`) && strings.HasSuffix(etag, `"`)
-		isWeak := strings.HasPrefix(etag, `W/"`) && strings.HasSuffix(etag, `"`)
-		assert.True(t, isStrong || isWeak, "ETag should be properly quoted: %s", etag)
-
-		// Verify consistency
-		if previousETag != "" {
-			assert.Equal(t, previousETag, etag, "ETag should be consistent across requests")
+			// Verify consistency
+			if previousETag != "" {
+				assert.Equal(t, previousETag, etag, "ETag should be consistent across requests")
+			}
+			previousETag = etag
 		}
-		previousETag = etag
-	}
-}
+	})
 
-// TestOrigin_LastModifiedFormat tests that Last-Modified header format is valid
-func TestOrigin_LastModifiedFormat(t *testing.T) {
-	t.Cleanup(test_utils.SetupTestLogging(t))
-	server_utils.ResetTestState()
-	defer server_utils.ResetTestState()
+	// Origin_LastModifiedFormat tests that Last-Modified header format is valid
+	t.Run("Origin_LastModifiedFormat", func(t *testing.T) {
+		// Setup test file
+		_, objectPath := setupTestFileOnOrigin(ft.Ctx, t, ft, "last_modified_format_test.txt", "Test content")
+		originURL := getOriginURL(t, objectPath)
 
-	require.NoError(t, param.Cache_EnableV2.Set(true))
-	ft := fed_test_utils.NewFedTest(t, persistentCacheConfig)
+		resp := makeRequest(ft.Ctx, t, originURL, nil)
+		defer resp.Body.Close()
 
-	// Setup test file
-	_, objectPath := setupTestFileOnOrigin(ft.Ctx, t, ft, "last_modified_format_test.txt", "Test content")
-	originURL := getOriginURL(t, objectPath)
+		lastModified := resp.Header.Get("Last-Modified")
+		require.NotEmpty(t, lastModified, "Last-Modified should be present")
 
-	resp := makeRequest(ft.Ctx, t, originURL, nil)
-	defer resp.Body.Close()
+		// Verify it can be parsed as HTTP date
+		parsedTime, err := http.ParseTime(lastModified)
+		require.NoError(t, err, "Last-Modified should be a valid HTTP date format")
 
-	lastModified := resp.Header.Get("Last-Modified")
-	require.NotEmpty(t, lastModified, "Last-Modified should be present")
+		// Should be in the past or very recent
+		assert.True(t, parsedTime.Before(time.Now().Add(time.Minute)),
+			"Last-Modified should be in the past or very recent")
+	})
 
-	// Verify it can be parsed as HTTP date
-	parsedTime, err := http.ParseTime(lastModified)
-	require.NoError(t, err, "Last-Modified should be a valid HTTP date format")
+	// Origin_ConditionalRequest_NonExistentFile tests conditional request for missing file
+	t.Run("Origin_ConditionalRequest_NonExistentFile", func(t *testing.T) {
+		originURL := getOriginURL(t, "/test/nonexistent_file.txt")
 
-	// Should be in the past or very recent
-	assert.True(t, parsedTime.Before(time.Now().Add(time.Minute)),
-		"Last-Modified should be in the past or very recent")
+		// Request with If-None-Match for non-existent file
+		resp := makeRequest(ft.Ctx, t, originURL, map[string]string{
+			"If-None-Match": `"some-etag"`,
+		})
+		defer resp.Body.Close()
+
+		// Should return 404, not 304
+		assert.Equal(t, http.StatusNotFound, resp.StatusCode,
+			"Non-existent file should return 404 even with conditional headers")
+	})
+
+	// Origin_ConditionalRequest_Directory tests conditional request for directory
+	t.Run("Origin_ConditionalRequest_Directory", func(t *testing.T) {
+		// Create a file in a subdirectory to ensure the directory exists
+		_, _ = setupTestFileOnOrigin(ft.Ctx, t, ft, "subdir/file.txt", "Test content")
+
+		// Request the directory (not the file)
+		originURL := getOriginURL(t, "/test/subdir/")
+
+		resp := makeRequest(ft.Ctx, t, originURL, map[string]string{
+			"If-None-Match": `"some-etag"`,
+		})
+		defer resp.Body.Close()
+
+		// Directory requests shouldn't get 304 for ETags (ETags are for files)
+		// Response could be various things depending on WebDAV config, but not 304
+		assert.NotEqual(t, http.StatusNotModified, resp.StatusCode,
+			"Directory listing shouldn't return 304 for If-None-Match")
+	})
 }
 
 // TestOrigin_CacheControlHeader tests that Cache-Control header is set appropriately
@@ -602,56 +534,4 @@ func TestOrigin_CacheControlHeader(t *testing.T) {
 	t.Logf("304 response Cache-Control: %q", cacheControl304)
 	assert.Equal(t, "no-cache, must-revalidate", cacheControl304,
 		"304 response should include Cache-Control: no-cache, must-revalidate")
-}
-
-// ============================================================================
-// Edge Cases and Error Handling
-// ============================================================================
-
-// TestOrigin_ConditionalRequest_NonExistentFile tests conditional request for missing file
-func TestOrigin_ConditionalRequest_NonExistentFile(t *testing.T) {
-	t.Cleanup(test_utils.SetupTestLogging(t))
-	server_utils.ResetTestState()
-	defer server_utils.ResetTestState()
-
-	require.NoError(t, param.Cache_EnableV2.Set(true))
-	ft := fed_test_utils.NewFedTest(t, persistentCacheConfig)
-
-	originURL := getOriginURL(t, "/test/nonexistent_file.txt")
-
-	// Request with If-None-Match for non-existent file
-	resp := makeRequest(ft.Ctx, t, originURL, map[string]string{
-		"If-None-Match": `"some-etag"`,
-	})
-	defer resp.Body.Close()
-
-	// Should return 404, not 304
-	assert.Equal(t, http.StatusNotFound, resp.StatusCode,
-		"Non-existent file should return 404 even with conditional headers")
-}
-
-// TestOrigin_ConditionalRequest_Directory tests conditional request for directory
-func TestOrigin_ConditionalRequest_Directory(t *testing.T) {
-	t.Cleanup(test_utils.SetupTestLogging(t))
-	server_utils.ResetTestState()
-	defer server_utils.ResetTestState()
-
-	require.NoError(t, param.Cache_EnableV2.Set(true))
-	ft := fed_test_utils.NewFedTest(t, persistentCacheConfig)
-
-	// Create a file in a subdirectory to ensure the directory exists
-	_, _ = setupTestFileOnOrigin(ft.Ctx, t, ft, "subdir/file.txt", "Test content")
-
-	// Request the directory (not the file)
-	originURL := getOriginURL(t, "/test/subdir/")
-
-	resp := makeRequest(ft.Ctx, t, originURL, map[string]string{
-		"If-None-Match": `"some-etag"`,
-	})
-	defer resp.Body.Close()
-
-	// Directory requests shouldn't get 304 for ETags (ETags are for files)
-	// Response could be various things depending on WebDAV config, but not 304
-	assert.NotEqual(t, http.StatusNotModified, resp.StatusCode,
-		"Directory listing shouldn't return 304 for If-None-Match")
 }

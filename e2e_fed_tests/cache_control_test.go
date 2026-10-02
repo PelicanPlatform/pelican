@@ -127,52 +127,169 @@ func fetchFromCache(t *testing.T, ft *fed_test_utils.FedTest, cacheURL string, e
 	}
 }
 
-// TestCacheControl_MaxAgePassthrough verifies that when the origin sets
-// Origin.CacheControl to "max-age=3600", the cache:
-//   - Stores the object
-//   - Returns Cache-Control: s-maxage=3600, max-age=3600
-//   - Returns an Age header on subsequent requests
-func TestCacheControl_MaxAgePassthrough(t *testing.T) {
+// TestCacheControl_MaxAge runs each case below against one shared federation. Starting a
+// federation (five services plus XRootD) dominates the run time of these
+// cases, so they share one and keep their object names distinct instead.
+// The origin serves Cache-Control: max-age=3600 throughout.
+func TestCacheControl_MaxAge(t *testing.T) {
 	t.Cleanup(test_utils.SetupTestLogging(t))
 	server_utils.ResetTestState()
 	t.Cleanup(server_utils.ResetTestState)
 
 	require.NoError(t, param.Cache_EnableV2.Set(true))
 	ft := fed_test_utils.NewFedTest(t, cacheControlOriginConfig("max-age=3600"))
-	token := getTempTokenForTest(t)
 
-	content := writeTestFile(t, ft, "maxage.bin", 8192)
-	cacheURL := waitForCacheRedirectURL(t, ft, "/test/maxage.bin", token)
+	// MaxAgePassthrough verifies that when the origin sets
+	// Origin.CacheControl to "max-age=3600", the cache:
+	//   - Stores the object
+	//   - Returns Cache-Control: s-maxage=3600, max-age=3600
+	//   - Returns an Age header on subsequent requests
+	t.Run("MaxAgePassthrough", func(t *testing.T) {
+		token := getTempTokenForTest(t)
 
-	// First fetch (cache miss — downloads from origin)
-	r1 := fetchFromCache(t, ft, cacheURL, nil)
-	require.Equal(t, http.StatusOK, r1.statusCode)
-	require.Equal(t, content, r1.body)
+		content := writeTestFile(t, ft, "maxage.bin", 8192)
+		cacheURL := waitForCacheRedirectURL(t, ft, "/test/maxage.bin", token)
 
-	// Verify Cache-Control header is passed through
-	cc := r1.headers.Get("Cache-Control")
-	assert.Contains(t, cc, "max-age=3600",
-		"Cache should pass through max-age from origin")
-	assert.Contains(t, cc, "s-maxage=3600",
-		"Cache should include s-maxage for shared cache semantics")
+		// First fetch (cache miss — downloads from origin)
+		r1 := fetchFromCache(t, ft, cacheURL, nil)
+		require.Equal(t, http.StatusOK, r1.statusCode)
+		require.Equal(t, content, r1.body)
 
-	// Second fetch (cache hit — should return the same content and an Age header)
-	r2 := fetchFromCache(t, ft, cacheURL, nil)
-	require.Equal(t, http.StatusOK, r2.statusCode)
-	require.Equal(t, content, r2.body)
+		// Verify Cache-Control header is passed through
+		cc := r1.headers.Get("Cache-Control")
+		assert.Contains(t, cc, "max-age=3600",
+			"Cache should pass through max-age from origin")
+		assert.Contains(t, cc, "s-maxage=3600",
+			"Cache should include s-maxage for shared cache semantics")
 
-	// Verify Age header is present and non-negative on a cache hit
-	ageStr := r2.headers.Get("Age")
-	require.NotEmpty(t, ageStr, "Cached response must have an Age header")
-	age, err := strconv.Atoi(ageStr)
-	require.NoError(t, err)
-	assert.GreaterOrEqual(t, age, 0, "Age must be non-negative")
-	assert.Less(t, age, 60, "Age should be small since object was just cached")
+		// Second fetch (cache hit — should return the same content and an Age header)
+		r2 := fetchFromCache(t, ft, cacheURL, nil)
+		require.Equal(t, http.StatusOK, r2.statusCode)
+		require.Equal(t, content, r2.body)
 
-	// Verify Cache-Control is still present on the cached response
-	cc2 := r2.headers.Get("Cache-Control")
-	assert.Contains(t, cc2, "max-age=3600",
-		"Cached response should preserve Cache-Control")
+		// Verify Age header is present and non-negative on a cache hit
+		ageStr := r2.headers.Get("Age")
+		require.NotEmpty(t, ageStr, "Cached response must have an Age header")
+		age, err := strconv.Atoi(ageStr)
+		require.NoError(t, err)
+		assert.GreaterOrEqual(t, age, 0, "Age must be non-negative")
+		assert.Less(t, age, 60, "Age should be small since object was just cached")
+
+		// Verify Cache-Control is still present on the cached response
+		cc2 := r2.headers.Get("Cache-Control")
+		assert.Contains(t, cc2, "max-age=3600",
+			"Cached response should preserve Cache-Control")
+	})
+
+	// ETagConditional verifies that the cache handles
+	// If-None-Match conditional requests correctly by returning 304.
+	t.Run("ETagConditional", func(t *testing.T) {
+		token := getTempTokenForTest(t)
+
+		writeTestFile(t, ft, "etag.bin", 8192)
+		cacheURL := waitForCacheRedirectURL(t, ft, "/test/etag.bin", token)
+
+		// First fetch to prime the cache and capture the ETag
+		r1 := fetchFromCache(t, ft, cacheURL, nil)
+		require.Equal(t, http.StatusOK, r1.statusCode)
+
+		etag := r1.headers.Get("ETag")
+		require.NotEmpty(t, etag, "First response must include an ETag")
+
+		// Second fetch with If-None-Match using the captured ETag → expect 304
+		r2 := fetchFromCache(t, ft, cacheURL, map[string]string{
+			"If-None-Match": etag,
+		})
+		assert.Equal(t, http.StatusNotModified, r2.statusCode,
+			"Cache should return 304 when ETag matches")
+		assert.Empty(t, r2.body,
+			"304 response body should be empty")
+
+		// Verify Cache-Control is set on the 304 response
+		cc304 := r2.headers.Get("Cache-Control")
+		assert.NotEmpty(t, cc304, "304 response should include Cache-Control")
+	})
+
+	// AgeHeaderAccuracy verifies that the Age header
+	// approximately reflects the time since the object was cached.
+	t.Run("AgeHeaderAccuracy", func(t *testing.T) {
+		token := getTempTokenForTest(t)
+
+		content := writeTestFile(t, ft, "age.bin", 8192)
+		cacheURL := waitForCacheRedirectURL(t, ft, "/test/age.bin", token)
+
+		// First fetch to cache the object
+		r1 := fetchFromCache(t, ft, cacheURL, nil)
+		require.Equal(t, http.StatusOK, r1.statusCode)
+		require.Equal(t, content, r1.body)
+		cacheTime := time.Now()
+
+		// Wait a bit so the Age header becomes non-zero
+		time.Sleep(2 * time.Second)
+
+		// Second fetch — Age header should reflect elapsed time
+		r2 := fetchFromCache(t, ft, cacheURL, nil)
+		require.Equal(t, http.StatusOK, r2.statusCode)
+
+		ageStr := r2.headers.Get("Age")
+		require.NotEmpty(t, ageStr, "Cached response must have an Age header")
+
+		age, err := strconv.Atoi(ageStr)
+		require.NoError(t, err)
+		require.Greater(t, age, 0,
+			"Age should be non-zero after waiting 2 seconds")
+
+		elapsed := int(time.Since(cacheTime).Seconds())
+		// Age should be approximately elapsed time (±2 seconds tolerance)
+		assert.InDelta(t, elapsed, age, 2.0,
+			"Age header (%d) should be close to elapsed time (%d)", age, elapsed)
+	})
+
+	// ETagStarWildcard verifies that If-None-Match: * returns
+	// 304 for any cached object (the wildcard matches any ETag).
+	t.Run("ETagStarWildcard", func(t *testing.T) {
+		token := getTempTokenForTest(t)
+
+		writeTestFile(t, ft, "wildcard.bin", 4096)
+		cacheURL := waitForCacheRedirectURL(t, ft, "/test/wildcard.bin", token)
+
+		// Prime the cache
+		r1 := fetchFromCache(t, ft, cacheURL, nil)
+		require.Equal(t, http.StatusOK, r1.statusCode)
+
+		// Wildcard If-None-Match
+		r2 := fetchFromCache(t, ft, cacheURL, map[string]string{
+			"If-None-Match": "*",
+		})
+		assert.Equal(t, http.StatusNotModified, r2.statusCode,
+			"If-None-Match: * should return 304 for any cached object")
+	})
+
+	// StaleServedWithinMaxAge verifies that within the max-age
+	// window, the cache serves the old version even if the origin has been updated.
+	// The cache should NOT contact the origin until the entry is stale.
+	t.Run("StaleServedWithinMaxAge", func(t *testing.T) {
+		token := getTempTokenForTest(t)
+
+		// Write initial content and fetch
+		originalContent := writeTestFile(t, ft, "fresh.bin", 8192)
+		cacheURL := waitForCacheRedirectURL(t, ft, "/test/fresh.bin", token)
+
+		r1 := fetchFromCache(t, ft, cacheURL, nil)
+		require.Equal(t, http.StatusOK, r1.statusCode)
+		require.Equal(t, originalContent, r1.body)
+
+		// Update the origin file
+		newContent := generateTestData(9000)
+		storageDir := ft.Exports[0].StoragePrefix
+		require.NoError(t, os.WriteFile(filepath.Join(storageDir, "fresh.bin"), newContent, 0644))
+
+		// Fetch again — entry is still fresh (max-age=3600), so cache should serve old version
+		r2 := fetchFromCache(t, ft, cacheURL, nil)
+		require.Equal(t, http.StatusOK, r2.statusCode)
+		require.Equal(t, originalContent, r2.body,
+			"Within max-age window, cache should serve old content even if origin changed")
+	})
 }
 
 // TestCacheControl_NoStore verifies that when the origin sets
@@ -274,82 +391,6 @@ func TestCacheControl_DefaultBehavior(t *testing.T) {
 	require.Equal(t, content, r2.body)
 }
 
-// TestCacheControl_ETagConditional verifies that the cache handles
-// If-None-Match conditional requests correctly by returning 304.
-func TestCacheControl_ETagConditional(t *testing.T) {
-	t.Cleanup(test_utils.SetupTestLogging(t))
-	server_utils.ResetTestState()
-	t.Cleanup(server_utils.ResetTestState)
-
-	require.NoError(t, param.Cache_EnableV2.Set(true))
-	ft := fed_test_utils.NewFedTest(t, cacheControlOriginConfig("max-age=3600"))
-	token := getTempTokenForTest(t)
-
-	writeTestFile(t, ft, "etag.bin", 8192)
-	cacheURL := waitForCacheRedirectURL(t, ft, "/test/etag.bin", token)
-
-	// First fetch to prime the cache and capture the ETag
-	r1 := fetchFromCache(t, ft, cacheURL, nil)
-	require.Equal(t, http.StatusOK, r1.statusCode)
-
-	etag := r1.headers.Get("ETag")
-	require.NotEmpty(t, etag, "First response must include an ETag")
-
-	// Second fetch with If-None-Match using the captured ETag → expect 304
-	r2 := fetchFromCache(t, ft, cacheURL, map[string]string{
-		"If-None-Match": etag,
-	})
-	assert.Equal(t, http.StatusNotModified, r2.statusCode,
-		"Cache should return 304 when ETag matches")
-	assert.Empty(t, r2.body,
-		"304 response body should be empty")
-
-	// Verify Cache-Control is set on the 304 response
-	cc304 := r2.headers.Get("Cache-Control")
-	assert.NotEmpty(t, cc304, "304 response should include Cache-Control")
-}
-
-// TestCacheControl_AgeHeaderAccuracy verifies that the Age header
-// approximately reflects the time since the object was cached.
-func TestCacheControl_AgeHeaderAccuracy(t *testing.T) {
-	t.Cleanup(test_utils.SetupTestLogging(t))
-	server_utils.ResetTestState()
-	t.Cleanup(server_utils.ResetTestState)
-
-	require.NoError(t, param.Cache_EnableV2.Set(true))
-	ft := fed_test_utils.NewFedTest(t, cacheControlOriginConfig("max-age=3600"))
-	token := getTempTokenForTest(t)
-
-	content := writeTestFile(t, ft, "age.bin", 8192)
-	cacheURL := waitForCacheRedirectURL(t, ft, "/test/age.bin", token)
-
-	// First fetch to cache the object
-	r1 := fetchFromCache(t, ft, cacheURL, nil)
-	require.Equal(t, http.StatusOK, r1.statusCode)
-	require.Equal(t, content, r1.body)
-	cacheTime := time.Now()
-
-	// Wait a bit so the Age header becomes non-zero
-	time.Sleep(2 * time.Second)
-
-	// Second fetch — Age header should reflect elapsed time
-	r2 := fetchFromCache(t, ft, cacheURL, nil)
-	require.Equal(t, http.StatusOK, r2.statusCode)
-
-	ageStr := r2.headers.Get("Age")
-	require.NotEmpty(t, ageStr, "Cached response must have an Age header")
-
-	age, err := strconv.Atoi(ageStr)
-	require.NoError(t, err)
-	require.Greater(t, age, 0,
-		"Age should be non-zero after waiting 2 seconds")
-
-	elapsed := int(time.Since(cacheTime).Seconds())
-	// Age should be approximately elapsed time (±2 seconds tolerance)
-	assert.InDelta(t, elapsed, age, 2.0,
-		"Age header (%d) should be close to elapsed time (%d)", age, elapsed)
-}
-
 // TestCacheControl_NoCacheWithMustRevalidate verifies that
 // Cache-Control: no-cache, must-revalidate is handled:
 //   - Object IS stored in the cache
@@ -423,32 +464,6 @@ func TestCacheControl_PrivateNotStored(t *testing.T) {
 	r2 := fetchFromCache(t, ft, cacheURL, nil)
 	require.Equal(t, http.StatusOK, r2.statusCode)
 	require.Equal(t, content, r2.body)
-}
-
-// TestCacheControl_ETagStarWildcard verifies that If-None-Match: * returns
-// 304 for any cached object (the wildcard matches any ETag).
-func TestCacheControl_ETagStarWildcard(t *testing.T) {
-	t.Cleanup(test_utils.SetupTestLogging(t))
-	server_utils.ResetTestState()
-	t.Cleanup(server_utils.ResetTestState)
-
-	require.NoError(t, param.Cache_EnableV2.Set(true))
-	ft := fed_test_utils.NewFedTest(t, cacheControlOriginConfig("max-age=3600"))
-	token := getTempTokenForTest(t)
-
-	writeTestFile(t, ft, "wildcard.bin", 4096)
-	cacheURL := waitForCacheRedirectURL(t, ft, "/test/wildcard.bin", token)
-
-	// Prime the cache
-	r1 := fetchFromCache(t, ft, cacheURL, nil)
-	require.Equal(t, http.StatusOK, r1.statusCode)
-
-	// Wildcard If-None-Match
-	r2 := fetchFromCache(t, ft, cacheURL, map[string]string{
-		"If-None-Match": "*",
-	})
-	assert.Equal(t, http.StatusNotModified, r2.statusCode,
-		"If-None-Match: * should return 304 for any cached object")
 }
 
 // TestCacheControl_SMaxAgePriority verifies that s-maxage takes priority
@@ -527,39 +542,6 @@ func TestCacheControl_ETagChangeAfterExpiry(t *testing.T) {
 	if etag1 != "" && etag2 != "" {
 		assert.NotEqual(t, etag1, etag2, "ETag should change when origin file is updated")
 	}
-}
-
-// TestCacheControl_StaleServedWithinMaxAge verifies that within the max-age
-// window, the cache serves the old version even if the origin has been updated.
-// The cache should NOT contact the origin until the entry is stale.
-func TestCacheControl_StaleServedWithinMaxAge(t *testing.T) {
-	t.Cleanup(test_utils.SetupTestLogging(t))
-	server_utils.ResetTestState()
-	t.Cleanup(server_utils.ResetTestState)
-
-	require.NoError(t, param.Cache_EnableV2.Set(true))
-	// Use a long max-age so the entry stays fresh
-	ft := fed_test_utils.NewFedTest(t, cacheControlOriginConfig("max-age=3600"))
-	token := getTempTokenForTest(t)
-
-	// Write initial content and fetch
-	originalContent := writeTestFile(t, ft, "fresh.bin", 8192)
-	cacheURL := waitForCacheRedirectURL(t, ft, "/test/fresh.bin", token)
-
-	r1 := fetchFromCache(t, ft, cacheURL, nil)
-	require.Equal(t, http.StatusOK, r1.statusCode)
-	require.Equal(t, originalContent, r1.body)
-
-	// Update the origin file
-	newContent := generateTestData(9000)
-	storageDir := ft.Exports[0].StoragePrefix
-	require.NoError(t, os.WriteFile(filepath.Join(storageDir, "fresh.bin"), newContent, 0644))
-
-	// Fetch again — entry is still fresh (max-age=3600), so cache should serve old version
-	r2 := fetchFromCache(t, ft, cacheURL, nil)
-	require.Equal(t, http.StatusOK, r2.statusCode)
-	require.Equal(t, originalContent, r2.body,
-		"Within max-age window, cache should serve old content even if origin changed")
 }
 
 // TestCacheControl_EvictionUnderPressure verifies that when the cache fills
@@ -716,126 +698,120 @@ func sendToCacheURL(t *testing.T, ft *fed_test_utils.FedTest, method, cacheURL, 
 	}
 }
 
-// TestWriteThrough_PutAndGet verifies the full write-through cycle:
-//  1. GET a file through the cache (populates the cache)
-//  2. PUT new content for that file through the cache (proxied to origin)
-//  3. Verify the cache invalidated the old version
-//  4. GET the file again through the cache — should return the new content
-func TestWriteThrough_PutAndGet(t *testing.T) {
+// TestWriteThrough runs each case below against one shared federation. Starting a
+// federation (five services plus XRootD) dominates the run time of these
+// cases, so they share one and keep their object names distinct instead.
+func TestWriteThrough(t *testing.T) {
 	t.Cleanup(test_utils.SetupTestLogging(t))
 	server_utils.ResetTestState()
 	t.Cleanup(server_utils.ResetTestState)
 
 	require.NoError(t, param.Cache_EnableV2.Set(true))
 	ft := fed_test_utils.NewFedTest(t, writeThroughOriginConfig())
-	tkn := getTempTokenForTest(t)
 
-	// Step 1: Write initial content to the origin and fetch through cache to populate it
-	originalContent := writeTestFile(t, ft, "writable.bin", 4096)
-	cacheURL := waitForCacheRedirectURL(t, ft, "/test/writable.bin", tkn)
+	// PutAndGet verifies the full write-through cycle:
+	//  1. GET a file through the cache (populates the cache)
+	//  2. PUT new content for that file through the cache (proxied to origin)
+	//  3. Verify the cache invalidated the old version
+	//  4. GET the file again through the cache — should return the new content
+	t.Run("PutAndGet", func(t *testing.T) {
+		tkn := getTempTokenForTest(t)
 
-	r1 := fetchFromCache(t, ft, cacheURL, nil)
-	require.Equal(t, http.StatusOK, r1.statusCode, "Initial GET should succeed")
-	require.Equal(t, originalContent, r1.body, "Initial GET should return original content")
+		// Step 1: Write initial content to the origin and fetch through cache to populate it
+		originalContent := writeTestFile(t, ft, "writable.bin", 4096)
+		cacheURL := waitForCacheRedirectURL(t, ft, "/test/writable.bin", tkn)
 
-	// Verify the object is cached (max-age=3600 means it's fresh)
-	cc := r1.headers.Get("Cache-Control")
-	assert.Contains(t, cc, "max-age=3600", "Object should be cached with max-age")
+		r1 := fetchFromCache(t, ft, cacheURL, nil)
+		require.Equal(t, http.StatusOK, r1.statusCode, "Initial GET should succeed")
+		require.Equal(t, originalContent, r1.body, "Initial GET should return original content")
 
-	// Step 2: PUT new content through the cache endpoint
-	newContent := generateTestData(5000) // Different size to be distinct
-	rPut := sendToCacheURL(t, ft, "PUT", cacheURL, tkn, newContent)
-	require.True(t, rPut.statusCode >= 200 && rPut.statusCode < 300,
-		"PUT through cache should succeed, got %d: %s", rPut.statusCode, string(rPut.body))
+		// Verify the object is cached (max-age=3600 means it's fresh)
+		cc := r1.headers.Get("Cache-Control")
+		assert.Contains(t, cc, "max-age=3600", "Object should be cached with max-age")
 
-	// Step 3: Verify the origin now has the new content
-	storageDir := ft.Exports[0].StoragePrefix
-	backendContent, err := os.ReadFile(filepath.Join(storageDir, "writable.bin"))
-	require.NoError(t, err, "Should be able to read the file from origin backend")
-	assert.Equal(t, newContent, backendContent,
-		"Origin backend should contain the new content after PUT")
+		// Step 2: PUT new content through the cache endpoint
+		newContent := generateTestData(5000) // Different size to be distinct
+		rPut := sendToCacheURL(t, ft, "PUT", cacheURL, tkn, newContent)
+		require.True(t, rPut.statusCode >= 200 && rPut.statusCode < 300,
+			"PUT through cache should succeed, got %d: %s", rPut.statusCode, string(rPut.body))
 
-	// Step 4: GET the file again through the cache.
-	// Even though max-age=3600 and the entry was fetched moments ago,
-	// the write-through PUT should have invalidated the cached version.
-	// Therefore this GET should fetch from the origin and return new content.
-	r2 := fetchFromCache(t, ft, cacheURL, nil)
-	require.Equal(t, http.StatusOK, r2.statusCode, "GET after PUT should succeed")
-	assert.Equal(t, newContent, r2.body,
-		"After PUT, cache should serve the new content (old entry was invalidated)")
+		// Step 3: Verify the origin now has the new content
+		storageDir := ft.Exports[0].StoragePrefix
+		backendContent, err := os.ReadFile(filepath.Join(storageDir, "writable.bin"))
+		require.NoError(t, err, "Should be able to read the file from origin backend")
+		assert.Equal(t, newContent, backendContent,
+			"Origin backend should contain the new content after PUT")
 
-	// Step 5: Verify the new content is now cached
-	r3 := fetchFromCache(t, ft, cacheURL, nil)
-	require.Equal(t, http.StatusOK, r3.statusCode)
-	assert.Equal(t, newContent, r3.body,
-		"Third GET should still return new content (now cached)")
-}
+		// Step 4: GET the file again through the cache.
+		// Even though max-age=3600 and the entry was fetched moments ago,
+		// the write-through PUT should have invalidated the cached version.
+		// Therefore this GET should fetch from the origin and return new content.
+		r2 := fetchFromCache(t, ft, cacheURL, nil)
+		require.Equal(t, http.StatusOK, r2.statusCode, "GET after PUT should succeed")
+		assert.Equal(t, newContent, r2.body,
+			"After PUT, cache should serve the new content (old entry was invalidated)")
 
-// TestWriteThrough_PutNewFile verifies that PUT through the cache works
-// for a file that doesn't exist yet (no prior cache entry to invalidate).
-func TestWriteThrough_PutNewFile(t *testing.T) {
-	t.Cleanup(test_utils.SetupTestLogging(t))
-	server_utils.ResetTestState()
-	t.Cleanup(server_utils.ResetTestState)
+		// Step 5: Verify the new content is now cached
+		r3 := fetchFromCache(t, ft, cacheURL, nil)
+		require.Equal(t, http.StatusOK, r3.statusCode)
+		assert.Equal(t, newContent, r3.body,
+			"Third GET should still return new content (now cached)")
+	})
 
-	require.NoError(t, param.Cache_EnableV2.Set(true))
-	ft := fed_test_utils.NewFedTest(t, writeThroughOriginConfig())
-	tkn := getTempTokenForTest(t)
+	// PutNewFile verifies that PUT through the cache works
+	// for a file that doesn't exist yet (no prior cache entry to invalidate).
+	t.Run("PutNewFile", func(t *testing.T) {
+		tkn := getTempTokenForTest(t)
 
-	// We need a cache URL. Discover it using an existing file, then
-	// substitute the path for the new file we want to create.
-	dummyContent := writeTestFile(t, ft, "dummy.bin", 256)
-	cacheURL := waitForCacheRedirectURL(t, ft, "/test/dummy.bin", tkn)
-	_ = dummyContent
+		// We need a cache URL. Discover it using an existing file, then
+		// substitute the path for the new file we want to create.
+		dummyContent := writeTestFile(t, ft, "dummy.bin", 256)
+		cacheURL := waitForCacheRedirectURL(t, ft, "/test/dummy.bin", tkn)
+		_ = dummyContent
 
-	// Derive the URL for a brand-new file by replacing the filename
-	newFileURL := strings.Replace(cacheURL, "dummy.bin", "brand_new.bin", 1)
+		// Derive the URL for a brand-new file by replacing the filename
+		newFileURL := strings.Replace(cacheURL, "dummy.bin", "brand_new.bin", 1)
 
-	// PUT the new file through the cache
-	newContent := generateTestData(2048)
-	rPut := sendToCacheURL(t, ft, "PUT", newFileURL, tkn, newContent)
-	require.True(t, rPut.statusCode >= 200 && rPut.statusCode < 300,
-		"PUT of new file should succeed, got %d: %s", rPut.statusCode, string(rPut.body))
+		// PUT the new file through the cache
+		newContent := generateTestData(2048)
+		rPut := sendToCacheURL(t, ft, "PUT", newFileURL, tkn, newContent)
+		require.True(t, rPut.statusCode >= 200 && rPut.statusCode < 300,
+			"PUT of new file should succeed, got %d: %s", rPut.statusCode, string(rPut.body))
 
-	// Verify the file exists on the origin backend
-	storageDir := ft.Exports[0].StoragePrefix
-	backendContent, err := os.ReadFile(filepath.Join(storageDir, "brand_new.bin"))
-	require.NoError(t, err, "New file should exist on origin backend")
-	assert.Equal(t, newContent, backendContent, "Backend content should match what was PUT")
+		// Verify the file exists on the origin backend
+		storageDir := ft.Exports[0].StoragePrefix
+		backendContent, err := os.ReadFile(filepath.Join(storageDir, "brand_new.bin"))
+		require.NoError(t, err, "New file should exist on origin backend")
+		assert.Equal(t, newContent, backendContent, "Backend content should match what was PUT")
 
-	// GET the new file through the cache
-	rGet := fetchFromCache(t, ft, newFileURL, nil)
-	require.Equal(t, http.StatusOK, rGet.statusCode, "GET of new file should succeed")
-	assert.Equal(t, newContent, rGet.body,
-		"GET should return the content that was just PUT")
-}
+		// GET the new file through the cache
+		rGet := fetchFromCache(t, ft, newFileURL, nil)
+		require.Equal(t, http.StatusOK, rGet.statusCode, "GET of new file should succeed")
+		assert.Equal(t, newContent, rGet.body,
+			"GET should return the content that was just PUT")
+	})
 
-// TestWriteThrough_Unauthorized verifies that PUT without a valid token
-// is rejected with 403 Forbidden.
-func TestWriteThrough_Unauthorized(t *testing.T) {
-	t.Cleanup(test_utils.SetupTestLogging(t))
-	server_utils.ResetTestState()
-	t.Cleanup(server_utils.ResetTestState)
+	// Unauthorized verifies that PUT without a valid token
+	// is rejected with 403 Forbidden.
+	t.Run("Unauthorized", func(t *testing.T) {
+		tkn := getTempTokenForTest(t)
 
-	require.NoError(t, param.Cache_EnableV2.Set(true))
-	ft := fed_test_utils.NewFedTest(t, writeThroughOriginConfig())
-	tkn := getTempTokenForTest(t)
+		content := writeTestFile(t, ft, "secret.bin", 1024)
+		cacheURL := waitForCacheRedirectURL(t, ft, "/test/secret.bin", tkn)
+		_ = content
 
-	content := writeTestFile(t, ft, "secret.bin", 1024)
-	cacheURL := waitForCacheRedirectURL(t, ft, "/test/secret.bin", tkn)
-	_ = content
+		// Strip the ?authz= query parameter that the director embeds in the
+		// redirect URL so this PUT is truly unauthenticated.
+		u, err := url.Parse(cacheURL)
+		require.NoError(t, err)
+		q := u.Query()
+		q.Del("authz")
+		u.RawQuery = q.Encode()
+		cacheURL = u.String()
 
-	// Strip the ?authz= query parameter that the director embeds in the
-	// redirect URL so this PUT is truly unauthenticated.
-	u, err := url.Parse(cacheURL)
-	require.NoError(t, err)
-	q := u.Query()
-	q.Del("authz")
-	u.RawQuery = q.Encode()
-	cacheURL = u.String()
-
-	// PUT with no token — should be rejected
-	rPut := sendToCacheURL(t, ft, "PUT", cacheURL, "", []byte("evil data"))
-	assert.Equal(t, http.StatusForbidden, rPut.statusCode,
-		"PUT without token should be forbidden")
+		// PUT with no token — should be rejected
+		rPut := sendToCacheURL(t, ft, "PUT", cacheURL, "", []byte("evil data"))
+		assert.Equal(t, http.StatusForbidden, rPut.statusCode,
+			"PUT without token should be forbidden")
+	})
 }
