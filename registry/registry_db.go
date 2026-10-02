@@ -200,6 +200,10 @@ var errRegistrationAlreadyOwned = errors.New("registration already has an owner"
 // lookups so handlers can map it to a 404 without string matching.
 var errRegistrationNotFound = errors.New("registration not found in database")
 
+// errRegistrationModified reports that the stored row changed between the
+// caller's read and its write. Handlers map it to a 409.
+var errRegistrationModified = errors.New("registration modified since it was read")
+
 // claimRegistration atomically binds an unowned registration to owner (a
 // Pelican user ID).
 func claimRegistration(id int, owner string) error {
@@ -927,7 +931,10 @@ func reapOrphanedPendingNamespaces(staleServers []serverIdentity) error {
 // else comes from the stored row as read inside the transaction, so a write that
 // committed between the handler's read and this call (an admin's edit, or the
 // server pushing a rotated key through updateNamespacesPubKey) is not reverted.
-func updateRegistration(ns *server_structs.Registration, ownerEditOfApproved bool) error {
+//
+// observedUpdatedAt is the AdminMetadata.UpdatedAt the caller based its decisions
+// on; the write fails with errRegistrationModified if the row has moved past it.
+func updateRegistration(ns *server_structs.Registration, ownerEditOfApproved bool, observedUpdatedAt time.Time) error {
 	// Wrap all database operations in a transaction
 	// If any operation fails, all changes are reverted. No partial records left.
 	// The read of the stored row happens INSIDE the transaction: the pinned
@@ -939,6 +946,9 @@ func updateRegistration(ns *server_structs.Registration, ownerEditOfApproved boo
 		existingNs, err := getRegistrationByIdTx(tx, ns.ID)
 		if err != nil || existingNs == nil {
 			return errors.Wrap(err, "Failed to get registration")
+		}
+		if !existingNs.AdminMetadata.UpdatedAt.Equal(observedUpdatedAt) {
+			return errors.Wrapf(errRegistrationModified, "registration %d", ns.ID)
 		}
 		if ownerEditOfApproved {
 			*ns = applyOwnerEdits(*existingNs, *ns)
