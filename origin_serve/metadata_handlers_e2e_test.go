@@ -44,6 +44,7 @@ import (
 	"github.com/pelicanplatform/pelican/param"
 	"github.com/pelicanplatform/pelican/server_structs"
 	"github.com/pelicanplatform/pelican/server_utils"
+	"github.com/pelicanplatform/pelican/test_utils"
 	"github.com/pelicanplatform/pelican/token"
 	"github.com/pelicanplatform/pelican/token_scopes"
 )
@@ -58,9 +59,7 @@ import (
 // metadata webhook fires with the federation-rooted path, exercising the
 // production FilesystemForExists existence check end-to-end.
 func TestE2E_InitializeHandlers_EventualPublish(t *testing.T) {
-	if testing.Short() {
-		t.Skip("skipping: boots real handler wiring + DB")
-	}
+	test_utils.SkipIfShort(t, "boots real handler wiring and a DB")
 
 	// Webhook receiver captures what the origin publishes.
 	gotPath := make(chan string, 4)
@@ -161,9 +160,7 @@ func TestE2E_InitializeHandlers_EventualPublish(t *testing.T) {
 // worker). It also checks the PUT response carries the real result header.
 // This is the wiring the direct-method unit tests don't exercise.
 func TestE2E_InitializeHandlers_LifecycleEvents(t *testing.T) {
-	if testing.Short() {
-		t.Skip("skipping: boots real handler wiring + DB")
-	}
+	test_utils.SkipIfShort(t, "boots real handler wiring and a DB")
 
 	type ev struct{ typ, path string }
 	events := make(chan ev, 16)
