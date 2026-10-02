@@ -57,10 +57,12 @@ jobs:
         with:
           go-version: "${{ steps.go-version.outputs.version }}"
           check-latest: true
+          cache: false
 
       - name: Pin the Go build cache
-        # Point every later Go build, including those run by tests,
-        # at the cache that setup-go restored.
+        # Point every later Go build, including those run by tests, at the
+        # same cache. Tests that start an origin or cache set
+        # XDG_CACHE_HOME, which on Linux would otherwise move Go's default.
         run: echo "GOCACHE=$(go env GOCACHE)" >> "$GITHUB_ENV"
 
       - name: Install gotestsum
