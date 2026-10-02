@@ -355,9 +355,18 @@ func resolveRegistrationOwnership(ctx *gin.Context, id int, userId string, isAdm
 	return belongsTo, true
 }
 
+// applyOwnerEdits restricts owner-editable fields of an approved registration
+func applyOwnerEdits(stored server_structs.Registration, edited server_structs.Registration) server_structs.Registration {
+	stored.AdminMetadata.Description = edited.AdminMetadata.Description
+	stored.AdminMetadata.Institution = edited.AdminMetadata.Institution
+	stored.AdminMetadata.SecurityContactUserID = edited.AdminMetadata.SecurityContactUserID
+	return stored
+}
+
 // Create a new namespace registration or update existing namespace registration.
 //
-// For update, only admin-user can update an existing registration if it's been approved already.
+// For update, an admin can change any field of any registration. The owner of an approved
+// registration can change specific fields (see applyOwnerEdits).
 //
 // One caveat in updating is that if the namespace to update was a legacy registration, i.e. It doesn't have
 // AdminMetaData populated, an update __will__ populate the AdminMetaData field and update
@@ -390,6 +399,7 @@ func createUpdateNamespace(ctx *gin.Context, isUpdate bool) {
 			Msg:    "You need to login to perform this action"})
 		return
 	}
+	var existingNs *server_structs.Registration
 	if isUpdate {
 		idStr := ctx.Param("id")
 		var err error
@@ -399,6 +409,19 @@ func createUpdateNamespace(ctx *gin.Context, isUpdate bool) {
 			ctx.JSON(http.StatusBadRequest, server_structs.SimpleApiResp{
 				Status: server_structs.RespFailed,
 				Msg:    "Invalid ID format. ID must a positive integer"})
+			return
+		}
+		existingNs, err = getRegistrationById(id)
+		if errors.Is(err, errRegistrationNotFound) {
+			ctx.JSON(http.StatusNotFound, server_structs.SimpleApiResp{
+				Status: server_structs.RespFailed,
+				Msg:    "Can't update namespace: namespace not found"})
+			return
+		} else if err != nil {
+			log.Error("Failed to get namespace by ID: ", err)
+			ctx.JSON(http.StatusInternalServerError, server_structs.SimpleApiResp{
+				Status: server_structs.RespFailed,
+				Msg:    "Error retrieving namespace"})
 			return
 		}
 	}
@@ -415,6 +438,13 @@ func createUpdateNamespace(ctx *gin.Context, isUpdate bool) {
 	}
 	// Assign ID from path param because the request data doesn't have ID set
 	ns.ID = id
+
+	// Allow the owner of an approved registration to change its descriptive fields only
+	ownerEditOfApproved := isUpdate && !isAdmin &&
+		existingNs.AdminMetadata.Status == server_structs.RegApproved
+	if ownerEditOfApproved {
+		ns = applyOwnerEdits(*existingNs, ns)
+	}
 
 	// Check that Prefix is a valid prefix
 	updated_prefix, err := validatePrefix(ns.Prefix)
@@ -551,31 +581,6 @@ func createUpdateNamespace(ctx *gin.Context, isUpdate bool) {
 				})
 		}
 	} else { // Update
-		// First check if the namespace exists
-		exists, err := registrationExistsById(ns.ID)
-		if err != nil {
-			log.Error("Failed to get namespace by ID:", err)
-			ctx.JSON(http.StatusInternalServerError, server_structs.SimpleApiResp{
-				Status: server_structs.RespFailed,
-				Msg:    "Fail to find if namespace exists"})
-			return
-		}
-
-		if !exists { // Return 404 is the namespace does not exists
-			ctx.JSON(http.StatusNotFound, server_structs.SimpleApiResp{
-				Status: server_structs.RespFailed,
-				Msg:    "Can't update namespace: namespace not found"})
-			return
-		}
-
-		existingNs, err := getRegistrationById(ns.ID)
-		if err != nil {
-			log.Error("Error checking namespace status: ", err)
-			ctx.JSON(http.StatusInternalServerError, server_structs.SimpleApiResp{
-				Status: server_structs.RespFailed,
-				Msg:    "Error checking namespace status"})
-			return
-		}
 		existingStatus := existingNs.AdminMetadata.Status
 
 		// Ownership can never be set or changed through the request body.
@@ -604,11 +609,13 @@ func createUpdateNamespace(ctx *gin.Context, isUpdate bool) {
 				}
 			}
 			if existingNs.AdminMetadata.Status == server_structs.RegApproved {
-				log.Errorf("User '%s' is trying to modify approved namespace registration with id=%d", user, ns.ID)
-				ctx.JSON(http.StatusForbidden, server_structs.SimpleApiResp{
-					Status: server_structs.RespFailed,
-					Msg:    "You don't have permission to modify an approved registration. Please contact your federation administrator"})
-				return
+				if !belongsTo {
+					log.Errorf("User '%s' is trying to modify approved namespace registration with id=%d", user, ns.ID)
+					ctx.JSON(http.StatusForbidden, server_structs.SimpleApiResp{
+						Status: server_structs.RespFailed,
+						Msg:    "You don't have permission to modify an approved registration. Please contact your federation administrator"})
+					return
+				}
 			}
 
 			// If non-admin user accesses a namespace with user_id != user but with access_token
@@ -678,6 +685,16 @@ func createUpdateNamespace(ctx *gin.Context, isUpdate bool) {
 				// In-memory only, so the required-field validation below sees
 				// the owner claimRegistration just recorded.
 				ns.AdminMetadata.UserID = userId
+				// The claim advanced the row's UpdatedAt; re-read so the write
+				// below checks against the row as it is now.
+				existingNs, err = getRegistrationById(ns.ID)
+				if err != nil {
+					log.Errorf("Failed to re-read registration %d after claim: %v", ns.ID, err)
+					ctx.JSON(http.StatusInternalServerError, server_structs.SimpleApiResp{
+						Status: server_structs.RespFailed,
+						Msg:    "Error retrieving namespace"})
+					return
+				}
 			}
 		}
 
@@ -705,7 +722,13 @@ func createUpdateNamespace(ctx *gin.Context, isUpdate bool) {
 		}
 
 		// If the user has privilege to update, go ahead
-		if err := updateRegistration(&ns); err != nil {
+		if err := updateRegistration(&ns, ownerEditOfApproved, existingNs.AdminMetadata.UpdatedAt); err != nil {
+			if errors.Is(err, errRegistrationModified) {
+				ctx.JSON(http.StatusConflict, server_structs.SimpleApiResp{
+					Status: server_structs.RespFailed,
+					Msg:    "The registration changed while your request was being processed. Reload it and try again"})
+				return
+			}
 			log.Errorf("Failed to update namespace with id %d. %v", ns.ID, err)
 			ctx.JSON(http.StatusInternalServerError, server_structs.SimpleApiResp{
 				Status: server_structs.RespFailed,

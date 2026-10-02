@@ -318,7 +318,7 @@ func TestUpdateNamespaceWithServerTables(t *testing.T) {
 		ns.AdminMetadata.SiteName = "updated-test.edu"
 		ns.AdminMetadata.Description = "Updated description"
 
-		err := updateRegistration(&ns)
+		err := updateRegistration(&ns, false, ns.AdminMetadata.UpdatedAt)
 		require.NoError(t, err)
 
 		// Verify server was updated
@@ -333,7 +333,7 @@ func TestUpdateNamespaceWithServerTables(t *testing.T) {
 		// Change to cache prefix (this would normally not happen in practice)
 		ns.Prefix = "/caches/updated-test.edu"
 
-		err := updateRegistration(&ns)
+		err := updateRegistration(&ns, false, ns.AdminMetadata.UpdatedAt)
 		require.NoError(t, err)
 
 		// Verify server flags were updated
