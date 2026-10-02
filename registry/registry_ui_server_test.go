@@ -418,7 +418,7 @@ func TestServerIntegrationWithNamespaceOperations(t *testing.T) {
 		// Update the namespace
 		ns.AdminMetadata.SiteName = "updated-integration.edu"
 		ns.AdminMetadata.Description = "Updated description"
-		err = updateRegistration(&ns, false)
+		err = updateRegistration(&ns, false, ns.AdminMetadata.UpdatedAt)
 		require.NoError(t, err)
 
 		// Verify server was updated via API

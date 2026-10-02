@@ -685,6 +685,16 @@ func createUpdateNamespace(ctx *gin.Context, isUpdate bool) {
 				// In-memory only, so the required-field validation below sees
 				// the owner claimRegistration just recorded.
 				ns.AdminMetadata.UserID = userId
+				// The claim advanced the row's UpdatedAt; re-read so the write
+				// below checks against the row as it is now.
+				existingNs, err = getRegistrationById(ns.ID)
+				if err != nil {
+					log.Errorf("Failed to re-read registration %d after claim: %v", ns.ID, err)
+					ctx.JSON(http.StatusInternalServerError, server_structs.SimpleApiResp{
+						Status: server_structs.RespFailed,
+						Msg:    "Error retrieving namespace"})
+					return
+				}
 			}
 		}
 
@@ -712,7 +722,13 @@ func createUpdateNamespace(ctx *gin.Context, isUpdate bool) {
 		}
 
 		// If the user has privilege to update, go ahead
-		if err := updateRegistration(&ns, ownerEditOfApproved); err != nil {
+		if err := updateRegistration(&ns, ownerEditOfApproved, existingNs.AdminMetadata.UpdatedAt); err != nil {
+			if errors.Is(err, errRegistrationModified) {
+				ctx.JSON(http.StatusConflict, server_structs.SimpleApiResp{
+					Status: server_structs.RespFailed,
+					Msg:    "The registration changed while your request was being processed. Reload it and try again"})
+				return
+			}
 			log.Errorf("Failed to update namespace with id %d. %v", ns.ID, err)
 			ctx.JSON(http.StatusInternalServerError, server_structs.SimpleApiResp{
 				Status: server_structs.RespFailed,

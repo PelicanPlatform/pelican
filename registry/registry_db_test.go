@@ -343,7 +343,7 @@ func TestUpdateNamespace(t *testing.T) {
 	t.Run("update-on-dne-entry-returns-error", func(t *testing.T) {
 		defer resetMockRegistryDB(t)
 		mockNs := mockNamespace("/test", "", "", server_structs.AdminMetadata{})
-		err := updateRegistration(&mockNs, false)
+		err := updateRegistration(&mockNs, false, time.Time{})
 		assert.Error(t, err)
 	})
 
@@ -357,13 +357,14 @@ func TestUpdateNamespace(t *testing.T) {
 		require.Equal(t, 1, len(initialNss))
 		initialNs := initialNss[0]
 		assert.Equal(t, mockNs.Prefix, initialNs.Prefix)
+		observedUpdatedAt := initialNs.AdminMetadata.UpdatedAt
 		initialNs.AdminMetadata.UserID = "bar"
 		initialNs.AdminMetadata.CreatedAt = time.Now().Add(10 * time.Hour)
 		initialNs.AdminMetadata.UpdatedAt = time.Now().Add(10 * time.Hour)
 		initialNs.AdminMetadata.Status = server_structs.RegApproved
 		initialNs.AdminMetadata.ApproverID = "hacker"
 		initialNs.AdminMetadata.ApprovedAt = time.Now().Add(10 * time.Hour)
-		err = updateRegistration(initialNs, false)
+		err = updateRegistration(initialNs, false, observedUpdatedAt)
 		require.NoError(t, err)
 		finalNss, err := getAllRegistrations()
 		require.NoError(t, err)
@@ -409,7 +410,7 @@ func TestUpdateNamespaceOwnerEditPinsToRowInTransaction(t *testing.T) {
 	// ...and before it writes, the server pushes a rotated key for the prefix
 	require.NoError(t, setRegistrationPubKey("/foo", rotatedKey))
 
-	require.NoError(t, updateRegistration(edit, true))
+	require.NoError(t, updateRegistration(edit, true, edit.AdminMetadata.UpdatedAt))
 
 	got, err := getRegistrationById(id)
 	require.NoError(t, err)
@@ -417,6 +418,53 @@ func TestUpdateNamespaceOwnerEditPinsToRowInTransaction(t *testing.T) {
 	assert.Equal(t, rotatedKey, got.Pubkey, "the key rotated in between is not reverted by the owner's stale copy")
 	assert.Equal(t, "owner", got.AdminMetadata.UserID)
 	assert.Equal(t, server_structs.RegApproved, got.AdminMetadata.Status)
+}
+
+func TestUpdateNamespaceRefusesRowChangedSinceRead(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
+	setupMockRegistryDB(t)
+	defer teardownMockRegistryDB(t)
+	defer resetMockRegistryDB(t)
+
+	mockNs := mockNamespace("/foo", "pubkey", "", server_structs.AdminMetadata{
+		UserID:      "owner",
+		Description: "old description",
+		Institution: "1000",
+		Status:      server_structs.RegPending,
+	})
+	require.NoError(t, insertMockDBData([]server_structs.Registration{mockNs}))
+	id, err := getLastNamespaceId()
+	require.NoError(t, err)
+
+	// The handler reads a Pending row, so it lets the owner edit every field...
+	stale, err := getRegistrationById(id)
+	require.NoError(t, err)
+	edit := *stale
+	edit.Prefix = "/bar"
+	edit.AdminMetadata.Description = "new description"
+
+	// ...and an admin approves the registration before the write lands
+	require.NoError(t, updateRegistrationStatusById(id, server_structs.RegApproved, "admin"))
+
+	err = updateRegistration(&edit, false, stale.AdminMetadata.UpdatedAt)
+	require.ErrorIs(t, err, errRegistrationModified)
+
+	got, err := getRegistrationById(id)
+	require.NoError(t, err)
+	assert.Equal(t, "/foo", got.Prefix, "an edit decided on the stale status is not written")
+	assert.Equal(t, "old description", got.AdminMetadata.Description)
+	assert.Equal(t, server_structs.RegApproved, got.AdminMetadata.Status)
+
+	// A retry from a fresh read goes through
+	fresh, err := getRegistrationById(id)
+	require.NoError(t, err)
+	retry := *fresh
+	retry.AdminMetadata.Description = "new description"
+	require.NoError(t, updateRegistration(&retry, true, fresh.AdminMetadata.UpdatedAt))
+	got, err = getRegistrationById(id)
+	require.NoError(t, err)
+	assert.Equal(t, "new description", got.AdminMetadata.Description)
+	assert.Equal(t, "/foo", got.Prefix)
 }
 
 func TestUpdateNamespaceStatusById(t *testing.T) {
