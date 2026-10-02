@@ -214,6 +214,9 @@ type PersistentCache struct {
 	fedToken      string
 	fedTokenMu    sync.Mutex
 	fedTokenReady chan struct{} // closed on first non-empty SetFedToken
+	// fedTokenWaited records that getFedToken has already spent its one
+	// startup grace period waiting for a token, so later calls never block.
+	fedTokenWaited bool
 
 	// Configuration
 	wasConfigured bool
@@ -2890,30 +2893,41 @@ func (pc *PersistentCache) SetFedToken(tok string) {
 	}
 }
 
+// fedTokenStartupWait bounds how long getFedToken blocks, once, for the
+// federation token manager to deliver its first token.
+var fedTokenStartupWait = 2 * time.Second
+
 // getFedToken returns the current federation token.  If no token has
-// been set yet it blocks for up to 2 seconds waiting for SetFedToken to
-// be called (which happens when the federation token manager
-// successfully fetches its first token).  Returns the empty string if
-// the wait times out (e.g. site-local mode where no token is expected).
+// been set yet, the first call blocks for up to fedTokenStartupWait
+// waiting for SetFedToken (which happens when the federation token
+// manager successfully fetches its first token).  The wait happens only
+// once per cache: a cache with no token manager at all (site-local mode,
+// or an instance created directly in a test) would otherwise pay it on
+// every cache miss.  Returns the empty string if no token is available.
 func (pc *PersistentCache) getFedToken() string {
 	pc.fedTokenMu.Lock()
 	tok := pc.fedToken
+	waited := pc.fedTokenWaited
 	pc.fedTokenMu.Unlock()
 	if tok != "" {
 		log.Tracef("getFedToken: returning cached token (len=%d)", len(tok))
 		return tok
 	}
+	if waited {
+		return ""
+	}
 
 	// No token yet — wait briefly for the first successful fetch.
-	log.Debugf("getFedToken: no token available, waiting up to 2s")
+	log.Debugf("getFedToken: no token available, waiting up to %v", fedTokenStartupWait)
 	select {
 	case <-pc.fedTokenReady:
 		log.Debugf("getFedToken: token became available via channel")
-	case <-time.After(2 * time.Second):
-		log.Debugf("getFedToken: timed out waiting for token")
+	case <-time.After(fedTokenStartupWait):
+		log.Debugf("getFedToken: timed out waiting for token; later calls will not wait")
 	}
 
 	pc.fedTokenMu.Lock()
+	pc.fedTokenWaited = true
 	tok = pc.fedToken
 	pc.fedTokenMu.Unlock()
 	return tok
