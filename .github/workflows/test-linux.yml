@@ -152,6 +152,43 @@ jobs:
             TEST_PELICAN_BINARY TEST_PELICAN_SERVER_BINARY |
             tee -a "$GITHUB_ENV"
 
+      - name: Run the end-to-end tests
+        # These tests mostly wait on servers and the network, so run them
+        # alongside "go test" instead of after it.
+        #
+        # Each script fails on its own once its time budget runs out
+        # (see github_scripts/e2e_common.sh). The step's time limit is
+        # a loose guard.
+        if: ${{ !cancelled() && steps.binaries.outcome == 'success' }}
+        background: true
+        timeout-minutes: 10
+        run: |
+          cp "$TEST_PELICAN_BINARY" ./pelican
+          cp "$TEST_PELICAN_SERVER_BINARY" ./pelican-server
+
+          failed=()
+          for script in \
+            citests \
+            get_put_test \
+            stat_test \
+            version_test \
+            site_local_cache_test \
+            cache_availability_test
+          do
+            echo "::group::${script}.sh"
+            status=0
+            "./github_scripts/${script}.sh" || status=$?
+            if [ "$status" -ne 0 ]; then
+              echo "::error::${script}.sh failed"
+              failed+=("${script}.sh")
+            fi
+            echo "::endgroup::"
+          done
+          if [ "${#failed[@]}" -gt 0 ]; then
+            echo "Failed: ${failed[*]}"
+            exit 1
+          fi
+
       - name: Run "go test" on shared and client-specific code
         if: ${{ !cancelled() && steps.binaries.outcome == 'success' }}
         run: |
@@ -233,26 +270,8 @@ jobs:
             publish "server-specific code" summary-server.md
           } >> "$GITHUB_STEP_SUMMARY"
 
-      - name: Copy the pelican binaries for the end-to-end tests
-        if: ${{ !cancelled() && steps.binaries.outcome == 'success' }}
-        run: |
-          cp "$TEST_PELICAN_BINARY" ./pelican
-          cp "$TEST_PELICAN_SERVER_BINARY" ./pelican-server
-      - name: Run integration tests
-        if: ${{ !cancelled() && steps.binaries.outcome == 'success' }}
-        run: ./github_scripts/citests.sh
-      - name: Run end-to-end test for object get/put
-        if: ${{ !cancelled() && steps.binaries.outcome == 'success' }}
-        run: ./github_scripts/get_put_test.sh
-      - name: Run end-to-end test for director stat
-        if: ${{ !cancelled() && steps.binaries.outcome == 'success' }}
-        run: ./github_scripts/stat_test.sh
-      - name: Run end-to-end test for --version flag
-        if: ${{ !cancelled() && steps.binaries.outcome == 'success' }}
-        run: ./github_scripts/version_test.sh
-      - name: Run end-to-end test for site-local cache standup
-        if: ${{ !cancelled() && steps.binaries.outcome == 'success' }}
-        run: ./github_scripts/site_local_cache_test.sh
-      - name: Run end-to-end test for Cache Availability/Stat weighting
-        if: ${{ !cancelled() && steps.binaries.outcome == 'success' }}
-        run: ./github_scripts/cache_availability_test.sh
+      # Report a failure in the background step above. If an earlier step
+      # failed, this step is skipped, and the runner reports the failure at
+      # the end of the job instead.
+      - name: Wait for the end-to-end tests
+        wait-all:
