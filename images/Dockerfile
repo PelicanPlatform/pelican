@@ -115,9 +115,17 @@ ARG BUILDOS
 ARG BUILDARCH
 
 WORKDIR /pelican-build
+
+# Use a dnf cache distinct from the one used by the other stages.
+# When the build and target platforms are the same, sharing a cache
+# makes this stage wait on theirs, and vice versa.
+#
+# This stage should not block others, because it can be the rate-limiting
+# step when building all of the "final" images.
+
 RUN --mount=type=bind,source=go.mod,target=/context/go.mod \
     --mount=type=bind,source=web_ui/frontend/package.json,target=/context/package.json \
-    --mount=type=cache,id=dnf-${BUILDPLATFORM},target=/var/cache/dnf,sharing=locked \
+    --mount=type=cache,id=dnf-pelican-build-${BUILDPLATFORM},target=/var/cache/dnf,sharing=locked \
     <<ENDRUN
 
   set -eux
