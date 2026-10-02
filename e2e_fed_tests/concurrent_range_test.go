@@ -162,924 +162,791 @@ func requireSuccessfulRead(t *testing.T, r rangeResult, expectedCode int, expect
 // Concurrent full-read tests
 // ============================================================================
 
-// TestConcurrent_FullReads_SameObject tests many goroutines reading the same
-// cached object simultaneously. This exercises the SeekableReader and
-// http.ServeContent under contention.
-func TestConcurrent_FullReads_SameObject(t *testing.T) {
+// TestConcurrentRangeReads runs each case below against one shared federation. Starting a
+// federation (five services plus XRootD) dominates the run time of these
+// cases, so they share one and keep their object names distinct instead.
+func TestConcurrentRangeReads(t *testing.T) {
 	t.Cleanup(test_utils.SetupTestLogging(t))
 	server_utils.ResetTestState()
-	defer server_utils.ResetTestState()
+	t.Cleanup(server_utils.ResetTestState)
 
 	require.NoError(t, param.Cache_EnableV2.Set(true))
 	ft := fed_test_utils.NewFedTest(t, persistentCacheConfig)
 
-	// Use a file larger than InlineThreshold (4096) so disk storage path is exercised
-	content := generateTestData(16384) // 16KB = ~4 blocks
-	pelicanURL := uploadTestFile(ft.Ctx, t, ft, "concurrent_full.bin", content)
-	cacheURL := primeCache(ft.Ctx, t, ft, pelicanURL, "/test/concurrent_full.bin")
+	// FullReads_SameObject tests many goroutines reading the same
+	// cached object simultaneously. This exercises the SeekableReader and
+	// http.ServeContent under contention.
+	t.Run("FullReads_SameObject", func(t *testing.T) {
+		// Use a file larger than InlineThreshold (4096) so disk storage path is exercised
+		content := generateTestData(16384) // 16KB = ~4 blocks
+		pelicanURL := uploadTestFile(ft.Ctx, t, ft, "concurrent_full.bin", content)
+		cacheURL := primeCache(ft.Ctx, t, ft, pelicanURL, "/test/concurrent_full.bin")
 
-	testToken := getTempTokenForTest(t)
-	const numReaders = 20
+		testToken := getTempTokenForTest(t)
+		const numReaders = 20
 
-	var wg sync.WaitGroup
-	results := make([]rangeResult, numReaders)
+		var wg sync.WaitGroup
+		results := make([]rangeResult, numReaders)
 
-	for i := 0; i < numReaders; i++ {
-		wg.Add(1)
-		go func(idx int) {
-			defer wg.Done()
-			results[idx] = doRangeRead(ft.Ctx, cacheURL, testToken, "", "")
-		}(i)
-	}
-	wg.Wait()
-
-	for i, r := range results {
-		requireSuccessfulRead(t, r, http.StatusOK, content, fmt.Sprintf("Reader %d", i))
-	}
-}
-
-// ============================================================================
-// Concurrent range-read tests
-// ============================================================================
-
-// TestConcurrent_RangeReads_DifferentRanges tests many goroutines requesting
-// different byte ranges from the same cached object. This stresses the
-// RangeReader's seek and block-read paths under contention.
-func TestConcurrent_RangeReads_DifferentRanges(t *testing.T) {
-	t.Cleanup(test_utils.SetupTestLogging(t))
-	server_utils.ResetTestState()
-	defer server_utils.ResetTestState()
-
-	require.NoError(t, param.Cache_EnableV2.Set(true))
-	ft := fed_test_utils.NewFedTest(t, persistentCacheConfig)
-
-	// Use a file large enough to have many blocks (each block is 4080 bytes data)
-	content := generateTestData(32768) // 32KB = ~8 blocks
-	pelicanURL := uploadTestFile(ft.Ctx, t, ft, "concurrent_ranges.bin", content)
-	cacheURL := primeCache(ft.Ctx, t, ft, pelicanURL, "/test/concurrent_ranges.bin")
-
-	testToken := getTempTokenForTest(t)
-
-	// Define a variety of range requests spanning different blocks
-	type rangeSpec struct {
-		header string
-		start  int
-		end    int
-	}
-	ranges := []rangeSpec{
-		{"bytes=0-99", 0, 99},
-		{"bytes=100-4079", 100, 4079},       // Within first block
-		{"bytes=4080-8159", 4080, 8159},     // Second block exactly
-		{"bytes=4000-5000", 4000, 5000},     // Spans block boundary (block 0/1)
-		{"bytes=0-0", 0, 0},                 // Single byte
-		{"bytes=16000-16999", 16000, 16999}, // Middle of file
-		{"bytes=32700-32767", 32700, 32767}, // End of file
-		{"bytes=0-32767", 0, 32767},         // Entire file as range
-		{"bytes=8000-12000", 8000, 12000},   // Spans blocks 1/2
-		{"bytes=12000-24000", 12000, 24000}, // Spans multiple blocks
-	}
-
-	const repeats = 3 // Each range is read this many times concurrently
-	totalReads := len(ranges) * repeats
-
-	var wg sync.WaitGroup
-	results := make([]rangeResult, totalReads)
-	specs := make([]rangeSpec, totalReads)
-
-	idx := 0
-	for _, rs := range ranges {
-		for r := 0; r < repeats; r++ {
-			specs[idx] = rs
+		for i := 0; i < numReaders; i++ {
 			wg.Add(1)
-			go func(i int, spec rangeSpec) {
+			go func(idx int) {
 				defer wg.Done()
-				results[i] = doRangeRead(ft.Ctx, cacheURL, testToken, "", spec.header)
-			}(idx, rs)
-			idx++
+				results[idx] = doRangeRead(ft.Ctx, cacheURL, testToken, "", "")
+			}(i)
 		}
-	}
-	wg.Wait()
+		wg.Wait()
 
-	for i, r := range results {
-		spec := specs[i]
-		expected := content[spec.start : spec.end+1]
-		requireSuccessfulRead(t, r, http.StatusPartialContent, expected,
-			fmt.Sprintf("Range %s (read %d)", spec.header, i))
-	}
-}
+		for i, r := range results {
+			requireSuccessfulRead(t, r, http.StatusOK, content, fmt.Sprintf("Reader %d", i))
+		}
+	})
 
-// TestConcurrent_RangeReads_BlockBoundaries focuses on ranges that straddle
-// block boundaries to stress the RangeReader's cross-block read logic.
-func TestConcurrent_RangeReads_BlockBoundaries(t *testing.T) {
-	t.Cleanup(test_utils.SetupTestLogging(t))
-	server_utils.ResetTestState()
-	defer server_utils.ResetTestState()
+	// RangeReads_DifferentRanges tests many goroutines requesting
+	// different byte ranges from the same cached object. This stresses the
+	// RangeReader's seek and block-read paths under contention.
+	t.Run("RangeReads_DifferentRanges", func(t *testing.T) {
+		// Use a file large enough to have many blocks (each block is 4080 bytes data)
+		content := generateTestData(32768) // 32KB = ~8 blocks
+		pelicanURL := uploadTestFile(ft.Ctx, t, ft, "concurrent_ranges.bin", content)
+		cacheURL := primeCache(ft.Ctx, t, ft, pelicanURL, "/test/concurrent_ranges.bin")
 
-	require.NoError(t, param.Cache_EnableV2.Set(true))
-	ft := fed_test_utils.NewFedTest(t, persistentCacheConfig)
+		testToken := getTempTokenForTest(t)
 
-	// 5 blocks worth of data
-	const blockDataSize = 4080
-	content := generateTestData(blockDataSize * 5)
-	pelicanURL := uploadTestFile(ft.Ctx, t, ft, "concurrent_boundaries.bin", content)
-	cacheURL := primeCache(ft.Ctx, t, ft, pelicanURL, "/test/concurrent_boundaries.bin")
+		// Define a variety of range requests spanning different blocks
+		type rangeSpec struct {
+			header string
+			start  int
+			end    int
+		}
+		ranges := []rangeSpec{
+			{"bytes=0-99", 0, 99},
+			{"bytes=100-4079", 100, 4079},       // Within first block
+			{"bytes=4080-8159", 4080, 8159},     // Second block exactly
+			{"bytes=4000-5000", 4000, 5000},     // Spans block boundary (block 0/1)
+			{"bytes=0-0", 0, 0},                 // Single byte
+			{"bytes=16000-16999", 16000, 16999}, // Middle of file
+			{"bytes=32700-32767", 32700, 32767}, // End of file
+			{"bytes=0-32767", 0, 32767},         // Entire file as range
+			{"bytes=8000-12000", 8000, 12000},   // Spans blocks 1/2
+			{"bytes=12000-24000", 12000, 24000}, // Spans multiple blocks
+		}
 
-	testToken := getTempTokenForTest(t)
+		const repeats = 3 // Each range is read this many times concurrently
+		totalReads := len(ranges) * repeats
 
-	// All ranges deliberately straddle block boundaries
-	type rangeSpec struct {
-		header string
-		start  int
-		end    int
-	}
-	ranges := []rangeSpec{
-		// Straddle block 0/1 boundary
-		{fmt.Sprintf("bytes=%d-%d", blockDataSize-10, blockDataSize+10), blockDataSize - 10, blockDataSize + 10},
-		// Straddle block 1/2 boundary
-		{fmt.Sprintf("bytes=%d-%d", 2*blockDataSize-1, 2*blockDataSize+1), 2*blockDataSize - 1, 2*blockDataSize + 1},
-		// Straddle block 2/3 boundary
-		{fmt.Sprintf("bytes=%d-%d", 3*blockDataSize-50, 3*blockDataSize+50), 3*blockDataSize - 50, 3*blockDataSize + 50},
-		// Span 3 blocks (block 1 through block 3)
-		{fmt.Sprintf("bytes=%d-%d", blockDataSize+100, 3*blockDataSize+100), blockDataSize + 100, 3*blockDataSize + 100},
-		// Span all blocks
-		{fmt.Sprintf("bytes=0-%d", 5*blockDataSize-1), 0, 5*blockDataSize - 1},
-	}
+		var wg sync.WaitGroup
+		results := make([]rangeResult, totalReads)
+		specs := make([]rangeSpec, totalReads)
 
-	const numReaders = 5
-	totalReads := len(ranges) * numReaders
+		idx := 0
+		for _, rs := range ranges {
+			for r := 0; r < repeats; r++ {
+				specs[idx] = rs
+				wg.Add(1)
+				go func(i int, spec rangeSpec) {
+					defer wg.Done()
+					results[i] = doRangeRead(ft.Ctx, cacheURL, testToken, "", spec.header)
+				}(idx, rs)
+				idx++
+			}
+		}
+		wg.Wait()
 
-	var wg sync.WaitGroup
-	results := make([]rangeResult, totalReads)
-	specs := make([]rangeSpec, totalReads)
+		for i, r := range results {
+			spec := specs[i]
+			expected := content[spec.start : spec.end+1]
+			requireSuccessfulRead(t, r, http.StatusPartialContent, expected,
+				fmt.Sprintf("Range %s (read %d)", spec.header, i))
+		}
+	})
 
-	idx := 0
-	for _, rs := range ranges {
-		for r := 0; r < numReaders; r++ {
-			specs[idx] = rs
+	// RangeReads_BlockBoundaries focuses on ranges that straddle
+	// block boundaries to stress the RangeReader's cross-block read logic.
+	t.Run("RangeReads_BlockBoundaries", func(t *testing.T) {
+		// 5 blocks worth of data
+		const blockDataSize = 4080
+		content := generateTestData(blockDataSize * 5)
+		pelicanURL := uploadTestFile(ft.Ctx, t, ft, "concurrent_boundaries.bin", content)
+		cacheURL := primeCache(ft.Ctx, t, ft, pelicanURL, "/test/concurrent_boundaries.bin")
+
+		testToken := getTempTokenForTest(t)
+
+		// All ranges deliberately straddle block boundaries
+		type rangeSpec struct {
+			header string
+			start  int
+			end    int
+		}
+		ranges := []rangeSpec{
+			// Straddle block 0/1 boundary
+			{fmt.Sprintf("bytes=%d-%d", blockDataSize-10, blockDataSize+10), blockDataSize - 10, blockDataSize + 10},
+			// Straddle block 1/2 boundary
+			{fmt.Sprintf("bytes=%d-%d", 2*blockDataSize-1, 2*blockDataSize+1), 2*blockDataSize - 1, 2*blockDataSize + 1},
+			// Straddle block 2/3 boundary
+			{fmt.Sprintf("bytes=%d-%d", 3*blockDataSize-50, 3*blockDataSize+50), 3*blockDataSize - 50, 3*blockDataSize + 50},
+			// Span 3 blocks (block 1 through block 3)
+			{fmt.Sprintf("bytes=%d-%d", blockDataSize+100, 3*blockDataSize+100), blockDataSize + 100, 3*blockDataSize + 100},
+			// Span all blocks
+			{fmt.Sprintf("bytes=0-%d", 5*blockDataSize-1), 0, 5*blockDataSize - 1},
+		}
+
+		const numReaders = 5
+		totalReads := len(ranges) * numReaders
+
+		var wg sync.WaitGroup
+		results := make([]rangeResult, totalReads)
+		specs := make([]rangeSpec, totalReads)
+
+		idx := 0
+		for _, rs := range ranges {
+			for r := 0; r < numReaders; r++ {
+				specs[idx] = rs
+				wg.Add(1)
+				go func(i int, spec rangeSpec) {
+					defer wg.Done()
+					results[i] = doRangeRead(ft.Ctx, cacheURL, testToken, "", spec.header)
+				}(idx, rs)
+				idx++
+			}
+		}
+		wg.Wait()
+
+		for i, r := range results {
+			spec := specs[i]
+			expected := content[spec.start : spec.end+1]
+			requireSuccessfulRead(t, r, http.StatusPartialContent, expected,
+				fmt.Sprintf("Boundary range %s (read %d)", spec.header, i))
+		}
+	})
+
+	// CacheMiss_SameObject tests that many concurrent requests for
+	// the same uncached object are properly deduplicated — only one download should
+	// happen, and all waiters should get correct data.
+	t.Run("CacheMiss_SameObject", func(t *testing.T) {
+		// Upload but do NOT prime the cache — all readers will hit a cache miss
+		content := generateTestData(20000) // ~5 blocks, forces disk storage
+		uploadTestFile(ft.Ctx, t, ft, "concurrent_miss.bin", content)
+
+		// Get the cache URL without priming
+		testToken := getTempTokenForTest(t)
+		cacheURL := getCacheRedirectURL(ft.Ctx, t, "/test/concurrent_miss.bin", testToken)
+
+		const numReaders = 15
+
+		var wg sync.WaitGroup
+		results := make([]rangeResult, numReaders)
+
+		// All readers fire simultaneously — the first will trigger a download,
+		// the rest should either wait for that download or get it once complete.
+		for i := 0; i < numReaders; i++ {
 			wg.Add(1)
-			go func(i int, spec rangeSpec) {
+			go func(idx int) {
 				defer wg.Done()
-				results[i] = doRangeRead(ft.Ctx, cacheURL, testToken, "", spec.header)
-			}(idx, rs)
-			idx++
+				results[idx] = doRangeRead(ft.Ctx, cacheURL, testToken, "", "")
+			}(i)
 		}
-	}
-	wg.Wait()
+		wg.Wait()
 
-	for i, r := range results {
-		spec := specs[i]
-		expected := content[spec.start : spec.end+1]
-		requireSuccessfulRead(t, r, http.StatusPartialContent, expected,
-			fmt.Sprintf("Boundary range %s (read %d)", spec.header, i))
-	}
-}
-
-// ============================================================================
-// Concurrent cache-miss tests (download deduplication)
-// ============================================================================
-
-// TestConcurrent_CacheMiss_SameObject tests that many concurrent requests for
-// the same uncached object are properly deduplicated — only one download should
-// happen, and all waiters should get correct data.
-func TestConcurrent_CacheMiss_SameObject(t *testing.T) {
-	t.Cleanup(test_utils.SetupTestLogging(t))
-	server_utils.ResetTestState()
-	defer server_utils.ResetTestState()
-
-	require.NoError(t, param.Cache_EnableV2.Set(true))
-	ft := fed_test_utils.NewFedTest(t, persistentCacheConfig)
-
-	// Upload but do NOT prime the cache — all readers will hit a cache miss
-	content := generateTestData(20000) // ~5 blocks, forces disk storage
-	uploadTestFile(ft.Ctx, t, ft, "concurrent_miss.bin", content)
-
-	// Get the cache URL without priming
-	testToken := getTempTokenForTest(t)
-	cacheURL := getCacheRedirectURL(ft.Ctx, t, "/test/concurrent_miss.bin", testToken)
-
-	const numReaders = 15
-
-	var wg sync.WaitGroup
-	results := make([]rangeResult, numReaders)
-
-	// All readers fire simultaneously — the first will trigger a download,
-	// the rest should either wait for that download or get it once complete.
-	for i := 0; i < numReaders; i++ {
-		wg.Add(1)
-		go func(idx int) {
-			defer wg.Done()
-			results[idx] = doRangeRead(ft.Ctx, cacheURL, testToken, "", "")
-		}(i)
-	}
-	wg.Wait()
-
-	for i, r := range results {
-		requireSuccessfulRead(t, r, http.StatusOK, content,
-			fmt.Sprintf("Cache-miss reader %d", i))
-	}
-}
-
-// TestConcurrent_CacheMiss_RangeReads tests concurrent range reads on an
-// object that is not yet cached. The first request triggers a download;
-// subsequent range requests should wait for it and return correct slices.
-func TestConcurrent_CacheMiss_RangeReads(t *testing.T) {
-	t.Cleanup(test_utils.SetupTestLogging(t))
-	server_utils.ResetTestState()
-	defer server_utils.ResetTestState()
-
-	require.NoError(t, param.Cache_EnableV2.Set(true))
-	ft := fed_test_utils.NewFedTest(t, persistentCacheConfig)
-
-	content := generateTestData(24000) // ~6 blocks
-	uploadTestFile(ft.Ctx, t, ft, "concurrent_miss_range.bin", content)
-
-	testToken := getTempTokenForTest(t)
-	cacheURL := getCacheRedirectURL(ft.Ctx, t, "/test/concurrent_miss_range.bin", testToken)
-
-	type rangeSpec struct {
-		header string
-		start  int
-		end    int
-	}
-	ranges := []rangeSpec{
-		{"bytes=0-999", 0, 999},
-		{"bytes=5000-9999", 5000, 9999},
-		{"bytes=15000-19999", 15000, 19999},
-		{"bytes=20000-23999", 20000, 23999},
-		{"", 0, len(content) - 1}, // Full read too
-	}
-
-	var wg sync.WaitGroup
-	results := make([]rangeResult, len(ranges))
-	specs := make([]rangeSpec, len(ranges))
-
-	for i, rs := range ranges {
-		specs[i] = rs
-		wg.Add(1)
-		go func(idx int, spec rangeSpec) {
-			defer wg.Done()
-			results[idx] = doRangeRead(ft.Ctx, cacheURL, testToken, "", spec.header)
-		}(i, rs)
-	}
-	wg.Wait()
-
-	for i, r := range results {
-		spec := specs[i]
-		expected := content[spec.start : spec.end+1]
-		expectedCode := http.StatusPartialContent
-		if spec.header == "" {
-			expectedCode = http.StatusOK
+		for i, r := range results {
+			requireSuccessfulRead(t, r, http.StatusOK, content,
+				fmt.Sprintf("Cache-miss reader %d", i))
 		}
-		requireSuccessfulRead(t, r, expectedCode, expected,
-			fmt.Sprintf("Range %s (read %d)", spec.header, i))
-	}
-}
+	})
 
-// ============================================================================
-// Concurrent multi-object tests
-// ============================================================================
+	// CacheMiss_RangeReads tests concurrent range reads on an
+	// object that is not yet cached. The first request triggers a download;
+	// subsequent range requests should wait for it and return correct slices.
+	t.Run("CacheMiss_RangeReads", func(t *testing.T) {
+		content := generateTestData(24000) // ~6 blocks
+		uploadTestFile(ft.Ctx, t, ft, "concurrent_miss_range.bin", content)
 
-// TestConcurrent_MultipleObjects tests concurrent reads across several different
-// objects. This exercises multiple independent download paths and ensures the
-// active download map handles multiple keys correctly.
-func TestConcurrent_MultipleObjects(t *testing.T) {
-	t.Cleanup(test_utils.SetupTestLogging(t))
-	server_utils.ResetTestState()
-	defer server_utils.ResetTestState()
+		testToken := getTempTokenForTest(t)
+		cacheURL := getCacheRedirectURL(ft.Ctx, t, "/test/concurrent_miss_range.bin", testToken)
 
-	require.NoError(t, param.Cache_EnableV2.Set(true))
-	ft := fed_test_utils.NewFedTest(t, persistentCacheConfig)
+		type rangeSpec struct {
+			header string
+			start  int
+			end    int
+		}
+		ranges := []rangeSpec{
+			{"bytes=0-999", 0, 999},
+			{"bytes=5000-9999", 5000, 9999},
+			{"bytes=15000-19999", 15000, 19999},
+			{"bytes=20000-23999", 20000, 23999},
+			{"", 0, len(content) - 1}, // Full read too
+		}
 
-	const numObjects = 5
-	const numReadersPerObject = 4
+		var wg sync.WaitGroup
+		results := make([]rangeResult, len(ranges))
+		specs := make([]rangeSpec, len(ranges))
 
-	// Create distinct objects of varying sizes
-	objects := make([]struct {
-		content  []byte
-		cacheURL string
-	}, numObjects)
-
-	testToken := getTempTokenForTest(t)
-
-	for i := 0; i < numObjects; i++ {
-		// Vary sizes: some inline (<4KB), some disk-backed
-		size := 1000 + i*5000 // 1KB, 6KB, 11KB, 16KB, 21KB
-		content := generateTestData(size)
-		filename := fmt.Sprintf("concurrent_multi_%d.bin", i)
-		pelicanURL := uploadTestFile(ft.Ctx, t, ft, filename, content)
-		objectPath := fmt.Sprintf("/test/%s", filename)
-
-		cacheURL := primeCache(ft.Ctx, t, ft, pelicanURL, objectPath)
-
-		objects[i].content = content
-		objects[i].cacheURL = cacheURL
-	}
-
-	var wg sync.WaitGroup
-	totalReads := numObjects * numReadersPerObject
-	results := make([]rangeResult, totalReads)
-	objectIndices := make([]int, totalReads)
-
-	idx := 0
-	for objIdx := 0; objIdx < numObjects; objIdx++ {
-		for r := 0; r < numReadersPerObject; r++ {
-			objectIndices[idx] = objIdx
+		for i, rs := range ranges {
+			specs[i] = rs
 			wg.Add(1)
-			go func(i, oi int) {
+			go func(idx int, spec rangeSpec) {
 				defer wg.Done()
-				results[i] = doRangeRead(ft.Ctx, objects[oi].cacheURL, testToken, "", "")
-			}(idx, objIdx)
-			idx++
+				results[idx] = doRangeRead(ft.Ctx, cacheURL, testToken, "", spec.header)
+			}(i, rs)
 		}
-	}
-	wg.Wait()
+		wg.Wait()
 
-	for i, r := range results {
-		oi := objectIndices[i]
-		requireSuccessfulRead(t, r, http.StatusOK, objects[oi].content,
-			fmt.Sprintf("Object %d reader %d", oi, i))
-	}
-}
-
-// ============================================================================
-// Concurrent mixed full + range read tests
-// ============================================================================
-
-// TestConcurrent_MixedFullAndRangeReads interleaves full and partial reads
-// on the same object to exercise the cache serving both code paths simultaneously.
-func TestConcurrent_MixedFullAndRangeReads(t *testing.T) {
-	t.Cleanup(test_utils.SetupTestLogging(t))
-	server_utils.ResetTestState()
-	defer server_utils.ResetTestState()
-
-	require.NoError(t, param.Cache_EnableV2.Set(true))
-	ft := fed_test_utils.NewFedTest(t, persistentCacheConfig)
-
-	content := generateTestData(24576) // 24KB = 6 blocks
-	pelicanURL := uploadTestFile(ft.Ctx, t, ft, "concurrent_mixed.bin", content)
-	cacheURL := primeCache(ft.Ctx, t, ft, pelicanURL, "/test/concurrent_mixed.bin")
-
-	testToken := getTempTokenForTest(t)
-
-	type readSpec struct {
-		rangeHeader string // empty = full read
-		start       int
-		end         int
-		expectCode  int
-	}
-	specs := []readSpec{
-		// Full reads
-		{"", 0, len(content) - 1, http.StatusOK},
-		{"", 0, len(content) - 1, http.StatusOK},
-		// Range reads
-		{"bytes=0-4079", 0, 4079, http.StatusPartialContent},
-		{"bytes=4080-8159", 4080, 8159, http.StatusPartialContent},
-		{"bytes=8160-12239", 8160, 12239, http.StatusPartialContent},
-		{"bytes=12240-16319", 12240, 16319, http.StatusPartialContent},
-		{"bytes=100-200", 100, 200, http.StatusPartialContent},
-		{"bytes=20000-24575", 20000, 24575, http.StatusPartialContent},
-		// More full reads mixed in
-		{"", 0, len(content) - 1, http.StatusOK},
-		{"", 0, len(content) - 1, http.StatusOK},
-	}
-
-	var wg sync.WaitGroup
-	results := make([]rangeResult, len(specs))
-
-	for i, s := range specs {
-		wg.Add(1)
-		go func(idx int, spec readSpec) {
-			defer wg.Done()
-			results[idx] = doRangeRead(ft.Ctx, cacheURL, testToken, "", spec.rangeHeader)
-		}(i, s)
-	}
-	wg.Wait()
-
-	for i, r := range results {
-		spec := specs[i]
-		expected := content[spec.start : spec.end+1]
-		requireSuccessfulRead(t, r, spec.expectCode, expected,
-			fmt.Sprintf("Mixed read %d (%s)", i, spec.rangeHeader))
-	}
-}
-
-// ============================================================================
-// Large file concurrent range tests
-// ============================================================================
-
-// TestConcurrent_LargeFile_ManySmallRanges tests many small range reads on a
-// large file. This exercises the block bitmap, decryption, and seek paths at
-// scale with many concurrent goroutines.
-func TestConcurrent_LargeFile_ManySmallRanges(t *testing.T) {
-	t.Cleanup(test_utils.SetupTestLogging(t))
-	server_utils.ResetTestState()
-	defer server_utils.ResetTestState()
-
-	require.NoError(t, param.Cache_EnableV2.Set(true))
-	ft := fed_test_utils.NewFedTest(t, persistentCacheConfig)
-
-	// 256KB file = ~62 blocks — large enough to stress multiple blocks
-	const fileSize = 256 * 1024
-	content := generateTestData(fileSize)
-	pelicanURL := uploadTestFile(ft.Ctx, t, ft, "concurrent_large.bin", content)
-	cacheURL := primeCache(ft.Ctx, t, ft, pelicanURL, "/test/concurrent_large.bin")
-
-	testToken := getTempTokenForTest(t)
-
-	// Generate 50 random 1KB range reads spread across the file
-	const numRanges = 50
-	const rangeSize = 1024
-
-	type rangeSpec struct {
-		header string
-		start  int
-		end    int
-	}
-	ranges := make([]rangeSpec, numRanges)
-	for i := 0; i < numRanges; i++ {
-		// Deterministic but well-distributed start positions
-		start := (i * (fileSize - rangeSize)) / numRanges
-		end := start + rangeSize - 1
-		ranges[i] = rangeSpec{
-			header: fmt.Sprintf("bytes=%d-%d", start, end),
-			start:  start,
-			end:    end,
+		for i, r := range results {
+			spec := specs[i]
+			expected := content[spec.start : spec.end+1]
+			expectedCode := http.StatusPartialContent
+			if spec.header == "" {
+				expectedCode = http.StatusOK
+			}
+			requireSuccessfulRead(t, r, expectedCode, expected,
+				fmt.Sprintf("Range %s (read %d)", spec.header, i))
 		}
-	}
+	})
 
-	var wg sync.WaitGroup
-	results := make([]rangeResult, numRanges)
+	// MultipleObjects tests concurrent reads across several different
+	// objects. This exercises multiple independent download paths and ensures the
+	// active download map handles multiple keys correctly.
+	t.Run("MultipleObjects", func(t *testing.T) {
+		const numObjects = 5
+		const numReadersPerObject = 4
 
-	for i, rs := range ranges {
-		wg.Add(1)
-		go func(idx int, spec rangeSpec) {
-			defer wg.Done()
-			results[idx] = doRangeRead(ft.Ctx, cacheURL, testToken, "", spec.header)
-		}(i, rs)
-	}
-	wg.Wait()
+		// Create distinct objects of varying sizes
+		objects := make([]struct {
+			content  []byte
+			cacheURL string
+		}, numObjects)
 
-	for i, r := range results {
-		spec := ranges[i]
-		expected := content[spec.start : spec.end+1]
-		requireSuccessfulRead(t, r, http.StatusPartialContent, expected,
-			fmt.Sprintf("Large file range %d (%s)", i, spec.header))
-	}
-}
+		testToken := getTempTokenForTest(t)
 
-// ============================================================================
-// Inline storage concurrent test
-// ============================================================================
+		for i := 0; i < numObjects; i++ {
+			// Vary sizes: some inline (<4KB), some disk-backed
+			size := 1000 + i*5000 // 1KB, 6KB, 11KB, 16KB, 21KB
+			content := generateTestData(size)
+			filename := fmt.Sprintf("concurrent_multi_%d.bin", i)
+			pelicanURL := uploadTestFile(ft.Ctx, t, ft, filename, content)
+			objectPath := fmt.Sprintf("/test/%s", filename)
 
-// TestConcurrent_InlineStorage_Reads tests concurrent reads on a small file
-// that uses inline storage (stored directly in BadgerDB, not on disk).
-// This exercises a different code path than the disk-based tests above.
-func TestConcurrent_InlineStorage_Reads(t *testing.T) {
-	t.Cleanup(test_utils.SetupTestLogging(t))
-	server_utils.ResetTestState()
-	defer server_utils.ResetTestState()
+			cacheURL := primeCache(ft.Ctx, t, ft, pelicanURL, objectPath)
 
-	require.NoError(t, param.Cache_EnableV2.Set(true))
-	ft := fed_test_utils.NewFedTest(t, persistentCacheConfig)
+			objects[i].content = content
+			objects[i].cacheURL = cacheURL
+		}
 
-	// Small file — below InlineThreshold (4096), stored inline in BadgerDB
-	content := []byte("This is a small file for inline storage concurrent testing. It must be less than 4096 bytes.")
-	pelicanURL := uploadTestFile(ft.Ctx, t, ft, "concurrent_inline.txt", content)
-	cacheURL := primeCache(ft.Ctx, t, ft, pelicanURL, "/test/concurrent_inline.txt")
+		var wg sync.WaitGroup
+		totalReads := numObjects * numReadersPerObject
+		results := make([]rangeResult, totalReads)
+		objectIndices := make([]int, totalReads)
 
-	testToken := getTempTokenForTest(t)
-	const numReaders = 20
+		idx := 0
+		for objIdx := 0; objIdx < numObjects; objIdx++ {
+			for r := 0; r < numReadersPerObject; r++ {
+				objectIndices[idx] = objIdx
+				wg.Add(1)
+				go func(i, oi int) {
+					defer wg.Done()
+					results[i] = doRangeRead(ft.Ctx, objects[oi].cacheURL, testToken, "", "")
+				}(idx, objIdx)
+				idx++
+			}
+		}
+		wg.Wait()
 
-	var wg sync.WaitGroup
-	results := make([]rangeResult, numReaders)
+		for i, r := range results {
+			oi := objectIndices[i]
+			requireSuccessfulRead(t, r, http.StatusOK, objects[oi].content,
+				fmt.Sprintf("Object %d reader %d", oi, i))
+		}
+	})
 
-	for i := 0; i < numReaders; i++ {
-		wg.Add(1)
-		go func(idx int) {
-			defer wg.Done()
-			results[idx] = doRangeRead(ft.Ctx, cacheURL, testToken, "", "")
-		}(i)
-	}
-	wg.Wait()
+	// MixedFullAndRangeReads interleaves full and partial reads
+	// on the same object to exercise the cache serving both code paths simultaneously.
+	t.Run("MixedFullAndRangeReads", func(t *testing.T) {
+		content := generateTestData(24576) // 24KB = 6 blocks
+		pelicanURL := uploadTestFile(ft.Ctx, t, ft, "concurrent_mixed.bin", content)
+		cacheURL := primeCache(ft.Ctx, t, ft, pelicanURL, "/test/concurrent_mixed.bin")
 
-	for i, r := range results {
-		requireSuccessfulRead(t, r, http.StatusOK, content,
-			fmt.Sprintf("Inline reader %d", i))
-	}
-}
+		testToken := getTempTokenForTest(t)
 
-// ============================================================================
-// Random data integrity test
-// ============================================================================
+		type readSpec struct {
+			rangeHeader string // empty = full read
+			start       int
+			end         int
+			expectCode  int
+		}
+		specs := []readSpec{
+			// Full reads
+			{"", 0, len(content) - 1, http.StatusOK},
+			{"", 0, len(content) - 1, http.StatusOK},
+			// Range reads
+			{"bytes=0-4079", 0, 4079, http.StatusPartialContent},
+			{"bytes=4080-8159", 4080, 8159, http.StatusPartialContent},
+			{"bytes=8160-12239", 8160, 12239, http.StatusPartialContent},
+			{"bytes=12240-16319", 12240, 16319, http.StatusPartialContent},
+			{"bytes=100-200", 100, 200, http.StatusPartialContent},
+			{"bytes=20000-24575", 20000, 24575, http.StatusPartialContent},
+			// More full reads mixed in
+			{"", 0, len(content) - 1, http.StatusOK},
+			{"", 0, len(content) - 1, http.StatusOK},
+		}
 
-// TestConcurrent_RandomData_Integrity uses random data to ensure
-// round-trips correctly under concurrent access for data without any patterns.
-func TestConcurrent_RandomData_Integrity(t *testing.T) {
-	t.Cleanup(test_utils.SetupTestLogging(t))
-	server_utils.ResetTestState()
-	defer server_utils.ResetTestState()
+		var wg sync.WaitGroup
+		results := make([]rangeResult, len(specs))
 
-	require.NoError(t, param.Cache_EnableV2.Set(true))
-	ft := fed_test_utils.NewFedTest(t, persistentCacheConfig)
-
-	// 50KB of random data — avoid any potential pattern matching in simpler tests
-	const fileSize = 50 * 1024
-	content := make([]byte, fileSize)
-	_, err := rand.Read(content)
-	require.NoError(t, err)
-
-	pelicanURL := uploadTestFile(ft.Ctx, t, ft, "concurrent_random.bin", content)
-	cacheURL := primeCache(ft.Ctx, t, ft, pelicanURL, "/test/concurrent_random.bin")
-
-	testToken := getTempTokenForTest(t)
-
-	// Mix of full reads and range reads
-	type readSpec struct {
-		rangeHeader string
-		start       int
-		end         int
-		expectCode  int
-	}
-	specs := []readSpec{
-		{"", 0, fileSize - 1, http.StatusOK},
-		{"", 0, fileSize - 1, http.StatusOK},
-		{"bytes=0-4079", 0, 4079, http.StatusPartialContent},
-		{"bytes=4080-8159", 4080, 8159, http.StatusPartialContent},
-		{"bytes=0-0", 0, 0, http.StatusPartialContent},
-		{fmt.Sprintf("bytes=%d-%d", fileSize-1, fileSize-1), fileSize - 1, fileSize - 1, http.StatusPartialContent},
-		{fmt.Sprintf("bytes=%d-%d", fileSize-100, fileSize-1), fileSize - 100, fileSize - 1, http.StatusPartialContent},
-		{"bytes=10000-30000", 10000, 30000, http.StatusPartialContent},
-		{"", 0, fileSize - 1, http.StatusOK},
-		{"bytes=3000-5000", 3000, 5000, http.StatusPartialContent}, // Cross block boundary
-	}
-
-	var wg sync.WaitGroup
-	results := make([]rangeResult, len(specs))
-
-	for i, s := range specs {
-		wg.Add(1)
-		go func(idx int, spec readSpec) {
-			defer wg.Done()
-			results[idx] = doRangeRead(ft.Ctx, cacheURL, testToken, "", spec.rangeHeader)
-		}(i, s)
-	}
-	wg.Wait()
-
-	for i, r := range results {
-		spec := specs[i]
-		expected := content[spec.start : spec.end+1]
-		requireSuccessfulRead(t, r, spec.expectCode, expected,
-			fmt.Sprintf("Random data read %d (%s)", i, spec.rangeHeader))
-	}
-}
-
-// ============================================================================
-// Suffix range and edge case tests
-// ============================================================================
-
-// TestConcurrent_SuffixRange tests concurrent suffix range requests (bytes=-N),
-// which request the last N bytes of a file.
-func TestConcurrent_SuffixRange(t *testing.T) {
-	t.Cleanup(test_utils.SetupTestLogging(t))
-	server_utils.ResetTestState()
-	defer server_utils.ResetTestState()
-
-	require.NoError(t, param.Cache_EnableV2.Set(true))
-	ft := fed_test_utils.NewFedTest(t, persistentCacheConfig)
-
-	content := generateTestData(16384) // 16KB
-	pelicanURL := uploadTestFile(ft.Ctx, t, ft, "concurrent_suffix.bin", content)
-	cacheURL := primeCache(ft.Ctx, t, ft, pelicanURL, "/test/concurrent_suffix.bin")
-
-	testToken := getTempTokenForTest(t)
-	fileSize := len(content)
-
-	type rangeSpec struct {
-		header string
-		start  int
-		end    int
-	}
-	ranges := []rangeSpec{
-		{"bytes=-100", fileSize - 100, fileSize - 1},
-		{"bytes=-1", fileSize - 1, fileSize - 1},
-		{"bytes=-4080", fileSize - 4080, fileSize - 1},
-		{"bytes=-8000", fileSize - 8000, fileSize - 1},
-	}
-
-	const repeats = 3
-	totalReads := len(ranges) * repeats
-
-	var wg sync.WaitGroup
-	results := make([]rangeResult, totalReads)
-	specs := make([]rangeSpec, totalReads)
-
-	idx := 0
-	for _, rs := range ranges {
-		for r := 0; r < repeats; r++ {
-			specs[idx] = rs
+		for i, s := range specs {
 			wg.Add(1)
-			go func(i int, spec rangeSpec) {
+			go func(idx int, spec readSpec) {
 				defer wg.Done()
-				results[i] = doRangeRead(ft.Ctx, cacheURL, testToken, "", spec.header)
-			}(idx, rs)
-			idx++
+				results[idx] = doRangeRead(ft.Ctx, cacheURL, testToken, "", spec.rangeHeader)
+			}(i, s)
 		}
-	}
-	wg.Wait()
+		wg.Wait()
 
-	for i, r := range results {
-		spec := specs[i]
-		expected := content[spec.start : spec.end+1]
-		requireSuccessfulRead(t, r, http.StatusPartialContent, expected,
-			fmt.Sprintf("Suffix range %s (read %d)", spec.header, i))
-	}
-}
+		for i, r := range results {
+			spec := specs[i]
+			expected := content[spec.start : spec.end+1]
+			requireSuccessfulRead(t, r, spec.expectCode, expected,
+				fmt.Sprintf("Mixed read %d (%s)", i, spec.rangeHeader))
+		}
+	})
 
-// TestConcurrent_HeadAndGet tests concurrent HEAD and GET requests on the same
-// object to verify that HEAD requests don't interfere with GET requests.
-func TestConcurrent_HeadAndGet(t *testing.T) {
-	t.Cleanup(test_utils.SetupTestLogging(t))
-	server_utils.ResetTestState()
-	defer server_utils.ResetTestState()
+	// LargeFile_ManySmallRanges tests many small range reads on a
+	// large file. This exercises the block bitmap, decryption, and seek paths at
+	// scale with many concurrent goroutines.
+	t.Run("LargeFile_ManySmallRanges", func(t *testing.T) {
+		// 256KB file = ~62 blocks — large enough to stress multiple blocks
+		const fileSize = 256 * 1024
+		content := generateTestData(fileSize)
+		pelicanURL := uploadTestFile(ft.Ctx, t, ft, "concurrent_large.bin", content)
+		cacheURL := primeCache(ft.Ctx, t, ft, pelicanURL, "/test/concurrent_large.bin")
 
-	require.NoError(t, param.Cache_EnableV2.Set(true))
-	ft := fed_test_utils.NewFedTest(t, persistentCacheConfig)
+		testToken := getTempTokenForTest(t)
 
-	content := generateTestData(12000) // ~3 blocks
-	pelicanURL := uploadTestFile(ft.Ctx, t, ft, "concurrent_head_get.bin", content)
-	cacheURL := primeCache(ft.Ctx, t, ft, pelicanURL, "/test/concurrent_head_get.bin")
+		// Generate 50 random 1KB range reads spread across the file
+		const numRanges = 50
+		const rangeSize = 1024
 
-	testToken := getTempTokenForTest(t)
-
-	type requestSpec struct {
-		method      string
-		rangeHeader string
-	}
-	reqs := []requestSpec{
-		{"GET", ""},
-		{"HEAD", ""},
-		{"GET", "bytes=0-999"},
-		{"HEAD", ""},
-		{"GET", "bytes=5000-5999"},
-		{"HEAD", ""},
-		{"GET", ""},
-		{"HEAD", ""},
-		{"GET", "bytes=10000-11999"},
-		{"GET", ""},
-	}
-
-	var wg sync.WaitGroup
-
-	type result struct {
-		statusCode    int
-		body          []byte
-		contentLength string
-		err           error
-	}
-	results := make([]result, len(reqs))
-
-	for i, r := range reqs {
-		wg.Add(1)
-		go func(idx int, spec requestSpec) {
-			defer wg.Done()
-			req, err := http.NewRequestWithContext(ft.Ctx, spec.method, cacheURL, nil)
-			if err != nil {
-				results[idx] = result{err: err}
-				return
+		type rangeSpec struct {
+			header string
+			start  int
+			end    int
+		}
+		ranges := make([]rangeSpec, numRanges)
+		for i := 0; i < numRanges; i++ {
+			// Deterministic but well-distributed start positions
+			start := (i * (fileSize - rangeSize)) / numRanges
+			end := start + rangeSize - 1
+			ranges[i] = rangeSpec{
+				header: fmt.Sprintf("bytes=%d-%d", start, end),
+				start:  start,
+				end:    end,
 			}
-			req.Header.Set("Authorization", "Bearer "+testToken)
-			if spec.rangeHeader != "" {
-				req.Header.Set("Range", spec.rangeHeader)
-			}
+		}
 
-			httpClient := &http.Client{Transport: config.GetTransport()}
-			resp, err := httpClient.Do(req)
-			if err != nil {
-				results[idx] = result{err: err}
-				return
-			}
-			defer resp.Body.Close()
-			body, _ := io.ReadAll(resp.Body)
-			results[idx] = result{
-				statusCode:    resp.StatusCode,
-				body:          body,
-				contentLength: resp.Header.Get("Content-Length"),
-			}
-		}(i, r)
-	}
-	wg.Wait()
+		var wg sync.WaitGroup
+		results := make([]rangeResult, numRanges)
 
-	for i, r := range results {
-		spec := reqs[i]
-		require.NoError(t, r.err, "Request %d (%s %s) should not error", i, spec.method, spec.rangeHeader)
+		for i, rs := range ranges {
+			wg.Add(1)
+			go func(idx int, spec rangeSpec) {
+				defer wg.Done()
+				results[idx] = doRangeRead(ft.Ctx, cacheURL, testToken, "", spec.header)
+			}(i, rs)
+		}
+		wg.Wait()
 
-		if spec.method == "HEAD" {
-			assert.True(t, r.statusCode == http.StatusOK || r.statusCode == http.StatusPartialContent,
-				"HEAD request %d should return 200 or 206, got %d", i, r.statusCode)
-			// HEAD should have Content-Length but empty body
-			assert.Empty(t, r.body, "HEAD request %d should have empty body", i)
-			assert.NotEmpty(t, r.contentLength, "HEAD request %d should have Content-Length", i)
-		} else {
-			// GET requests
-			if spec.rangeHeader != "" {
-				assert.Equal(t, http.StatusPartialContent, r.statusCode,
-					"GET range request %d should return 206", i)
+		for i, r := range results {
+			spec := ranges[i]
+			expected := content[spec.start : spec.end+1]
+			requireSuccessfulRead(t, r, http.StatusPartialContent, expected,
+				fmt.Sprintf("Large file range %d (%s)", i, spec.header))
+		}
+	})
+
+	// InlineStorage_Reads tests concurrent reads on a small file
+	// that uses inline storage (stored directly in BadgerDB, not on disk).
+	// This exercises a different code path than the disk-based tests above.
+	t.Run("InlineStorage_Reads", func(t *testing.T) {
+		// Small file — below InlineThreshold (4096), stored inline in BadgerDB
+		content := []byte("This is a small file for inline storage concurrent testing. It must be less than 4096 bytes.")
+		pelicanURL := uploadTestFile(ft.Ctx, t, ft, "concurrent_inline.txt", content)
+		cacheURL := primeCache(ft.Ctx, t, ft, pelicanURL, "/test/concurrent_inline.txt")
+
+		testToken := getTempTokenForTest(t)
+		const numReaders = 20
+
+		var wg sync.WaitGroup
+		results := make([]rangeResult, numReaders)
+
+		for i := 0; i < numReaders; i++ {
+			wg.Add(1)
+			go func(idx int) {
+				defer wg.Done()
+				results[idx] = doRangeRead(ft.Ctx, cacheURL, testToken, "", "")
+			}(i)
+		}
+		wg.Wait()
+
+		for i, r := range results {
+			requireSuccessfulRead(t, r, http.StatusOK, content,
+				fmt.Sprintf("Inline reader %d", i))
+		}
+	})
+
+	// RandomData_Integrity uses random data to ensure
+	// round-trips correctly under concurrent access for data without any patterns.
+	t.Run("RandomData_Integrity", func(t *testing.T) {
+		// 50KB of random data — avoid any potential pattern matching in simpler tests
+		const fileSize = 50 * 1024
+		content := make([]byte, fileSize)
+		_, err := rand.Read(content)
+		require.NoError(t, err)
+
+		pelicanURL := uploadTestFile(ft.Ctx, t, ft, "concurrent_random.bin", content)
+		cacheURL := primeCache(ft.Ctx, t, ft, pelicanURL, "/test/concurrent_random.bin")
+
+		testToken := getTempTokenForTest(t)
+
+		// Mix of full reads and range reads
+		type readSpec struct {
+			rangeHeader string
+			start       int
+			end         int
+			expectCode  int
+		}
+		specs := []readSpec{
+			{"", 0, fileSize - 1, http.StatusOK},
+			{"", 0, fileSize - 1, http.StatusOK},
+			{"bytes=0-4079", 0, 4079, http.StatusPartialContent},
+			{"bytes=4080-8159", 4080, 8159, http.StatusPartialContent},
+			{"bytes=0-0", 0, 0, http.StatusPartialContent},
+			{fmt.Sprintf("bytes=%d-%d", fileSize-1, fileSize-1), fileSize - 1, fileSize - 1, http.StatusPartialContent},
+			{fmt.Sprintf("bytes=%d-%d", fileSize-100, fileSize-1), fileSize - 100, fileSize - 1, http.StatusPartialContent},
+			{"bytes=10000-30000", 10000, 30000, http.StatusPartialContent},
+			{"", 0, fileSize - 1, http.StatusOK},
+			{"bytes=3000-5000", 3000, 5000, http.StatusPartialContent}, // Cross block boundary
+		}
+
+		var wg sync.WaitGroup
+		results := make([]rangeResult, len(specs))
+
+		for i, s := range specs {
+			wg.Add(1)
+			go func(idx int, spec readSpec) {
+				defer wg.Done()
+				results[idx] = doRangeRead(ft.Ctx, cacheURL, testToken, "", spec.rangeHeader)
+			}(i, s)
+		}
+		wg.Wait()
+
+		for i, r := range results {
+			spec := specs[i]
+			expected := content[spec.start : spec.end+1]
+			requireSuccessfulRead(t, r, spec.expectCode, expected,
+				fmt.Sprintf("Random data read %d (%s)", i, spec.rangeHeader))
+		}
+	})
+
+	// SuffixRange tests concurrent suffix range requests (bytes=-N),
+	// which request the last N bytes of a file.
+	t.Run("SuffixRange", func(t *testing.T) {
+		content := generateTestData(16384) // 16KB
+		pelicanURL := uploadTestFile(ft.Ctx, t, ft, "concurrent_suffix.bin", content)
+		cacheURL := primeCache(ft.Ctx, t, ft, pelicanURL, "/test/concurrent_suffix.bin")
+
+		testToken := getTempTokenForTest(t)
+		fileSize := len(content)
+
+		type rangeSpec struct {
+			header string
+			start  int
+			end    int
+		}
+		ranges := []rangeSpec{
+			{"bytes=-100", fileSize - 100, fileSize - 1},
+			{"bytes=-1", fileSize - 1, fileSize - 1},
+			{"bytes=-4080", fileSize - 4080, fileSize - 1},
+			{"bytes=-8000", fileSize - 8000, fileSize - 1},
+		}
+
+		const repeats = 3
+		totalReads := len(ranges) * repeats
+
+		var wg sync.WaitGroup
+		results := make([]rangeResult, totalReads)
+		specs := make([]rangeSpec, totalReads)
+
+		idx := 0
+		for _, rs := range ranges {
+			for r := 0; r < repeats; r++ {
+				specs[idx] = rs
+				wg.Add(1)
+				go func(i int, spec rangeSpec) {
+					defer wg.Done()
+					results[i] = doRangeRead(ft.Ctx, cacheURL, testToken, "", spec.header)
+				}(idx, rs)
+				idx++
+			}
+		}
+		wg.Wait()
+
+		for i, r := range results {
+			spec := specs[i]
+			expected := content[spec.start : spec.end+1]
+			requireSuccessfulRead(t, r, http.StatusPartialContent, expected,
+				fmt.Sprintf("Suffix range %s (read %d)", spec.header, i))
+		}
+	})
+
+	// HeadAndGet tests concurrent HEAD and GET requests on the same
+	// object to verify that HEAD requests don't interfere with GET requests.
+	t.Run("HeadAndGet", func(t *testing.T) {
+		content := generateTestData(12000) // ~3 blocks
+		pelicanURL := uploadTestFile(ft.Ctx, t, ft, "concurrent_head_get.bin", content)
+		cacheURL := primeCache(ft.Ctx, t, ft, pelicanURL, "/test/concurrent_head_get.bin")
+
+		testToken := getTempTokenForTest(t)
+
+		type requestSpec struct {
+			method      string
+			rangeHeader string
+		}
+		reqs := []requestSpec{
+			{"GET", ""},
+			{"HEAD", ""},
+			{"GET", "bytes=0-999"},
+			{"HEAD", ""},
+			{"GET", "bytes=5000-5999"},
+			{"HEAD", ""},
+			{"GET", ""},
+			{"HEAD", ""},
+			{"GET", "bytes=10000-11999"},
+			{"GET", ""},
+		}
+
+		var wg sync.WaitGroup
+
+		type result struct {
+			statusCode    int
+			body          []byte
+			contentLength string
+			err           error
+		}
+		results := make([]result, len(reqs))
+
+		for i, r := range reqs {
+			wg.Add(1)
+			go func(idx int, spec requestSpec) {
+				defer wg.Done()
+				req, err := http.NewRequestWithContext(ft.Ctx, spec.method, cacheURL, nil)
+				if err != nil {
+					results[idx] = result{err: err}
+					return
+				}
+				req.Header.Set("Authorization", "Bearer "+testToken)
+				if spec.rangeHeader != "" {
+					req.Header.Set("Range", spec.rangeHeader)
+				}
+
+				httpClient := &http.Client{Transport: config.GetTransport()}
+				resp, err := httpClient.Do(req)
+				if err != nil {
+					results[idx] = result{err: err}
+					return
+				}
+				defer resp.Body.Close()
+				body, _ := io.ReadAll(resp.Body)
+				results[idx] = result{
+					statusCode:    resp.StatusCode,
+					body:          body,
+					contentLength: resp.Header.Get("Content-Length"),
+				}
+			}(i, r)
+		}
+		wg.Wait()
+
+		for i, r := range results {
+			spec := reqs[i]
+			require.NoError(t, r.err, "Request %d (%s %s) should not error", i, spec.method, spec.rangeHeader)
+
+			if spec.method == "HEAD" {
+				assert.True(t, r.statusCode == http.StatusOK || r.statusCode == http.StatusPartialContent,
+					"HEAD request %d should return 200 or 206, got %d", i, r.statusCode)
+				// HEAD should have Content-Length but empty body
+				assert.Empty(t, r.body, "HEAD request %d should have empty body", i)
+				assert.NotEmpty(t, r.contentLength, "HEAD request %d should have Content-Length", i)
+			} else {
+				// GET requests
+				if spec.rangeHeader != "" {
+					assert.Equal(t, http.StatusPartialContent, r.statusCode,
+						"GET range request %d should return 206", i)
+				} else {
+					assert.Equal(t, http.StatusOK, r.statusCode,
+						"GET full request %d should return 200", i)
+					assert.Equal(t, content, r.body,
+						"GET full request %d content mismatch", i)
+				}
+			}
+		}
+	})
+
+	// ConditionalAndFullReads tests that conditional requests
+	// (If-None-Match) work correctly when mixed with full reads under concurrency.
+	t.Run("ConditionalAndFullReads", func(t *testing.T) {
+		content := generateTestData(8192) // 8KB
+		pelicanURL := uploadTestFile(ft.Ctx, t, ft, "concurrent_conditional.bin", content)
+		cacheURL := primeCache(ft.Ctx, t, ft, pelicanURL, "/test/concurrent_conditional.bin")
+
+		testToken := getTempTokenForTest(t)
+
+		// Get the ETag from an initial request
+		initialResult := doRangeRead(ft.Ctx, cacheURL, testToken, "", "")
+		require.NoError(t, initialResult.err)
+
+		// We need to get the ETag from the response headers - do a manual request
+		req, err := http.NewRequestWithContext(ft.Ctx, http.MethodGet, cacheURL, nil)
+		require.NoError(t, err)
+		req.Header.Set("Authorization", "Bearer "+testToken)
+		httpClient := &http.Client{Transport: config.GetTransport()}
+		resp, err := httpClient.Do(req)
+		require.NoError(t, err)
+		_, _ = io.ReadAll(resp.Body)
+		resp.Body.Close()
+
+		etag := resp.Header.Get("ETag")
+		if etag == "" {
+			t.Skip("Cache did not return ETag; skipping conditional concurrency test")
+		}
+
+		type requestSpec struct {
+			ifNoneMatch string // empty = unconditional GET
+		}
+		reqs := []requestSpec{
+			{""}, {etag}, {""}, {etag}, {etag},
+			{""}, {""}, {etag}, {""}, {etag},
+		}
+
+		var wg sync.WaitGroup
+		type result struct {
+			statusCode int
+			body       []byte
+			err        error
+		}
+		results := make([]result, len(reqs))
+
+		for i, r := range reqs {
+			wg.Add(1)
+			go func(idx int, spec requestSpec) {
+				defer wg.Done()
+				req, err := http.NewRequestWithContext(ft.Ctx, http.MethodGet, cacheURL, nil)
+				if err != nil {
+					results[idx] = result{err: err}
+					return
+				}
+				req.Header.Set("Authorization", "Bearer "+testToken)
+				if spec.ifNoneMatch != "" {
+					req.Header.Set("If-None-Match", spec.ifNoneMatch)
+				}
+
+				resp, err := httpClient.Do(req)
+				if err != nil {
+					results[idx] = result{err: err}
+					return
+				}
+				defer resp.Body.Close()
+				body, _ := io.ReadAll(resp.Body)
+				results[idx] = result{statusCode: resp.StatusCode, body: body}
+			}(i, r)
+		}
+		wg.Wait()
+
+		for i, r := range results {
+			spec := reqs[i]
+			require.NoError(t, r.err, "Concurrent conditional/full read %d should not error", i)
+
+			if spec.ifNoneMatch != "" {
+				assert.Equal(t, http.StatusNotModified, r.statusCode,
+					"Conditional request %d with matching ETag should return 304", i)
 			} else {
 				assert.Equal(t, http.StatusOK, r.statusCode,
-					"GET full request %d should return 200", i)
+					"Unconditional request %d should return 200", i)
 				assert.Equal(t, content, r.body,
-					"GET full request %d content mismatch", i)
+					"Unconditional request %d content mismatch", i)
 			}
 		}
-	}
-}
+	})
 
-// ============================================================================
-// Conditional request under concurrency
-// ============================================================================
+	// ThunderingHerd_SameRange_CacheHit fires many simultaneous
+	// requests for the exact same byte range on a fully cached object.  This
+	// stresses the SeekableReader's shared state and verifies that no data
+	// corruption occurs when many goroutines read the same blocks at once.
+	t.Run("ThunderingHerd_SameRange_CacheHit", func(t *testing.T) {
+		content := generateTestData(32768) // 32KB = ~8 blocks
+		pelicanURL := uploadTestFile(ft.Ctx, t, ft, "herd_hit.bin", content)
+		cacheURL := primeCache(ft.Ctx, t, ft, pelicanURL, "/test/herd_hit.bin")
 
-// TestConcurrent_ConditionalAndFullReads tests that conditional requests
-// (If-None-Match) work correctly when mixed with full reads under concurrency.
-func TestConcurrent_ConditionalAndFullReads(t *testing.T) {
-	t.Cleanup(test_utils.SetupTestLogging(t))
-	server_utils.ResetTestState()
-	defer server_utils.ResetTestState()
+		testToken := getTempTokenForTest(t)
 
-	require.NoError(t, param.Cache_EnableV2.Set(true))
-	ft := fed_test_utils.NewFedTest(t, persistentCacheConfig)
+		// All goroutines request the exact same range that spans two blocks.
+		const rangeStart = 4000
+		const rangeEnd = 8200
+		rangeHeader := fmt.Sprintf("bytes=%d-%d", rangeStart, rangeEnd)
+		expected := content[rangeStart : rangeEnd+1]
 
-	content := generateTestData(8192) // 8KB
-	pelicanURL := uploadTestFile(ft.Ctx, t, ft, "concurrent_conditional.bin", content)
-	cacheURL := primeCache(ft.Ctx, t, ft, pelicanURL, "/test/concurrent_conditional.bin")
+		const numReaders = 30
 
-	testToken := getTempTokenForTest(t)
+		var wg sync.WaitGroup
+		results := make([]rangeResult, numReaders)
 
-	// Get the ETag from an initial request
-	initialResult := doRangeRead(ft.Ctx, cacheURL, testToken, "", "")
-	require.NoError(t, initialResult.err)
-
-	// We need to get the ETag from the response headers - do a manual request
-	req, err := http.NewRequestWithContext(ft.Ctx, http.MethodGet, cacheURL, nil)
-	require.NoError(t, err)
-	req.Header.Set("Authorization", "Bearer "+testToken)
-	httpClient := &http.Client{Transport: config.GetTransport()}
-	resp, err := httpClient.Do(req)
-	require.NoError(t, err)
-	_, _ = io.ReadAll(resp.Body)
-	resp.Body.Close()
-
-	etag := resp.Header.Get("ETag")
-	if etag == "" {
-		t.Skip("Cache did not return ETag; skipping conditional concurrency test")
-	}
-
-	type requestSpec struct {
-		ifNoneMatch string // empty = unconditional GET
-	}
-	reqs := []requestSpec{
-		{""}, {etag}, {""}, {etag}, {etag},
-		{""}, {""}, {etag}, {""}, {etag},
-	}
-
-	var wg sync.WaitGroup
-	type result struct {
-		statusCode int
-		body       []byte
-		err        error
-	}
-	results := make([]result, len(reqs))
-
-	for i, r := range reqs {
-		wg.Add(1)
-		go func(idx int, spec requestSpec) {
-			defer wg.Done()
-			req, err := http.NewRequestWithContext(ft.Ctx, http.MethodGet, cacheURL, nil)
-			if err != nil {
-				results[idx] = result{err: err}
-				return
-			}
-			req.Header.Set("Authorization", "Bearer "+testToken)
-			if spec.ifNoneMatch != "" {
-				req.Header.Set("If-None-Match", spec.ifNoneMatch)
-			}
-
-			resp, err := httpClient.Do(req)
-			if err != nil {
-				results[idx] = result{err: err}
-				return
-			}
-			defer resp.Body.Close()
-			body, _ := io.ReadAll(resp.Body)
-			results[idx] = result{statusCode: resp.StatusCode, body: body}
-		}(i, r)
-	}
-	wg.Wait()
-
-	for i, r := range results {
-		spec := reqs[i]
-		require.NoError(t, r.err, "Concurrent conditional/full read %d should not error", i)
-
-		if spec.ifNoneMatch != "" {
-			assert.Equal(t, http.StatusNotModified, r.statusCode,
-				"Conditional request %d with matching ETag should return 304", i)
-		} else {
-			assert.Equal(t, http.StatusOK, r.statusCode,
-				"Unconditional request %d should return 200", i)
-			assert.Equal(t, content, r.body,
-				"Unconditional request %d content mismatch", i)
+		for i := 0; i < numReaders; i++ {
+			wg.Add(1)
+			go func(idx int) {
+				defer wg.Done()
+				results[idx] = doRangeRead(ft.Ctx, cacheURL, testToken, "", rangeHeader)
+			}(i)
 		}
-	}
-}
+		wg.Wait()
 
-// ============================================================================
-// Thundering herd tests — same range from many goroutines
-// ============================================================================
+		for i, r := range results {
+			requireSuccessfulRead(t, r, http.StatusPartialContent, expected,
+				fmt.Sprintf("Herd hit reader %d", i))
+		}
+	})
 
-// TestConcurrent_ThunderingHerd_SameRange_CacheHit fires many simultaneous
-// requests for the exact same byte range on a fully cached object.  This
-// stresses the SeekableReader's shared state and verifies that no data
-// corruption occurs when many goroutines read the same blocks at once.
-func TestConcurrent_ThunderingHerd_SameRange_CacheHit(t *testing.T) {
-	t.Cleanup(test_utils.SetupTestLogging(t))
-	server_utils.ResetTestState()
-	defer server_utils.ResetTestState()
+	// ThunderingHerd_SameRange_CacheMiss fires many simultaneous
+	// requests for the exact same byte range on an object that is NOT yet cached.
+	// The first request triggers a download from origin; all others must wait for
+	// (or join) that download and return the correct data.  This is the classic
+	// "thundering herd" scenario for a cache miss.
+	t.Run("ThunderingHerd_SameRange_CacheMiss", func(t *testing.T) {
+		content := generateTestData(32768) // 32KB = ~8 blocks
+		// Upload but do NOT prime the cache — all readers hit a miss.
+		uploadTestFile(ft.Ctx, t, ft, "herd_miss.bin", content)
 
-	require.NoError(t, param.Cache_EnableV2.Set(true))
-	ft := fed_test_utils.NewFedTest(t, persistentCacheConfig)
+		testToken := getTempTokenForTest(t)
+		cacheURL := getCacheRedirectURL(ft.Ctx, t, "/test/herd_miss.bin", testToken)
 
-	content := generateTestData(32768) // 32KB = ~8 blocks
-	pelicanURL := uploadTestFile(ft.Ctx, t, ft, "herd_hit.bin", content)
-	cacheURL := primeCache(ft.Ctx, t, ft, pelicanURL, "/test/herd_hit.bin")
+		const rangeStart = 4000
+		const rangeEnd = 8200
+		rangeHeader := fmt.Sprintf("bytes=%d-%d", rangeStart, rangeEnd)
+		expected := content[rangeStart : rangeEnd+1]
 
-	testToken := getTempTokenForTest(t)
+		const numReaders = 30
 
-	// All goroutines request the exact same range that spans two blocks.
-	const rangeStart = 4000
-	const rangeEnd = 8200
-	rangeHeader := fmt.Sprintf("bytes=%d-%d", rangeStart, rangeEnd)
-	expected := content[rangeStart : rangeEnd+1]
+		var wg sync.WaitGroup
+		results := make([]rangeResult, numReaders)
 
-	const numReaders = 30
+		for i := 0; i < numReaders; i++ {
+			wg.Add(1)
+			go func(idx int) {
+				defer wg.Done()
+				results[idx] = doRangeRead(ft.Ctx, cacheURL, testToken, "", rangeHeader)
+			}(i)
+		}
+		wg.Wait()
 
-	var wg sync.WaitGroup
-	results := make([]rangeResult, numReaders)
-
-	for i := 0; i < numReaders; i++ {
-		wg.Add(1)
-		go func(idx int) {
-			defer wg.Done()
-			results[idx] = doRangeRead(ft.Ctx, cacheURL, testToken, "", rangeHeader)
-		}(i)
-	}
-	wg.Wait()
-
-	for i, r := range results {
-		requireSuccessfulRead(t, r, http.StatusPartialContent, expected,
-			fmt.Sprintf("Herd hit reader %d", i))
-	}
-}
-
-// TestConcurrent_ThunderingHerd_SameRange_CacheMiss fires many simultaneous
-// requests for the exact same byte range on an object that is NOT yet cached.
-// The first request triggers a download from origin; all others must wait for
-// (or join) that download and return the correct data.  This is the classic
-// "thundering herd" scenario for a cache miss.
-func TestConcurrent_ThunderingHerd_SameRange_CacheMiss(t *testing.T) {
-	t.Cleanup(test_utils.SetupTestLogging(t))
-	server_utils.ResetTestState()
-	defer server_utils.ResetTestState()
-
-	require.NoError(t, param.Cache_EnableV2.Set(true))
-	ft := fed_test_utils.NewFedTest(t, persistentCacheConfig)
-
-	content := generateTestData(32768) // 32KB = ~8 blocks
-	// Upload but do NOT prime the cache — all readers hit a miss.
-	uploadTestFile(ft.Ctx, t, ft, "herd_miss.bin", content)
-
-	testToken := getTempTokenForTest(t)
-	cacheURL := getCacheRedirectURL(ft.Ctx, t, "/test/herd_miss.bin", testToken)
-
-	const rangeStart = 4000
-	const rangeEnd = 8200
-	rangeHeader := fmt.Sprintf("bytes=%d-%d", rangeStart, rangeEnd)
-	expected := content[rangeStart : rangeEnd+1]
-
-	const numReaders = 30
-
-	var wg sync.WaitGroup
-	results := make([]rangeResult, numReaders)
-
-	for i := 0; i < numReaders; i++ {
-		wg.Add(1)
-		go func(idx int) {
-			defer wg.Done()
-			results[idx] = doRangeRead(ft.Ctx, cacheURL, testToken, "", rangeHeader)
-		}(i)
-	}
-	wg.Wait()
-
-	for i, r := range results {
-		requireSuccessfulRead(t, r, http.StatusPartialContent, expected,
-			fmt.Sprintf("Herd miss reader %d", i))
-	}
+		for i, r := range results {
+			requireSuccessfulRead(t, r, http.StatusPartialContent, expected,
+				fmt.Sprintf("Herd miss reader %d", i))
+		}
+	})
 }
