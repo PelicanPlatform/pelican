@@ -932,6 +932,45 @@ type: stringSlice
 default: none
 components: ["client"]
 ---
+name: Client.FileRedirectRoots
+description: |+
+  A list of filesystem directories under which the client will follow a `file://` redirect
+  from a cache.  Leaving it empty — the default — means the client never follows one, and
+  it does not tell caches that it could.
+
+  A cache whose storage the client already shares (a mounted filesystem the cache also
+  writes to) can answer a request by redirecting to the object's path instead of sending
+  its bytes over the network.  When this is set, the client advertises that it can follow
+  such a redirect, via the `X-Pelican-Accept-Redirect` request header; a cache sends one
+  only to a client that asked for it.
+
+  **Enable this only for caches you trust with local filesystem access.**  Following a
+  `file://` redirect lets the cache choose which local path this client reads, with the
+  privileges of the user running it — a very different thing from a cache choosing which
+  bytes to send.  A compromised or misconfigured cache could point a transfer at any
+  readable file, and in automated contexts (the client agent, HTCondor file transfer, or a
+  transfer whose destination is itself remote) those bytes go on somewhere.
+
+  The configured roots bound that exposure, so name the specific mount point rather than
+  `/`.  Containment is enforced by the operating system against an open handle on each
+  root, not by comparing path strings, so neither `..` nor a symlink inside a root can be
+  used to reach outside it.  A redirect to anything that is not a regular file inside a
+  root is refused.
+
+  Two consequences worth knowing: a symlink inside a root that points to another file in
+  the same root is followed only when it is *relative* — an absolute symlink is refused
+  even when its target is inside the root — and a root reached through a symlinked mount
+  point works whichever spelling of the path the cache sends.
+
+  Example YAML:
+  ```yaml
+  Client:
+    FileRedirectRoots: ["/mnt/pelican-cache/objects"]
+  ```
+type: stringSlice
+default: none
+components: ["client"]
+---
 ############################
 #  ClientAgent-level Configs #
 ############################

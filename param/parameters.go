@@ -164,6 +164,7 @@ var runtimeConfigurableMap = map[string]bool{
 	"Client.DisableHttpProxy": false,
 	"Client.DisableProxyFallback": false,
 	"Client.EnableOverwrites": false,
+	"Client.FileRedirectRoots": false,
 	"Client.IsPlugin": false,
 	"Client.MaximumDownloadSpeed": false,
 	"Client.MinimumDownloadSpeed": false,
@@ -903,6 +904,7 @@ var stringSliceAccessors = map[string]func(*Config) []string{
 	"Cache.DataLocations": func(c *Config) []string { return c.Cache.DataLocations },
 	"Cache.MetaLocations": func(c *Config) []string { return c.Cache.MetaLocations },
 	"Cache.PermittedNamespaces": func(c *Config) []string { return c.Cache.PermittedNamespaces },
+	"Client.FileRedirectRoots": func(c *Config) []string { return c.Client.FileRedirectRoots },
 	"Client.PreferredCaches": func(c *Config) []string { return c.Client.PreferredCaches },
 	"ConfigLocations": func(c *Config) []string { return c.ConfigLocations },
 	"Director.CacheResponseHostnames": func(c *Config) []string { return c.Director.CacheResponseHostnames },
@@ -1497,6 +1499,7 @@ var allParameterNames = []string{
 	"Client.DisableHttpProxy",
 	"Client.DisableProxyFallback",
 	"Client.EnableOverwrites",
+	"Client.FileRedirectRoots",
 	"Client.IsPlugin",
 	"Client.MaximumDownloadSpeed",
 	"Client.MinimumDownloadSpeed",
@@ -2181,6 +2184,7 @@ var (
 	Cache_DataLocations = StringSliceParam{"Cache.DataLocations"}
 	Cache_MetaLocations = StringSliceParam{"Cache.MetaLocations"}
 	Cache_PermittedNamespaces = StringSliceParam{"Cache.PermittedNamespaces"}
+	Client_FileRedirectRoots = StringSliceParam{"Client.FileRedirectRoots"}
 	Client_PreferredCaches = StringSliceParam{"Client.PreferredCaches"}
 	ConfigLocations = StringSliceParam{"ConfigLocations"}
 	Director_CacheResponseHostnames = StringSliceParam{"Director.CacheResponseHostnames"}
@@ -2744,6 +2748,7 @@ func init() {
 		"Cache.DataLocations": Cache_DataLocations,
 		"Cache.MetaLocations": Cache_MetaLocations,
 		"Cache.PermittedNamespaces": Cache_PermittedNamespaces,
+		"Client.FileRedirectRoots": Client_FileRedirectRoots,
 		"Client.PreferredCaches": Client_PreferredCaches,
 		"ConfigLocations": ConfigLocations,
 		"Director.CacheResponseHostnames": Director_CacheResponseHostnames,

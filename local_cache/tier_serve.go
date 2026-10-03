@@ -31,6 +31,7 @@ import (
 	log "github.com/sirupsen/logrus"
 
 	"github.com/pelicanplatform/pelican/param"
+	"github.com/pelicanplatform/pelican/server_structs"
 	"github.com/pelicanplatform/pelican/token_scopes"
 )
 
@@ -126,6 +127,15 @@ func cacheExternalHost() string {
 	return hostOnly(param.Server_Hostname.GetString())
 }
 
+// clientAcceptsRedirectScheme reports whether the request advertised that the
+// client can follow a redirect in the given scheme.  The header and its
+// parsing live in server_structs so the client writing it and the cache
+// reading it cannot drift apart.
+func clientAcceptsRedirectScheme(r *http.Request, scheme string) bool {
+	return server_structs.AcceptsRedirectScheme(
+		r.Header.Get(server_structs.AcceptRedirectHeader), scheme)
+}
+
 // tryTierRedirect serves a GET by redirecting the client straight to the
 // tiering target that holds the object, so the bytes never pass through the
 // cache.  Returns true when the response has been written; false means the
@@ -183,6 +193,18 @@ func (pc *PersistentCache) tryTierRedirect(w http.ResponseWriter, r *http.Reques
 	if target == nil || !target.canRedirect {
 		// Either the object is not tiered, or its target cannot hand out a
 		// URL the client could fetch on its own; proxy instead.
+		return false
+	}
+	// A URL the client fetches over something other than HTTP -- a file://
+	// path on shared storage, say -- only works if the client is in a
+	// position to use it, and nothing observable about a request says
+	// whether it is: the same subnet does not imply the same mount, and a
+	// containerized client can share a host without sharing a mount
+	// namespace.  So the client has to say so, and we believe only what it
+	// claims.  http and https need no advertisement; every client follows
+	// those.
+	if scheme := target.redirectScheme; scheme != "http" && scheme != "https" && !clientAcceptsRedirectScheme(r, scheme) {
+		reqLog.WithField("scheme", scheme).Debug("Client did not advertise support for this redirect scheme; proxying instead")
 		return false
 	}
 	// Would redirecting hand this client's Authorization header to the target?

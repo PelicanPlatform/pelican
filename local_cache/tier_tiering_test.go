@@ -1172,6 +1172,49 @@ func TestTierRedirectServing(t *testing.T) {
 		assert.Equal(t, data, body)
 	})
 
+	// A target that hands out a non-HTTP URL is gated on the client saying it
+	// can follow one.  Make the target look like one whose storage the client
+	// shares -- it reports file:// at startup and mints file:// URLs -- and
+	// check both directions.  Everything else about it is unchanged, so a
+	// request that is refused the redirect still gets its bytes.
+	t.Run("FileRedirectRequiresClientOptIn", func(t *testing.T) {
+		require.NoError(t, param.Cache_TieringDisableRedirect.Set(false))
+		t.Cleanup(func() { _ = param.Cache_TieringDisableRedirect.Set(true) })
+
+		target := pc.storage.getTierTarget(tierID)
+		require.NotNil(t, target)
+		original, scheme, host := target.backend, target.redirectScheme, target.redirectHost
+		target.backend = fixedURLBackend{TierBackend: original, url: "file:///srv/shared/objects/obj.dat"}
+		target.redirectScheme, target.redirectHost = "file", ""
+		t.Cleanup(func() {
+			target.backend, target.redirectScheme, target.redirectHost = original, scheme, host
+		})
+
+		// No advertisement: the file:// URL must not be sent, and the cache
+		// serves the object itself.
+		plainResp, err := noRedirectClient.Get(srv.URL + objectPath)
+		require.NoError(t, err)
+		plainBody, err := io.ReadAll(plainResp.Body)
+		plainResp.Body.Close()
+		require.NoError(t, err)
+		assert.Equal(t, http.StatusOK, plainResp.StatusCode,
+			"without the advertisement the cache must serve the bytes itself")
+		assert.Equal(t, data, plainBody)
+
+		// Advertised: the redirect is issued.  (That a file:// destination
+		// raises no Authorization concern is covered by
+		// TestRedirectSendsCredentials.)
+		optIn, err := http.NewRequest(http.MethodGet, srv.URL+objectPath, nil)
+		require.NoError(t, err)
+		optIn.Header.Set(server_structs.AcceptRedirectHeader, server_structs.RedirectSchemeFile)
+		optInResp, err := noRedirectClient.Do(optIn)
+		require.NoError(t, err)
+		_, _ = io.Copy(io.Discard, optInResp.Body)
+		optInResp.Body.Close()
+		assert.Equal(t, http.StatusTemporaryRedirect, optInResp.StatusCode)
+		assert.Equal(t, "file:///srv/shared/objects/obj.dat", optInResp.Header.Get("Location"))
+	})
+
 	// The redirect stamped a presign hold: eviction must skip the object.
 	evicted, _, _, err := pc.storage.EvictByLRU(tierID, NamespaceID(1), 0, 0)
 	require.NoError(t, err)
@@ -1188,6 +1231,35 @@ type fixedURLBackend struct {
 
 func (f fixedURLBackend) RedirectURL(_ context.Context, _ string, _ time.Duration) (string, error) {
 	return f.url, nil
+}
+
+// TestClientAcceptsRedirectScheme covers the advertisement parser, including
+// the forms a client might reasonably send.
+func TestClientAcceptsRedirectScheme(t *testing.T) {
+	tests := []struct {
+		name   string
+		header string
+		scheme string
+		want   bool
+	}{
+		{"exact", "file", "file", true},
+		{"list", "file, unix", "unix", true},
+		{"padded", "  file  ", "file", true},
+		{"case-insensitive", "FILE", "file", true},
+		{"absent", "", "file", false},
+		{"different scheme", "unix", "file", false},
+		{"empty scheme never matches", "file", "", false},
+		{"substring must not match", "filesystem", "file", false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			r := httptest.NewRequest(http.MethodGet, "https://cache.example.org/ns/obj", nil)
+			if tt.header != "" {
+				r.Header.Set(server_structs.AcceptRedirectHeader, tt.header)
+			}
+			assert.Equal(t, tt.want, clientAcceptsRedirectScheme(r, tt.scheme))
+		})
+	}
 }
 
 // TestRedirectSendsCredentials covers the scheme half of the decision: the
