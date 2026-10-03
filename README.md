@@ -100,8 +100,6 @@ builds:
     id: "pelican"
     dir: ./cmd
     binary: pelican
-    tags:
-      - forceposix
     ldflags:
       - -s -w -X github.com/pelicanplatform/pelican/version.commit={{.Commit}} -X github.com/pelicanplatform/pelican/version.date={{.Date}} -X github.com/pelicanplatform/pelican/version.builtBy=goreleaser -X github.com/pelicanplatform/pelican/version.version={{.Version}}
     ignore:
