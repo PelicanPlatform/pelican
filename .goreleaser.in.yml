@@ -67,7 +67,6 @@ builds:
     dir: ./cmd
     binary: pelican
     tags:
-      - forceposix
       - client
     ldflags:
       - &ldflags-metadata
@@ -105,7 +104,6 @@ builds:
     dir: ./cmd
     binary: pelican-server
     tags:
-      - forceposix
       - server
     ldflags:
       - *ldflags-metadata
