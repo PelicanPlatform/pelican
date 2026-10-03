@@ -388,6 +388,42 @@ func resolveForRequest(ctx context.Context, pUrl *pelican_url.PelicanURL, httpMe
 	return getDirectorInfoForPath(ctx, pUrl, httpMethod, token, cacheMode)
 }
 
+// cachedDirectorInfo answers a director question from te's cache when te has
+// one, and by calling load when it does not.  The answer is filed under the
+// namespace it names, so later objects in that namespace find it.
+//
+// te may be nil; a caller holding no engine simply always asks.
+//
+// load must capture nothing its caller may clear on the way out -- a named
+// return above all.  The cache coalesces concurrent misses and runs the load
+// detached from the caller's cancellation, so a load can still be running
+// after its caller has returned; a TransferJob read through a named return
+// that `return nil, err` had just cleared was once a segfault here.  Passing
+// what the load needs as arguments, as directorInfo does, keeps it clear.
+func (te *TransferEngine) cachedDirectorInfo(ctx context.Context, pUrl *pelican_url.PelicanURL, flavor DirRespFlavor, load func(ctx context.Context) (server_structs.DirectorResponse, error)) (server_structs.DirectorResponse, error) {
+	if te == nil || te.dirRespCache == nil {
+		return load(ctx)
+	}
+	return te.dirRespCache.LookupOrLoad(ctx, pUrl.FedInfo.DiscoveryEndpoint, flavor, pUrl.Path, func(ctx context.Context) (server_structs.DirectorResponse, string, error) {
+		resp, err := load(ctx)
+		return resp, resp.XPelNsHdr.Namespace, err
+	})
+}
+
+// directorInfo asks the director about pUrl with verb, presenting token when it
+// is non-empty, and answers from te's cache when it can.
+//
+// The cache key is derived from the same arguments the query is made with, so
+// the two cannot disagree: verb, cache-mode routing, the object URL's query,
+// and a fingerprint of the token.  An answer obtained with one credential is
+// never handed to a caller presenting another, or none.
+func (te *TransferEngine) directorInfo(ctx context.Context, pUrl *pelican_url.PelicanURL, verb string, token string, cacheMode bool) (server_structs.DirectorResponse, error) {
+	flavor := NewDirRespFlavor(verb, cacheMode, pUrl.RawQuery).WithCredential(token)
+	return te.cachedDirectorInfo(ctx, pUrl, flavor, func(ctx context.Context) (server_structs.DirectorResponse, error) {
+		return getDirectorInfoForPath(ctx, pUrl, verb, token, cacheMode)
+	})
+}
+
 // resolveWithoutDirector answers a federation that publishes no director,
 // without asking anyone.
 //

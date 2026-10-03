@@ -248,14 +248,8 @@ func stat(ctx context.Context, te *TransferEngine, destination string, options .
 	directorless := pUrl.FedInfo.DirectorEndpoint == "" && pUrl.FedInfo.DiscoveryEndpoint != ""
 	if directorless && !uploadDestination {
 		dirResp, err = resolveForRequest(ctx, pUrl, directorMethod, "", cacheMode)
-	} else if te != nil && te.dirRespCache != nil {
-		flavor := NewDirRespFlavor(directorMethod, cacheMode, pUrl.RawQuery)
-		dirResp, err = te.dirRespCache.LookupOrLoad(ctx, pUrl.FedInfo.DiscoveryEndpoint, flavor, pUrl.Path, func(ctx context.Context) (server_structs.DirectorResponse, string, error) {
-			resp, qErr := getDirectorInfoForPath(ctx, pUrl, directorMethod, "", cacheMode)
-			return resp, resp.XPelNsHdr.Namespace, qErr
-		})
 	} else {
-		dirResp, err = getDirectorInfoForPath(ctx, pUrl, directorMethod, "", cacheMode)
+		dirResp, err = te.directorInfo(ctx, pUrl, directorMethod, "", cacheMode)
 	}
 	if err != nil {
 		return nil, err
@@ -632,16 +626,9 @@ func walkOn(ctx context.Context, te *TransferEngine, remoteObject string, fn Wal
 	// cache: walking many collections under one namespace -- listing a
 	// directory of directories, say -- otherwise asks the director once per
 	// collection for an answer that is the same every time.
-	var dirResp server_structs.DirectorResponse
-	if te != nil && te.dirRespCache != nil {
-		flavor := NewDirRespFlavor(http.MethodGet, false, pUrl.RawQuery)
-		dirResp, err = te.dirRespCache.LookupOrLoad(ctx, pUrl.FedInfo.DiscoveryEndpoint, flavor, pUrl.Path, func(lCtx context.Context) (server_structs.DirectorResponse, string, error) {
-			resp, qErr := resolveForRequest(lCtx, pUrl, http.MethodGet, "", false)
-			return resp, resp.XPelNsHdr.Namespace, qErr
-		})
-	} else {
-		dirResp, err = resolveForRequest(ctx, pUrl, http.MethodGet, "", false)
-	}
+	dirResp, err := te.cachedDirectorInfo(ctx, pUrl, NewDirRespFlavor(http.MethodGet, false, pUrl.RawQuery), func(ctx context.Context) (server_structs.DirectorResponse, error) {
+		return resolveForRequest(ctx, pUrl, http.MethodGet, "", false)
+	})
 	if err != nil {
 		return err
 	}
@@ -900,16 +887,7 @@ func deleteObj(ctx context.Context, te *TransferEngine, remoteDestination string
 		recursive = true
 	}
 
-	var dirResp server_structs.DirectorResponse
-	if te != nil && te.dirRespCache != nil {
-		flavor := NewDirRespFlavor(http.MethodDelete, false, pUrl.RawQuery)
-		dirResp, err = te.dirRespCache.LookupOrLoad(ctx, pUrl.FedInfo.DiscoveryEndpoint, flavor, pUrl.Path, func(lCtx context.Context) (server_structs.DirectorResponse, string, error) {
-			resp, qErr := getDirectorInfoForPath(lCtx, pUrl, http.MethodDelete, "", false)
-			return resp, resp.XPelNsHdr.Namespace, qErr
-		})
-	} else {
-		dirResp, err = getDirectorInfoForPath(ctx, pUrl, http.MethodDelete, "", false)
-	}
+	dirResp, err := te.directorInfo(ctx, pUrl, http.MethodDelete, "", false)
 	if err != nil {
 		return err
 	}
