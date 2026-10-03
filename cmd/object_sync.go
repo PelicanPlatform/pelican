@@ -21,6 +21,7 @@
 package main
 
 import (
+	"context"
 	"net/url"
 	"os"
 
@@ -184,56 +185,85 @@ func syncMain(cmd *cobra.Command, args []string) {
 
 	dryRun, _ := cmd.Flags().GetBool("dry-run")
 
-	if doTPC {
-		for _, src := range sources {
-			options := []client.TransferOption{
-				client.WithCallback(pb.callback),
-				client.WithTokenLocation(tokenLocation),
-				client.WithSynchronize(client.SyncSize),
-				client.WithCaches(caches...),
-				client.WithDryRun(dryRun),
-			}
-			if _, err = client.DoCopy(ctx, src, dest, true, options...); err != nil {
-				lastSrc = src
-				break
-			}
+	// One engine for the whole command, not one per source; see the note in
+	// object_get.go for why the director's answer has to outlive a source.
+	engine, err := client.NewTransferEngine(ctx)
+	if err != nil {
+		log.Errorln("Failed to create transfer engine:", err)
+		os.Exit(1)
+	}
+	defer func() {
+		if err := engine.Shutdown(); err != nil {
+			log.Errorln("Failure when shutting down transfer engine:", err)
 		}
-	} else if doDownload {
-		for _, src := range sources {
-			options := []client.TransferOption{
-				client.WithCallback(pb.callback),
-				client.WithTokenLocation(tokenLocation),
-				client.WithSynchronize(client.SyncSize),
-				client.WithCaches(caches...),
-				client.WithInPlace(inPlace),
-				client.WithDryRun(dryRun),
+	}()
+
+	options := []client.TransferOption{
+		client.WithCallback(pb.callback),
+		client.WithTokenLocation(tokenLocation),
+		client.WithSynchronize(client.SyncSize),
+		client.WithCaches(caches...),
+		client.WithDryRun(dryRun),
+	}
+	if doDownload {
+		options = append(options, client.WithInPlace(inPlace))
+	}
+
+	tc, err := engine.NewClient(options...)
+	if err != nil {
+		log.Errorln("Failed to create transfer client:", err)
+		os.Exit(1)
+	}
+
+	// A sync names one direction for every source, so the job each source
+	// becomes is decided once rather than per source.
+	var newJob func(ctx context.Context, src string) (*client.TransferJob, error)
+	switch {
+	case doTPC:
+		newJob = func(ctx context.Context, src string) (*client.TransferJob, error) {
+			parsedSrc, parseErr := url.Parse(src)
+			if parseErr != nil {
+				return nil, errors.Wrap(parseErr, "failed to parse source URL")
 			}
-			if _, err = client.DoGet(ctx, src, dest, true, options...); err != nil {
-				lastSrc = src
-				break
+			parsedDest, parseErr := url.Parse(dest)
+			if parseErr != nil {
+				return nil, errors.Wrap(parseErr, "failed to parse destination URL")
 			}
+			return tc.NewCopyJob(ctx, parsedSrc, parsedDest, true, options...)
 		}
-	} else {
+	case doDownload:
+		newJob = func(ctx context.Context, src string) (*client.TransferJob, error) {
+			plan, planErr := engine.PlanDownload(ctx, src, dest, true, options...)
+			if planErr != nil {
+				return nil, planErr
+			}
+			return tc.NewTransferJob(ctx, plan.RemoteURL, plan.LocalPath, false, plan.Recursive)
+		}
+	default:
+		// The local sources are checked up front, before anything is
+		// submitted, so a missing one still exits without having started a
+		// transfer.
 		for _, src := range sources {
-			if srcStat, err := os.Stat(src); err != nil {
+			if srcStat, statErr := os.Stat(src); statErr != nil {
 				log.Errorln("Source: " + src + " does not exist")
 				os.Exit(1)
 			} else if !srcStat.IsDir() && string(dest[len(dest)-1]) == `/` {
 				log.Warningln("Destination: " + dest + " ends with '/', but the source is a file. If the destination does not exist, it will be treated as an object, not a collection.")
 			}
-
-			options := []client.TransferOption{
-				client.WithCallback(pb.callback),
-				client.WithTokenLocation(tokenLocation),
-				client.WithSynchronize(client.SyncSize),
-				client.WithCaches(caches...),
-				client.WithDryRun(dryRun),
-			}
-			if _, err = client.DoPut(ctx, src, dest, true, options...); err != nil {
-				lastSrc = src
-				break
-			}
 		}
+		newJob = func(ctx context.Context, src string) (*client.TransferJob, error) {
+			plan, planErr := engine.PlanUpload(ctx, src, dest, true, options...)
+			if planErr != nil {
+				return nil, planErr
+			}
+			return tc.NewTransferJob(ctx, plan.RemoteURL, plan.LocalPath, true, plan.Recursive, options...)
+		}
+	}
+
+	var failedIdx int
+	_, failedIdx, err = submitAndDrain(ctx, tc, sources, newJob)
+	if failedIdx >= 0 {
+		lastSrc = sources[failedIdx]
 	}
 
 	// Exit with failure

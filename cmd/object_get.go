@@ -21,6 +21,7 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"net/url"
@@ -302,29 +303,53 @@ func getMain(cmd *cobra.Command, args []string) {
 		}
 	}
 
-	var attemptErr error
+	isRecursive, _ := cmd.Flags().GetBool("recursive")
+	dryRun, _ := cmd.Flags().GetBool("dry-run")
+	options := []client.TransferOption{
+		client.WithCallback(pb.callback),
+		client.WithCaches(caches...),
+		client.WithInPlace(inPlace),
+		client.WithDryRun(dryRun),
+		client.WithRejectCollections(!isRecursive),
+	}
+	options = append(options, tokenOpts...)
+
+	// One engine and one transfer client for the whole command, with every
+	// source submitted as a job.  Built per source instead -- as this was --
+	// each object stood up its own engine and so its own empty
+	// director-response cache, and a workflow naming a few hundred objects put
+	// a few hundred queries through the director to learn one thing about one
+	// namespace.  Sharing the engine makes that one query, and sharing the
+	// client lets the objects transfer together rather than one at a time.
+	engine, err := client.NewTransferEngine(ctx)
+	if err != nil {
+		log.Errorln("Failed to create transfer engine:", err)
+		os.Exit(1)
+	}
+	defer func() {
+		if err := engine.Shutdown(); err != nil {
+			log.Errorln("Failure when shutting down transfer engine:", err)
+		}
+	}()
+
+	tc, err := engine.NewClient(options...)
+	if err != nil {
+		log.Errorln("Failed to create transfer client:", err)
+		os.Exit(1)
+	}
+
+	finalResults, failedIdx, attemptErr := submitAndDrain(ctx, tc, source,
+		func(ctx context.Context, src string) (*client.TransferJob, error) {
+			plan, planErr := engine.PlanDownload(ctx, src, dest, isRecursive, options...)
+			if planErr != nil {
+				return nil, planErr
+			}
+			return tc.NewTransferJob(ctx, plan.RemoteURL, plan.LocalPath, false, plan.Recursive)
+		})
+
 	lastSrc := ""
-
-	finalResults := make([][]client.TransferResults, 0)
-
-	for _, src := range source {
-		isRecursive, _ := cmd.Flags().GetBool("recursive")
-		dryRun, _ := cmd.Flags().GetBool("dry-run")
-		options := []client.TransferOption{
-			client.WithCallback(pb.callback),
-			client.WithCaches(caches...),
-			client.WithInPlace(inPlace),
-			client.WithDryRun(dryRun),
-			client.WithRejectCollections(!isRecursive),
-		}
-		options = append(options, tokenOpts...)
-		transferResults, err := client.DoGet(ctx, src, dest, isRecursive, options...)
-		if err != nil {
-			attemptErr = err
-			lastSrc = src
-			break
-		}
-		finalResults = append(finalResults, transferResults)
+	if failedIdx >= 0 {
+		lastSrc = source[failedIdx]
 	}
 
 	// Exit with failure

@@ -400,15 +400,66 @@ func copyMain(cmd *cobra.Command, args []string) {
 	var result error
 	lastSrc := ""
 
-	for _, src := range source {
-		isRecursive, _ := cmd.Flags().GetBool("recursive")
-		options := append([]client.TransferOption{client.WithCallback(pb.callback), client.WithCaches(caches...),
-			client.WithRejectCollections(!isRecursive)}, tokenOpts...)
-		_, result = client.DoCopy(ctx, src, dest, isRecursive, options...)
-		if result != nil {
-			lastSrc = src
-			break
+	// One engine for the whole command, not one per source; see the note in
+	// object_get.go for why the director's answer has to outlive a source.
+	engine, err := client.NewTransferEngine(ctx)
+	if err != nil {
+		log.Errorln("Failed to create transfer engine:", err)
+		os.Exit(1)
+	}
+	defer func() {
+		if err := engine.Shutdown(); err != nil {
+			log.Errorln("Failure when shutting down transfer engine:", err)
 		}
+	}()
+
+	isRecursive, _ := cmd.Flags().GetBool("recursive")
+	options := append([]client.TransferOption{client.WithCallback(pb.callback), client.WithCaches(caches...),
+		client.WithRejectCollections(!isRecursive)}, tokenOpts...)
+
+	tc, err := engine.NewClient(options...)
+	if err != nil {
+		log.Errorln("Failed to create transfer client:", err)
+		os.Exit(1)
+	}
+
+	var failedIdx int
+	_, failedIdx, result = submitAndDrain(ctx, tc, source,
+		func(ctx context.Context, src string) (*client.TransferJob, error) {
+			// Which way a copy runs is decided per source, exactly as the
+			// single-object path decides it: a pelican/osdf scheme on an end
+			// marks it as the federation's.
+			parsedSrc, parseErr := url.Parse(src)
+			if parseErr != nil {
+				return nil, errors.Wrap(parseErr, "failed to parse source URL")
+			}
+			parsedDest, parseErr := url.Parse(dest)
+			if parseErr != nil {
+				return nil, errors.Wrap(parseErr, "failed to parse destination URL")
+			}
+			isPut := pelican_url.IsPelicanScheme(parsedDest.Scheme)
+			isGet := pelican_url.IsPelicanScheme(parsedSrc.Scheme)
+			switch {
+			case isPut && isGet:
+				return tc.NewCopyJob(ctx, parsedSrc, parsedDest, isRecursive, options...)
+			case isPut:
+				plan, planErr := engine.PlanUpload(ctx, parsedSrc.Path, dest, isRecursive, options...)
+				if planErr != nil {
+					return nil, planErr
+				}
+				return tc.NewTransferJob(ctx, plan.RemoteURL, plan.LocalPath, true, plan.Recursive, options...)
+			case isGet:
+				plan, planErr := engine.PlanDownload(ctx, src, parsedDest.Path, isRecursive, options...)
+				if planErr != nil {
+					return nil, planErr
+				}
+				return tc.NewTransferJob(ctx, plan.RemoteURL, plan.LocalPath, false, plan.Recursive)
+			default:
+				return nil, errors.New("unable to determine direction of transfer.  Either source or destination must be a pelican/osdf URL")
+			}
+		})
+	if failedIdx >= 0 {
+		lastSrc = source[failedIdx]
 	}
 
 	// Exit with failure

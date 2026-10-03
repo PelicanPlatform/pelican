@@ -22,6 +22,7 @@ package main
 
 import (
 	"bufio"
+	"context"
 	"crypto/md5"
 	"crypto/sha1"
 	"encoding/hex"
@@ -444,7 +445,7 @@ func putMain(cmd *cobra.Command, args []string) {
 	options = append(options, client.WithCallback(pb.callback), client.WithDryRun(dryRun))
 	options = append(options, tokenOpts...)
 
-	finalResults := make([][]client.TransferResults, 0)
+	var finalResults [][]client.TransferResults
 
 	isRecursive, _ := cmd.Flags().GetBool("recursive")
 	multipleObjects := len(source) > 1
@@ -483,6 +484,23 @@ func putMain(cmd *cobra.Command, args []string) {
 	// capability, a transient collections-endpoint outage -- so the
 	// destination is used as given and DoPut makes the real decision.
 	destIsDir := canInferNames && multipleObjects
+
+	// One engine for the whole command, not one per source.  The engine is
+	// what remembers the director's answer about the destination namespace;
+	// built per source instead, every object would re-ask for a response the
+	// previous one had already been given.  It is built before the pre-flight
+	// stat below so that stat's answer is the one the uploads reuse.
+	engine, err := client.NewTransferEngine(ctx)
+	if err != nil {
+		log.Errorln("Failed to create transfer engine:", err)
+		os.Exit(1)
+	}
+	defer func() {
+		if err := engine.Shutdown(); err != nil {
+			log.Errorln("Failure when shutting down transfer engine:", err)
+		}
+	}()
+
 	if canInferNames && !dryRun {
 		// The pre-flight is a convenience: it must never block a scripted
 		// upload on an interactive token acquisition, and it has to be
@@ -494,7 +512,7 @@ func putMain(cmd *cobra.Command, args []string) {
 			client.WithStatUploadDestination(true),
 			client.WithAcquireToken(false))
 
-		statInfo, statErr := client.DoStat(ctx, dest, statOptions...)
+		statInfo, statErr := engine.Stat(ctx, dest, statOptions...)
 		if statErr != nil {
 			if !errors.Is(statErr, client.ErrObjectNotFound) {
 				log.Debugf("Stat of destination %q failed (%v); using the destination as given", dest, statErr)
@@ -507,27 +525,32 @@ func putMain(cmd *cobra.Command, args []string) {
 		}
 	}
 
-	for _, src := range source {
-		actualDest := dest
-		if destIsDir {
-			inferredDest, err := inferRemoteObjectName(destURL, src)
-			if err != nil {
-				log.Errorln("Failed to infer destination object name:", err)
-				result = err
-				lastSrc = src
-				break
-			}
-			actualDest = inferredDest
-			log.Debugf("Inferred destination for %s: %s", src, actualDest)
-		}
+	tc, err := engine.NewClient(options...)
+	if err != nil {
+		log.Errorln("Failed to create transfer client:", err)
+		os.Exit(1)
+	}
 
-		transferResults, err := client.DoPut(ctx, src, actualDest, isRecursive, options...)
-		result = err
-		if result != nil {
-			lastSrc = src
-			break
-		}
-		finalResults = append(finalResults, transferResults)
+	var failedIdx int
+	finalResults, failedIdx, result = submitAndDrain(ctx, tc, source,
+		func(ctx context.Context, src string) (*client.TransferJob, error) {
+			actualDest := dest
+			if destIsDir {
+				inferredDest, inferErr := inferRemoteObjectName(destURL, src)
+				if inferErr != nil {
+					return nil, errors.Wrap(inferErr, "failed to infer destination object name")
+				}
+				actualDest = inferredDest
+				log.Debugf("Inferred destination for %s: %s", src, actualDest)
+			}
+			plan, planErr := engine.PlanUpload(ctx, src, actualDest, isRecursive, options...)
+			if planErr != nil {
+				return nil, planErr
+			}
+			return tc.NewTransferJob(ctx, plan.RemoteURL, plan.LocalPath, true, plan.Recursive, options...)
+		})
+	if failedIdx >= 0 {
+		lastSrc = source[failedIdx]
 	}
 
 	// Exit with failure

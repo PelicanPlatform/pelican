@@ -945,8 +945,83 @@ func deleteObj(ctx context.Context, te *TransferEngine, remoteDestination string
 localObject: the source file/directory you would like to upload
 remoteDestination: the end location of the upload
 recursive: a boolean indicating if the source is a directory or not
+
+DoPut uploads through an engine that lives only for this call.  A caller with
+several objects to move wants TransferEngine.Put against one engine instead:
+see withTemporaryEngine for what looping over this costs.
 */
 func DoPut(ctx context.Context, localObject string, remoteDestination string, recursive bool, options ...TransferOption) (transferResults []TransferResults, err error) {
+	return withTemporaryEngine(ctx, func(te *TransferEngine) ([]TransferResults, error) {
+		return doPut(ctx, te, localObject, remoteDestination, recursive, options...)
+	})
+}
+
+// PlanUpload resolves an upload of localObject to remoteDestination,
+// validating that the local object exists and is readable and that a directory
+// was asked for recursively.  It performs no transfer.
+func (te *TransferEngine) PlanUpload(ctx context.Context, localObject string, remoteDestination string, recursive bool, options ...TransferOption) (plan TransferPlan, err error) {
+	// Parse as a Pelican URL, but without any discovery (that happens when the transfer job is created).
+	// We do this to handle URL validation early, and we allow unknown query params to be passed through so that old
+	// clients may continue to function with newer directors/origins/caches. This will generate a warning about the query
+	// but should still send it along.
+	dOpts := []pelican_url.DiscoveryOption{}
+	rpUrl, err := url.Parse(remoteDestination)
+	if err != nil {
+		return plan, errors.Wrap(err, "failed to parse remote destination while performing PUT")
+	}
+	dOpts = append(dOpts, pelican_url.WithContext(ctx))
+
+	// If the incoming path has no scheme, we need to tell the pelican_url parser to use the configured discovery URL
+	if err = handleSchemelessIfNeeded(ctx, rpUrl, &dOpts); err != nil {
+		return plan, errors.Wrap(err, "failed to handle schemeless URL")
+	}
+
+	pUrl, err := pelican_url.Parse(remoteDestination, []pelican_url.ParseOption{pelican_url.ValidateQueryParams(true), pelican_url.AllowUnknownQueryParams(true)}, dOpts)
+	if err != nil {
+		return plan, errors.Wrapf(err, "failed to parse remote object: %s", remoteDestination)
+	}
+
+	if _, exists := pUrl.Query()[pelican_url.QueryRecursive]; exists {
+		recursive = true
+	}
+
+	info, err := os.Stat(localObject)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return plan, error_codes.NewParameter_FileNotFoundError(errors.Wrapf(err, "local object %q does not exist", localObject))
+		}
+		return plan, error_codes.NewParameterError(errors.Wrapf(err, "failed to stat local object %q", localObject))
+	}
+
+	if info.IsDir() {
+		if !recursive {
+			return plan, error_codes.NewParameterError(errors.Errorf("local object %q is a directory but recursive is not enabled", localObject))
+		}
+		// Only check that the directory exists and is accessible, don't recurse through all files
+		// The actual file processing will be done during the transfer phase
+	} else {
+		// For non-directory files (including symlinks), try to open them
+		// This matches the logic that will be used during actual transfer
+		file, err := os.Open(localObject)
+		if err != nil {
+			if os.IsPermission(err) {
+				return plan, error_codes.NewAuthorizationError(errors.Wrapf(err, "permission denied when opening local object: %q", localObject))
+			}
+			return plan, error_codes.NewParameterError(errors.Wrapf(err, "failed to open local object for reading: %q", localObject))
+		}
+		file.Close()
+	}
+
+	return TransferPlan{
+		RemoteURL: pUrl.GetRawUrl(),
+		LocalPath: localObject,
+		Upload:    true,
+		Recursive: recursive,
+	}, nil
+}
+
+// doPut is the body of both.  te is always non-nil.
+func doPut(ctx context.Context, te *TransferEngine, localObject string, remoteDestination string, recursive bool, options ...TransferOption) (transferResults []TransferResults, err error) {
 	// First, create a handler for any panics that occur
 	defer func() {
 		if r := recover(); r != nil {
@@ -957,73 +1032,16 @@ func DoPut(ctx context.Context, localObject string, remoteDestination string, re
 		}
 	}()
 
-	// Parse as a Pelican URL, but without any discovery (that happens when the transfer job is created).
-	// We do this to handle URL validation early, and we allow unknown query params to be passed through so that old
-	// clients may continue to function with newer directors/origins/caches. This will generate a warning about the query
-	// but should still send it along.
-	dOpts := []pelican_url.DiscoveryOption{}
-	rpUrl, err := url.Parse(remoteDestination)
-	if err != nil {
-		return nil, errors.Wrap(err, "failed to parse remote destination while performing PUT")
-	}
-	dOpts = append(dOpts, pelican_url.WithContext(ctx))
-
-	// If the incoming path has no scheme, we need to tell the pelican_url parser to use the configured discovery URL
-	if err = handleSchemelessIfNeeded(ctx, rpUrl, &dOpts); err != nil {
-		return nil, errors.Wrap(err, "failed to handle schemeless URL")
-	}
-
-	pUrl, err := pelican_url.Parse(remoteDestination, []pelican_url.ParseOption{pelican_url.ValidateQueryParams(true), pelican_url.AllowUnknownQueryParams(true)}, dOpts)
-	if err != nil {
-		return nil, errors.Wrapf(err, "failed to parse remote object: %s", remoteDestination)
-	}
-
-	if _, exists := pUrl.Query()[pelican_url.QueryRecursive]; exists {
-		recursive = true
-	}
-
-	info, err := os.Stat(localObject)
-	if err != nil {
-		if os.IsNotExist(err) {
-			return nil, error_codes.NewParameter_FileNotFoundError(errors.Wrapf(err, "local object %q does not exist", localObject))
-		}
-		return nil, error_codes.NewParameterError(errors.Wrapf(err, "failed to stat local object %q", localObject))
-	}
-
-	if info.IsDir() {
-		if !recursive {
-			return nil, error_codes.NewParameterError(errors.Errorf("local object %q is a directory but recursive is not enabled", localObject))
-		}
-		// Only check that the directory exists and is accessible, don't recurse through all files
-		// The actual file processing will be done during the transfer phase
-	} else {
-		// For non-directory files (including symlinks), try to open them
-		// This matches the logic that will be used during actual transfer
-		file, err := os.Open(localObject)
-		if err != nil {
-			if os.IsPermission(err) {
-				return nil, error_codes.NewAuthorizationError(errors.Wrapf(err, "permission denied when opening local object: %q", localObject))
-			}
-			return nil, error_codes.NewParameterError(errors.Wrapf(err, "failed to open local object for reading: %q", localObject))
-		}
-		file.Close()
-	}
-
-	te, err := NewTransferEngine(ctx)
+	plan, err := te.PlanUpload(ctx, localObject, remoteDestination, recursive, options...)
 	if err != nil {
 		return nil, err
 	}
 
-	defer func() {
-		if err := te.Shutdown(); err != nil {
-			log.Errorln("Failure when shutting down transfer engine:", err)
-		}
-	}()
 	client, err := te.NewClient(options...)
 	if err != nil {
 		return
 	}
-	tj, err := client.NewTransferJob(context.Background(), pUrl.GetRawUrl(), localObject, true, recursive, options...)
+	tj, err := client.NewTransferJob(context.Background(), plan.RemoteURL, plan.LocalPath, true, plan.Recursive, options...)
 	if err != nil {
 		return
 	}
@@ -1042,24 +1060,78 @@ func DoPut(ctx context.Context, localObject string, remoteDestination string, re
 	return
 }
 
+// withTemporaryEngine runs fn against an engine built for this one call and
+// shut down when it returns.
+//
+// It exists so the Do* helpers stay usable by a caller that has a single
+// object to move and no interest in engine lifetime.  Every caller that has
+// more than one should hold an engine of its own instead: what an engine
+// carries between transfers -- the director-response cache above all -- is
+// discarded here, so a loop over a Do* helper re-asks the director about
+// every object.  It also rebuilds a worker pool per call.
+func withTemporaryEngine(ctx context.Context, fn func(te *TransferEngine) ([]TransferResults, error)) (transferResults []TransferResults, err error) {
+	te, err := NewTransferEngine(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer func() {
+		if shutdownErr := te.Shutdown(); shutdownErr != nil {
+			log.Errorln("Failure when shutting down transfer engine:", shutdownErr)
+		}
+	}()
+	return fn(te)
+}
+
 /*
 	Start of transfer for pelican object get, gets information from the target source before doing our HTTP GET request
 
 remoteObject: the source file/directory you would like to upload
 localDestination: the end location of the upload
 recursive: a boolean indicating if the source is a directory or not
+
+DoGet downloads through an engine that lives only for this call.  A caller with
+several objects to move wants TransferEngine.Get against one engine instead:
+see withTemporaryEngine for what looping over this costs.
 */
 func DoGet(ctx context.Context, remoteObject string, localDestination string, recursive bool, options ...TransferOption) (transferResults []TransferResults, err error) {
-	// First, create a handler for any panics that occur
-	defer func() {
-		if r := recover(); r != nil {
-			log.Debugln("Panic captured while attempting to perform transfer (DoGet):", r)
-			log.Debugln("Panic caused by the following", string(debug.Stack()))
-			ret := fmt.Sprintf("Unrecoverable error (panic) captured in DoGet: %v", r)
-			err = errors.New(ret)
-		}
-	}()
+	return withTemporaryEngine(ctx, func(te *TransferEngine) ([]TransferResults, error) {
+		return doGet(ctx, te, remoteObject, localDestination, recursive, options...)
+	})
+}
 
+// TransferPlan is what one source and destination resolve to before any
+// transfer job exists: the exact federation URL and local path to hand to
+// TransferClient.NewTransferJob, and whether the transfer is recursive.
+//
+// Resolving is a separate step from transferring because a command that moves
+// several objects wants to create every job on one TransferClient and let them
+// run together, rather than completing one before resolving the next.  What is
+// decided here -- where an object lands when the destination is a directory,
+// whether a collection without recursion is an error, whether a ?recursive in
+// the URL turns recursion on -- is the documented behavior in
+// docs/object-transfer-semantics.md, which is why it is offered rather than
+// left for each caller to rebuild.
+type TransferPlan struct {
+	// RemoteURL is the federation end of the transfer.
+	RemoteURL *url.URL
+	// LocalPath is the local end: where a download lands, or what an upload
+	// reads.
+	LocalPath string
+	// Upload is true when the transfer writes into the federation.
+	Upload bool
+	// Recursive is the caller's argument, turned on if the object URL carried
+	// a ?recursive of its own.
+	Recursive bool
+}
+
+// PlanDownload resolves a download of remoteObject into localDestination,
+// including the destination-layout rules a container target implies (rows G2,
+// G4 and G5 of docs/object-transfer-semantics.md).  It performs no transfer.
+//
+// It may query the federation: telling an object from a collection needs a
+// stat, which goes through the engine so the director response is shared with
+// the transfer that follows.
+func (te *TransferEngine) PlanDownload(ctx context.Context, remoteObject string, localDestination string, recursive bool, options ...TransferOption) (plan TransferPlan, err error) {
 	// Parse as a Pelican URL, but without any discovery (that happens when the transfer job is created).
 	// We do this to handle URL validation early, and we allow unknown query params to be passed through so that old
 	// clients may continue to function with newer directors/origins/caches. This will generate a warning about the query
@@ -1067,18 +1139,18 @@ func DoGet(ctx context.Context, remoteObject string, localDestination string, re
 	dOpts := []pelican_url.DiscoveryOption{}
 	rpUrl, err := url.Parse(remoteObject)
 	if err != nil {
-		return nil, errors.Wrap(err, "failed to parse remote source while performing GET")
+		return plan, errors.Wrap(err, "failed to parse remote source while performing GET")
 	}
 	dOpts = append(dOpts, pelican_url.WithContext(ctx))
 
 	// If the incoming path has no scheme, we need to tell the pelican_url parser to use the configured discovery URL
 	if err = handleSchemelessIfNeeded(ctx, rpUrl, &dOpts); err != nil {
-		return nil, errors.Wrap(err, "failed to handle schemeless URL")
+		return plan, errors.Wrap(err, "failed to handle schemeless URL")
 	}
 
 	pUrl, err := pelican_url.Parse(remoteObject, []pelican_url.ParseOption{pelican_url.ValidateQueryParams(true), pelican_url.AllowUnknownQueryParams(true)}, dOpts)
 	if err != nil {
-		return nil, errors.Wrapf(err, "failed to parse remote object: %s", remoteObject)
+		return plan, errors.Wrapf(err, "failed to parse remote object: %s", remoteObject)
 	}
 
 	if _, exists := pUrl.Query()[pelican_url.QueryRecursive]; exists {
@@ -1125,38 +1197,53 @@ func DoGet(ctx context.Context, remoteObject string, localDestination string, re
 			// the destination's parent.
 			remoteObjectFilename, nameErr := RemoteObjectBaseName(pUrl.Path)
 			if nameErr != nil {
-				return nil, nameErr
+				return plan, nameErr
 			}
-			stat, statErr := DoStat(ctx, pUrl.GetRawUrl().String(), options...)
+			stat, statErr := te.Stat(ctx, pUrl.GetRawUrl().String(), options...)
 			if statErr != nil && !errors.Is(statErr, ErrObjectNotFound) {
-				return nil, errors.Wrapf(statErr,
+				return plan, errors.Wrapf(statErr,
 					"failed to stat remote source %q while deciding destination layout", remoteObject)
 			}
 			if stat != nil && stat.IsCollection {
-				return nil, errors.Errorf(
+				return plan, errors.Errorf(
 					"remote object %q is a collection but recursive is not enabled", remoteObject)
 			}
 			localDestination = path.Join(localDestPath, remoteObjectFilename)
 		}
 	}
 
-	success := false
+	return TransferPlan{
+		RemoteURL: pUrl.GetRawUrl(),
+		LocalPath: localDestination,
+		Upload:    false,
+		Recursive: recursive,
+	}, nil
+}
 
-	te, err := NewTransferEngine(ctx)
+// doGet is the body of both.  te is always non-nil.
+func doGet(ctx context.Context, te *TransferEngine, remoteObject string, localDestination string, recursive bool, options ...TransferOption) (transferResults []TransferResults, err error) {
+	// First, create a handler for any panics that occur
+	defer func() {
+		if r := recover(); r != nil {
+			log.Debugln("Panic captured while attempting to perform transfer (DoGet):", r)
+			log.Debugln("Panic caused by the following", string(debug.Stack()))
+			ret := fmt.Sprintf("Unrecoverable error (panic) captured in DoGet: %v", r)
+			err = errors.New(ret)
+		}
+	}()
+
+	plan, err := te.PlanDownload(ctx, remoteObject, localDestination, recursive, options...)
 	if err != nil {
 		return nil, err
 	}
 
-	defer func() {
-		if err := te.Shutdown(); err != nil {
-			log.Errorln("Failure when shutting down transfer engine:", err)
-		}
-	}()
+	success := false
+
 	tc, err := te.NewClient(options...)
 	if err != nil {
 		return
 	}
-	tj, err := tc.NewTransferJob(context.Background(), pUrl.GetRawUrl(), localDestination, false, recursive)
+	tj, err := tc.NewTransferJob(context.Background(), plan.RemoteURL, plan.LocalPath, false, plan.Recursive)
 	if err != nil {
 		return
 	}
@@ -1194,17 +1281,17 @@ func DoGet(ctx context.Context, remoteObject string, localDestination string, re
 		//    failed download from local-cache: server returned 404 Not Found
 		// versus:
 		//    failed to download file: transfer error: failed download from local-cache: server returned 404 Not Found
-		var te *TransferErrors
-		if errors.As(err, &te) {
-			if len(te.Unwrap()) == 1 {
+		var xferErrs *TransferErrors
+		if errors.As(err, &xferErrs) {
+			if len(xferErrs.Unwrap()) == 1 {
 				var tae *TransferAttemptError
-				if errors.As(te.Unwrap()[0], &tae) {
+				if errors.As(xferErrs.Unwrap()[0], &tae) {
 					return nil, tae
 				} else {
 					return nil, errors.Wrap(err, "failed to download file")
 				}
 			}
-			return nil, te
+			return nil, xferErrs
 		}
 		return nil, errors.Wrap(err, "failed to download file")
 	} else {
@@ -1213,7 +1300,18 @@ func DoGet(ctx context.Context, remoteObject string, localDestination string, re
 }
 
 // Start the transfer, whether read or write back. Primarily used for backwards compatibility
+//
+// DoCopy transfers through an engine that lives only for this call.  A caller
+// with several objects to move wants TransferEngine.Copy against one engine
+// instead: see withTemporaryEngine for what looping over this costs.
 func DoCopy(ctx context.Context, sourceFile string, destination string, recursive bool, options ...TransferOption) (transferResults []TransferResults, err error) {
+	return withTemporaryEngine(ctx, func(te *TransferEngine) ([]TransferResults, error) {
+		return doCopy(ctx, te, sourceFile, destination, recursive, options...)
+	})
+}
+
+// doCopy is the body of both.  te is always non-nil.
+func doCopy(ctx context.Context, te *TransferEngine, sourceFile string, destination string, recursive bool, options ...TransferOption) (transferResults []TransferResults, err error) {
 	// First, create a handler for any panics that occur
 	defer func() {
 		if r := recover(); r != nil {
@@ -1241,31 +1339,20 @@ func DoCopy(ctx context.Context, sourceFile string, destination string, recursiv
 
 	if isPut && isGet {
 		// Both source and destination are remote: third-party-copy
-		return doThirdPartyCopy(ctx, parsedSrc, parsedDest, recursive, options...)
+		return doThirdPartyCopy(ctx, te, parsedSrc, parsedDest, recursive, options...)
 	} else if isPut {
 		log.Debugf("Detected a PUT from %s to %s", parsedSrc.Path, parsedDest.String())
-		return DoPut(ctx, parsedSrc.Path, parsedDest.String(), recursive, options...)
+		return doPut(ctx, te, parsedSrc.Path, parsedDest.String(), recursive, options...)
 	} else if isGet {
 		log.Debugf("Detected a GET from %s to %s", parsedSrc.String(), parsedDest.Path)
-		return DoGet(ctx, parsedSrc.String(), parsedDest.Path, recursive, options...)
+		return doGet(ctx, te, parsedSrc.String(), parsedDest.Path, recursive, options...)
 	} else {
 		return nil, errors.New("unable to determine direction of transfer.  Either source or destination must be a pelican/osdf URL")
 	}
 }
 
 // doThirdPartyCopy performs a third-party-copy transfer between two remote URLs
-func doThirdPartyCopy(ctx context.Context, sourceURL *url.URL, destURL *url.URL, recursive bool, options ...TransferOption) (transferResults []TransferResults, err error) {
-
-	te, err := NewTransferEngine(ctx)
-	if err != nil {
-		return nil, err
-	}
-
-	defer func() {
-		if err := te.Shutdown(); err != nil {
-			log.Errorln("Failure when shutting down transfer engine:", err)
-		}
-	}()
+func doThirdPartyCopy(ctx context.Context, te *TransferEngine, sourceURL *url.URL, destURL *url.URL, recursive bool, options ...TransferOption) (transferResults []TransferResults, err error) {
 
 	tc, err := te.NewClient(options...)
 	if err != nil {
@@ -1299,16 +1386,16 @@ func doThirdPartyCopy(ctx context.Context, sourceURL *url.URL, destURL *url.URL,
 	}
 
 	if !success {
-		var te *TransferErrors
-		if errors.As(err, &te) {
-			if len(te.Unwrap()) == 1 {
+		var xferErrs *TransferErrors
+		if errors.As(err, &xferErrs) {
+			if len(xferErrs.Unwrap()) == 1 {
 				var tae *TransferAttemptError
-				if errors.As(te.Unwrap()[0], &tae) {
+				if errors.As(xferErrs.Unwrap()[0], &tae) {
 					return nil, tae
 				}
 				return nil, errors.Wrap(err, "failed third-party-copy")
 			}
-			return nil, te
+			return nil, xferErrs
 		}
 		return nil, errors.Wrap(err, "failed third-party-copy")
 	}

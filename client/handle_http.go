@@ -2449,9 +2449,21 @@ func (tc *TransferClient) NewPrestageJob(ctx context.Context, remoteUrl *url.URL
 			return nil, errors.Wrap(err, "failed to get token for transfer")
 		}
 
-		// The director response may change if it's given a token; let's repeat the query.
+		// The director response may change if it's given a token; let's repeat
+		// the query -- through the cache, under a credential-scoped flavor, so
+		// a second prefix reached by the same token costs nothing.  Storing it
+		// without ever looking it up (as this did) meant a token-protected
+		// namespace paid a round trip per prestage however warm the cache was.
 		if contents != "" {
-			dirResp, err = getDirectorInfoForPath(tj.ctx, pelicanURL, http.MethodGet, contents, false)
+			authFlavor := NewDirRespFlavor(http.MethodGet, false, pelicanURL.RawQuery).WithCredential(contents)
+			if tc.engine != nil && tc.engine.dirRespCache != nil {
+				dirResp, err = tc.engine.dirRespCache.LookupOrLoad(tj.ctx, pelicanURL.FedInfo.DiscoveryEndpoint, authFlavor, pelicanURL.Path, func(ctx context.Context) (server_structs.DirectorResponse, string, error) {
+					resp, qErr := getDirectorInfoForPath(ctx, pelicanURL, http.MethodGet, contents, false)
+					return resp, resp.XPelNsHdr.Namespace, qErr
+				})
+			} else {
+				dirResp, err = getDirectorInfoForPath(tj.ctx, pelicanURL, http.MethodGet, contents, false)
+			}
 			if err != nil {
 				log.Errorln(err)
 				err = errors.Wrapf(err, "failed to get namespace information for remote URL %s", remoteUrl.String())
@@ -2459,9 +2471,6 @@ func (tc *TransferClient) NewPrestageJob(ctx context.Context, remoteUrl *url.URL
 			}
 			tj.dirResp = dirResp
 			tj.token.SetDirectorResponse(&dirResp)
-			if tc.engine != nil && tc.engine.dirRespCache != nil && dirResp.XPelNsHdr.Namespace != "" {
-				tc.engine.dirRespCache.Store(pelicanURL.FedInfo.DiscoveryEndpoint, NewDirRespFlavor(http.MethodGet, false, pelicanURL.RawQuery).WithCredential(contents), dirResp.XPelNsHdr.Namespace, pelicanURL.Path, dirResp)
-			}
 		}
 	} else {
 		tj.token = nil
@@ -2590,7 +2599,26 @@ func (tc *TransferClient) NewCopyJob(ctx context.Context, src *url.URL, dest *ur
 			return nil, err
 		}
 		if contents != "" {
-			dirResp, err = GetDirectorInfoForPath(tj.ctx, &copyDestUrl, destVerb, contents)
+			// Re-ask through the cache under the credential-scoped flavor.
+			// The loader repeats the COPY->PUT fallback rather than trusting
+			// destVerb, because a cached answer to the unauthenticated
+			// question above means that loader never ran: destVerb would still
+			// read "COPY" against a director that only does PUT, and every
+			// object after the first would fail.  The uncached branch has no
+			// such gap -- its resolution above always ran -- so it asks once.
+			authFlavor := destFlavor.WithCredential(contents)
+			if tc.engine != nil && tc.engine.dirRespCache != nil {
+				copyDestUrlRef := &copyDestUrl
+				dirResp, err = tc.engine.dirRespCache.LookupOrLoad(tj.ctx, copyDestUrl.FedInfo.DiscoveryEndpoint, authFlavor, copyDestUrl.Path, func(ctx context.Context) (server_structs.DirectorResponse, string, error) {
+					resp, qErr := getDirectorInfoForPath(ctx, copyDestUrlRef, destVerb, contents, false)
+					if qErr != nil {
+						resp, qErr = getDirectorInfoForPath(ctx, copyDestUrlRef, http.MethodPut, contents, false)
+					}
+					return resp, resp.XPelNsHdr.Namespace, qErr
+				})
+			} else {
+				dirResp, err = GetDirectorInfoForPath(tj.ctx, &copyDestUrl, destVerb, contents)
+			}
 			if err != nil {
 				log.Errorln(err)
 				err = errors.Wrapf(err, "failed to get namespace information for destination URL %s", dest.String())
@@ -2598,9 +2626,6 @@ func (tc *TransferClient) NewCopyJob(ctx context.Context, src *url.URL, dest *ur
 			}
 			tj.destDirResp = dirResp
 			tj.token.SetDirectorResponse(&dirResp)
-			if tc.engine != nil && tc.engine.dirRespCache != nil && dirResp.XPelNsHdr.Namespace != "" {
-				tc.engine.dirRespCache.Store(copyDestUrl.FedInfo.DiscoveryEndpoint, destFlavor.WithCredential(contents), dirResp.XPelNsHdr.Namespace, copyDestUrl.Path, dirResp)
-			}
 		}
 	}
 
@@ -2631,7 +2656,16 @@ func (tc *TransferClient) NewCopyJob(ctx context.Context, src *url.URL, dest *ur
 			return nil, err
 		}
 		if contents != "" {
-			srcDirResp, err = GetDirectorInfoForPath(tj.ctx, &copySrcUrl, http.MethodGet, contents)
+			authFlavor := NewDirRespFlavor(http.MethodGet, false, copySrcUrl.RawQuery).WithCredential(contents)
+			if tc.engine != nil && tc.engine.dirRespCache != nil {
+				copySrcUrlRef := &copySrcUrl
+				srcDirResp, err = tc.engine.dirRespCache.LookupOrLoad(tj.ctx, copySrcUrl.FedInfo.DiscoveryEndpoint, authFlavor, copySrcUrl.Path, func(ctx context.Context) (server_structs.DirectorResponse, string, error) {
+					resp, qErr := getDirectorInfoForPath(ctx, copySrcUrlRef, http.MethodGet, contents, false)
+					return resp, resp.XPelNsHdr.Namespace, qErr
+				})
+			} else {
+				srcDirResp, err = GetDirectorInfoForPath(tj.ctx, &copySrcUrl, http.MethodGet, contents)
+			}
 			if err != nil {
 				log.Errorln(err)
 				err = errors.Wrapf(err, "failed to get namespace information for source URL %s", src.String())
@@ -2639,9 +2673,6 @@ func (tc *TransferClient) NewCopyJob(ctx context.Context, src *url.URL, dest *ur
 			}
 			tj.srcDirResp = srcDirResp
 			tj.srcToken.SetDirectorResponse(&srcDirResp)
-			if tc.engine != nil && tc.engine.dirRespCache != nil && srcDirResp.XPelNsHdr.Namespace != "" {
-				tc.engine.dirRespCache.Store(copySrcUrl.FedInfo.DiscoveryEndpoint, NewDirRespFlavor(http.MethodGet, false, copySrcUrl.RawQuery).WithCredential(contents), srcDirResp.XPelNsHdr.Namespace, copySrcUrl.Path, srcDirResp)
-			}
 		}
 	} else {
 		tj.srcToken = nil
@@ -2743,18 +2774,25 @@ func (tc *TransferClient) CacheInfo(ctx context.Context, remoteUrl *url.URL, opt
 			return
 		}
 
-		// The director response may change if it's given a token; let's repeat the query.
+		// The director response may change if it's given a token; let's repeat
+		// the query -- through the cache, under a credential-scoped flavor, so
+		// the same token asking about the same namespace again costs nothing.
 		if contents != "" {
-			dirResp, err = getDirectorInfoForPath(ctx, pelicanURL, http.MethodGet, contents, false)
+			authFlavor := NewDirRespFlavor(http.MethodGet, false, pelicanURL.RawQuery).WithCredential(contents)
+			if tc.engine != nil && tc.engine.dirRespCache != nil {
+				dirResp, err = tc.engine.dirRespCache.LookupOrLoad(ctx, pelicanURL.FedInfo.DiscoveryEndpoint, authFlavor, pelicanURL.Path, func(lCtx context.Context) (server_structs.DirectorResponse, string, error) {
+					resp, qErr := getDirectorInfoForPath(lCtx, pelicanURL, http.MethodGet, contents, false)
+					return resp, resp.XPelNsHdr.Namespace, qErr
+				})
+			} else {
+				dirResp, err = getDirectorInfoForPath(ctx, pelicanURL, http.MethodGet, contents, false)
+			}
 			if err != nil {
 				log.Errorln(err)
 				err = errors.Wrapf(err, "failed to get namespace information for remote URL %s", remoteUrl.String())
 				return
 			}
 			token.SetDirectorResponse(&dirResp)
-			if tc.engine != nil && tc.engine.dirRespCache != nil && dirResp.XPelNsHdr.Namespace != "" {
-				tc.engine.dirRespCache.Store(pelicanURL.FedInfo.DiscoveryEndpoint, NewDirRespFlavor(http.MethodGet, false, pelicanURL.RawQuery).WithCredential(contents), dirResp.XPelNsHdr.Namespace, pelicanURL.Path, dirResp)
-			}
 		}
 	} else if !directorless {
 		// Nothing has asked yet, so "no token required" is not a fact; keep the
