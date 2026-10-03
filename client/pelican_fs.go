@@ -171,17 +171,7 @@ func (pfs *PelicanFS) openFile(name string, flag int, lazyStat bool) (fs.File, e
 	// Reads and writes cache separately -- the flavor carries the verb, so
 	// a writer is never handed the caches a read was told to use -- as does
 	// each distinct query (?directread and friends steer matchmaking).
-	var dirResp server_structs.DirectorResponse
-	var err2 error
-	if pfs.transferEngine != nil && pfs.transferEngine.dirRespCache != nil {
-		flavor := NewDirRespFlavor(httpMethod, false, pUrl.RawQuery)
-		dirResp, err2 = pfs.transferEngine.dirRespCache.LookupOrLoad(pfs.ctx, pUrl.FedInfo.DiscoveryEndpoint, flavor, pUrl.Path, func(ctx context.Context) (server_structs.DirectorResponse, string, error) {
-			resp, qErr := getDirectorInfoForPath(ctx, pUrl, httpMethod, "", false)
-			return resp, resp.XPelNsHdr.Namespace, qErr
-		})
-	} else {
-		dirResp, err2 = getDirectorInfoForPath(pfs.ctx, pUrl, httpMethod, "", false)
-	}
+	dirResp, err2 := pfs.transferEngine.directorInfo(pfs.ctx, pUrl, httpMethod, "", false)
 	if err2 != nil {
 		return nil, &fs.PathError{Op: "open", Path: name, Err: err2}
 	}

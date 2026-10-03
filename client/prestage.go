@@ -29,8 +29,18 @@ import (
 	"github.com/pelicanplatform/pelican/pelican_url"
 )
 
-// Single-shot call to prestage a single prefix
+// Single-shot call to prestage a single prefix through an engine that lives
+// only for this call.  A caller with several prefixes wants
+// TransferEngine.Prestage against one engine instead: see withTemporaryEngine
+// for what looping over this costs.
 func DoPrestage(ctx context.Context, prefixUrl string, options ...TransferOption) (transferResults []TransferResults, err error) {
+	return withTemporaryEngine(ctx, func(te *TransferEngine) ([]TransferResults, error) {
+		return doPrestage(ctx, te, prefixUrl, options...)
+	})
+}
+
+// doPrestage is the body of both.  te is always non-nil.
+func doPrestage(ctx context.Context, te *TransferEngine, prefixUrl string, options ...TransferOption) (transferResults []TransferResults, err error) {
 	// First, create a handler for any panics that occur
 	defer func() {
 		if r := recover(); r != nil {
@@ -49,16 +59,6 @@ func DoPrestage(ctx context.Context, prefixUrl string, options ...TransferOption
 
 	success := false
 
-	te, err := NewTransferEngine(ctx)
-	if err != nil {
-		return nil, err
-	}
-
-	defer func() {
-		if err := te.Shutdown(); err != nil {
-			log.Errorln("Failure when shutting down transfer engine:", err)
-		}
-	}()
 	tc, err := te.NewClient(options...)
 	if err != nil {
 		return
@@ -101,17 +101,17 @@ func DoPrestage(ctx context.Context, prefixUrl string, options ...TransferOption
 		//    failed download from local-cache: server returned 404 Not Found
 		// versus:
 		//    failed to download file: transfer error: failed download from local-cache: server returned 404 Not Found
-		var te *TransferErrors
-		if errors.As(err, &te) {
-			if len(te.Unwrap()) == 1 {
+		var xferErrs *TransferErrors
+		if errors.As(err, &xferErrs) {
+			if len(xferErrs.Unwrap()) == 1 {
 				var tae *TransferAttemptError
-				if errors.As(te.Unwrap()[0], &tae) {
+				if errors.As(xferErrs.Unwrap()[0], &tae) {
 					return nil, tae
 				} else {
 					return nil, errors.Wrap(err, "failed to prestage file")
 				}
 			}
-			return nil, te
+			return nil, xferErrs
 		}
 		return nil, errors.Wrap(err, "failed to prestage file")
 	} else {

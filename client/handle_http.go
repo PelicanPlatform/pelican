@@ -1767,7 +1767,10 @@ func (te *TransferEngine) Close() {
 }
 
 // If we've detected a job is done, clean up the active job state map
-func (te *TransferEngine) finishJob(activeJobs *map[uuid.UUID][]*TransferJob, job *TransferJob, id uuid.UUID) {
+// Returns true when this retires the client itself -- its work channel was
+// already closed and that was its last job -- so the caller can drop the
+// engine's bookkeeping for it once nothing is left queued.
+func (te *TransferEngine) finishJob(activeJobs *map[uuid.UUID][]*TransferJob, job *TransferJob, id uuid.UUID) (clientRetired bool) {
 	// Retiring the client's last job -- or being handed a job that is no longer
 	// in the list at all -- has to leave no entry behind. Storing an
 	// empty-but-non-nil slice would make the client look permanently active:
@@ -1785,6 +1788,7 @@ func (te *TransferEngine) finishJob(activeJobs *map[uuid.UUID][]*TransferJob, jo
 			// for the client -- a clean shutdown of the client.
 			if te.workMap[id] == nil {
 				close(te.resultsMap[id])
+				clientRetired = true
 				log.Debugln("Client", id.String(), "has no more work and is finished shutting down")
 			}
 		}()
@@ -1800,6 +1804,7 @@ func (te *TransferEngine) finishJob(activeJobs *map[uuid.UUID][]*TransferJob, jo
 		(*activeJobs)[id] = newJobList
 		log.Debugln("Job", job.ID(), "is done for client", id.String(), " which has", len(newJobList), "jobs remaining")
 	}
+	return
 }
 
 // Launches a helper goroutine that ensures completed
@@ -1808,6 +1813,14 @@ func (te *TransferEngine) finishJob(activeJobs *map[uuid.UUID][]*TransferJob, jo
 func (te *TransferEngine) runMux() error {
 	tmpResults := make(map[uuid.UUID][]*TransferResults)
 	activeJobs := make(map[uuid.UUID][]*TransferJob)
+	// Clients that have shut down cleanly: work channel closed, last job
+	// retired, results channel closed.  Their entries in the engine's workMap
+	// and resultsMap are dropped below once nothing is left queued for them.
+	// Until that happened these maps only ever grew, so a long-lived engine --
+	// or a command that makes a client per object -- left an entry behind for
+	// every client it ever created, and runMux walked all of them on each pass
+	// through the select.
+	retired := make(map[uuid.UUID]bool)
 	var clientJob *clientTransferJob
 	closing := false
 	closedWorkChan := false
@@ -1816,11 +1829,25 @@ func (te *TransferEngine) runMux() error {
 	for {
 		// The channels we interact with on depend on how many clients and how many results we have.
 		// Since this is dynamic, we can't do a fixed-size case statement and instead need to use reflect.Select.
-		// This helper function iterates through the TransferEngine's internals with a read-lock held, building up
-		// the list of work.
+		// This helper function iterates through the TransferEngine's internals with the client lock held, building up
+		// the list of work.  The lock is exclusive rather than shared because this is also where retired clients are
+		// reaped from the engine's maps.
 		cases, workMap, workKeys, resultsMap, resultsKeys := func() (cases []reflect.SelectCase, workMap map[uuid.UUID]chan *TransferJob, workKeys []uuid.UUID, resultsMap map[uuid.UUID]chan *TransferResults, resultsKeys []uuid.UUID) {
-			te.clientLock.RLock()
-			defer te.clientLock.RUnlock()
+			te.clientLock.Lock()
+			defer te.clientLock.Unlock()
+			// Reap retired clients.  This is deliberately not done at the
+			// moment the results channel is closed: finishJob closes it while
+			// the result that retired the job is still sitting in tmpResults,
+			// and a case built from a deleted entry would be a send on a nil
+			// channel -- a hang rather than an error.  Waiting until the queue
+			// has drained needs no invariant to hold.
+			for id := range retired {
+				if len(tmpResults[id]) == 0 {
+					delete(te.workMap, id)
+					delete(te.resultsMap, id)
+					delete(retired, id)
+				}
+			}
 			workMap = make(map[uuid.UUID]chan *TransferJob, len(te.workMap))
 			ctr := 0
 			workKeys = make(uuid.UUIDs, 0)
@@ -1912,6 +1939,7 @@ func (te *TransferEngine) runMux() error {
 				}()
 				if activeJobs[id] == nil {
 					close(te.resultsMap[id])
+					retired[id] = true
 				}
 				continue
 			}
@@ -1932,7 +1960,9 @@ func (te *TransferEngine) runMux() error {
 			// Test to see if the transfer job is done (true if job-to-file translation
 			// has completed and there are no remaining active transfers)
 			if job.lookupDone.Load() && job.activeXfer.Load() == 0 {
-				te.finishJob(&activeJobs, job, id)
+				if te.finishJob(&activeJobs, job, id) {
+					retired[id] = true
+				}
 			}
 			if len(tmpResults[id]) == 1 {
 				// The last result back to this client has been sent; delete the
@@ -1991,7 +2021,9 @@ func (te *TransferEngine) runMux() error {
 			// happens last -- the lookup finishing or the final result landing --
 			// is what retires the job.
 			if job.job.activeXfer.Load() == 0 {
-				te.finishJob(&activeJobs, job.job, job.uuid)
+				if te.finishJob(&activeJobs, job.job, job.uuid) {
+					retired[job.uuid] = true
+				}
 			}
 		} else if chosen == len(workMap)+len(resultsMap)+5 {
 			// Notification that the engine should shut down
@@ -2216,18 +2248,6 @@ func (tc *TransferClient) NewTransferJob(ctx context.Context, remoteUrl *url.URL
 	// transfer therefore keeps its token generator either way, so that a
 	// rejection carrying token hints has something to acquire onto.
 	directorless := copyUrl.FedInfo.DirectorEndpoint == "" && copyUrl.FedInfo.DiscoveryEndpoint != ""
-	copyUrlRef := &copyUrl
-	// Snapshot the routing mode for the director loaders below rather than
-	// reading it off tj inside them. Those loaders run on a goroutine that
-	// DirRespCache.LookupOrLoad deliberately lets outlive this call -- it
-	// detaches cancellation so a caller that goes away does not waste the
-	// query other waiters are relying on -- while tj is this function's
-	// *named return*. Every `return nil, err` below therefore assigns nil to
-	// the very variable such a goroutine would be dereferencing, and
-	// tj.cacheMode on a nil tj is a segfault at offset 0x318 rather than a
-	// read of `false`.
-	cacheMode := tj.cacheMode
-	dirFlavor := NewDirRespFlavor(httpMethod, cacheMode, copyUrl.RawQuery)
 	// A download against a directorless federation resolves locally and pays no
 	// round trip: it addresses the object to the host the user named and lets
 	// the origin's own rejection say what credential the namespace wants.  An
@@ -2235,13 +2255,11 @@ func (tc *TransferClient) NewTransferJob(ctx context.Context, remoteUrl *url.URL
 	// it still asks first.
 	if directorless && !upload {
 		dirResp, err = resolveForRequest(tj.ctx, &copyUrl, httpMethod, "", tj.cacheMode)
-	} else if tc.engine != nil && tc.engine.dirRespCache != nil {
-		dirResp, err = tc.engine.dirRespCache.LookupOrLoad(tj.ctx, copyUrl.FedInfo.DiscoveryEndpoint, dirFlavor, copyUrl.Path, func(ctx context.Context) (server_structs.DirectorResponse, string, error) {
-			resp, qErr := getDirectorInfoForPath(ctx, copyUrlRef, httpMethod, "", cacheMode)
-			return resp, resp.XPelNsHdr.Namespace, qErr
-		})
 	} else {
-		dirResp, err = getDirectorInfoForPath(tj.ctx, &copyUrl, httpMethod, "", tj.cacheMode)
+		// tj is safe to read here: directorInfo evaluates its arguments now,
+		// and the loader it may leave running captures only those (see
+		// cachedDirectorInfo).
+		dirResp, err = tc.engine.directorInfo(tj.ctx, &copyUrl, httpMethod, "", tj.cacheMode)
 	}
 	if err != nil {
 		// If director query failed but we have explicit caches, create a minimal response and continue
@@ -2297,18 +2315,9 @@ func (tc *TransferClient) NewTransferJob(ctx context.Context, remoteUrl *url.URL
 			// so this asks again -- but the answer holds for every object
 			// in the namespace that this same credential reaches, and a
 			// token-protected namespace would otherwise spend a director
-			// round trip on every single transfer.  Cache it under a
-			// credential-scoped flavor: another token (or none) keys
-			// elsewhere and never receives this answer.
-			authFlavor := dirFlavor.WithCredential(contents)
-			if tc.engine != nil && tc.engine.dirRespCache != nil {
-				dirResp, err = tc.engine.dirRespCache.LookupOrLoad(tj.ctx, copyUrl.FedInfo.DiscoveryEndpoint, authFlavor, copyUrl.Path, func(ctx context.Context) (server_structs.DirectorResponse, string, error) {
-					resp, qErr := getDirectorInfoForPath(ctx, copyUrlRef, httpMethod, contents, cacheMode)
-					return resp, resp.XPelNsHdr.Namespace, qErr
-				})
-			} else {
-				dirResp, err = getDirectorInfoForPath(tj.ctx, &copyUrl, httpMethod, contents, tj.cacheMode)
-			}
+			// round trip on every single transfer.  directorInfo keys it by
+			// the credential: another token (or none) never receives it.
+			dirResp, err = tc.engine.directorInfo(tj.ctx, &copyUrl, httpMethod, contents, tj.cacheMode)
 			if err != nil {
 				var sce *StatusCodeError
 				if errors.As(err, &sce) {
@@ -2393,15 +2402,7 @@ func (tc *TransferClient) NewPrestageJob(ctx context.Context, remoteUrl *url.URL
 
 	tj.directorUrl = pelicanURL.FedInfo.DirectorEndpoint
 
-	var dirResp server_structs.DirectorResponse
-	if tc.engine != nil && tc.engine.dirRespCache != nil {
-		dirResp, err = tc.engine.dirRespCache.LookupOrLoad(tj.ctx, pelicanURL.FedInfo.DiscoveryEndpoint, NewDirRespFlavor(http.MethodGet, false, pelicanURL.RawQuery), pelicanURL.Path, func(ctx context.Context) (server_structs.DirectorResponse, string, error) {
-			resp, qErr := getDirectorInfoForPath(ctx, pelicanURL, http.MethodGet, "", false)
-			return resp, resp.XPelNsHdr.Namespace, qErr
-		})
-	} else {
-		dirResp, err = getDirectorInfoForPath(tj.ctx, pelicanURL, http.MethodGet, "", false)
-	}
+	dirResp, err := tc.engine.directorInfo(tj.ctx, pelicanURL, http.MethodGet, "", false)
 	if err != nil {
 		log.Errorln(err)
 		err = errors.Wrapf(err, "failed to get namespace information for remote URL %s", remoteUrl.String())
@@ -2417,9 +2418,11 @@ func (tc *TransferClient) NewPrestageJob(ctx context.Context, remoteUrl *url.URL
 			return nil, errors.Wrap(err, "failed to get token for transfer")
 		}
 
-		// The director response may change if it's given a token; let's repeat the query.
+		// The director response may change if it's given a token; let's repeat
+		// the query.  Keyed by the credential, a second prefix reached by the
+		// same token costs nothing.
 		if contents != "" {
-			dirResp, err = getDirectorInfoForPath(tj.ctx, pelicanURL, http.MethodGet, contents, false)
+			dirResp, err = tc.engine.directorInfo(tj.ctx, pelicanURL, http.MethodGet, contents, false)
 			if err != nil {
 				log.Errorln(err)
 				err = errors.Wrapf(err, "failed to get namespace information for remote URL %s", remoteUrl.String())
@@ -2427,9 +2430,6 @@ func (tc *TransferClient) NewPrestageJob(ctx context.Context, remoteUrl *url.URL
 			}
 			tj.dirResp = dirResp
 			tj.token.SetDirectorResponse(&dirResp)
-			if tc.engine != nil && tc.engine.dirRespCache != nil && dirResp.XPelNsHdr.Namespace != "" {
-				tc.engine.dirRespCache.Store(pelicanURL.FedInfo.DiscoveryEndpoint, NewDirRespFlavor(http.MethodGet, false, pelicanURL.RawQuery).WithCredential(contents), dirResp.XPelNsHdr.Namespace, pelicanURL.Path, dirResp)
-			}
 		}
 	} else {
 		tj.token = nil
@@ -2515,33 +2515,25 @@ func (tc *TransferClient) NewCopyJob(ctx context.Context, src *url.URL, dest *ur
 	// If the director doesn't know about COPY (old director) or no origins support
 	// it, fall back to PUT which matches the pre-TPC behavior.
 	tj.directorUrl = copyDestUrl.FedInfo.DirectorEndpoint
-	var dirResp server_structs.DirectorResponse
-	destVerb := "COPY"
-	// The TPC destination flavor, pinned to COPY even when the query below
-	// falls back to PUT: the fallback is part of answering "where may this
-	// third-party copy write?", and only this resolution asks that question.
-	// Pinning it keeps lookup and store on one key, and keeps the entry from
-	// ever answering a plain PUT -- which would be a different question.
-	destFlavor := NewDirRespFlavor(destVerb, false, copyDestUrl.RawQuery)
-	if tc.engine != nil && tc.engine.dirRespCache != nil {
-		copyDestUrlRef := &copyDestUrl
-		dirResp, err = tc.engine.dirRespCache.LookupOrLoad(tj.ctx, copyDestUrl.FedInfo.DiscoveryEndpoint, destFlavor, copyDestUrl.Path, func(ctx context.Context) (server_structs.DirectorResponse, string, error) {
-			resp, qErr := getDirectorInfoForPath(ctx, copyDestUrlRef, destVerb, "", false)
+	// The answer is cached under COPY whichever verb produced it: the PUT
+	// fallback is part of answering "where may this third-party copy write?",
+	// and only this resolution asks that question.  One key for lookup and
+	// store also keeps the entry from ever answering a plain PUT -- a
+	// different question.  The fallback lives inside the loader, so each query
+	// that is actually made works out its own verb and nothing outside it has
+	// to remember which one succeeded.
+	copyDestUrlRef := &copyDestUrl
+	destFlavor := NewDirRespFlavor("COPY", false, copyDestUrl.RawQuery)
+	destDirectorInfo := func(ctx context.Context, token string) (server_structs.DirectorResponse, error) {
+		return tc.engine.cachedDirectorInfo(ctx, copyDestUrlRef, destFlavor.WithCredential(token), func(ctx context.Context) (server_structs.DirectorResponse, error) {
+			resp, qErr := getDirectorInfoForPath(ctx, copyDestUrlRef, "COPY", token, false)
 			if qErr != nil {
-				// Fall back to PUT if COPY is not supported by the director
-				destVerb = http.MethodPut
-				resp, qErr = getDirectorInfoForPath(ctx, copyDestUrlRef, destVerb, "", false)
+				resp, qErr = getDirectorInfoForPath(ctx, copyDestUrlRef, http.MethodPut, token, false)
 			}
-			return resp, resp.XPelNsHdr.Namespace, qErr
+			return resp, qErr
 		})
-	} else {
-		dirResp, err = GetDirectorInfoForPath(tj.ctx, &copyDestUrl, destVerb, "")
-		if err != nil {
-			// Fall back to PUT if COPY is not supported by the director
-			destVerb = http.MethodPut
-			dirResp, err = GetDirectorInfoForPath(tj.ctx, &copyDestUrl, destVerb, "")
-		}
 	}
+	dirResp, err := destDirectorInfo(tj.ctx, "")
 	if err != nil {
 		log.Errorln(err)
 		err = errors.Wrapf(err, "failed to get namespace information for destination URL %s", dest.String())
@@ -2558,7 +2550,7 @@ func (tc *TransferClient) NewCopyJob(ctx context.Context, src *url.URL, dest *ur
 			return nil, err
 		}
 		if contents != "" {
-			dirResp, err = GetDirectorInfoForPath(tj.ctx, &copyDestUrl, destVerb, contents)
+			dirResp, err = destDirectorInfo(tj.ctx, contents)
 			if err != nil {
 				log.Errorln(err)
 				err = errors.Wrapf(err, "failed to get namespace information for destination URL %s", dest.String())
@@ -2566,24 +2558,11 @@ func (tc *TransferClient) NewCopyJob(ctx context.Context, src *url.URL, dest *ur
 			}
 			tj.destDirResp = dirResp
 			tj.token.SetDirectorResponse(&dirResp)
-			if tc.engine != nil && tc.engine.dirRespCache != nil && dirResp.XPelNsHdr.Namespace != "" {
-				tc.engine.dirRespCache.Store(copyDestUrl.FedInfo.DiscoveryEndpoint, destFlavor.WithCredential(contents), dirResp.XPelNsHdr.Namespace, copyDestUrl.Path, dirResp)
-			}
 		}
 	}
 
 	// Resolve the source director information, using the cache when available.
-	var srcDirResp server_structs.DirectorResponse
-	if tc.engine != nil && tc.engine.dirRespCache != nil {
-		copySrcUrlRef := &copySrcUrl
-		srcFlavor := NewDirRespFlavor(http.MethodGet, false, copySrcUrl.RawQuery)
-		srcDirResp, err = tc.engine.dirRespCache.LookupOrLoad(tj.ctx, copySrcUrl.FedInfo.DiscoveryEndpoint, srcFlavor, copySrcUrl.Path, func(ctx context.Context) (server_structs.DirectorResponse, string, error) {
-			resp, qErr := getDirectorInfoForPath(ctx, copySrcUrlRef, http.MethodGet, "", false)
-			return resp, resp.XPelNsHdr.Namespace, qErr
-		})
-	} else {
-		srcDirResp, err = GetDirectorInfoForPath(tj.ctx, &copySrcUrl, http.MethodGet, "")
-	}
+	srcDirResp, err := tc.engine.directorInfo(tj.ctx, &copySrcUrl, http.MethodGet, "", false)
 	if err != nil {
 		log.Errorln(err)
 		err = errors.Wrapf(err, "failed to get namespace information for source URL %s", src.String())
@@ -2599,7 +2578,7 @@ func (tc *TransferClient) NewCopyJob(ctx context.Context, src *url.URL, dest *ur
 			return nil, err
 		}
 		if contents != "" {
-			srcDirResp, err = GetDirectorInfoForPath(tj.ctx, &copySrcUrl, http.MethodGet, contents)
+			srcDirResp, err = tc.engine.directorInfo(tj.ctx, &copySrcUrl, http.MethodGet, contents, false)
 			if err != nil {
 				log.Errorln(err)
 				err = errors.Wrapf(err, "failed to get namespace information for source URL %s", src.String())
@@ -2607,9 +2586,6 @@ func (tc *TransferClient) NewCopyJob(ctx context.Context, src *url.URL, dest *ur
 			}
 			tj.srcDirResp = srcDirResp
 			tj.srcToken.SetDirectorResponse(&srcDirResp)
-			if tc.engine != nil && tc.engine.dirRespCache != nil && srcDirResp.XPelNsHdr.Namespace != "" {
-				tc.engine.dirRespCache.Store(copySrcUrl.FedInfo.DiscoveryEndpoint, NewDirRespFlavor(http.MethodGet, false, copySrcUrl.RawQuery).WithCredential(contents), srcDirResp.XPelNsHdr.Namespace, copySrcUrl.Path, srcDirResp)
-			}
 		}
 	} else {
 		tj.srcToken = nil
@@ -2688,13 +2664,8 @@ func (tc *TransferClient) CacheInfo(ctx context.Context, remoteUrl *url.URL, opt
 	directorless := pelicanURL.FedInfo.DirectorEndpoint == "" && pelicanURL.FedInfo.DiscoveryEndpoint != ""
 	if directorless {
 		dirResp, err = resolveForRequest(ctx, pelicanURL, http.MethodGet, "", false)
-	} else if tc.engine != nil && tc.engine.dirRespCache != nil {
-		dirResp, err = tc.engine.dirRespCache.LookupOrLoad(ctx, pelicanURL.FedInfo.DiscoveryEndpoint, NewDirRespFlavor(http.MethodGet, false, pelicanURL.RawQuery), pelicanURL.Path, func(lCtx context.Context) (server_structs.DirectorResponse, string, error) {
-			resp, qErr := getDirectorInfoForPath(lCtx, pelicanURL, http.MethodGet, "", false)
-			return resp, resp.XPelNsHdr.Namespace, qErr
-		})
 	} else {
-		dirResp, err = getDirectorInfoForPath(ctx, pelicanURL, http.MethodGet, "", false)
+		dirResp, err = tc.engine.directorInfo(ctx, pelicanURL, http.MethodGet, "", false)
 	}
 	if err != nil {
 		log.Errorln(err)
@@ -2711,18 +2682,17 @@ func (tc *TransferClient) CacheInfo(ctx context.Context, remoteUrl *url.URL, opt
 			return
 		}
 
-		// The director response may change if it's given a token; let's repeat the query.
+		// The director response may change if it's given a token; let's repeat
+		// the query.  Keyed by the credential, the same token asking about the
+		// same namespace again costs nothing.
 		if contents != "" {
-			dirResp, err = getDirectorInfoForPath(ctx, pelicanURL, http.MethodGet, contents, false)
+			dirResp, err = tc.engine.directorInfo(ctx, pelicanURL, http.MethodGet, contents, false)
 			if err != nil {
 				log.Errorln(err)
 				err = errors.Wrapf(err, "failed to get namespace information for remote URL %s", remoteUrl.String())
 				return
 			}
 			token.SetDirectorResponse(&dirResp)
-			if tc.engine != nil && tc.engine.dirRespCache != nil && dirResp.XPelNsHdr.Namespace != "" {
-				tc.engine.dirRespCache.Store(pelicanURL.FedInfo.DiscoveryEndpoint, NewDirRespFlavor(http.MethodGet, false, pelicanURL.RawQuery).WithCredential(contents), dirResp.XPelNsHdr.Namespace, pelicanURL.Path, dirResp)
-			}
 		}
 	} else if !directorless {
 		// Nothing has asked yet, so "no token required" is not a fact; keep the

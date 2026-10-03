@@ -824,7 +824,10 @@ func (lc *LocalCache) Stat(path, token string) (uint64, error) {
 	dUrl := *lc.directorURL
 	dUrl.Path = path
 	dUrl.Scheme = "pelican"
-	statInfo, err := client.DoStat(context.Background(), dUrl.String(), client.WithToken(token))
+	// The cache holds an engine; going through it means this stat reuses the
+	// director response the last download of the namespace was given instead
+	// of asking again for every stat.
+	statInfo, err := lc.te.Stat(lc.ctx, dUrl.String(), client.WithToken(token))
 	if err != nil {
 		return 0, err
 	}

@@ -21,6 +21,7 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -244,17 +245,52 @@ func prestageMain(cmd *cobra.Command, args []string) {
 
 	lastSrc := ""
 
+	// One engine for the whole command, not one per prefix; see the note in
+	// object_get.go for why the director's answer has to outlive a source.
+	engine, err := client.NewTransferEngine(ctx)
+	if err != nil {
+		log.Errorln("Failed to create transfer engine:", err)
+		os.Exit(1)
+	}
+	defer func() {
+		if err := engine.Shutdown(); err != nil {
+			log.Errorln("Failure when shutting down transfer engine:", err)
+		}
+	}()
+
+	// Validate every prefix before anything is submitted, so a bad one still
+	// exits without having started a prestage.
 	for _, src := range args {
 		if !pelican_url.IsPelicanURL(src) {
 			log.Errorln("Provided URL is not a valid Pelican URL:", src)
 			os.Exit(1)
 		}
-		if _, err = client.DoPrestage(ctx, src,
-			client.WithCallback(pb.callback), client.WithTokenLocation(tokenLocation),
-			client.WithCaches(caches...)); err != nil {
-			lastSrc = src
-			break
-		}
+	}
+
+	options := []client.TransferOption{
+		client.WithCallback(pb.callback),
+		client.WithTokenLocation(tokenLocation),
+		client.WithCaches(caches...),
+	}
+
+	tc, err := engine.NewClient(options...)
+	if err != nil {
+		log.Errorln("Failed to create transfer client:", err)
+		os.Exit(1)
+	}
+
+	var failedIdx int
+	_, failedIdx, err = submitAndDrain(ctx, tc, args,
+		func(ctx context.Context, src string) (*client.TransferJob, error) {
+			pUrl, parseErr := pelican_url.Parse(src,
+				[]pelican_url.ParseOption{pelican_url.ValidateQueryParams(true), pelican_url.AllowUnknownQueryParams(true)}, nil)
+			if parseErr != nil {
+				return nil, errors.Wrapf(parseErr, "failed to parse source URL: %s", src)
+			}
+			return tc.NewPrestageJob(ctx, pUrl.GetRawUrl(), options...)
+		})
+	if failedIdx >= 0 {
+		lastSrc = args[failedIdx]
 	}
 
 	// Exit with failure
