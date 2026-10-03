@@ -20,6 +20,7 @@ package client_agent
 
 import (
 	"context"
+	"net/url"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -32,6 +33,7 @@ import (
 	"github.com/pelicanplatform/pelican/client"
 	pelican_config "github.com/pelicanplatform/pelican/config"
 	"github.com/pelicanplatform/pelican/param"
+	"github.com/pelicanplatform/pelican/pelican_url"
 )
 
 // Transfer represents an individual file transfer
@@ -98,6 +100,170 @@ type TransferManager struct {
 	nextSubID              int
 	backgroundTasksStarted bool
 	onJobTerminal          func(*TransferJob)
+
+	// The transfer engine every transfer runs on, built once and kept for
+	// the life of the manager.  Guarded by its own lock rather than mu,
+	// which transfer bookkeeping holds far too often to also serialize
+	// engine construction behind.
+	engineMu  sync.Mutex
+	engine    *client.TransferEngine
+	engineErr error
+}
+
+// transferEngine returns the manager's shared transfer engine, building it on
+// first use.
+//
+// It cannot be built in NewTransferManager: an engine refuses to start before
+// the client is initialized, and a manager is routinely constructed first.
+//
+// The pool is sized so that no transfer is worse off for sharing. The manager
+// runs at most maxJobs transfers at once, each of which used to own an engine
+// with Client.WorkerCount workers to itself, and a recursive transfer can use
+// the whole pool; a single pool of the default size would have capped every
+// transfer in the agent at what one of them used to get.
+func (tm *TransferManager) transferEngine() (*client.TransferEngine, error) {
+	tm.engineMu.Lock()
+	defer tm.engineMu.Unlock()
+	if tm.engine != nil || tm.engineErr != nil {
+		return tm.engine, tm.engineErr
+	}
+	workers := param.Client_WorkerCount.GetInt()
+	if workers <= 0 {
+		workers = 1
+	}
+	tm.engine, tm.engineErr = client.NewTransferEngine(tm.ctx, client.WithWorkerCount(workers*tm.maxJobs))
+	if tm.engineErr != nil {
+		log.Errorf("Failed to create the transfer engine: %v", tm.engineErr)
+	}
+	return tm.engine, tm.engineErr
+}
+
+// shutdownEngine stops the shared engine if one was ever built.
+func (tm *TransferManager) shutdownEngine() {
+	tm.engineMu.Lock()
+	te := tm.engine
+	tm.engine = nil
+	tm.engineMu.Unlock()
+	if te == nil {
+		return
+	}
+	if err := te.Shutdown(); err != nil && !errors.Is(err, context.Canceled) {
+		log.Warnf("Transfer engine returned an error during shutdown: %v", err)
+	}
+}
+
+// runTransfer performs one transfer on the manager's shared engine.
+//
+// Each transfer gets its own TransferClient -- they are cheap, and the results
+// of one transfer must not arrive on another's channel -- but the engine, and
+// with it the director responses it has already been given, is shared across
+// every transfer the agent ever runs.
+func (tm *TransferManager) runTransfer(ctx context.Context, transfer *Transfer, options []client.TransferOption) (results []client.TransferResults, err error) {
+	te, err := tm.transferEngine()
+	if err != nil {
+		return nil, err
+	}
+
+	tc, err := te.NewClient(options...)
+	if err != nil {
+		return nil, err
+	}
+
+	tj, err := tm.newJobForTransfer(ctx, te, tc, transfer, options)
+	if err != nil {
+		// Shutting the client down rather than cancelling it is what retires
+		// it from the engine; a cancelled client is never reaped.
+		_, _ = tc.Shutdown()
+		return nil, err
+	}
+	if err = tc.Submit(tj); err != nil {
+		_, _ = tc.Shutdown()
+		return nil, err
+	}
+
+	results, err = tc.Shutdown()
+	if err == nil {
+		if _, lookupErr := tj.GetLookupStatus(); lookupErr != nil {
+			err = lookupErr
+		}
+	}
+	for _, result := range results {
+		if err == nil && result.Error != nil {
+			err = result.Error
+		}
+	}
+	return results, unwrapSingleTransferError(err)
+}
+
+// newJobForTransfer turns one requested transfer into a job on tc.
+func (tm *TransferManager) newJobForTransfer(ctx context.Context, te *client.TransferEngine, tc *client.TransferClient, transfer *Transfer, options []client.TransferOption) (*client.TransferJob, error) {
+	switch transfer.Operation {
+	case "get":
+		plan, err := te.PlanDownload(ctx, transfer.Source, transfer.Destination, transfer.Recursive, options...)
+		if err != nil {
+			return nil, err
+		}
+		return tc.NewTransferJob(ctx, plan.RemoteURL, plan.LocalPath, false, plan.Recursive)
+	case "put":
+		plan, err := te.PlanUpload(ctx, transfer.Source, transfer.Destination, transfer.Recursive, options...)
+		if err != nil {
+			return nil, err
+		}
+		return tc.NewTransferJob(ctx, plan.RemoteURL, plan.LocalPath, true, plan.Recursive, options...)
+	case "copy":
+		// Which way a copy runs is read off the schemes, exactly as the
+		// command line reads it.
+		parsedSrc, err := url.Parse(transfer.Source)
+		if err != nil {
+			return nil, errors.Wrap(err, "failed to parse source URL")
+		}
+		parsedDest, err := url.Parse(transfer.Destination)
+		if err != nil {
+			return nil, errors.Wrap(err, "failed to parse destination URL")
+		}
+		isPut := pelican_url.IsPelicanScheme(parsedDest.Scheme)
+		isGet := pelican_url.IsPelicanScheme(parsedSrc.Scheme)
+		switch {
+		case isPut && isGet:
+			return tc.NewCopyJob(ctx, parsedSrc, parsedDest, transfer.Recursive, options...)
+		case isPut:
+			plan, planErr := te.PlanUpload(ctx, parsedSrc.Path, transfer.Destination, transfer.Recursive, options...)
+			if planErr != nil {
+				return nil, planErr
+			}
+			return tc.NewTransferJob(ctx, plan.RemoteURL, plan.LocalPath, true, plan.Recursive, options...)
+		case isGet:
+			plan, planErr := te.PlanDownload(ctx, transfer.Source, parsedDest.Path, transfer.Recursive, options...)
+			if planErr != nil {
+				return nil, planErr
+			}
+			return tc.NewTransferJob(ctx, plan.RemoteURL, plan.LocalPath, false, plan.Recursive)
+		default:
+			return nil, errors.New("unable to determine direction of transfer.  Either source or destination must be a pelican/osdf URL")
+		}
+	case "prestage":
+		pUrl, err := pelican_url.Parse(transfer.Source,
+			[]pelican_url.ParseOption{pelican_url.ValidateQueryParams(true), pelican_url.AllowUnknownQueryParams(true)}, nil)
+		if err != nil {
+			return nil, errors.Wrapf(err, "failed to parse source URL: %s", transfer.Source)
+		}
+		return tc.NewPrestageJob(ctx, pUrl.GetRawUrl(), options...)
+	default:
+		return nil, errors.Errorf("unknown operation: %s", transfer.Operation)
+	}
+}
+
+// unwrapSingleTransferError keeps the error text the single-object helpers
+// produce: one failed attempt reads better on its own than wrapped twice.
+func unwrapSingleTransferError(err error) error {
+	var xferErrs *client.TransferErrors
+	if errors.As(err, &xferErrs) && len(xferErrs.Unwrap()) == 1 {
+		var attemptErr *client.TransferAttemptError
+		if errors.As(xferErrs.Unwrap()[0], &attemptErr) {
+			return attemptErr
+		}
+	}
+	return err
 }
 
 // SetJobCompletionCallback registers a function invoked exactly once per job
@@ -589,22 +755,10 @@ func (tm *TransferManager) executeTransfer(job *TransferJob, transfer *Transfer,
 		client.WithRejectCollections(!transfer.Recursive),
 	}, options...)
 
-	var err error
-	var results []client.TransferResults
-
-	// Execute the appropriate transfer operation
-	switch transfer.Operation {
-	case "get":
-		results, err = client.DoGet(transfer.ctx, transfer.Source, transfer.Destination, transfer.Recursive, options...)
-	case "put":
-		results, err = client.DoPut(transfer.ctx, transfer.Source, transfer.Destination, transfer.Recursive, options...)
-	case "copy":
-		results, err = client.DoCopy(transfer.ctx, transfer.Source, transfer.Destination, transfer.Recursive, options...)
-	case "prestage":
-		results, err = client.DoPrestage(transfer.ctx, transfer.Source, options...)
-	default:
-		err = errors.Errorf("unknown operation: %s", transfer.Operation)
-	}
+	// Every transfer runs on the manager's shared engine, so the agent asks
+	// the director about a namespace once rather than once per transfer for
+	// as long as the answer is good.
+	results, err := tm.runTransfer(transfer.ctx, transfer, options)
 
 	completedAt := time.Now()
 	tm.mu.Lock()
@@ -1171,6 +1325,8 @@ func (tm *TransferManager) Shutdown() error {
 
 	// Cancel context to signal all background goroutines to stop
 	tm.cancel()
+
+	tm.shutdownEngine()
 
 	// If this manager owns its errgroup, no caller is waiting on the
 	// background goroutines, so Shutdown must block until they have all
