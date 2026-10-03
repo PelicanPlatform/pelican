@@ -185,12 +185,12 @@ func TestGetAdsForPath(t *testing.T) {
 	o2Slice := []server_structs.NamespaceAd{nsAd2, nsAd3}
 	c1Slice := []server_structs.NamespaceAd{nsAd1, nsAd2, nsAdTopoOnly}
 	topoSlice := []server_structs.NamespaceAd{nsAdTopo1, nsAdTopoOnly}
-	recordAd(context.Background(), originAd2, &o2Slice)
-	recordAd(context.Background(), originAd1, &o1Slice)
+	recordAd(context.Background(), originAd2, &o2Slice, true)
+	recordAd(context.Background(), originAd1, &o1Slice, true)
 	// Add a server from Topology that serves /chtc namespace
-	recordAd(context.Background(), originAdTopo1, &topoSlice)
-	recordAd(context.Background(), cacheAd1, &c1Slice)
-	recordAd(context.Background(), cacheAd2, &o1Slice)
+	recordAd(context.Background(), originAdTopo1, &topoSlice, true)
+	recordAd(context.Background(), cacheAd1, &c1Slice, true)
+	recordAd(context.Background(), cacheAd2, &o1Slice, true)
 
 	testCases := []struct {
 		name            string
