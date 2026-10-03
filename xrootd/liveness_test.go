@@ -479,3 +479,11 @@ func TestLaunchXrootdLivenessCheckDisabled(t *testing.T) {
 	cancel()
 	require.NoError(t, egrp.Wait())
 }
+
+// Seams for the package's external test files.  They cannot live in package xrootd:
+// fed_test_utils reaches back into xrootd through launchers, so importing it from inside
+// the package is an import cycle.
+var (
+	ProbeXrootdEndpoint   = probeXrootdEndpoint
+	XrootdLivenessAddress = xrootdLivenessAddress
+)

@@ -21,6 +21,7 @@
 package xrootd_test
 
 import (
+	"context"
 	"os"
 	"syscall"
 	"testing"
@@ -31,6 +32,7 @@ import (
 	"github.com/pelicanplatform/pelican/fed_test_utils"
 	"github.com/pelicanplatform/pelican/server_utils"
 	"github.com/pelicanplatform/pelican/test_utils"
+	"github.com/pelicanplatform/pelican/xrootd"
 )
 
 // livenessFedConfig is a minimal origin export plus the hidden liveness knobs, shortened so
@@ -56,6 +58,46 @@ func livenessProcessExists(pid int) bool {
 		return false
 	}
 	return process.Signal(syscall.Signal(0)) == nil
+}
+
+// healthyLivenessFedConfig is the same export without the shortened liveness knobs: the
+// shipped ten-minute window never elapses during the test, so the monitor cannot interfere
+// with the probe this test performs by hand.
+const healthyLivenessFedConfig = `
+Origin:
+  StorageType: "posix"
+  Exports:
+    - StoragePrefix: /<SHOULD BE OVERRIDDEN>
+      FederationPrefix: /test-namespace
+      Capabilities: ["PublicReads", "Writes", "DirectReads", "Listings"]
+`
+
+// TestXRootDLivenessProbeAcceptsHealthyXrootd is the other half of the check: a working
+// XRootD has to pass the probe.  Everything else here exercises the unresponsive side, so
+// a probe that could never succeed -- because the data port stopped speaking TLS, say, or
+// because the address it resolves is not the one XRootD listens on -- would look perfectly
+// healthy in the rest of the suite while shutting down every origin and cache in the field.
+func TestXRootDLivenessProbeAcceptsHealthyXrootd(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
+	server_utils.ResetTestState()
+	t.Cleanup(server_utils.ResetTestState)
+
+	fed_test_utils.NewFedTest(t, healthyLivenessFedConfig)
+
+	for _, role := range []struct {
+		name    string
+		isCache bool
+	}{
+		{"origin", false},
+		{"cache", true},
+	} {
+		t.Run(role.name, func(t *testing.T) {
+			addr, err := xrootd.XrootdLivenessAddress(role.isCache)
+			require.NoError(t, err)
+			require.NoError(t, xrootd.ProbeXrootdEndpoint(context.Background(), addr, 30*time.Second),
+				"a healthy XRootD must answer the liveness probe")
+		})
+	}
 }
 
 // TestXRootDLivenessKillsHungProcess wedges XRootD with SIGSTOP -- the one way to stall it
