@@ -1767,7 +1767,10 @@ func (te *TransferEngine) Close() {
 }
 
 // If we've detected a job is done, clean up the active job state map
-func (te *TransferEngine) finishJob(activeJobs *map[uuid.UUID][]*TransferJob, job *TransferJob, id uuid.UUID) {
+// Returns true when this retires the client itself -- its work channel was
+// already closed and that was its last job -- so the caller can drop the
+// engine's bookkeeping for it once nothing is left queued.
+func (te *TransferEngine) finishJob(activeJobs *map[uuid.UUID][]*TransferJob, job *TransferJob, id uuid.UUID) (clientRetired bool) {
 	// Retiring the client's last job -- or being handed a job that is no longer
 	// in the list at all -- has to leave no entry behind. Storing an
 	// empty-but-non-nil slice would make the client look permanently active:
@@ -1785,6 +1788,7 @@ func (te *TransferEngine) finishJob(activeJobs *map[uuid.UUID][]*TransferJob, jo
 			// for the client -- a clean shutdown of the client.
 			if te.workMap[id] == nil {
 				close(te.resultsMap[id])
+				clientRetired = true
 				log.Debugln("Client", id.String(), "has no more work and is finished shutting down")
 			}
 		}()
@@ -1800,6 +1804,7 @@ func (te *TransferEngine) finishJob(activeJobs *map[uuid.UUID][]*TransferJob, jo
 		(*activeJobs)[id] = newJobList
 		log.Debugln("Job", job.ID(), "is done for client", id.String(), " which has", len(newJobList), "jobs remaining")
 	}
+	return
 }
 
 // Launches a helper goroutine that ensures completed
@@ -1808,6 +1813,14 @@ func (te *TransferEngine) finishJob(activeJobs *map[uuid.UUID][]*TransferJob, jo
 func (te *TransferEngine) runMux() error {
 	tmpResults := make(map[uuid.UUID][]*TransferResults)
 	activeJobs := make(map[uuid.UUID][]*TransferJob)
+	// Clients that have shut down cleanly: work channel closed, last job
+	// retired, results channel closed.  Their entries in the engine's workMap
+	// and resultsMap are dropped below once nothing is left queued for them.
+	// Until that happened these maps only ever grew, so a long-lived engine --
+	// or a command that makes a client per object -- left an entry behind for
+	// every client it ever created, and runMux walked all of them on each pass
+	// through the select.
+	retired := make(map[uuid.UUID]bool)
 	var clientJob *clientTransferJob
 	closing := false
 	closedWorkChan := false
@@ -1816,11 +1829,25 @@ func (te *TransferEngine) runMux() error {
 	for {
 		// The channels we interact with on depend on how many clients and how many results we have.
 		// Since this is dynamic, we can't do a fixed-size case statement and instead need to use reflect.Select.
-		// This helper function iterates through the TransferEngine's internals with a read-lock held, building up
-		// the list of work.
+		// This helper function iterates through the TransferEngine's internals with the client lock held, building up
+		// the list of work.  The lock is exclusive rather than shared because this is also where retired clients are
+		// reaped from the engine's maps.
 		cases, workMap, workKeys, resultsMap, resultsKeys := func() (cases []reflect.SelectCase, workMap map[uuid.UUID]chan *TransferJob, workKeys []uuid.UUID, resultsMap map[uuid.UUID]chan *TransferResults, resultsKeys []uuid.UUID) {
-			te.clientLock.RLock()
-			defer te.clientLock.RUnlock()
+			te.clientLock.Lock()
+			defer te.clientLock.Unlock()
+			// Reap retired clients.  This is deliberately not done at the
+			// moment the results channel is closed: finishJob closes it while
+			// the result that retired the job is still sitting in tmpResults,
+			// and a case built from a deleted entry would be a send on a nil
+			// channel -- a hang rather than an error.  Waiting until the queue
+			// has drained needs no invariant to hold.
+			for id := range retired {
+				if len(tmpResults[id]) == 0 {
+					delete(te.workMap, id)
+					delete(te.resultsMap, id)
+					delete(retired, id)
+				}
+			}
 			workMap = make(map[uuid.UUID]chan *TransferJob, len(te.workMap))
 			ctr := 0
 			workKeys = make(uuid.UUIDs, 0)
@@ -1912,6 +1939,7 @@ func (te *TransferEngine) runMux() error {
 				}()
 				if activeJobs[id] == nil {
 					close(te.resultsMap[id])
+					retired[id] = true
 				}
 				continue
 			}
@@ -1932,7 +1960,9 @@ func (te *TransferEngine) runMux() error {
 			// Test to see if the transfer job is done (true if job-to-file translation
 			// has completed and there are no remaining active transfers)
 			if job.lookupDone.Load() && job.activeXfer.Load() == 0 {
-				te.finishJob(&activeJobs, job, id)
+				if te.finishJob(&activeJobs, job, id) {
+					retired[id] = true
+				}
 			}
 			if len(tmpResults[id]) == 1 {
 				// The last result back to this client has been sent; delete the
@@ -1991,7 +2021,9 @@ func (te *TransferEngine) runMux() error {
 			// happens last -- the lookup finishing or the final result landing --
 			// is what retires the job.
 			if job.job.activeXfer.Load() == 0 {
-				te.finishJob(&activeJobs, job.job, job.uuid)
+				if te.finishJob(&activeJobs, job.job, job.uuid) {
+					retired[job.uuid] = true
+				}
 			}
 		} else if chosen == len(workMap)+len(resultsMap)+5 {
 			// Notification that the engine should shut down
