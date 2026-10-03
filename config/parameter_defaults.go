@@ -39,6 +39,18 @@ var (
 // Server.Hostname, RuntimeDir) must already be set in viper via SetDefault
 // before calling this function, as dependent params read them inline.
 func SetParameterDefaults(v *viper.Viper, isRoot bool, isOSDF bool) {
+	// Cache.Anycast.AddressManagement
+	v.SetDefault(param.Cache_Anycast_AddressManagement.GetName(), "auto")
+	// Cache.Anycast.BGP.LocalASN
+	v.SetDefault(param.Cache_Anycast_BGP_LocalASN.GetName(), 0)
+	// Cache.Anycast.BGP.PeerASN
+	v.SetDefault(param.Cache_Anycast_BGP_PeerASN.GetName(), 0)
+	// Cache.Anycast.BGP.Port
+	v.SetDefault(param.Cache_Anycast_BGP_Port.GetName(), 179)
+	// Cache.Anycast.Enable
+	v.SetDefault(param.Cache_Anycast_Enable.GetName(), false)
+	// Cache.Anycast.ProbeInterval
+	v.SetDefault(param.Cache_Anycast_ProbeInterval.GetName(), "30s")
 	// Cache.BlocksToPrefetch
 	v.SetDefault(param.Cache_BlocksToPrefetch.GetName(), 0)
 	// Cache.ConcurrencyDegradedThreshold
@@ -190,6 +202,8 @@ func SetParameterDefaults(v *viper.Viper, isRoot bool, isOSDF bool) {
 	v.SetDefault(param.Client_MaximumDownloadSpeed.GetName(), 0)
 	// Client.MinimumDownloadSpeed
 	v.SetDefault(param.Client_MinimumDownloadSpeed.GetName(), 102400)
+	// Client.PreferAnycast
+	v.SetDefault(param.Client_PreferAnycast.GetName(), false)
 	// Client.SlowTransferRampupTime
 	v.SetDefault(param.Client_SlowTransferRampupTime.GetName(), "100s")
 	// Client.SlowTransferWindow
