@@ -49,6 +49,11 @@ import (
 // It runs on the goroutine driving the flow, before polling begins, so a
 // handler that blocks delays the user's own approval.
 //
+// It must be safe to call concurrently.  Token acquisition is deduplicated
+// only per destination, so transfers to different namespaces can each start a
+// device flow at the same time, and each calls the handler from its own
+// goroutine.
+//
 // An installed handler REPLACES Pelican's own announcement rather than adding
 // to it: while one is installed the URL is not written to stderr.  An embedder
 // installs a handler precisely because the terminal is not where its user is
