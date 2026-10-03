@@ -601,6 +601,18 @@ func SetXNamespaceHeaderWithCollections(hdr http.Header, collUrl string, bestNSA
 // LongestNSMatch returns the namespace ad whose path is the longest logical prefix of reqPath.
 // For example, for path `/foo/bar/baz` and namespace ads `/foo` & `/foo/bar`, it returns the
 // ad for `/foo/bar`.  Returns nil if no ad matches.
+//
+// The match is on path boundaries, not raw string prefixes: `/foobar` is a
+// sibling of `/foo`, not a child of it.  A stored path is read the same whether
+// or not it carries a trailing slash.
+//
+// The winner is copied out, so a caller may modify what it gets back without
+// reaching into the slice it was given -- director/sort.go relies on that.  The
+// copy is made once, after the winner is known, rather than once per candidate:
+// this runs for every server ad on every director redirect, and a cache
+// advertises the whole federation's namespaces (cache/advertise.go), so the
+// loop body is walked O(caches * namespaces) times per request and must not
+// allocate.
 func LongestNSMatch(reqPath string, namespaceAds []NamespaceAd) *NamespaceAd {
 	// Normalize incoming path if needed --> adding the trailing / makes
 	// basic prefix matching safer
@@ -608,30 +620,33 @@ func LongestNSMatch(reqPath string, namespaceAds []NamespaceAd) *NamespaceAd {
 		reqPath += "/"
 	}
 
-	var bestFedPrefix string
-	var bestNamespace *NamespaceAd
-	for _, ns := range namespaceAds {
-		// Create a copy of ns to avoid reusing the loop variable
-		currentNS := ns
+	bestLen, best := -1, -1
+	for i := range namespaceAds {
+		// TrimSuffix returns a substring rather than a new string, so reading a
+		// stored path in its slashless form costs nothing.
+		nsPath := strings.TrimSuffix(namespaceAds[i].Path, "/")
 
-		// Additionally normalize stored namespace paths
-		nsPath := currentNS.Path
-		if !strings.HasSuffix(currentNS.Path, "/") {
-			nsPath += "/"
-		}
-
-		if !strings.HasPrefix(reqPath, nsPath) {
-			// This namespace doesn't match the request path, skip it
+		// reqPath is known to end in '/', so demanding a '/' at the byte just
+		// past nsPath is the same boundary test that appending a slash to
+		// nsPath and asking for a prefix would make -- without building the
+		// slashed string to ask it with.
+		if len(reqPath) <= len(nsPath) || reqPath[len(nsPath)] != '/' ||
+			reqPath[:len(nsPath)] != nsPath {
 			continue
 		}
 
-		if bestFedPrefix == "" || len(nsPath) > len(bestFedPrefix) {
-			bestFedPrefix = nsPath
-			bestNamespace = &currentNS
+		// Strictly longer wins, so the first ad of a tie is kept, as when the
+		// comparison was between slash-terminated paths.
+		if len(nsPath) > bestLen {
+			bestLen, best = len(nsPath), i
 		}
 	}
 
-	return bestNamespace
+	if best < 0 {
+		return nil
+	}
+	match := namespaceAds[best]
+	return &match
 }
 
 func NewRedirectInfoFromIP(ipAddr string) *RedirectInfo {

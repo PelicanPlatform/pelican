@@ -281,6 +281,38 @@ func TestLongestNSMatch(t *testing.T) {
 			nsAds:    nil,
 			expected: "",
 		},
+		{
+			// The two spellings of one prefix are the same prefix, so neither
+			// outranks the other and the first one listed is kept.
+			name:     "a trailing slash does not make an export deeper than its slashless twin",
+			reqPath:  "/foo/baz",
+			nsAds:    []NamespaceAd{nsAd("/foo"), nsAd("/foo/")},
+			expected: "/foo",
+		},
+		{
+			name:     "matches a request equal to an export stored with a trailing slash",
+			reqPath:  "/foo/bar",
+			nsAds:    []NamespaceAd{nsAd("/foo/bar/")},
+			expected: "/foo/bar/",
+		},
+		{
+			name:     "an export deeper than the request does not match",
+			reqPath:  "/foo",
+			nsAds:    []NamespaceAd{nsAd("/foo/bar")},
+			expected: "",
+		},
+		{
+			name:     "a root export matches the root itself",
+			reqPath:  "/",
+			nsAds:    []NamespaceAd{nsAd("/")},
+			expected: "/",
+		},
+		{
+			name:     "a sibling sharing every byte but the boundary does not match",
+			reqPath:  "/foo/barbaz",
+			nsAds:    []NamespaceAd{nsAd("/foo/bar")},
+			expected: "",
+		},
 	}
 
 	for _, tc := range testCases {
@@ -292,6 +324,71 @@ func TestLongestNSMatch(t *testing.T) {
 			}
 			require.NotNil(t, got)
 			assert.Equal(t, tc.expected, got.Path)
+		})
+	}
+}
+
+// TestLongestNSMatchEmptyExportPath pins that an ad carrying no path at all is
+// read as the root rather than as a prefix that matches nothing: appending a
+// slash to "" is what the slash-normalizing form of this search did.
+func TestLongestNSMatchEmptyExportPath(t *testing.T) {
+	got := LongestNSMatch("/foo/bar", []NamespaceAd{{Path: ""}})
+	require.NotNil(t, got)
+	assert.Equal(t, "", got.Path)
+
+	// ...but it still loses to any export that actually covers the path.
+	got = LongestNSMatch("/foo/bar", []NamespaceAd{{Path: ""}, {Path: "/foo"}})
+	require.NotNil(t, got)
+	assert.Equal(t, "/foo", got.Path)
+}
+
+// TestLongestNSMatchReturnsACopy pins the contract that makes this search safe
+// to call on a shared ad list: callers edit what they get back (director/sort.go
+// strips the trailing slash off the returned path before handing it on), and
+// the ads live in the director's TTL cache, so handing out an interior pointer
+// would let one request mutate what the next one reads.
+func TestLongestNSMatchReturnsACopy(t *testing.T) {
+	nsAds := []NamespaceAd{{Path: "/foo"}, {Path: "/foo/bar"}}
+
+	got := LongestNSMatch("/foo/bar/baz", nsAds)
+	require.NotNil(t, got)
+	require.Equal(t, "/foo/bar", got.Path)
+
+	got.Path = "/clobbered"
+	got.Caps.Writes = true
+
+	assert.Equal(t, "/foo/bar", nsAds[1].Path, "the caller's slice must not be reachable through the result")
+	assert.False(t, nsAds[1].Caps.Writes)
+}
+
+// BenchmarkLongestNSMatch guards the allocation behavior rather than the clock.
+// A cache advertises every namespace in the federation (cache/advertise.go), and
+// the director runs this search once per server ad on every redirect, so an
+// allocation in the loop body is multiplied by caches x namespaces per request.
+// The count below should stay flat as the ad list grows.
+func BenchmarkLongestNSMatch(b *testing.B) {
+	for _, n := range []int{1, 100, 1000} {
+		nsAds := make([]NamespaceAd, 0, n)
+		for i := 0; i < n; i++ {
+			nsAds = append(nsAds, NamespaceAd{Path: fmt.Sprintf("/project%04d/export", i)})
+		}
+		reqPath := nsAds[n-1].Path + "/some/object.dat"
+
+		b.Run(fmt.Sprintf("match/n=%d", n), func(b *testing.B) {
+			b.ReportAllocs()
+			for i := 0; i < b.N; i++ {
+				if LongestNSMatch(reqPath, nsAds) == nil {
+					b.Fatal("expected a match")
+				}
+			}
+		})
+		b.Run(fmt.Sprintf("nomatch/n=%d", n), func(b *testing.B) {
+			b.ReportAllocs()
+			for i := 0; i < b.N; i++ {
+				if LongestNSMatch("/covered/by/nothing", nsAds) != nil {
+					b.Fatal("expected no match")
+				}
+			}
 		})
 	}
 }
