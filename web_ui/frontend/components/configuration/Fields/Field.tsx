@@ -23,6 +23,8 @@ import {
   ParameterInputProps,
   PolicyDefinition,
   PolicyDefinitionForm,
+  TieringTarget,
+  TieringTargetForm,
   StorageDir,
   StorageDirForm,
   StringField,
@@ -223,6 +225,17 @@ const Field = ({
               value={value as StorageDir[]}
               Form={StorageDirForm}
               keyGetter={(v) => v.path}
+            />
+          );
+        case 'TieringTargets':
+          return (
+            <ObjectField
+              focused={focused}
+              onChange={handleChange<TieringTarget[]>}
+              name={name}
+              value={value as TieringTarget[]}
+              Form={TieringTargetForm}
+              keyGetter={(v) => v.providerurl || v.serviceurl + '/' + v.bucket}
             />
           );
         default:

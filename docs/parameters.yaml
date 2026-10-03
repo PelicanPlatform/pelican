@@ -932,6 +932,45 @@ type: stringSlice
 default: none
 components: ["client"]
 ---
+name: Client.FileRedirectRoots
+description: |+
+  A list of filesystem directories under which the client will follow a `file://` redirect
+  from a cache.  Leaving it empty — the default — means the client never follows one, and
+  it does not tell caches that it could.
+
+  A cache whose storage the client already shares (a mounted filesystem the cache also
+  writes to) can answer a request by redirecting to the object's path instead of sending
+  its bytes over the network.  When this is set, the client advertises that it can follow
+  such a redirect, via the `X-Pelican-Accept-Redirect` request header; a cache sends one
+  only to a client that asked for it.
+
+  **Enable this only for caches you trust with local filesystem access.**  Following a
+  `file://` redirect lets the cache choose which local path this client reads, with the
+  privileges of the user running it — a very different thing from a cache choosing which
+  bytes to send.  A compromised or misconfigured cache could point a transfer at any
+  readable file, and in automated contexts (the client agent, HTCondor file transfer, or a
+  transfer whose destination is itself remote) those bytes go on somewhere.
+
+  The configured roots bound that exposure, so name the specific mount point rather than
+  `/`.  Containment is enforced by the operating system against an open handle on each
+  root, not by comparing path strings, so neither `..` nor a symlink inside a root can be
+  used to reach outside it.  A redirect to anything that is not a regular file inside a
+  root is refused.
+
+  Two consequences worth knowing: a symlink inside a root that points to another file in
+  the same root is followed only when it is *relative* — an absolute symlink is refused
+  even when its target is inside the root — and a root reached through a symlinked mount
+  point works whichever spelling of the path the cache sends.
+
+  Example YAML:
+  ```yaml
+  Client:
+    FileRedirectRoots: ["/mnt/pelican-cache/objects"]
+  ```
+type: stringSlice
+default: none
+components: ["client"]
+---
 ############################
 #  ClientAgent-level Configs #
 ############################
@@ -3262,6 +3301,147 @@ type: bool
 default: false
 components: ["cache"]
 hidden: true
+---
+name: Cache.TieringTargets
+description: |+
+  A list of remote storage targets the V2 (persistent) cache tiers objects to.  Once an
+  object is fully downloaded to a local storage directory, the cache uploads it
+  (unencrypted) to one of these targets when the object size meets or exceeds
+  ${Cache.TieringThreshold}; the local copy is then removed and the object is served from
+  the target.
+
+  Targets are object stores, reached through the same library the origin's object backends
+  use: S3 and S3-compatible services (MinIO, Ceph RGW), Google Cloud Storage, and Azure Blob
+  Storage.
+
+  Each entry is an object.  Name the target either with a single provider URL:
+
+  - **ProviderURL** (string): the backend in URL form — `s3://bucket`, `gs://bucket`,
+    `azblob://container`.  Takes precedence over the S3-specific keys below.  Prefer a
+    keyfile to embedding credentials here; anything that is embedded is redacted before
+    the target is logged.
+
+  ...or with the S3-specific keys, which match how the origin's exports are configured:
+
+  - **ServiceUrl** (string): S3 endpoint URL (e.g. `https://s3.us-east-1.amazonaws.com`).
+  - **Region** (string, optional): the S3 region; defaults to `us-east-1`.
+  - **Bucket** (string): the bucket that holds cached objects.
+  - **UrlStyle** (string, optional): `path` (default) or `virtual` bucket addressing.
+
+  The remaining keys apply to every target:
+
+  - **Prefix** (string, optional): a key prefix under which objects are stored.
+  - **AccessKeyfile** (string, optional): file containing the access key ID.
+  - **SecretKeyfile** (string, optional): file containing the secret key.
+    Both keyfiles must be provided together; when omitted, the provider's ambient
+    credential chain is used.
+  - **MaxSize** (string, required): maximum bytes of cache data stored on the target
+    (e.g. "5TB").  Unlike directory targets it cannot be auto-detected.
+  - **HighWaterMarkPercentage** / **LowWaterMarkPercentage** (int, optional): eviction
+    watermarks as a percentage of MaxSize.  When omitted they follow
+    ${Cache.HighWaterMark} and ${Cache.LowWaterMark} if those are expressed as
+    percentages; absolute-byte watermarks are not applied to tiering targets, which fall
+    back to the built-in 90%/80% defaults instead.
+
+  Example YAML:
+  ```yaml
+  Cache:
+    TieringTargets:
+      - ServiceUrl: https://s3.example.com
+        Region: us-east-1
+        Bucket: pelican-cache
+        Prefix: objects
+        MaxSize: 10TB
+        AccessKeyfile: /etc/pelican/s3-access
+        SecretKeyfile: /etc/pelican/s3-secret
+  ```
+
+  **The cache assumes exclusive ownership of the target (or of the configured
+  Prefix within it).**  Its consistency sweep deletes any object under the prefix
+  it does not recognize, and crash recovery aborts all in-progress multipart
+  uploads there — do not share the prefix with other applications or with a
+  second cache instance.
+
+  **Objects on a tiering target are protected differently from objects on local disk.**
+  On disk the cache encrypts every block and authenticates it on read, so tampering
+  and disclosure both require breaking the encryption.  A tiered object is stored as
+  plaintext, and the cache verifies only its size:
+
+  - Anyone who can *read* the target can read every object tiered to it, including
+    objects from namespaces that require a token through Pelican.
+  - Anyone who can *write* the target can replace an object's bytes with content of
+    the same length, and the cache will serve it — with the origin's ETag and
+    checksums attached — without detecting the substitution.  The periodic data-
+    integrity scan does not checksum tiered objects.
+
+  Treat the target as part of the cache's trust boundary: give the cache a
+  dedicated least-privilege credential, keep the bucket or container private (no
+  anonymous or cross-account access), prefer an `https` endpoint, and consider
+  server-side encryption plus versioning or object lock.  Operators who need the
+  on-disk guarantees for a given namespace should not tier it — raise
+  ${Cache.TieringThreshold} above the object sizes involved.
+
+  This setting only has effect when `${Cache.EnableV2}` is true; the cache logs a
+  warning and ignores tiering targets otherwise.
+type: object
+default: none
+components: ["cache"]
+---
+name: Cache.TieringThreshold
+description: |+
+  The minimum object size for the V2 cache to tier a completed object to a storage target
+  configured via ${Cache.TieringTargets}.  Objects smaller than this threshold stay on
+  local storage.  Accepts byte units (e.g. "4MB", "512MB", "1TB"); the suffixes are
+  binary multiples.
+type: string
+default: 4MB
+components: ["cache"]
+---
+name: Cache.TieringDisableRedirect
+description: |+
+  When an object has been tiered to a storage target (${Cache.TieringTargets}), the V2
+  cache by default redirects GET requests to a URL the client can fetch directly from the
+  target, so the bytes never pass through the cache.  Set this to true to proxy them
+  instead.
+
+  Not every target can issue such a URL.  The cache asks each one at startup and proxies
+  for any that cannot, so this setting is only needed to override a target that can.
+
+  Where the URL is a pre-signed one, it is self-authenticating and never carries the
+  client's Pelican bearer token.  Spec-compliant HTTP clients (including Pelican's own
+  client) drop the Authorization header when following a redirect, unless the destination
+  is the host they connected to or a subdomain of it — so when a request carries such a
+  header and the target falls inside the cache's own DNS domain, the cache proxies that
+  request instead of redirecting it, rather than relying on the operator to notice.
+
+  Enable this option (proxy instead of redirect) if you serve private namespaces to clients
+  that forward Authorization even across unrelated hosts, contrary to the specification
+  (e.g. `curl --location-trusted`).
+
+  Note that bytes served by redirect do not pass through the cache, so they are not counted
+  in the cache's transfer monitoring.  Proxying restores that accounting at the cost of
+  moving the data through the cache.
+type: bool
+default: false
+components: ["cache"]
+---
+name: Cache.TieringRedirectExpiry
+description: |+
+  The lifetime of the URLs handed to clients when serving an object directly from a
+  tiering storage target (see ${Cache.TieringDisableRedirect}).
+type: duration
+default: 5m
+components: ["cache"]
+---
+name: Cache.TieringRedirectEvictionHold
+description: |+
+  How long after handing out a redirect URL the referenced object is protected from
+  cache eviction.  This prevents deleting an object out from under a client that is
+  still downloading it directly from the storage target.  Should be at least
+  ${Cache.TieringRedirectExpiry}.
+type: duration
+default: 5m
+components: ["cache"]
 ---
 name: Cache.WorkerCount
 description: |+

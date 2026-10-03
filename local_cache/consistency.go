@@ -309,6 +309,13 @@ func (cc *ConsistencyChecker) Start(ctx context.Context, egrp *errgroup.Group) {
 	egrp.Go(func() error {
 		return cc.dataScanLoop(ctx)
 	})
+
+	// Tiering target reconciliation - runs hourly when tiering targets exist
+	if len(cc.storage.tierTargets) > 0 {
+		egrp.Go(func() error {
+			return cc.tierScanLoop(ctx)
+		})
+	}
 }
 
 // Stop stops the consistency checker
@@ -758,8 +765,10 @@ func (cc *ConsistencyChecker) RunMetadataScan(ctx context.Context, progressCh ch
 
 			// For completed disk objects, verify all required chunk files exist.
 			// In-progress objects may have partial chunks (from byte-range downloads),
-			// so we only check completed objects.
-			if meta.IsDisk() && !meta.Completed.IsZero() {
+			// so we only check completed objects.  Objects resident on a tiering
+			// storage target have no local files at all — they are verified
+			// against the bucket listing by the tiering sweep instead.
+			if meta.IsDisk() && !meta.Completed.IsZero() && !cc.storage.IsTiered(meta.StorageID) {
 				if !cc.allChunkFilesExist(meta, instanceHash) {
 					// Some chunk files are missing - queue DB entry for deletion
 					if len(deletions) < maxDeletionsPerTx {
@@ -1385,6 +1394,13 @@ func (cc *ConsistencyChecker) verifyObjectChecksum(
 	bytesLimiter *rate.Limiter,
 	checksumMismatches, inconsistentBytes, bytesVerified, objectsVerified *int64,
 ) error {
+	// Objects resident on a tiering target have no local data to read back.
+	// The bucket provides its own at-rest durability; the tiering sweep
+	// cross-checks existence and size against metadata instead.
+	if cc.storage.IsTiered(meta.StorageID) {
+		return errChecksumSkipped
+	}
+
 	// For disk storage, check if complete before attempting any checksumming
 	if meta.IsDisk() {
 		complete, err := cc.storage.IsComplete(instanceHash)
@@ -1616,6 +1632,19 @@ func (cc *ConsistencyChecker) VerifyObject(instanceHash InstanceHash) (bool, err
 	}
 	if meta == nil {
 		return false, errors.New("object not found")
+	}
+
+	// tiered objects have no local data; verify existence and size
+	// against the target instead.  Bound the probe so a hung remote endpoint
+	// cannot block VerifyObject indefinitely.
+	if target := cc.storage.getTierTarget(meta.StorageID); target != nil {
+		probeCtx, cancel := context.WithTimeout(context.Background(), tierSweepOpTimeout)
+		defer cancel()
+		size, exists, err := target.objectSize(probeCtx, instanceHash)
+		if err != nil {
+			return false, err
+		}
+		return exists && size == meta.ContentLength, nil
 	}
 
 	// For disk storage, check that all ALLOCATED chunk files exist and object is complete

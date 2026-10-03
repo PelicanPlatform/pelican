@@ -150,6 +150,11 @@ var runtimeConfigurableMap = map[string]bool{
 	"Cache.Throttle.PerOriginPendingSize": false,
 	"Cache.Throttle.PerOriginStarvingPercent": false,
 	"Cache.Throttle.RetryAfter": false,
+	"Cache.TieringDisableRedirect": false,
+	"Cache.TieringRedirectEvictionHold": false,
+	"Cache.TieringRedirectExpiry": false,
+	"Cache.TieringTargets": false,
+	"Cache.TieringThreshold": false,
 	"Cache.Url": false,
 	"Cache.WorkerCount": false,
 	"Cache.XRootDPrefix": false,
@@ -159,6 +164,7 @@ var runtimeConfigurableMap = map[string]bool{
 	"Client.DisableHttpProxy": false,
 	"Client.DisableProxyFallback": false,
 	"Client.EnableOverwrites": false,
+	"Client.FileRedirectRoots": false,
 	"Client.IsPlugin": false,
 	"Client.MaximumDownloadSpeed": false,
 	"Client.MinimumDownloadSpeed": false,
@@ -673,6 +679,7 @@ var stringAccessors = map[string]func(*Config) string{
 	"Cache.RunLocation": func(c *Config) string { return c.Cache.RunLocation },
 	"Cache.SentinelLocation": func(c *Config) string { return c.Cache.SentinelLocation },
 	"Cache.StorageLocation": func(c *Config) string { return c.Cache.StorageLocation },
+	"Cache.TieringThreshold": func(c *Config) string { return c.Cache.TieringThreshold },
 	"Cache.Url": func(c *Config) string { return c.Cache.Url },
 	"Cache.XRootDPrefix": func(c *Config) string { return c.Cache.XRootDPrefix },
 	"ClientAgent.DbLocation": func(c *Config) string { return c.ClientAgent.DbLocation },
@@ -897,6 +904,7 @@ var stringSliceAccessors = map[string]func(*Config) []string{
 	"Cache.DataLocations": func(c *Config) []string { return c.Cache.DataLocations },
 	"Cache.MetaLocations": func(c *Config) []string { return c.Cache.MetaLocations },
 	"Cache.PermittedNamespaces": func(c *Config) []string { return c.Cache.PermittedNamespaces },
+	"Client.FileRedirectRoots": func(c *Config) []string { return c.Client.FileRedirectRoots },
 	"Client.PreferredCaches": func(c *Config) []string { return c.Client.PreferredCaches },
 	"ConfigLocations": func(c *Config) []string { return c.ConfigLocations },
 	"Director.CacheResponseHostnames": func(c *Config) []string { return c.Director.CacheResponseHostnames },
@@ -1115,6 +1123,7 @@ var boolAccessors = map[string]func(*Config) bool{
 	"Cache.EnableV2": func(c *Config) bool { return c.Cache.EnableV2 },
 	"Cache.EnableVoms": func(c *Config) bool { return c.Cache.EnableVoms },
 	"Cache.SelfTest": func(c *Config) bool { return c.Cache.SelfTest },
+	"Cache.TieringDisableRedirect": func(c *Config) bool { return c.Cache.TieringDisableRedirect },
 	"Client.AssumeDirectorServerHeader": func(c *Config) bool { return c.Client.AssumeDirectorServerHeader },
 	"Client.DisableHttpProxy": func(c *Config) bool { return c.Client.DisableHttpProxy },
 	"Client.DisableProxyFallback": func(c *Config) bool { return c.Client.DisableProxyFallback },
@@ -1240,6 +1249,8 @@ var durationAccessors = map[string]func(*Config) time.Duration{
 	"Cache.SelfTestMaxAge": func(c *Config) time.Duration { return c.Cache.SelfTestMaxAge },
 	"Cache.Throttle.EMAWindow": func(c *Config) time.Duration { return c.Cache.Throttle.EMAWindow },
 	"Cache.Throttle.RetryAfter": func(c *Config) time.Duration { return c.Cache.Throttle.RetryAfter },
+	"Cache.TieringRedirectEvictionHold": func(c *Config) time.Duration { return c.Cache.TieringRedirectEvictionHold },
+	"Cache.TieringRedirectExpiry": func(c *Config) time.Duration { return c.Cache.TieringRedirectExpiry },
 	"ClientAgent.IdleTimeout": func(c *Config) time.Duration { return c.ClientAgent.IdleTimeout },
 	"ClientAgent.ProgressUpdateInterval": func(c *Config) time.Duration { return c.ClientAgent.ProgressUpdateInterval },
 	"Client.SlowTransferRampupTime": func(c *Config) time.Duration { return c.Client.SlowTransferRampupTime },
@@ -1474,6 +1485,11 @@ var allParameterNames = []string{
 	"Cache.Throttle.PerOriginPendingSize",
 	"Cache.Throttle.PerOriginStarvingPercent",
 	"Cache.Throttle.RetryAfter",
+	"Cache.TieringDisableRedirect",
+	"Cache.TieringRedirectEvictionHold",
+	"Cache.TieringRedirectExpiry",
+	"Cache.TieringTargets",
+	"Cache.TieringThreshold",
 	"Cache.Url",
 	"Cache.WorkerCount",
 	"Cache.XRootDPrefix",
@@ -1483,6 +1499,7 @@ var allParameterNames = []string{
 	"Client.DisableHttpProxy",
 	"Client.DisableProxyFallback",
 	"Client.EnableOverwrites",
+	"Client.FileRedirectRoots",
 	"Client.IsPlugin",
 	"Client.MaximumDownloadSpeed",
 	"Client.MinimumDownloadSpeed",
@@ -1970,6 +1987,7 @@ var (
 	Cache_RunLocation = StringParam{"Cache.RunLocation"}
 	Cache_SentinelLocation = StringParam{"Cache.SentinelLocation"}
 	Cache_StorageLocation = StringParam{"Cache.StorageLocation"}
+	Cache_TieringThreshold = StringParam{"Cache.TieringThreshold"}
 	Cache_Url = StringParam{"Cache.Url"}
 	Cache_XRootDPrefix = StringParam{"Cache.XRootDPrefix"}
 	ClientAgent_DbLocation = StringParam{"ClientAgent.DbLocation"}
@@ -2166,6 +2184,7 @@ var (
 	Cache_DataLocations = StringSliceParam{"Cache.DataLocations"}
 	Cache_MetaLocations = StringSliceParam{"Cache.MetaLocations"}
 	Cache_PermittedNamespaces = StringSliceParam{"Cache.PermittedNamespaces"}
+	Client_FileRedirectRoots = StringSliceParam{"Client.FileRedirectRoots"}
 	Client_PreferredCaches = StringSliceParam{"Client.PreferredCaches"}
 	ConfigLocations = StringSliceParam{"ConfigLocations"}
 	Director_CacheResponseHostnames = StringSliceParam{"Director.CacheResponseHostnames"}
@@ -2291,6 +2310,7 @@ var (
 	Cache_EnableV2 = BoolParam{"Cache.EnableV2"}
 	Cache_EnableVoms = BoolParam{"Cache.EnableVoms"}
 	Cache_SelfTest = BoolParam{"Cache.SelfTest"}
+	Cache_TieringDisableRedirect = BoolParam{"Cache.TieringDisableRedirect"}
 	Client_AssumeDirectorServerHeader = BoolParam{"Client.AssumeDirectorServerHeader"}
 	Client_DisableHttpProxy = BoolParam{"Client.DisableHttpProxy"}
 	Client_DisableProxyFallback = BoolParam{"Client.DisableProxyFallback"}
@@ -2388,6 +2408,8 @@ var (
 	Cache_SelfTestMaxAge = DurationParam{"Cache.SelfTestMaxAge"}
 	Cache_Throttle_EMAWindow = DurationParam{"Cache.Throttle.EMAWindow"}
 	Cache_Throttle_RetryAfter = DurationParam{"Cache.Throttle.RetryAfter"}
+	Cache_TieringRedirectEvictionHold = DurationParam{"Cache.TieringRedirectEvictionHold"}
+	Cache_TieringRedirectExpiry = DurationParam{"Cache.TieringRedirectExpiry"}
 	ClientAgent_IdleTimeout = DurationParam{"ClientAgent.IdleTimeout"}
 	ClientAgent_ProgressUpdateInterval = DurationParam{"ClientAgent.ProgressUpdateInterval"}
 	Client_SlowTransferRampupTime = DurationParam{"Client.SlowTransferRampupTime"}
@@ -2483,6 +2505,7 @@ var (
 )
 
 var (
+	Cache_TieringTargets = ObjectParam{"Cache.TieringTargets"}
 	GeoIPOverrides = ObjectParam{"GeoIPOverrides"}
 	Issuer_AuthorizationTemplates = ObjectParam{"Issuer.AuthorizationTemplates"}
 	Issuer_OIDCAuthenticationRequirements = ObjectParam{"Issuer.OIDCAuthenticationRequirements"}
@@ -2531,6 +2554,7 @@ func init() {
 		"Cache.RunLocation": Cache_RunLocation,
 		"Cache.SentinelLocation": Cache_SentinelLocation,
 		"Cache.StorageLocation": Cache_StorageLocation,
+		"Cache.TieringThreshold": Cache_TieringThreshold,
 		"Cache.Url": Cache_Url,
 		"Cache.XRootDPrefix": Cache_XRootDPrefix,
 		"ClientAgent.DbLocation": ClientAgent_DbLocation,
@@ -2724,6 +2748,7 @@ func init() {
 		"Cache.DataLocations": Cache_DataLocations,
 		"Cache.MetaLocations": Cache_MetaLocations,
 		"Cache.PermittedNamespaces": Cache_PermittedNamespaces,
+		"Client.FileRedirectRoots": Client_FileRedirectRoots,
 		"Client.PreferredCaches": Client_PreferredCaches,
 		"ConfigLocations": ConfigLocations,
 		"Director.CacheResponseHostnames": Director_CacheResponseHostnames,
@@ -2840,6 +2865,7 @@ func init() {
 		"Cache.EnableV2": Cache_EnableV2,
 		"Cache.EnableVoms": Cache_EnableVoms,
 		"Cache.SelfTest": Cache_SelfTest,
+		"Cache.TieringDisableRedirect": Cache_TieringDisableRedirect,
 		"Client.AssumeDirectorServerHeader": Client_AssumeDirectorServerHeader,
 		"Client.DisableHttpProxy": Client_DisableHttpProxy,
 		"Client.DisableProxyFallback": Client_DisableProxyFallback,
@@ -2934,6 +2960,8 @@ func init() {
 		"Cache.SelfTestMaxAge": Cache_SelfTestMaxAge,
 		"Cache.Throttle.EMAWindow": Cache_Throttle_EMAWindow,
 		"Cache.Throttle.RetryAfter": Cache_Throttle_RetryAfter,
+		"Cache.TieringRedirectEvictionHold": Cache_TieringRedirectEvictionHold,
+		"Cache.TieringRedirectExpiry": Cache_TieringRedirectExpiry,
 		"ClientAgent.IdleTimeout": ClientAgent_IdleTimeout,
 		"ClientAgent.ProgressUpdateInterval": ClientAgent_ProgressUpdateInterval,
 		"Client.SlowTransferRampupTime": Client_SlowTransferRampupTime,
@@ -3026,6 +3054,7 @@ func init() {
 		"Xrootd.LivenessMaxUnresponsiveTime": Xrootd_LivenessMaxUnresponsiveTime,
 		"Xrootd.MaxStartupWait": Xrootd_MaxStartupWait,
 		"Xrootd.ShutdownTimeout": Xrootd_ShutdownTimeout,
+		"Cache.TieringTargets": Cache_TieringTargets,
 		"GeoIPOverrides": GeoIPOverrides,
 		"Issuer.AuthorizationTemplates": Issuer_AuthorizationTemplates,
 		"Issuer.OIDCAuthenticationRequirements": Issuer_OIDCAuthenticationRequirements,
