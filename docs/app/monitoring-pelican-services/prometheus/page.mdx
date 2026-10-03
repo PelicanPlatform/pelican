@@ -139,6 +139,7 @@ This yields the duration in seconds.
   |---------------|------------------------------------------------|------------------------------|
   | `web-ui`      | Admin website                                  | All servers                  |
   | `xrootd`     | XRootD process                                 | Origin and cache servers     |
+  | `xrootd-liveness` | Whether the local XRootD still answers new connections. Warning indicates it has missed one or more checks but is still inside `Xrootd.LivenessMaxUnresponsiveTime`; critical indicates Pelican has given up and is shutting the daemon down. Reported separately from `xrootd` so that a liveness verdict cannot overwrite the self-test's | Origin and cache servers |
   | `cmsd`       | CMSD process                                   | Origin and cache servers     |
   | `federation` | Advertisement to the Director                | Origin and cache servers     |
   | `registry`   | Namespace registration at the Registry | Origin and cache servers     |

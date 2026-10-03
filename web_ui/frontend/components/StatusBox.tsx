@@ -53,6 +53,9 @@ function StatusDisplay({ component, status, message }: StatusDisplayProps) {
     case 'xrootd':
       component = 'XRootD';
       break;
+    case 'xrootd-liveness':
+      component = 'XRootD Liveness';
+      break;
     case 'web-ui':
       component = 'Web UI';
       break;

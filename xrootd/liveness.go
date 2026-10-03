@@ -131,6 +131,8 @@ func runXrootdLivenessCheck(ctx context.Context, isCache bool) {
 
 		if probeErr == nil {
 			log.Debugf("XRootD liveness check against %s succeeded", addr)
+			metrics.SetComponentHealthStatus(metrics.OriginCache_XRootDLiveness, metrics.StatusOK,
+				"XRootD answered the liveness check at "+time.Now().Format(time.RFC3339))
 			lastSuccess = time.Now()
 			consecutiveFailures = 0
 			continue
@@ -142,7 +144,7 @@ func runXrootdLivenessCheck(ctx context.Context, isCache bool) {
 		if unresponsiveFor < maxUnresponsive {
 			log.Warnf("XRootD liveness check against %s failed (%v); %d consecutive failures over %s of the permitted %s",
 				addr, probeErr, consecutiveFailures, unresponsiveFor.Round(time.Second), maxUnresponsive)
-			metrics.SetComponentHealthStatus(metrics.OriginCache_XRootD, metrics.StatusWarning,
+			metrics.SetComponentHealthStatus(metrics.OriginCache_XRootDLiveness, metrics.StatusWarning,
 				fmt.Sprintf("XRootD has failed %d consecutive liveness checks over %s; it is shut down after %s",
 					consecutiveFailures, unresponsiveFor.Round(time.Second), maxUnresponsive))
 			continue
@@ -150,7 +152,7 @@ func runXrootdLivenessCheck(ctx context.Context, isCache bool) {
 
 		log.Errorf("XRootD at %s has failed %d consecutive liveness checks and has not responded for %s (limit %s); shutting the daemon down",
 			addr, consecutiveFailures, unresponsiveFor.Round(time.Second), maxUnresponsive)
-		metrics.SetComponentHealthStatus(metrics.OriginCache_XRootD, metrics.StatusCritical,
+		metrics.SetComponentHealthStatus(metrics.OriginCache_XRootDLiveness, metrics.StatusCritical,
 			"XRootD was unresponsive for "+unresponsiveFor.Round(time.Second).String()+" and is being shut down")
 		shutdownXrootdFn(isCache)
 		return

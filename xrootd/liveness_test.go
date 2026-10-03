@@ -37,6 +37,7 @@ import (
 
 	"github.com/pelicanplatform/pelican/config"
 	"github.com/pelicanplatform/pelican/daemon"
+	"github.com/pelicanplatform/pelican/metrics"
 	"github.com/pelicanplatform/pelican/param"
 	"github.com/pelicanplatform/pelican/server_utils"
 )
@@ -461,6 +462,52 @@ func TestLivenessCheckSkipsWithoutPort(t *testing.T) {
 
 	cancel()
 	<-done
+}
+
+// TestLivenessCheckOwnsItsHealthComponent covers the two properties that earn the liveness
+// probe a health component of its own.
+//
+// A component slot holds whatever was written to it last, with no merge and no max-severity
+// rule, so sharing OriginCache_XRootD with the self-test would let each one overwrite the
+// other: a liveness "ok" hiding a self-test "critical" (XRootD answers connections fine but
+// fails real transfers), or a liveness "warning" downgrading one.  And because the self-test
+// would then be the only writer able to clear a liveness warning, an operator who set
+// Origin.SelfTest to false would be left with a warning pinned for the life of the process.
+func TestLivenessCheckOwnsItsHealthComponent(t *testing.T) {
+	h := newLivenessHarness(t, time.Hour) // Long enough that no shutdown fires.
+	clearHealth := func() {
+		metrics.DeleteComponentHealthStatus(metrics.OriginCache_XRootD)
+		metrics.DeleteComponentHealthStatus(metrics.OriginCache_XRootDLiveness)
+	}
+	clearHealth()
+	t.Cleanup(clearHealth)
+
+	livenessStatus := func() string {
+		status, err := metrics.GetComponentStatus(metrics.OriginCache_XRootDLiveness)
+		if err != nil {
+			return ""
+		}
+		return status
+	}
+
+	h.probeFails.Store(true)
+	cancel, done := h.run(t)
+	t.Cleanup(func() {
+		cancel()
+		<-done
+	})
+
+	require.Eventually(t, func() bool { return livenessStatus() == metrics.StatusWarning.String() },
+		30*time.Second, 5*time.Millisecond, "a failed check should warn on the liveness component")
+
+	// The self-test's component is left alone, so neither verdict can overwrite the other.
+	_, err := metrics.GetComponentStatus(metrics.OriginCache_XRootD)
+	assert.Error(t, err, "the liveness check must not write to the self-test's health component")
+
+	// A recovered XRootD clears the warning without help from any other writer.
+	h.probeFails.Store(false)
+	require.Eventually(t, func() bool { return livenessStatus() == metrics.StatusOK.String() },
+		30*time.Second, 5*time.Millisecond, "a recovered XRootD should clear its own liveness warning")
 }
 
 // TestLaunchXrootdLivenessCheckDisabled verifies the hidden kill switch restores the
