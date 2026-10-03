@@ -5477,7 +5477,6 @@ description: |+
   is only reported through the health endpoint.
 type: bool
 default: false
-hidden: true
 components: ["cache", "origin"]
 ---
 name: Xrootd.LivenessCheckInterval
@@ -5490,7 +5489,6 @@ description: |+
   delay to an XRootD that is already in trouble.
 type: duration
 default: 1m
-hidden: true
 components: ["cache", "origin"]
 ---
 name: Xrootd.LivenessCheckTimeout
@@ -5500,7 +5498,6 @@ description: |+
   servicing new connections at all, not when it is merely busy.
 type: duration
 default: 3m
-hidden: true
 components: ["cache", "origin"]
 ---
 name: Xrootd.LivenessMaxUnresponsiveTime
@@ -5514,7 +5511,6 @@ description: |+
   one.
 type: duration
 default: 10m
-hidden: true
 components: ["cache", "origin"]
 ---
 name: Xrootd.HttpMaxDelay
