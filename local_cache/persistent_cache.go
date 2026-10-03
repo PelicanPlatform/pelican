@@ -41,6 +41,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"math"
 	"net/http"
 	"net/url"
 	"os"
@@ -779,6 +780,13 @@ func NewPersistentCache(ctx context.Context, egrp *errgroup.Group, cfg Persisten
 			if err != nil {
 				pc.Close()
 				return nil, errors.Wrap(err, "failed to parse Cache.S3UploadThreshold")
+			}
+			// ParseBytes returns a uint64; refuse a value that would wrap
+			// negative as an int64 rather than silently turning an absurd
+			// threshold into one that tiers everything.
+			if parsed > math.MaxInt64 {
+				pc.Close()
+				return nil, errors.Errorf("Cache.S3UploadThreshold value %q is too large", thresholdStr)
 			}
 			threshold = int64(parsed)
 		}
