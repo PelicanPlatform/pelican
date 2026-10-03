@@ -97,6 +97,7 @@ type Config struct {
 		DisableHttpProxy bool `mapstructure:"disablehttpproxy" yaml:"DisableHttpProxy"`
 		DisableProxyFallback bool `mapstructure:"disableproxyfallback" yaml:"DisableProxyFallback"`
 		EnableOverwrites bool `mapstructure:"enableoverwrites" yaml:"EnableOverwrites"`
+		FileRedirectRoots []string `mapstructure:"fileredirectroots" yaml:"FileRedirectRoots"`
 		IsPlugin bool `mapstructure:"isplugin" yaml:"IsPlugin"`
 		MaximumDownloadSpeed int `mapstructure:"maximumdownloadspeed" yaml:"MaximumDownloadSpeed"`
 		MinimumDownloadSpeed int `mapstructure:"minimumdownloadspeed" yaml:"MinimumDownloadSpeed"`
@@ -699,6 +700,7 @@ type configWithType struct {
 		DisableHttpProxy struct { Type string; Value bool }
 		DisableProxyFallback struct { Type string; Value bool }
 		EnableOverwrites struct { Type string; Value bool }
+		FileRedirectRoots struct { Type string; Value []string }
 		IsPlugin struct { Type string; Value bool }
 		MaximumDownloadSpeed struct { Type string; Value int }
 		MinimumDownloadSpeed struct { Type string; Value int }
