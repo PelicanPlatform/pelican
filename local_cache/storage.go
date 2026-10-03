@@ -374,15 +374,15 @@ type StorageManager struct {
 	// by free space) before any concurrent access begins.
 	chooseDir func() StorageID
 
-	// s3Targets maps storageID → S3 bucket target.  New objects are never
-	// placed here directly; completed objects are tiered to S3 by the
-	// uploader.  Populated by RegisterS3Targets during single-threaded
+	// tierTargets maps storageID → remote tiering target.  New objects are never
+	// placed here directly; completed objects are tiered there by the
+	// uploader.  Populated by RegisterTierTargets during single-threaded
 	// init; read-only afterwards.
-	s3Targets map[StorageID]*s3Target
+	tierTargets map[StorageID]*tierTarget
 
 	// onObjectComplete, when non-nil, is invoked (on the completing
 	// goroutine) each time an object transitions to Completed.  Set during
-	// single-threaded init by the S3 uploader to observe candidates for
+	// single-threaded init by the tiering uploader to observe candidates for
 	// tiering.
 	onObjectComplete func(InstanceHash)
 }
@@ -654,19 +654,19 @@ func (sm *StorageManager) GetDirs() map[StorageID]string {
 	return sm.dirs
 }
 
-// RegisterS3Targets resolves identities for the configured S3 storage
+// RegisterTierTargets resolves identities for the configured tiering
 // targets and assigns each a storage ID, mirroring the UUID-based directory
 // association performed by NewStorageManager.  Must be called during
 // single-threaded initialization, before any concurrent access.
 //
 // Returns the storageID → config mapping for the registered targets.
-func (sm *StorageManager) RegisterS3Targets(ctx context.Context, configs []S3TargetConfig) (map[StorageID]S3TargetConfig, error) {
+func (sm *StorageManager) RegisterTierTargets(ctx context.Context, configs []TierTargetConfig) (map[StorageID]TierTargetConfig, error) {
 	if len(configs) == 0 {
 		return nil, nil
 	}
 	persisted, err := sm.db.LoadDiskMappings()
 	if err != nil {
-		return nil, errors.Wrap(err, "failed to load disk mappings for S3 target registration")
+		return nil, errors.Wrap(err, "failed to load disk mappings for tiering target registration")
 	}
 	byUUID := make(map[string]DiskMapping, len(persisted))
 	usedIDs := make(map[StorageID]bool, len(persisted))
@@ -678,20 +678,20 @@ func (sm *StorageManager) RegisterS3Targets(ctx context.Context, configs []S3Tar
 		usedIDs[id] = true
 	}
 	if len(sm.dirs)+len(configs) > 255 {
-		return nil, errors.New("at most 255 storage targets (directories + S3 buckets) are supported")
+		return nil, errors.New("at most 255 storage targets (directories + tiering targets) are supported")
 	}
 
-	sm.s3Targets = make(map[StorageID]*s3Target, len(configs))
-	result := make(map[StorageID]S3TargetConfig, len(configs))
+	sm.tierTargets = make(map[StorageID]*tierTarget, len(configs))
+	result := make(map[StorageID]TierTargetConfig, len(configs))
 	cacheHost := cacheExternalHost()
 	claimedUUIDs := make(map[string]string, len(configs))
 	for i := range configs {
 		cfg := configs[i]
-		if !strings.EqualFold(cfg.ServiceUrlScheme(), "https") {
-			log.Warnf("Cache S3 target %s is configured over %s: object data and pre-signed URLs "+
-				"will cross the network in cleartext", cfg.DisplayURL(), cfg.ServiceUrlScheme())
+		if !strings.EqualFold(cfg.TransportScheme(), "https") {
+			log.Warnf("Cache tiering target %s is configured over %s: object data and pre-signed URLs "+
+				"will cross the network in cleartext", cfg.DisplayURL(), cfg.TransportScheme())
 		}
-		target, err := newS3Target(ctx, cfg)
+		target, err := newTierTarget(ctx, cfg)
 		if err != nil {
 			return nil, err
 		}
@@ -704,7 +704,7 @@ func (sm *StorageManager) RegisterS3Targets(ctx context.Context, configs []S3Tar
 		// second would silently replace the first -- leaving one entry's
 		// MaxSize governing both buckets' worth of data.
 		if prev, dup := claimedUUIDs[uid]; dup {
-			return nil, errors.Errorf("cache S3 targets %s and %s resolve to the same bucket and prefix; "+
+			return nil, errors.Errorf("cache tiering targets %s and %s resolve to the same bucket and prefix; "+
 				"configure each bucket (or prefix) once", prev, cfg.DisplayURL())
 		}
 		claimedUUIDs[uid] = cfg.DisplayURL()
@@ -712,52 +712,52 @@ func (sm *StorageManager) RegisterS3Targets(ctx context.Context, configs []S3Tar
 		// Advisory: warn once at startup about an arrangement that will make
 		// the cache proxy token-bearing requests instead of redirecting them.
 		// The decision itself is per-request, against the host the client
-		// actually connected to -- see (*PersistentCache).tryS3Redirect.
-		if cacheHost != "" && redirectRetainsAuthorization(cfg.ServiceUrl, cacheHost) {
-			log.Warnf("Cache S3 target %s shares the cache's DNS domain (%s); authenticated requests for "+
+		// actually connected to -- see (*PersistentCache).tryTierRedirect.
+		if cacheHost != "" && target.canRedirect && target.redirectSendsCredentials(cacheHost) {
+			log.Warnf("Cache tiering target %s shares the cache's DNS domain (%s); authenticated requests for "+
 				"objects on it will be proxied rather than served by pre-signed redirect, so that client "+
 				"credentials are not forwarded to the bucket endpoint", cfg.DisplayURL(), cacheHost)
 		}
 
 		var id StorageID
 		if dm, known := byUUID[uid]; known {
-			if dm.Backend != BackendS3 {
-				return nil, errors.Errorf("cache S3 target %s has the identity of storage %d, which is not an S3 target", cfg.DisplayURL(), dm.ID)
+			if dm.Backend != BackendTier {
+				return nil, errors.Errorf("cache tiering target %s has the identity of storage %d, which is not a tiering target", cfg.DisplayURL(), dm.ID)
 			}
 			id = dm.ID
 			if dm.Directory != cfg.DisplayURL() {
-				log.Infof("Cache S3 target %d (UUID %s) moved: %s → %s", dm.ID, uid, dm.Directory, cfg.DisplayURL())
+				log.Infof("Cache tiering target %d (UUID %s) moved: %s → %s", dm.ID, uid, dm.Directory, cfg.DisplayURL())
 			}
 		} else {
 			id = StorageIDFirstDisk
 			for usedIDs[id] {
 				id++
 				if id == 0 {
-					return nil, errors.New("exhausted storage IDs while registering S3 targets")
+					return nil, errors.New("exhausted storage IDs while registering tiering targets")
 				}
 			}
-			log.Infof("Assigned storage ID %d (UUID %s) to cache S3 target %s", id, uid, cfg.DisplayURL())
+			log.Infof("Assigned storage ID %d (UUID %s) to cache tiering target %s", id, uid, cfg.DisplayURL())
 		}
-		if err := sm.db.SaveDiskMapping(DiskMapping{ID: id, UUID: uid, Directory: cfg.DisplayURL(), Backend: BackendS3}); err != nil {
-			return nil, errors.Wrapf(err, "failed to save mapping for cache S3 target %s", cfg.DisplayURL())
+		if err := sm.db.SaveDiskMapping(DiskMapping{ID: id, UUID: uid, Directory: cfg.DisplayURL(), Backend: BackendTier}); err != nil {
+			return nil, errors.Wrapf(err, "failed to save mapping for cache tiering target %s", cfg.DisplayURL())
 		}
 		usedIDs[id] = true
 		target.id = id
-		sm.s3Targets[id] = target
+		sm.tierTargets[id] = target
 		result[id] = cfg
 	}
 	return result, nil
 }
 
-// IsS3Backed reports whether the given storage ID is an S3 bucket target.
-func (sm *StorageManager) IsS3Backed(id StorageID) bool {
-	_, ok := sm.s3Targets[id]
+// IsTiered reports whether the given storage ID is a remote tiering target.
+func (sm *StorageManager) IsTiered(id StorageID) bool {
+	_, ok := sm.tierTargets[id]
 	return ok
 }
 
-// getS3Target returns the S3 target for a storage ID, or nil.
-func (sm *StorageManager) getS3Target(id StorageID) *s3Target {
-	return sm.s3Targets[id]
+// getTierTarget returns the tiering target for a storage ID, or nil.
+func (sm *StorageManager) getTierTarget(id StorageID) *tierTarget {
+	return sm.tierTargets[id]
 }
 
 // Close stops TTL cache eviction goroutines and releases cached resources.
@@ -809,7 +809,7 @@ func NewStorageManagerReadOnly(baseDir string, db *CacheDB) (*StorageManager, er
 	objDirs := make(map[StorageID]string, len(mappings))
 	for _, dm := range mappings {
 		if dm.Backend != BackendPosix {
-			continue // S3 targets have no local directory
+			continue // tiering targets have no local directory
 		}
 		objDirs[dm.ID] = filepath.Join(dm.Directory, objectsSubDir)
 	}
@@ -972,7 +972,7 @@ func containedObjectPath(dir, relative string) string {
 
 // storageIsResolvable reports whether a storage ID names something this manager
 // can actually reach: a configured directory, inline storage, or a registered
-// S3 target.
+// tiering target.
 //
 // An object whose storage ID resolves to none of those must be treated as a
 // miss rather than looked up on disk.  A bucket that has been removed from the
@@ -987,7 +987,7 @@ func (sm *StorageManager) storageIsResolvable(storageID StorageID) bool {
 	if _, ok := sm.dirs[storageID]; ok {
 		return true
 	}
-	_, ok := sm.s3Targets[storageID]
+	_, ok := sm.tierTargets[storageID]
 	return ok
 }
 
@@ -2076,15 +2076,15 @@ func (sm *StorageManager) Delete(instanceHash InstanceHash) error {
 	}
 	sm.invalidateObjectCaches(instanceHash, chunkCount)
 
-	// If stored on an S3 target, delete the bucket object; otherwise
+	// If stored on a tiering target, delete the remote object; otherwise
 	// delete all chunk files on disk.
 	if meta != nil {
-		if target := sm.getS3Target(meta.StorageID); target != nil {
-			delCtx, delCancel := context.WithTimeout(context.Background(), s3SweepOpTimeout)
+		if target := sm.getTierTarget(meta.StorageID); target != nil {
+			delCtx, delCancel := context.WithTimeout(context.Background(), tierSweepOpTimeout)
 			err := target.deleteObject(delCtx, instanceHash)
 			delCancel()
 			if err != nil {
-				log.Warnf("Failed to delete %s from S3 target %d (consistency sweep will retry): %v", instanceHash, meta.StorageID, err)
+				log.Warnf("Failed to delete %s from tiering target %d (consistency sweep will retry): %v", instanceHash, meta.StorageID, err)
 			}
 		} else if meta.IsDisk() {
 			sm.deleteChunkFiles(instanceHash, meta.ContentLength, meta.StorageID, meta.ChunkSizeCode, meta.ChunkLocations)
@@ -2169,14 +2169,14 @@ func (sm *StorageManager) EvictByLRU(storageID StorageID, namespaceID NamespaceI
 		// Remove all in-memory cached state for this object.
 		sm.invalidateObjectCaches(obj.instanceHash, CalculateChunkCount(obj.contentLen, obj.chunkSizeCode))
 
-		// Delete the backing data: bucket object for S3-resident objects,
+		// Delete the backing data: remote object for tiered objects,
 		// chunk files on disk otherwise.
-		if target := sm.getS3Target(obj.storageID); target != nil {
-			delCtx, delCancel := context.WithTimeout(context.Background(), s3SweepOpTimeout)
+		if target := sm.getTierTarget(obj.storageID); target != nil {
+			delCtx, delCancel := context.WithTimeout(context.Background(), tierSweepOpTimeout)
 			err := target.deleteObject(delCtx, obj.instanceHash)
 			delCancel()
 			if err != nil {
-				log.Warnf("Failed to delete evicted object %s from S3 target %d (consistency sweep will retry): %v",
+				log.Warnf("Failed to delete evicted object %s from tiering target %d (consistency sweep will retry): %v",
 					obj.instanceHash, obj.storageID, err)
 			}
 		} else if obj.storageID != StorageIDInline {
@@ -2860,7 +2860,7 @@ func (bw *BlockWriter) Close() error {
 			bw.onComplete()
 		}
 
-		// Notify the completion observer (e.g. the S3 uploader) so the
+		// Notify the completion observer (e.g. the tiering uploader) so the
 		// object can be considered for tiering.
 		if bw.sm.onObjectComplete != nil {
 			bw.sm.onObjectComplete(bw.instanceHash)

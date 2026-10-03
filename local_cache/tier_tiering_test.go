@@ -48,24 +48,24 @@ import (
 	"github.com/pelicanplatform/pelican/test_utils"
 )
 
-// setS3Targets configures the Cache.S3StorageTargets parameter through the
+// setTierTargets configures the Cache.TieringTargets parameter through the
 // param API (rather than touching viper directly) for tests.
-func setS3Targets(t *testing.T, targets []interface{}) {
+func setTierTargets(t *testing.T, targets []interface{}) {
 	t.Helper()
-	require.NoError(t, param.Cache_S3StorageTargets.Set(targets))
+	require.NoError(t, param.Cache_TieringTargets.Set(targets))
 }
 
-func TestParseS3TargetsConfig(t *testing.T) {
+func TestParseTierTargetsConfig(t *testing.T) {
 	t.Run("Unset", func(t *testing.T) {
 		server_utils.ResetTestState()
-		targets, err := ParseS3TargetsConfig()
+		targets, err := ParseTierTargetsConfig()
 		require.NoError(t, err)
 		assert.Nil(t, targets)
 	})
 
 	t.Run("Valid", func(t *testing.T) {
 		server_utils.ResetTestState()
-		setS3Targets(t, []interface{}{
+		setTierTargets(t, []interface{}{
 			map[string]interface{}{
 				"ServiceUrl": "https://s3.example.com",
 				"Bucket":     "pelican-cache",
@@ -73,7 +73,7 @@ func TestParseS3TargetsConfig(t *testing.T) {
 				"MaxSize":    "10GB",
 			},
 		})
-		targets, err := ParseS3TargetsConfig()
+		targets, err := ParseTierTargetsConfig()
 		require.NoError(t, err)
 		require.Len(t, targets, 1)
 		assert.Equal(t, "https://s3.example.com", targets[0].ServiceUrl)
@@ -87,31 +87,31 @@ func TestParseS3TargetsConfig(t *testing.T) {
 
 	t.Run("MissingBucket", func(t *testing.T) {
 		server_utils.ResetTestState()
-		setS3Targets(t, []interface{}{
+		setTierTargets(t, []interface{}{
 			map[string]interface{}{
 				"ServiceUrl": "https://s3.example.com",
 				"MaxSize":    "10GB",
 			},
 		})
-		_, err := ParseS3TargetsConfig()
+		_, err := ParseTierTargetsConfig()
 		require.ErrorContains(t, err, "Bucket")
 	})
 
 	t.Run("MissingMaxSize", func(t *testing.T) {
 		server_utils.ResetTestState()
-		setS3Targets(t, []interface{}{
+		setTierTargets(t, []interface{}{
 			map[string]interface{}{
 				"ServiceUrl": "https://s3.example.com",
 				"Bucket":     "b",
 			},
 		})
-		_, err := ParseS3TargetsConfig()
+		_, err := ParseTierTargetsConfig()
 		require.ErrorContains(t, err, "MaxSize")
 	})
 
 	t.Run("KeyfilesMustBePaired", func(t *testing.T) {
 		server_utils.ResetTestState()
-		setS3Targets(t, []interface{}{
+		setTierTargets(t, []interface{}{
 			map[string]interface{}{
 				"ServiceUrl":    "https://s3.example.com",
 				"Bucket":        "b",
@@ -119,48 +119,44 @@ func TestParseS3TargetsConfig(t *testing.T) {
 				"AccessKeyfile": "/etc/access",
 			},
 		})
-		_, err := ParseS3TargetsConfig()
+		_, err := ParseTierTargetsConfig()
 		require.ErrorContains(t, err, "must be set together")
 	})
 }
 
-func TestS3KeyLayout(t *testing.T) {
+func TestTierKeyLayout(t *testing.T) {
 	hash := InstanceHash("42561abfe18be8fca1dcd5b6ac0f6b6d42561abfe18be8fca1dcd5b6ac0f6b6d")
+	target := &tierTarget{cfg: TierTargetConfig{Bucket: "b", Prefix: "objects"}}
 
-	t.Run("WithPrefix", func(t *testing.T) {
-		target := &s3Target{cfg: S3TargetConfig{Bucket: "b", Prefix: "objects"}}
-		key := target.objectKey(hash)
-		assert.Equal(t, "objects/42/56/1abfe18be8fca1dcd5b6ac0f6b6d42561abfe18be8fca1dcd5b6ac0f6b6d", key)
-		assert.Equal(t, hash, target.hashFromKey(key))
-		assert.Equal(t, InstanceHash(""), target.hashFromKey("other/42/56/rest"))
-		assert.Equal(t, InstanceHash(""), target.hashFromKey(target.keyForStoragePath(s3IdentityKey)))
-	})
+	// Keys are prefix-relative even when a prefix is configured: the backend
+	// applies it on write and strips it on list (blob.PrefixedBucket), so
+	// nothing above the backend has to account for one.
+	key := target.objectKey(hash)
+	assert.Equal(t, "42/56/1abfe18be8fca1dcd5b6ac0f6b6d42561abfe18be8fca1dcd5b6ac0f6b6d", key)
+	assert.Equal(t, hash, target.hashFromKey(key))
 
-	t.Run("NoPrefix", func(t *testing.T) {
-		target := &s3Target{cfg: S3TargetConfig{Bucket: "b"}}
-		key := target.objectKey(hash)
-		assert.Equal(t, "42/56/1abfe18be8fca1dcd5b6ac0f6b6d42561abfe18be8fca1dcd5b6ac0f6b6d", key)
-		assert.Equal(t, hash, target.hashFromKey(key))
-		assert.Equal(t, InstanceHash(""), target.hashFromKey(".pelican-cache-id"))
-		assert.Equal(t, InstanceHash(""), target.hashFromKey("42/56/not-hex-suffix"))
-	})
+	// The leading bytes of the key are the leading bytes of the hash, which
+	// is what makes a key-ordered listing also a hash-ordered one and lets
+	// the consistency sweep merge-join it against metadata.
+	lower := target.objectKey(InstanceHash("0" + string(hash)[1:]))
+	assert.Less(t, lower, key, "key order must follow hash order")
+
+	// Non-object keys are ignored rather than mistaken for objects.
+	for _, notAnObject := range []string{
+		tierIdentityKey,
+		tierRedirectProbeKey,
+		"42/56/not-hex-suffix",
+		"42/56",
+		"4/256/1abfe18be8fca1dcd5b6ac0f6b6d42561abfe18be8fca1dcd5b6ac0f6b6d",
+	} {
+		assert.Equal(t, InstanceHash(""), target.hashFromKey(notAnObject), "key %q", notAnObject)
+	}
 }
 
-// s3TestEnv bundles the pieces needed to exercise tiering against minio.
-type s3TestEnv struct {
-	db       *CacheDB
-	storage  *StorageManager
-	eviction *EvictionManager
-	uploader *s3Uploader
-	target   *s3Target
-	s3ID     StorageID
-	diskID   StorageID
-}
-
-// setupS3TestEnv starts minio, registers one S3 target alongside one local
+// setupTierTestEnv starts minio, registers one S3 target alongside one local
 // directory, and wires an eviction manager + uploader (no background
 // goroutines are started; tests drive the pieces synchronously).
-func setupS3TestEnv(t *testing.T, ctx context.Context) *s3TestEnv {
+func setupTierTestEnv(t *testing.T, ctx context.Context) *tierTestEnv {
 	test_utils.SkipIfNoMinio(t)
 	endpoint, accessKey, secretKey := test_utils.StartMinio(t, "pelican-cache-test")
 
@@ -182,7 +178,7 @@ func setupS3TestEnv(t *testing.T, ctx context.Context) *s3TestEnv {
 	require.NoError(t, err)
 	t.Cleanup(func() { storage.Close() })
 
-	targetCfg := S3TargetConfig{
+	targetCfg := TierTargetConfig{
 		ServiceUrl:    endpoint,
 		Region:        "us-east-1",
 		Bucket:        "pelican-cache-test",
@@ -192,35 +188,35 @@ func setupS3TestEnv(t *testing.T, ctx context.Context) *s3TestEnv {
 		SecretKeyfile: secretKeyfile,
 		MaxSize:       1 << 30,
 	}
-	registered, err := storage.RegisterS3Targets(ctx, []S3TargetConfig{targetCfg})
+	registered, err := storage.RegisterTierTargets(ctx, []TierTargetConfig{targetCfg})
 	require.NoError(t, err)
 	require.Len(t, registered, 1)
 
-	env := &s3TestEnv{db: db, storage: storage}
+	env := &tierTestEnv{db: db, storage: storage}
 	for id := range registered {
-		env.s3ID = id
+		env.tierID = id
 	}
-	env.target = storage.getS3Target(env.s3ID)
+	env.target = storage.getTierTarget(env.tierID)
 	require.NotNil(t, env.target)
 	for id := range storage.GetDirs() {
 		env.diskID = id
 	}
-	require.NotEqual(t, env.diskID, env.s3ID)
+	require.NotEqual(t, env.diskID, env.tierID)
 
 	env.eviction = NewEvictionManager(db, storage, EvictionConfig{
 		DirConfigs: map[StorageID]EvictionDirConfig{
 			env.diskID: {MaxSize: 1 << 30},
-			env.s3ID:   {MaxSize: targetCfg.MaxSize, NoPlacement: true},
+			env.tierID: {MaxSize: targetCfg.MaxSize, NoPlacement: true},
 		},
 	})
-	env.uploader = newS3Uploader(db, storage, env.eviction, 1024)
+	env.uploader = newTierUploader(db, storage, env.eviction, 1024)
 	return env
 }
 
-func TestS3TieringLifecycle(t *testing.T) {
+func TestTierLifecycle(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	env := setupS3TestEnv(t, ctx)
+	env := setupTierTestEnv(t, ctx)
 
 	data := make([]byte, 3*BlockDataSize+123) // multi-block, above the 1KB threshold
 	for i := range data {
@@ -238,8 +234,8 @@ func TestS3TieringLifecycle(t *testing.T) {
 	meta, err := env.storage.GetMetadata(hash)
 	require.NoError(t, err)
 	require.NotNil(t, meta)
-	assert.Equal(t, env.s3ID, meta.StorageID)
-	intents, err := env.db.ListS3UploadIntents()
+	assert.Equal(t, env.tierID, meta.StorageID)
+	intents, err := env.db.ListTierUploadIntents()
 	require.NoError(t, err)
 	assert.Empty(t, intents)
 
@@ -250,9 +246,9 @@ func TestS3TieringLifecycle(t *testing.T) {
 	diskUsage, err := env.db.GetUsage(env.diskID, nsID)
 	require.NoError(t, err)
 	assert.Zero(t, diskUsage)
-	s3Usage, err := env.db.GetUsage(env.s3ID, nsID)
+	tierUsage, err := env.db.GetUsage(env.tierID, nsID)
 	require.NoError(t, err)
-	assert.Equal(t, fileSize, s3Usage)
+	assert.Equal(t, fileSize, tierUsage)
 
 	// The bucket object is the plaintext content.
 	stream, err := env.target.openStream(ctx, hash, 0)
@@ -263,7 +259,7 @@ func TestS3TieringLifecycle(t *testing.T) {
 	assert.Equal(t, data, fetched)
 
 	// Ranged reads through the proxy-mode stream work.
-	objStream := newS3ObjectStream(ctx, env.target, hash, int64(len(data)))
+	objStream := newTierObjectStream(ctx, env.target, hash, int64(len(data)))
 	defer objStream.Close()
 	_, err = objStream.Seek(int64(BlockDataSize), io.SeekStart)
 	require.NoError(t, err)
@@ -273,7 +269,7 @@ func TestS3TieringLifecycle(t *testing.T) {
 	assert.Equal(t, data[BlockDataSize:BlockDataSize+100], buf)
 
 	// A pre-signed URL serves the object without credentials.
-	presigned, err := env.target.presignGet(ctx, hash, 5*time.Minute)
+	presigned, err := env.target.redirectURL(ctx, hash, 5*time.Minute)
 	require.NoError(t, err)
 	resp, err := http.Get(presigned)
 	require.NoError(t, err)
@@ -285,15 +281,15 @@ func TestS3TieringLifecycle(t *testing.T) {
 
 	// A fresh presign stamp protects the object from eviction...
 	require.NoError(t, env.db.UpdateLRU(hash, 0)) // create the LRU entry under the S3 storage ID
-	env.db.setPresignHold(time.Hour)
-	require.NoError(t, env.db.RecordPresignIssued(hash))
-	evicted, _, _, err := env.storage.EvictByLRU(env.s3ID, nsID, 0, 0)
+	env.db.setRedirectHold(time.Hour)
+	require.NoError(t, env.db.RecordRedirectIssued(hash))
+	evicted, _, _, err := env.storage.EvictByLRU(env.tierID, nsID, 0, 0)
 	require.NoError(t, err)
 	assert.Empty(t, evicted, "presign hold should block eviction")
 
 	// ...and once the hold lapses, eviction removes DB entry and bucket object.
-	env.db.setPresignHold(time.Nanosecond)
-	evicted, _, _, err = env.storage.EvictByLRU(env.s3ID, nsID, 0, 0)
+	env.db.setRedirectHold(time.Nanosecond)
+	evicted, _, _, err = env.storage.EvictByLRU(env.tierID, nsID, 0, 0)
 	require.NoError(t, err)
 	require.Len(t, evicted, 1)
 	exists, err := env.target.objectExists(ctx, hash)
@@ -304,13 +300,13 @@ func TestS3TieringLifecycle(t *testing.T) {
 	assert.Nil(t, meta)
 }
 
-// TestS3TieringChunkedObject verifies that a large chunked object — whose
+// TestTierChunkedObject verifies that a large chunked object — whose
 // data is spread across multiple local directories in multiple chunk files —
 // migrates to S3 as a single flattened blob, with every local chunk file
 // removed and each contributing directory's usage released.  Large objects
 // are exactly the ones chunking splits up, so this is the primary tiering
 // case once chunking is enabled.
-func TestS3TieringChunkedObject(t *testing.T) {
+func TestTierChunkedObject(t *testing.T) {
 	test_utils.SkipIfNoMinio(t)
 	endpoint, accessKey, secretKey := test_utils.StartMinio(t, "pelican-cache-chunked")
 	InitIssuerKeyForTests(t)
@@ -334,7 +330,7 @@ func TestS3TieringChunkedObject(t *testing.T) {
 	require.NoError(t, err)
 	t.Cleanup(func() { storage.Close() })
 
-	registered, err := storage.RegisterS3Targets(ctx, []S3TargetConfig{{
+	registered, err := storage.RegisterTierTargets(ctx, []TierTargetConfig{{
 		ServiceUrl:    endpoint,
 		Region:        "us-east-1",
 		Bucket:        "pelican-cache-chunked",
@@ -346,19 +342,19 @@ func TestS3TieringChunkedObject(t *testing.T) {
 	}})
 	require.NoError(t, err)
 	require.Len(t, registered, 1)
-	var s3ID StorageID
+	var tierID StorageID
 	for id := range registered {
-		s3ID = id
+		tierID = id
 	}
-	target := storage.getS3Target(s3ID)
+	target := storage.getTierTarget(tierID)
 	require.NotNil(t, target)
 
-	dirCfgs := map[StorageID]EvictionDirConfig{s3ID: {MaxSize: 1 << 30, NoPlacement: true}}
+	dirCfgs := map[StorageID]EvictionDirConfig{tierID: {MaxSize: 1 << 30, NoPlacement: true}}
 	for id := range storage.GetDirs() {
 		dirCfgs[id] = EvictionDirConfig{MaxSize: 1 << 30}
 	}
 	eviction := NewEvictionManager(db, storage, EvictionConfig{DirConfigs: dirCfgs})
-	uploader := newS3Uploader(db, storage, eviction, 1024)
+	uploader := newTierUploader(db, storage, eviction, 1024)
 
 	// A two-chunk object; the chunks round-robin across dir1 and dir2.
 	chunkSizeCode := BytesToChunkSizeCode(2 * 1024 * 1024)
@@ -399,7 +395,7 @@ func TestS3TieringChunkedObject(t *testing.T) {
 	got, err := storage.GetMetadata(hash)
 	require.NoError(t, err)
 	require.NotNil(t, got)
-	assert.Equal(t, s3ID, got.StorageID)
+	assert.Equal(t, tierID, got.StorageID)
 	assert.False(t, got.IsChunked(), "relocation must flatten the chunk layout")
 	assert.Equal(t, objectSize, got.ContentLength)
 
@@ -413,9 +409,9 @@ func TestS3TieringChunkedObject(t *testing.T) {
 		require.NoError(t, err)
 		assert.Zerof(t, usage, "disk usage should be released for storage %d", id)
 	}
-	s3Usage, err := db.GetUsage(s3ID, nsID)
+	tierUsage, err := db.GetUsage(tierID, nsID)
 	require.NoError(t, err)
-	assert.Equal(t, CalculateFileSize(objectSize), s3Usage)
+	assert.Equal(t, CalculateFileSize(objectSize), tierUsage)
 
 	// The bucket holds the full contiguous plaintext object.
 	stream, err := target.openStream(ctx, hash, 0)
@@ -426,15 +422,15 @@ func TestS3TieringChunkedObject(t *testing.T) {
 	assert.Equal(t, data, fetched)
 
 	// No upload intent left behind.
-	intents, err := db.ListS3UploadIntents()
+	intents, err := db.ListTierUploadIntents()
 	require.NoError(t, err)
 	assert.Empty(t, intents)
 }
 
-func TestS3TieringSkipsSmallAndInlineObjects(t *testing.T) {
+func TestTierSkipsSmallAndInlineObjects(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	env := setupS3TestEnv(t, ctx)
+	env := setupTierTestEnv(t, ctx)
 
 	t.Run("BelowThreshold", func(t *testing.T) {
 		data := []byte("small object below the threshold")
@@ -479,16 +475,16 @@ func TestS3TieringSkipsSmallAndInlineObjects(t *testing.T) {
 	})
 }
 
-// TestS3RelocationMovesLRUEntry pins the LRU bookkeeping that relocation
+// TestTierRelocationMovesLRUEntry pins the LRU bookkeeping that relocation
 // depends on: the index entry has to move from the local storage ID to the
 // bucket's, keeping its access timestamp, or the object becomes invisible to
 // eviction on its new target (and leaves a phantom entry behind on the old
 // one).  The rest of the suite stores objects without ever recording an
 // access, which leaves LastAccessTime zero and skips this path entirely.
-func TestS3RelocationMovesLRUEntry(t *testing.T) {
+func TestTierRelocationMovesLRUEntry(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	env := setupS3TestEnv(t, ctx)
+	env := setupTierTestEnv(t, ctx)
 
 	data := make([]byte, 2*BlockDataSize)
 	hash := InstanceHash(fmt.Sprintf("%064d", 11))
@@ -507,24 +503,24 @@ func TestS3RelocationMovesLRUEntry(t *testing.T) {
 
 	after, err := env.storage.GetMetadata(hash)
 	require.NoError(t, err)
-	require.Equal(t, env.s3ID, after.StorageID)
+	require.Equal(t, env.tierID, after.StorageID)
 	assert.Equal(t, before.LastAccessTime.UnixNano(), after.LastAccessTime.UnixNano(),
 		"relocation must preserve the access time, not reset the object's LRU position")
 	assert.False(t, lruKeyExists(t, env.db, env.diskID, nsID, before.LastAccessTime, hash),
 		"the local LRU entry must be gone")
-	assert.True(t, lruKeyExists(t, env.db, env.s3ID, nsID, before.LastAccessTime, hash),
+	assert.True(t, lruKeyExists(t, env.db, env.tierID, nsID, before.LastAccessTime, hash),
 		"the object must appear in the S3 target's LRU index")
 }
 
-// TestS3TieringDefersReleaseWhileReaderOpen covers the window between an
+// TestTierDefersReleaseWhileReaderOpen covers the window between an
 // object completing and a client finishing with it: tiering must not delete
 // the local copy a reader is working from.  A chunked object is used because
 // its reads reopen chunk files by path, so an early unlink breaks the transfer
 // outright rather than surviving on an already-open descriptor.
-func TestS3TieringDefersReleaseWhileReaderOpen(t *testing.T) {
+func TestTierDefersReleaseWhileReaderOpen(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	env := setupS3TestEnv(t, ctx)
+	env := setupTierTestEnv(t, ctx)
 
 	data := make([]byte, 3*BlockDataSize+7)
 	for i := range data {
@@ -548,7 +544,7 @@ func TestS3TieringDefersReleaseWhileReaderOpen(t *testing.T) {
 	// reader holds it -- and the reader can still finish.
 	meta, err := env.storage.GetMetadata(hash)
 	require.NoError(t, err)
-	require.Equal(t, env.s3ID, meta.StorageID, "relocation should still commit")
+	require.Equal(t, env.tierID, meta.StorageID, "relocation should still commit")
 	_, statErr := os.Stat(localPath)
 	require.NoError(t, statErr, "local file must survive while a reader holds the object")
 
@@ -559,7 +555,7 @@ func TestS3TieringDefersReleaseWhileReaderOpen(t *testing.T) {
 
 	// The intent is kept so the cleanup can be retried, and the retry pass
 	// finishes it once the reader is gone.
-	intents, err := env.db.ListS3UploadIntents()
+	intents, err := env.db.ListTierUploadIntents()
 	require.NoError(t, err)
 	require.Contains(t, intents, hash, "the deferred cleanup must stay recorded")
 
@@ -567,7 +563,7 @@ func TestS3TieringDefersReleaseWhileReaderOpen(t *testing.T) {
 
 	_, statErr = os.Stat(localPath)
 	assert.True(t, os.IsNotExist(statErr), "local file should be removed once unpinned")
-	intents, err = env.db.ListS3UploadIntents()
+	intents, err = env.db.ListTierUploadIntents()
 	require.NoError(t, err)
 	assert.Empty(t, intents, "the intent should be cleared after cleanup completes")
 	diskUsage, err := env.db.GetUsage(env.diskID, nsID)
@@ -575,15 +571,15 @@ func TestS3TieringDefersReleaseWhileReaderOpen(t *testing.T) {
 	assert.Zero(t, diskUsage, "the deferred release must still refund the local capacity")
 }
 
-// TestS3UploaderRecoveryAccounting covers the two recovery branches that run
+// TestTierUploaderRecoveryAccounting covers the two recovery branches that run
 // after a relocation has committed.  Both are pure accounting: getting them
 // wrong silently drives a usage counter away from reality, which shows up much
 // later as a bucket that will not fill or one that never drains.
-func TestS3UploaderRecoveryAccounting(t *testing.T) {
+func TestTierUploaderRecoveryAccounting(t *testing.T) {
 	t.Run("ObjectDeletedAfterRelocation", func(t *testing.T) {
 		ctx, cancel := context.WithCancel(context.Background())
 		defer cancel()
-		env := setupS3TestEnv(t, ctx)
+		env := setupTierTestEnv(t, ctx)
 
 		nsID := NamespaceID(5)
 		hash := InstanceHash(fmt.Sprintf("%064d", 13))
@@ -592,8 +588,8 @@ func TestS3UploaderRecoveryAccounting(t *testing.T) {
 		// The state a crash leaves behind when the object was deleted after
 		// its relocation committed: the deletion already refunded the bucket
 		// charge, so recovery must not refund it a second time.
-		require.NoError(t, env.db.SetS3UploadIntent(hash, &S3UploadIntent{
-			TargetStorageID:   env.s3ID,
+		require.NoError(t, env.db.SetTierUploadIntent(hash, &TierUploadIntent{
+			TargetStorageID:   env.tierID,
 			OriginalStorageID: env.diskID,
 			Key:               env.target.objectKey(hash),
 			Size:              size,
@@ -604,10 +600,10 @@ func TestS3UploaderRecoveryAccounting(t *testing.T) {
 
 		require.NoError(t, env.uploader.recover(ctx))
 
-		s3Usage, err := env.db.GetUsage(env.s3ID, nsID)
+		tierUsage, err := env.db.GetUsage(env.tierID, nsID)
 		require.NoError(t, err)
-		assert.Zero(t, s3Usage, "recovery must not refund a charge the deletion already returned")
-		intents, err := env.db.ListS3UploadIntents()
+		assert.Zero(t, tierUsage, "recovery must not refund a charge the deletion already returned")
+		intents, err := env.db.ListTierUploadIntents()
 		require.NoError(t, err)
 		assert.Empty(t, intents)
 	})
@@ -615,7 +611,7 @@ func TestS3UploaderRecoveryAccounting(t *testing.T) {
 	t.Run("LocalCleanupUnfinished", func(t *testing.T) {
 		ctx, cancel := context.WithCancel(context.Background())
 		defer cancel()
-		env := setupS3TestEnv(t, ctx)
+		env := setupTierTestEnv(t, ctx)
 
 		data := make([]byte, 2*BlockDataSize)
 		hash := InstanceHash(fmt.Sprintf("%064d", 14))
@@ -626,9 +622,9 @@ func TestS3UploaderRecoveryAccounting(t *testing.T) {
 
 		// Relocation committed, local cleanup did not: the object is on the
 		// bucket, the local file and its charge are still there.
-		require.NoError(t, env.db.AddUsage(env.s3ID, nsID, fileSize))
-		require.NoError(t, env.db.SetS3UploadIntent(hash, &S3UploadIntent{
-			TargetStorageID:   env.s3ID,
+		require.NoError(t, env.db.AddUsage(env.tierID, nsID, fileSize))
+		require.NoError(t, env.db.SetTierUploadIntent(hash, &TierUploadIntent{
+			TargetStorageID:   env.tierID,
 			OriginalStorageID: env.diskID,
 			Key:               env.target.objectKey(hash),
 			Size:              int64(len(data)),
@@ -636,7 +632,7 @@ func TestS3UploaderRecoveryAccounting(t *testing.T) {
 			StartedAt:         time.Now().Add(-time.Minute),
 			RelocatedAt:       time.Now().Add(-30 * time.Second),
 		}))
-		_, err := env.db.RelocateObject(hash, env.s3ID)
+		_, err := env.db.RelocateObject(hash, env.tierID)
 		require.NoError(t, err)
 
 		require.NoError(t, env.uploader.recover(ctx))
@@ -646,20 +642,20 @@ func TestS3UploaderRecoveryAccounting(t *testing.T) {
 		diskUsage, err := env.db.GetUsage(env.diskID, nsID)
 		require.NoError(t, err)
 		assert.Zero(t, diskUsage, "the local charge must be refunded, not leaked")
-		s3Usage, err := env.db.GetUsage(env.s3ID, nsID)
+		tierUsage, err := env.db.GetUsage(env.tierID, nsID)
 		require.NoError(t, err)
-		assert.Equal(t, fileSize, s3Usage, "the bucket charge belongs to the object and must remain")
+		assert.Equal(t, fileSize, tierUsage, "the bucket charge belongs to the object and must remain")
 	})
 }
 
-// TestS3TieringConcurrentWorkers runs several workers at one object, the way
+// TestTierConcurrentWorkers runs several workers at one object, the way
 // repeated completion notifications can.  Exactly one may tier it, and the
 // bucket copy must survive: an earlier version of the in-flight guard let the
 // losing worker delete the winner's object.
-func TestS3TieringConcurrentWorkers(t *testing.T) {
+func TestTierConcurrentWorkers(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	env := setupS3TestEnv(t, ctx)
+	env := setupTierTestEnv(t, ctx)
 
 	data := make([]byte, 2*BlockDataSize)
 	for i := range data {
@@ -686,7 +682,7 @@ func TestS3TieringConcurrentWorkers(t *testing.T) {
 	meta, err := env.storage.GetMetadata(hash)
 	require.NoError(t, err)
 	require.NotNil(t, meta)
-	assert.Equal(t, env.s3ID, meta.StorageID)
+	assert.Equal(t, env.tierID, meta.StorageID)
 
 	// The object is in the bucket exactly once, with the right bytes, and the
 	// bucket is charged for exactly one copy.
@@ -697,11 +693,11 @@ func TestS3TieringConcurrentWorkers(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, data, fetched, "the surviving bucket object must hold the real bytes")
 
-	s3Usage, err := env.db.GetUsage(env.s3ID, nsID)
+	tierUsage, err := env.db.GetUsage(env.tierID, nsID)
 	require.NoError(t, err)
-	assert.Equal(t, CalculateFileSize(int64(len(data))), s3Usage,
+	assert.Equal(t, CalculateFileSize(int64(len(data))), tierUsage,
 		"only one worker's charge may stick")
-	intents, err := env.db.ListS3UploadIntents()
+	intents, err := env.db.ListTierUploadIntents()
 	require.NoError(t, err)
 	assert.Empty(t, intents)
 }
@@ -715,7 +711,7 @@ func TestS3TieringConcurrentWorkers(t *testing.T) {
 func TestEvictionDrainsPastHeldNamespace(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	env := setupS3TestEnv(t, ctx)
+	env := setupTierTestEnv(t, ctx)
 
 	data := make([]byte, 2*BlockDataSize)
 	fileSize := CalculateFileSize(int64(len(data)))
@@ -736,9 +732,9 @@ func TestEvictionDrainsPastHeldNamespace(t *testing.T) {
 	require.NoError(t, env.uploader.processObject(ctx, freeHash))
 	require.NoError(t, env.db.UpdateLRU(freeHash, 0))
 
-	env.db.setPresignHold(time.Hour)
+	env.db.setRedirectHold(time.Hour)
 	for _, h := range heldHashes {
-		require.NoError(t, env.db.RecordPresignIssued(h))
+		require.NoError(t, env.db.RecordRedirectIssued(h))
 	}
 
 	// Rebuild the eviction manager with a limit that forces it to evict: the
@@ -746,7 +742,7 @@ func TestEvictionDrainsPastHeldNamespace(t *testing.T) {
 	eviction := NewEvictionManager(env.db, env.storage, EvictionConfig{
 		DirConfigs: map[StorageID]EvictionDirConfig{
 			env.diskID: {MaxSize: 1 << 30},
-			env.s3ID:   {MaxSize: uint64(fileSize) * 4, HighWaterPercentage: 30, LowWaterPercentage: 20, NoPlacement: true},
+			env.tierID: {MaxSize: uint64(fileSize) * 4, HighWaterPercentage: 30, LowWaterPercentage: 20, NoPlacement: true},
 		},
 	})
 	eviction.recalculateDirUsage()
@@ -819,26 +815,26 @@ func lruKeyExists(t *testing.T, db *CacheDB, sid StorageID, nsID NamespaceID, ts
 	return found
 }
 
-func TestS3TargetIdentityStable(t *testing.T) {
+func TestTierTargetIdentityStable(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	env := setupS3TestEnv(t, ctx)
+	env := setupTierTestEnv(t, ctx)
 
 	// Re-register against the same database and bucket: the storage ID
 	// must be re-associated via the bucket identity object, not reassigned.
 	cfg := env.target.cfg
-	registered, err := env.storage.RegisterS3Targets(ctx, []S3TargetConfig{cfg})
+	registered, err := env.storage.RegisterTierTargets(ctx, []TierTargetConfig{cfg})
 	require.NoError(t, err)
 	require.Len(t, registered, 1)
 	for id := range registered {
-		assert.Equal(t, env.s3ID, id)
+		assert.Equal(t, env.tierID, id)
 	}
 }
 
-func TestS3UploaderRecovery(t *testing.T) {
+func TestTierUploaderRecovery(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	env := setupS3TestEnv(t, ctx)
+	env := setupTierTestEnv(t, ctx)
 
 	data := make([]byte, 8192)
 	hash := InstanceHash(fmt.Sprintf("%064d", 3))
@@ -848,9 +844,9 @@ func TestS3UploaderRecovery(t *testing.T) {
 
 	// Simulate a crash mid-upload: usage charged, intent recorded, object
 	// bytes (fully) uploaded — but the relocation never committed.
-	require.NoError(t, env.db.AddUsage(env.s3ID, nsID, fileSize))
-	require.NoError(t, env.db.SetS3UploadIntent(hash, &S3UploadIntent{
-		TargetStorageID:   env.s3ID,
+	require.NoError(t, env.db.AddUsage(env.tierID, nsID, fileSize))
+	require.NoError(t, env.db.SetTierUploadIntent(hash, &TierUploadIntent{
+		TargetStorageID:   env.tierID,
 		OriginalStorageID: env.diskID,
 		Key:               env.target.objectKey(hash),
 		Size:              int64(len(data)),
@@ -866,10 +862,10 @@ func TestS3UploaderRecovery(t *testing.T) {
 	exists, err := env.target.objectExists(ctx, hash)
 	require.NoError(t, err)
 	assert.False(t, exists, "uncommitted upload should be deleted during recovery")
-	s3Usage, err := env.db.GetUsage(env.s3ID, nsID)
+	tierUsage, err := env.db.GetUsage(env.tierID, nsID)
 	require.NoError(t, err)
-	assert.Zero(t, s3Usage)
-	intents, err := env.db.ListS3UploadIntents()
+	assert.Zero(t, tierUsage)
+	intents, err := env.db.ListTierUploadIntents()
 	require.NoError(t, err)
 	assert.Empty(t, intents)
 	select {
@@ -880,13 +876,13 @@ func TestS3UploaderRecovery(t *testing.T) {
 	}
 }
 
-// TestS3RedirectDropsAuthorizationCrossHost pins the safety property that
+// TestTierRedirectDropsAuthorizationCrossHost pins the safety property that
 // makes the S3 presigned-URL redirect safe by default: a spec-compliant
 // HTTP client — specifically the one Pelican itself uses (config.GetClient,
 // which sets no CheckRedirect) — does NOT forward the Authorization header
 // to the redirect target when that target is a different hostname, as a
 // real S3 provider always is.  The cross-host redirect is exactly what the
-// cache issues in tryS3Redirect, so this guarantees a client's bearer token
+// cache issues in tryTierRedirect, so this guarantees a client's bearer token
 // is never disclosed to the S3 endpoint.
 //
 // The same-hostname case (different port) shows the converse, and is why the
@@ -894,9 +890,9 @@ func TestS3UploaderRecovery(t *testing.T) {
 // ignores ports, so an endpoint co-located with the cache does receive the
 // header.  redirectRetainsAuthorization is what detects that arrangement --
 // including the subdomain form, which this loopback-only test cannot stage --
-// and tryS3Redirect proxies those targets instead.  See
+// and tryTierRedirect proxies those targets instead.  See
 // TestRedirectRetainsAuthorization.
-func TestS3RedirectDropsAuthorizationCrossHost(t *testing.T) {
+func TestTierRedirectDropsAuthorizationCrossHost(t *testing.T) {
 	// s3Backend stands in for the S3 provider (the redirect target); it
 	// records whether the Authorization header survived the hop.
 	var sawAuth string
@@ -909,7 +905,7 @@ func TestS3RedirectDropsAuthorizationCrossHost(t *testing.T) {
 	require.NoError(t, err)
 
 	// cache stands in for the cache endpoint; it 307s to the "S3 provider"
-	// on a chosen hostname, mirroring http.Redirect in tryS3Redirect.
+	// on a chosen hostname, mirroring http.Redirect in tryTierRedirect.
 	var redirectHost string // set per subtest
 	cache := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		target := *backendURL
@@ -989,12 +985,12 @@ func TestRedirectRetainsAuthorization(t *testing.T) {
 	}
 }
 
-// TestS3RedirectServing is a handler-level end-to-end test: it stands up a
+// TestTierRedirectServing is a handler-level end-to-end test: it stands up a
 // real persistent cache with an S3 target (minio), lets the tiering
 // pipeline move a completed object into the bucket, and asserts that a GET
 // through serveObject is answered with a 307 to a working pre-signed URL —
 // and with the proxied bytes when redirect is disabled.
-func TestS3RedirectServing(t *testing.T) {
+func TestTierRedirectServing(t *testing.T) {
 	test_utils.SkipIfNoMinio(t)
 	endpoint, accessKey, secretKey := test_utils.StartMinio(t, "pelican-redirect-test")
 
@@ -1021,7 +1017,7 @@ func TestS3RedirectServing(t *testing.T) {
 	require.NoError(t, os.WriteFile(accessKeyfile, []byte(accessKey), 0600))
 	require.NoError(t, os.WriteFile(secretKeyfile, []byte(secretKey), 0600))
 
-	setS3Targets(t, []interface{}{
+	setTierTargets(t, []interface{}{
 		map[string]interface{}{
 			"ServiceUrl":    endpoint,
 			"Bucket":        "pelican-redirect-test",
@@ -1031,7 +1027,7 @@ func TestS3RedirectServing(t *testing.T) {
 			"SecretKeyfile": secretKeyfile,
 		},
 	})
-	require.NoError(t, param.Cache_S3UploadThreshold.Set("1KB"))
+	require.NoError(t, param.Cache_TieringThreshold.Set("1KB"))
 
 	tmpDir := t.TempDir()
 	pc, err := NewPersistentCache(ctx, egrp, PersistentCacheConfig{
@@ -1042,11 +1038,11 @@ func TestS3RedirectServing(t *testing.T) {
 	})
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = pc.Close() })
-	require.NotNil(t, pc.s3Uploader, "uploader should be wired when S3 targets are configured")
+	require.NotNil(t, pc.tierUploader, "uploader should be wired when S3 targets are configured")
 
-	var s3ID StorageID
-	for id := range pc.storage.s3Targets {
-		s3ID = id
+	var tierID StorageID
+	for id := range pc.storage.tierTargets {
+		tierID = id
 	}
 
 	// Inject a public namespace so the tokenless GET authorizes.
@@ -1072,10 +1068,10 @@ func TestS3RedirectServing(t *testing.T) {
 
 	// Nudge the queue directly (storeTestObject bypasses some completion
 	// paths) and wait for the relocation to land.
-	pc.s3Uploader.MaybeEnqueue(instanceHash)
+	pc.tierUploader.MaybeEnqueue(instanceHash)
 	require.Eventually(t, func() bool {
 		meta, err := pc.storage.GetMetadata(instanceHash)
-		return err == nil && meta != nil && meta.StorageID == s3ID
+		return err == nil && meta != nil && meta.StorageID == tierID
 	}, 15*time.Second, 50*time.Millisecond, "object should be tiered to the S3 target")
 
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -1129,8 +1125,8 @@ func TestS3RedirectServing(t *testing.T) {
 
 	// With redirect disabled, the same GET proxies the bytes through the
 	// cache (S3 stream mode) with a plain 200.
-	require.NoError(t, param.Cache_S3DisableRedirect.Set(true))
-	t.Cleanup(func() { _ = param.Cache_S3DisableRedirect.Set(false) })
+	require.NoError(t, param.Cache_TieringDisableRedirect.Set(true))
+	t.Cleanup(func() { _ = param.Cache_TieringDisableRedirect.Set(false) })
 	resp, err = noRedirectClient.Get(srv.URL + objectPath)
 	require.NoError(t, err)
 	body, err = io.ReadAll(resp.Body)
@@ -1151,10 +1147,75 @@ func TestS3RedirectServing(t *testing.T) {
 	require.Equal(t, http.StatusPartialContent, resp.StatusCode)
 	assert.Equal(t, data[4000:5000], body)
 
+	// The credential check runs against the redirect host the target reported
+	// at startup, before a URL is minted.  A URL that comes back pointing
+	// anywhere else must not be handed out on the strength of a check made
+	// about somewhere else; the cache proxies instead.
+	t.Run("RedirectToUnprobedHostIsRefused", func(t *testing.T) {
+		require.NoError(t, param.Cache_TieringDisableRedirect.Set(false))
+		t.Cleanup(func() { _ = param.Cache_TieringDisableRedirect.Set(true) })
+
+		target := pc.storage.getTierTarget(tierID)
+		require.NotNil(t, target)
+		original := target.backend
+		target.backend = fixedURLBackend{TierBackend: original, url: "https://elsewhere.example.net/k"}
+		t.Cleanup(func() { target.backend = original })
+
+		resp, err := noRedirectClient.Get(srv.URL + objectPath)
+		require.NoError(t, err)
+		body, err := io.ReadAll(resp.Body)
+		resp.Body.Close()
+		require.NoError(t, err)
+		assert.Equal(t, http.StatusOK, resp.StatusCode,
+			"a URL for an unprobed host must be proxied, not redirected to")
+		assert.Empty(t, resp.Header.Get("Location"))
+		assert.Equal(t, data, body)
+	})
+
 	// The redirect stamped a presign hold: eviction must skip the object.
-	evicted, _, _, err := pc.storage.EvictByLRU(s3ID, NamespaceID(1), 0, 0)
+	evicted, _, _, err := pc.storage.EvictByLRU(tierID, NamespaceID(1), 0, 0)
 	require.NoError(t, err)
 	assert.Empty(t, evicted, "presign hold should protect the object from eviction")
+}
+
+// fixedURLBackend wraps a real backend but hands out a fixed redirect URL,
+// so a test can make the target point somewhere other than it reported at
+// startup.  Everything else is delegated, so the proxy path still works.
+type fixedURLBackend struct {
+	TierBackend
+	url string
+}
+
+func (f fixedURLBackend) RedirectURL(_ context.Context, _ string, _ time.Duration) (string, error) {
+	return f.url, nil
+}
+
+// TestRedirectSendsCredentials covers the scheme half of the decision: the
+// host comparison only means something for a destination the client will
+// make an HTTP request to.
+func TestRedirectSendsCredentials(t *testing.T) {
+	tests := []struct {
+		name   string
+		scheme string
+		host   string
+		cache  string
+		want   bool
+	}{
+		{"unrelated https host", "https", "s3.amazonaws.com", "cache.example.org", false},
+		{"subdomain of the cache", "https", "s3.cache.example.org", "cache.example.org", true},
+		{"plain http subdomain", "http", "s3.cache.example.org", "cache.example.org", true},
+		// The client reads a file:// URL locally; no request is made to a
+		// host, so there is no header on the wire to forward.
+		{"file URL", "file", "", "cache.example.org", false},
+		// Nothing was learned at startup: fail closed so the caller proxies.
+		{"unknown destination", "", "", "cache.example.org", true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			target := &tierTarget{redirectScheme: tt.scheme, redirectHost: tt.host}
+			assert.Equal(t, tt.want, target.redirectSendsCredentials(tt.cache))
+		})
+	}
 }
 
 // newZeroReader returns a reader yielding n zero bytes.
@@ -1171,10 +1232,10 @@ func (zeroReader) Read(p []byte) (int, error) {
 	return len(p), nil
 }
 
-func TestS3ConsistencySweep(t *testing.T) {
+func TestTierConsistencySweep(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	env := setupS3TestEnv(t, ctx)
+	env := setupTierTestEnv(t, ctx)
 	nsID := NamespaceID(1)
 
 	checker := NewConsistencyChecker(env.db, env.storage, ConsistencyConfig{
@@ -1196,7 +1257,7 @@ func TestS3ConsistencySweep(t *testing.T) {
 	require.NoError(t, env.db.SetMetadata(ghostHash, &CacheMetadata{
 		ContentLength: 2048,
 		SourceURL:     "pelican://example.com/ghost",
-		StorageID:     env.s3ID,
+		StorageID:     env.tierID,
 		NamespaceID:   nsID,
 		Completed:     time.Now().Add(-time.Hour),
 	}))
@@ -1207,11 +1268,11 @@ func TestS3ConsistencySweep(t *testing.T) {
 	meta, err := env.storage.GetMetadata(keepHash)
 	require.NoError(t, err)
 	require.NotNil(t, meta, "metadata scan must not delete S3-resident entries")
-	assert.Equal(t, env.s3ID, meta.StorageID)
+	assert.Equal(t, env.tierID, meta.StorageID)
 
 	// The S3 sweep removes the stray bucket object and the ghost DB entry
 	// while leaving the valid object alone.
-	require.NoError(t, checker.RunS3Scan(ctx))
+	require.NoError(t, checker.RunTierScan(ctx))
 
 	exists, err := env.target.objectExists(ctx, strayHash)
 	require.NoError(t, err)

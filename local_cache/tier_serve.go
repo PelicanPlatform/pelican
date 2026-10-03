@@ -34,17 +34,17 @@ import (
 	"github.com/pelicanplatform/pelican/token_scopes"
 )
 
-// newS3SeekableReader builds a SeekableReader that proxies an S3-resident
+// newTierSeekableReader builds a SeekableReader that proxies a tiered
 // object through the cache (used when redirect is disabled, or by internal
 // callers such as the data-integrity scan).
 //
 // The object is pinned for the life of the stream.  A proxied object gets no
-// presign stamp -- no URL was handed out -- so the pin is its only protection:
-// without it, eviction could delete the bucket object between two of this
+// redirect-hold stamp -- no URL was handed out -- so the pin is its only protection:
+// without it, eviction could delete the remote object between two of this
 // reader's ranged GETs, which is exactly the configuration operators are
 // pointed at for private namespaces.
-func (pc *PersistentCache) newS3SeekableReader(ctx context.Context, target *s3Target, res *objectResolution) *SeekableReader {
-	stream := newS3ObjectStream(ctx, target, res.instanceHash, res.meta.ContentLength)
+func (pc *PersistentCache) newTierSeekableReader(ctx context.Context, target *tierTarget, res *objectResolution) *SeekableReader {
+	stream := newTierObjectStream(ctx, target, res.instanceHash, res.meta.ContentLength)
 	stream.onClose = pc.storage.PinObject(res.instanceHash)
 	return &SeekableReader{RangeReader: &RangeReader{
 		storage:      pc.storage,
@@ -56,14 +56,14 @@ func (pc *PersistentCache) newS3SeekableReader(ctx context.Context, target *s3Ta
 	}}
 }
 
-// presignHoldHeadroom is how much longer than a pre-signed URL's lifetime the
+// redirectHoldHeadroom is how much longer than a pre-signed URL's lifetime the
 // eviction hold must last, covering the gap between minting a URL and the
 // client actually finishing with it.
-const presignHoldHeadroom = 5 * time.Minute
+const redirectHoldHeadroom = 5 * time.Minute
 
-// s3PresignExpiry returns the configured presigned-URL lifetime.
-func s3PresignExpiry() time.Duration {
-	if d := param.Cache_S3PresignExpiry.GetDuration(); d > 0 {
+// tierRedirectExpiry returns the configured presigned-URL lifetime.
+func tierRedirectExpiry() time.Duration {
+	if d := param.Cache_TieringRedirectExpiry.GetDuration(); d > 0 {
 		return d
 	}
 	return 5 * time.Minute
@@ -126,38 +126,40 @@ func cacheExternalHost() string {
 	return hostOnly(param.Server_Hostname.GetString())
 }
 
-// tryS3Redirect serves a GET by redirecting the client to a pre-signed S3
-// URL when possible.  Returns true when the response has been written
-// (redirect issued); false means the caller should proceed with the normal
-// serving path (object not on S3, redirect disabled, object stale, etc.).
+// tryTierRedirect serves a GET by redirecting the client straight to the
+// tiering target that holds the object, so the bytes never pass through the
+// cache.  Returns true when the response has been written; false means the
+// caller should proceed with the normal serving path (object not tiered, the
+// target cannot issue URLs, redirect disabled, object stale, and so on).
 //
-// The redirect is only issued for objects that are fully resident on an S3
-// target and still fresh — stale objects fall through so the normal path
-// revalidates against the origin.  Issuing the URL stamps the presign key,
-// which protects the object from eviction for Cache.S3PresignEvictionHold.
+// The redirect is only issued for objects that are fully resident on a
+// tiering target and still fresh — stale objects fall through so the normal path
+// revalidates against the origin.  Issuing the URL stamps the redirect-hold key,
+// which protects the object from eviction for Cache.TieringRedirectEvictionHold.
 //
-// Token safety: the presigned URL points at the S3 provider, which is outside
-// the federation trust boundary, so the client's bearer token must not reach
-// it.  Two of the three ways it could are closed by construction:
-//   - The presigned URL (the redirect Location) is self-authenticating and
-//     carries only AWS SigV4 material; the Pelican token is never embedded.
+// Token safety: the URL points at a storage provider outside the federation
+// trust boundary, so the client's bearer token must not reach it.  Two of the
+// three ways it could are closed by construction:
+//   - The URL (the redirect Location) is self-authenticating -- a pre-signed
+//     URL carries only the provider's own signature material -- and the
+//     Pelican token is never embedded in it.
 //   - A token delivered as ?authz= (how the director hands one to a client)
 //     is not carried onto the Location: http.Redirect only rewrites the query
-//     for relative targets, and a presigned URL is absolute.
+//     for relative targets, and these URLs are absolute.
 //
 // The third is the Authorization header, which a compliant client drops only
 // when the destination is neither the host it connected to nor a subdomain of
 // it (see redirectRetainsAuthorization).  When a request carries such a header
-// and the bucket endpoint falls inside that domain, this function declines and
-// the object is proxied instead, so an S3 endpoint co-located with the cache
-// cannot be handed federation tokens.
+// and the target's redirect host falls inside that domain, this function
+// declines and the object is proxied instead, so a storage endpoint
+// co-located with the cache cannot be handed federation tokens.
 //
 // Residual risk: a client that re-sends Authorization across unrelated hosts,
 // contrary to the spec (e.g. curl --location-trusted), still discloses it.
 // Operators serving private namespaces to such clients should set
-// Cache.S3DisableRedirect.  See TestS3RedirectDropsAuthorizationCrossHost.
-func (pc *PersistentCache) tryS3Redirect(w http.ResponseWriter, r *http.Request, objectPath, token string, reqLog *log.Entry, startTime time.Time) bool {
-	if len(pc.storage.s3Targets) == 0 || param.Cache_S3DisableRedirect.GetBool() {
+// Cache.TieringDisableRedirect.  See TestTierRedirectDropsAuthorizationCrossHost.
+func (pc *PersistentCache) tryTierRedirect(w http.ResponseWriter, r *http.Request, objectPath, token string, reqLog *log.Entry, startTime time.Time) bool {
+	if len(pc.storage.tierTargets) == 0 || param.Cache_TieringDisableRedirect.GetBool() {
 		return false
 	}
 
@@ -177,17 +179,23 @@ func (pc *PersistentCache) tryS3Redirect(w http.ResponseWriter, r *http.Request,
 	if err != nil || meta == nil || meta.Completed.IsZero() {
 		return false
 	}
-	target := pc.storage.getS3Target(meta.StorageID)
-	if target == nil {
+	target := pc.storage.getTierTarget(meta.StorageID)
+	if target == nil || !target.canRedirect {
+		// Either the object is not tiered, or its target cannot hand out a
+		// URL the client could fetch on its own; proxy instead.
 		return false
 	}
-	// Would redirecting hand this client's Authorization header to the bucket?
+	// Would redirecting hand this client's Authorization header to the target?
 	// Only a request that carries one has anything to leak -- a public read,
 	// or the director's ?authz= flow, does not -- and the host to compare
 	// against is the one the client actually connected to, since that is what
-	// its redirect policy compares.  See the doc comment.
-	if r.Header.Get("Authorization") != "" && redirectRetainsAuthorization(target.cfg.ServiceUrl, r.Host) {
-		reqLog.Debug("Proxying instead of redirecting: the bucket endpoint shares this cache's DNS domain, " +
+	// its redirect policy compares.  The destination is the target's probed
+	// redirect host rather than its configured endpoint: that is where the
+	// client would really be sent, and it exists for every kind of target.
+	// Checking before a URL is minted keeps a request that is going to be
+	// proxied anyway from paying for one.  See the doc comment.
+	if r.Header.Get("Authorization") != "" && target.redirectSendsCredentials(r.Host) {
+		reqLog.Debug("Proxying instead of redirecting: the tier target shares this cache's DNS domain, " +
 			"so the client would forward its credentials to it")
 		return false
 	}
@@ -202,10 +210,10 @@ func (pc *PersistentCache) tryS3Redirect(w http.ResponseWriter, r *http.Request,
 	}
 
 	// A client revalidating with the ETag it already holds is answered here
-	// rather than redirected.  Sending it to the bucket instead would make it
+	// rather than redirected.  Sending it to the target instead would make it
 	// re-download the whole object for nothing: the far end cannot complete the
-	// revalidation, because S3 answers with its own ETag (an MD5 of the stored
-	// bytes) which never matches the origin's.
+	// revalidation, because the storage provider answers with its own ETag
+	// (for S3, an MD5 of the stored bytes), which never matches the origin's.
 	if meta.ETag != "" {
 		for _, match := range strings.Split(r.Header.Get("If-None-Match"), ",") {
 			if match = strings.TrimSpace(match); match == "*" || (match != "" && match == meta.ETag) {
@@ -222,20 +230,29 @@ func (pc *PersistentCache) tryS3Redirect(w http.ResponseWriter, r *http.Request,
 		}
 	}
 
-	presignedURL, err := target.presignGet(r.Context(), instanceHash, s3PresignExpiry())
+	targetURL, err := target.redirectURL(r.Context(), instanceHash, tierRedirectExpiry())
 	if err != nil {
-		reqLog.WithError(err).Warn("Failed to presign S3 URL; falling back to proxying")
+		reqLog.WithError(err).Warn("Failed to build a redirect URL for the tier target; falling back to proxying")
+		return false
+	}
+	// The credential check above was made against the host the startup probe
+	// reported.  Every backend we have points all of its URLs at one host,
+	// but nothing guarantees that, so a URL that disagrees is refused rather
+	// than handed out on the strength of a check made about somewhere else.
+	if dst, perr := url.Parse(targetURL); perr != nil ||
+		!strings.EqualFold(dst.Scheme, target.redirectScheme) || !strings.EqualFold(dst.Host, target.redirectHost) {
+		reqLog.Warn("Tier target produced a redirect URL for a different destination than it reported at startup; proxying instead")
 		return false
 	}
 
-	// Stamp the presign key *before* handing out the URL so the eviction
+	// Stamp the redirect-hold key *before* handing out the URL so the eviction
 	// hold is in place by the time the client can use it.
-	if err := pc.db.RecordPresignIssued(instanceHash); err != nil {
-		reqLog.WithError(err).Warn("Failed to record presign stamp; falling back to proxying")
+	if err := pc.db.RecordRedirectIssued(instanceHash); err != nil {
+		reqLog.WithError(err).Warn("Failed to record redirect-hold stamp; falling back to proxying")
 		return false
 	}
 	if err := pc.eviction.RecordAccess(instanceHash); err != nil {
-		log.Debugf("Failed to record access for %s during S3 redirect: %v", instanceHash, err)
+		log.Debugf("Failed to record access for %s during tiering redirect: %v", instanceHash, err)
 	}
 
 	// Carry the same validators and freshness metadata the proxied path sets,
@@ -254,7 +271,7 @@ func (pc *PersistentCache) tryS3Redirect(w http.ResponseWriter, r *http.Request,
 		}
 	}
 	w.Header().Set("Cache-Control", meta.ResponseCacheControl())
-	http.Redirect(w, r, presignedURL, http.StatusTemporaryRedirect)
+	http.Redirect(w, r, targetURL, http.StatusTemporaryRedirect)
 	reqLog.WithFields(log.Fields{
 		"status":   http.StatusTemporaryRedirect,
 		"cache":    "hit-redirect",
@@ -265,7 +282,7 @@ func (pc *PersistentCache) tryS3Redirect(w http.ResponseWriter, r *http.Request,
 
 // limitedReadCloser bounds a stream to n bytes while preserving Close.
 type limitedReadCloser struct {
-	stream *s3ObjectStream
+	stream *tierObjectStream
 	remain int64
 }
 

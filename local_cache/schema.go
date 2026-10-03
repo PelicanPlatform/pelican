@@ -82,16 +82,16 @@ const (
 	// remove it, and anything left over belongs to a writer that did not
 	// survive.  See StorageManager.ReclaimAbandonedAppends.
 	PrefixAppendIntent = "aw:"
-	// PrefixS3Upload tracks in-progress uploads to S3 storage targets:
-	// up:<instance_hash> -> msgpack(S3UploadIntent).  An intent is written
+	// PrefixTierUpload tracks in-progress uploads to tiering targets:
+	// up:<instance_hash> -> msgpack(TierUploadIntent).  An intent is written
 	// before the first byte reaches S3 and removed only after the object
 	// has been relocated (or the partial upload aborted), so a crash never
 	// leaves untracked objects in the bucket.
-	PrefixS3Upload = "up:"
-	// PrefixPresign records when a pre-signed URL was last handed out for
+	PrefixTierUpload = "up:"
+	// PrefixRedirectHold records when a pre-signed URL was last handed out for
 	// an object: ps:<instance_hash> -> 8-byte big-endian UnixNano.
-	// Eviction skips objects with a recent presign timestamp.
-	PrefixPresign = "ps:"
+	// Eviction skips objects with a recent redirect timestamp.
+	PrefixRedirectHold = "ps:"
 	// The keys below describe the database as a whole rather than any one
 	// object.  They are single, underscore-prefixed keys, they are written at
 	// open before any consumer touches a record, and none of them is ever
@@ -741,15 +741,15 @@ func (m *CacheMetadata) EnsureExpires() {
 const (
 	// BackendPosix is a local directory-backed storage target.
 	BackendPosix = ""
-	// BackendS3 is an S3 bucket-backed storage target.
-	BackendS3 = "s3"
+	// BackendTier is an S3 bucket-backed storage target.
+	BackendTier = "s3"
 )
 
 // DiskMapping stores the mapping of a storage ID to its directory path
 // and UUID.  The UUID file is dropped in the directory root so that
 // directories can be remounted at different paths and re-associated.
 //
-// For S3 targets (Backend == BackendS3), Directory holds a display URL
+// For tiering targets (Backend == BackendTier), Directory holds a display URL
 // (s3://<endpoint-host>/<bucket>/<prefix>) and the UUID is stored in an
 // identity object inside the bucket, so the same re-association logic
 // applies when a bucket is reconfigured under a different endpoint.
@@ -760,10 +760,10 @@ type DiskMapping struct {
 	Backend   string    `msgpack:"be,omitempty"`
 }
 
-// S3UploadIntent records an in-progress upload of a completed object to an
-// S3 storage target.  Serialized with msgpack under up:<instance_hash>.
-type S3UploadIntent struct {
-	// TargetStorageID is the S3 storage target being uploaded to.
+// TierUploadIntent records an in-progress upload of a completed object to an
+// tiering target.  Serialized with msgpack under up:<instance_hash>.
+type TierUploadIntent struct {
+	// TargetStorageID is the tiering target being uploaded to.
 	TargetStorageID StorageID `msgpack:"tid"`
 	// OriginalStorageID is the local (POSIX) storage the object's base
 	// (chunk 0) lives on; used by crash recovery to clean up the local
@@ -784,10 +784,10 @@ type S3UploadIntent struct {
 	// StartedAt is when the upload began.
 	StartedAt time.Time `msgpack:"st"`
 	// RelocatedAt is set once the relocation transaction has committed, i.e.
-	// once the bucket copy -- not the local one -- is the object's
+	// once the remote copy -- not the local one -- is the object's
 	// authoritative storage.  It is what lets crash recovery tell the two
 	// halves of the lifecycle apart when the metadata record is gone: before
-	// relocation the bucket bytes and their capacity charge belong to this
+	// relocation the remote bytes and their capacity charge belong to this
 	// intent and must be reclaimed, while afterwards they belong to the
 	// object, so whatever deleted it has already accounted for them and only
 	// the leftover local copy needs cleaning up.  Zero means "not yet".
@@ -1065,20 +1065,31 @@ func PurgeFirstKey(instanceHash InstanceHash) []byte {
 	return []byte(PrefixPurgeFirst + string(instanceHash))
 }
 
-// S3UploadIntentKey returns the BadgerDB key tracking an in-progress upload
-// of an object to an S3 storage target.
-func S3UploadIntentKey(instanceHash InstanceHash) []byte {
-	return []byte(PrefixS3Upload + string(instanceHash))
+// TierUploadIntentKey returns the BadgerDB key tracking an in-progress upload
+// of an object to a tiering target.
+func TierUploadIntentKey(instanceHash InstanceHash) []byte {
+	return []byte(PrefixTierUpload + string(instanceHash))
 }
 
-// PresignKey returns the BadgerDB key recording the last time a pre-signed
+// RedirectHoldKey returns the BadgerDB key recording the last time a pre-signed
 // URL was handed out for an object.
-func PresignKey(instanceHash InstanceHash) []byte {
-	return []byte(PrefixPresign + string(instanceHash))
+func RedirectHoldKey(instanceHash InstanceHash) []byte {
+	return []byte(PrefixRedirectHold + string(instanceHash))
 }
 
-// S3TargetConfig describes one S3 bucket used as a cache storage target.
-type S3TargetConfig struct {
+// TierTargetConfig describes one remote storage target the cache tiers
+// completed objects to.
+//
+// A target is named either by a gocloud.dev/blob provider URL or, for
+// S3-compatible services, by the explicit S3 fields.  Nothing above this
+// struct is S3-specific: the fields are kept because naming an S3 endpoint,
+// region and credential files separately is how the origin's exports are
+// configured too, and operators should not have to learn a second spelling.
+type TierTargetConfig struct {
+	// ProviderURL names the backend in gocloud.dev/blob form --
+	// "s3://bucket", "gs://bucket", "azblob://container", "mem://".  When
+	// set it takes precedence over the S3-specific fields.
+	ProviderURL string
 	// ServiceUrl is the S3 endpoint (e.g. https://s3.us-east-1.amazonaws.com).
 	ServiceUrl string
 	// Region is the S3 region; defaults to us-east-1 when empty.
@@ -1090,55 +1101,114 @@ type S3TargetConfig struct {
 	// UrlStyle is "path" (default) or "virtual".
 	UrlStyle string
 	// AccessKeyfile / SecretKeyfile point at files holding static
-	// credentials.  Both must be set together; when empty the ambient AWS
+	// credentials.  Both must be set together; when empty the ambient
 	// credential chain is used.
 	AccessKeyfile string
 	SecretKeyfile string
-	// MaxSize is the maximum bytes of cache data stored in the bucket.
-	// Required — bucket capacity cannot be auto-detected.
+	// MaxSize is the maximum bytes of cache data stored on the target.
+	// Required -- remote capacity cannot be auto-detected.
 	MaxSize uint64
 	// Watermark overrides (percent of MaxSize); 0 means use the global default.
 	HighWaterMarkPercentage int
 	LowWaterMarkPercentage  int
 }
 
-// ServiceUrlScheme returns the URL scheme of the configured endpoint,
-// defaulting to https when the endpoint carries none.
-func (c *S3TargetConfig) ServiceUrlScheme() string {
-	if u, err := url.Parse(c.ServiceUrl); err == nil && u.Scheme != "" {
+// UsesVirtualHostStyle reports whether S3 virtual-host addressing was asked
+// for.  Path style is the default because most S3-compatible services and
+// custom endpoints require it.
+func (c *TierTargetConfig) UsesVirtualHostStyle() bool {
+	return strings.EqualFold(c.UrlStyle, "virtual")
+}
+
+// TransportScheme returns the URL scheme object data travels over, defaulting
+// to https.  For the S3 fields that is the endpoint's scheme; for a provider
+// URL it is the scheme of an explicit endpoint override when one is given
+// (s3://bucket?endpoint=http://...), since the cloud providers' own
+// endpoints are https.
+func (c *TierTargetConfig) TransportScheme() string {
+	endpoint := c.ServiceUrl
+	if c.ProviderURL != "" {
+		endpoint = ""
+		if u, err := url.Parse(c.ProviderURL); err == nil {
+			endpoint = u.Query().Get("endpoint")
+		}
+	}
+	if u, err := url.Parse(endpoint); err == nil && u.Scheme != "" {
 		return strings.ToLower(u.Scheme)
 	}
 	return "https"
 }
 
-// DisplayURL returns a human-readable identity string for the target,
-// stored in the DiskMapping.Directory field.
-func (c *S3TargetConfig) DisplayURL() string {
+// DisplayURL returns a human-readable identity string for the target.  It is
+// persisted in the DiskMapping.Directory field and written to logs, so it
+// must never carry credentials -- operators may legitimately embed secrets in
+// a provider URL (e.g. "s3://bucket?awssecretkey=...").
+func (c *TierTargetConfig) DisplayURL() string {
+	if c.ProviderURL != "" {
+		return redactTierURL(c.ProviderURL)
+	}
 	host := c.ServiceUrl
 	if u, err := url.Parse(c.ServiceUrl); err == nil && u.Host != "" {
 		host = u.Host
 	}
 	s := "s3://" + host + "/" + c.Bucket
-	if c.Prefix != "" {
-		s += "/" + strings.Trim(c.Prefix, "/")
+	if prefix := trimTierPrefix(c.Prefix); prefix != "" {
+		s += "/" + prefix
 	}
 	return s
 }
 
-// ParseS3TargetsConfig reads the Cache.S3StorageTargets setting and returns
+// tierSecretQueryKeys are the query parameters gocloud URL openers accept
+// that carry a secret.
+var tierSecretQueryKeys = []string{"awssecretkey", "secretkey", "sas_token", "accountkey"}
+
+// redactTierURL strips credentials from a provider URL: both the userinfo
+// component and the well-known secret query parameters.
+func redactTierURL(raw string) string {
+	u, err := url.Parse(raw)
+	if err != nil {
+		// Unparsable: say nothing rather than risk echoing a secret.
+		return "(unparsable provider URL)"
+	}
+	if u.User != nil {
+		u.User = url.User("redacted")
+	}
+	q := u.Query()
+	changed := false
+	for key := range q {
+		for _, secret := range tierSecretQueryKeys {
+			if strings.EqualFold(key, secret) {
+				q.Set(key, "redacted")
+				changed = true
+			}
+		}
+	}
+	if changed {
+		u.RawQuery = q.Encode()
+	}
+	return u.String()
+}
+
+// trimTierPrefix normalises a configured key prefix (no leading or trailing
+// slashes, so callers can join it unconditionally).
+func trimTierPrefix(prefix string) string {
+	return strings.Trim(prefix, "/")
+}
+
+// ParseTierTargetsConfig reads the Cache.TieringTargets setting and returns
 // the parsed target configurations.  Returns nil (not an error) when the key
 // is unset or empty.
-func ParseS3TargetsConfig() ([]S3TargetConfig, error) {
-	raw := param.Cache_S3StorageTargets.GetRaw()
+func ParseTierTargetsConfig() ([]TierTargetConfig, error) {
+	raw := param.Cache_TieringTargets.GetRaw()
 	if raw == nil {
 		return nil, nil
 	}
 
 	list, ok := raw.([]interface{})
 	if !ok {
-		return nil, fmt.Errorf("Cache.S3StorageTargets: unsupported type %T; expected a list of objects", raw)
+		return nil, fmt.Errorf("Cache.TieringTargets: unsupported type %T; expected a list of objects", raw)
 	}
-	configs := make([]S3TargetConfig, 0, len(list))
+	configs := make([]TierTargetConfig, 0, len(list))
 	for i, elem := range list {
 		var m map[string]interface{}
 		switch e := elem.(type) {
@@ -1150,9 +1220,9 @@ func ParseS3TargetsConfig() ([]S3TargetConfig, error) {
 				m[fmt.Sprint(k)] = val
 			}
 		default:
-			return nil, fmt.Errorf("Cache.S3StorageTargets[%d]: unsupported type %T; expected an object", i, elem)
+			return nil, fmt.Errorf("Cache.TieringTargets[%d]: unsupported type %T; expected an object", i, elem)
 		}
-		cfg, err := parseS3TargetEntry(i, m)
+		cfg, err := parseTierTargetEntry(i, m)
 		if err != nil {
 			return nil, err
 		}
@@ -1161,10 +1231,10 @@ func ParseS3TargetsConfig() ([]S3TargetConfig, error) {
 	return configs, nil
 }
 
-// s3EntryString fetches a string-valued key from an S3 target entry,
-// falling back to the all-lowercase key name (viper lowercases keys in
-// some code paths).
-func s3EntryString(m map[string]interface{}, key string) string {
+// tierEntryString fetches a string-valued key from a target entry, falling
+// back to the all-lowercase key name (viper lowercases keys in some code
+// paths).
+func tierEntryString(m map[string]interface{}, key string) string {
 	if v, ok := m[key].(string); ok {
 		return v
 	}
@@ -1174,8 +1244,8 @@ func s3EntryString(m map[string]interface{}, key string) string {
 	return ""
 }
 
-// s3EntryInt fetches an integer-valued key with lowercase fallback.
-func s3EntryInt(m map[string]interface{}, key string) int {
+// tierEntryInt fetches an integer-valued key with lowercase fallback.
+func tierEntryInt(m map[string]interface{}, key string) int {
 	v, ok := m[key]
 	if !ok {
 		v, ok = m[strings.ToLower(key)]
@@ -1194,33 +1264,37 @@ func s3EntryInt(m map[string]interface{}, key string) int {
 	return 0
 }
 
-// parseS3TargetEntry converts a map entry into an S3TargetConfig.
-func parseS3TargetEntry(idx int, m map[string]interface{}) (S3TargetConfig, error) {
-	cfg := S3TargetConfig{
-		ServiceUrl:              s3EntryString(m, "ServiceUrl"),
-		Region:                  s3EntryString(m, "Region"),
-		Bucket:                  s3EntryString(m, "Bucket"),
-		Prefix:                  strings.Trim(s3EntryString(m, "Prefix"), "/"),
-		UrlStyle:                s3EntryString(m, "UrlStyle"),
-		AccessKeyfile:           s3EntryString(m, "AccessKeyfile"),
-		SecretKeyfile:           s3EntryString(m, "SecretKeyfile"),
-		HighWaterMarkPercentage: s3EntryInt(m, "HighWaterMarkPercentage"),
-		LowWaterMarkPercentage:  s3EntryInt(m, "LowWaterMarkPercentage"),
+// parseTierTargetEntry converts a map entry into a TierTargetConfig.
+func parseTierTargetEntry(idx int, m map[string]interface{}) (TierTargetConfig, error) {
+	cfg := TierTargetConfig{
+		ProviderURL:             tierEntryString(m, "ProviderURL"),
+		ServiceUrl:              tierEntryString(m, "ServiceUrl"),
+		Region:                  tierEntryString(m, "Region"),
+		Bucket:                  tierEntryString(m, "Bucket"),
+		Prefix:                  trimTierPrefix(tierEntryString(m, "Prefix")),
+		UrlStyle:                tierEntryString(m, "UrlStyle"),
+		AccessKeyfile:           tierEntryString(m, "AccessKeyfile"),
+		SecretKeyfile:           tierEntryString(m, "SecretKeyfile"),
+		HighWaterMarkPercentage: tierEntryInt(m, "HighWaterMarkPercentage"),
+		LowWaterMarkPercentage:  tierEntryInt(m, "LowWaterMarkPercentage"),
 	}
-	if cfg.ServiceUrl == "" {
-		return cfg, fmt.Errorf("Cache.S3StorageTargets[%d]: missing required ServiceUrl", idx)
-	}
-	if cfg.Bucket == "" {
-		return cfg, fmt.Errorf("Cache.S3StorageTargets[%d]: missing required Bucket", idx)
-	}
-	if cfg.Region == "" {
-		cfg.Region = "us-east-1"
-	}
-	if cfg.UrlStyle == "" {
-		cfg.UrlStyle = "path"
+	if cfg.ProviderURL == "" {
+		// Fall back to the explicit S3 spelling, which then has to be complete.
+		if cfg.ServiceUrl == "" {
+			return cfg, fmt.Errorf("Cache.TieringTargets[%d]: set either ProviderURL or both ServiceUrl and Bucket", idx)
+		}
+		if cfg.Bucket == "" {
+			return cfg, fmt.Errorf("Cache.TieringTargets[%d]: missing required Bucket", idx)
+		}
+		if cfg.Region == "" {
+			cfg.Region = "us-east-1"
+		}
+		if cfg.UrlStyle == "" {
+			cfg.UrlStyle = "path"
+		}
 	}
 	if (cfg.AccessKeyfile == "") != (cfg.SecretKeyfile == "") {
-		return cfg, fmt.Errorf("Cache.S3StorageTargets[%d]: AccessKeyfile and SecretKeyfile must be set together", idx)
+		return cfg, fmt.Errorf("Cache.TieringTargets[%d]: AccessKeyfile and SecretKeyfile must be set together", idx)
 	}
 
 	// MaxSize (required, string like "5TB" or a byte count)
@@ -1235,7 +1309,7 @@ func parseS3TargetEntry(idx int, m map[string]interface{}) (S3TargetConfig, erro
 		if s != "" && s != "0" {
 			n, err := utils.ParseBytes(s)
 			if err != nil {
-				return cfg, fmt.Errorf("Cache.S3StorageTargets[%d].MaxSize: %w", idx, err)
+				return cfg, fmt.Errorf("Cache.TieringTargets[%d].MaxSize: %w", idx, err)
 			}
 			cfg.MaxSize = n
 		}
@@ -1247,7 +1321,7 @@ func parseS3TargetEntry(idx int, m map[string]interface{}) (S3TargetConfig, erro
 		cfg.MaxSize = uint64(s)
 	}
 	if cfg.MaxSize == 0 {
-		return cfg, fmt.Errorf("Cache.S3StorageTargets[%d]: MaxSize is required for S3 targets (bucket capacity cannot be auto-detected)", idx)
+		return cfg, fmt.Errorf("Cache.TieringTargets[%d]: MaxSize is required (remote capacity cannot be auto-detected)", idx)
 	}
 	return cfg, nil
 }

@@ -55,7 +55,7 @@ export type ParameterValue =
   | Export[]
   | PolicyDefinition[]
   | StorageDir[]
-  | S3StorageTarget[];
+  | TieringTarget[];
 
 export type ParameterValueRecord = { [key: string]: ParameterValue };
 
@@ -155,7 +155,8 @@ export interface StorageDir {
   lowwatermarkpercentage: number;
 }
 
-export interface S3StorageTarget {
+export interface TieringTarget {
+  providerurl: string;
   serviceurl: string;
   region: string;
   bucket: string;
