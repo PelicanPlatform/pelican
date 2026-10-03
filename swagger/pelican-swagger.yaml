@@ -3357,6 +3357,8 @@ paths:
                     $ref: "#/definitions/HealthStatus"
                   xrootd:
                     $ref: "#/definitions/HealthStatus"
+                  xrootd-liveness:
+                    $ref: "#/definitions/HealthStatus"
   /auth/login:
     post:
       tags:

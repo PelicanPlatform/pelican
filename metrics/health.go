@@ -70,18 +70,25 @@ const statusIndexErrorMessage = "Error: status string index out of range"
 // i.e. For ""OriginCache_XRootD", it means this component is available at both
 // Origin and Cache. Please come up with the largest possible scope of the component
 const (
-	OriginCache_XRootD        HealthStatusComponent = "xrootd"
-	OriginCache_CMSD          HealthStatusComponent = "cmsd"
-	OriginCache_Federation    HealthStatusComponent = "federation" // Advertise to the director
-	OriginCache_Director      HealthStatusComponent = "director"   // File transfer tests with director
-	OriginCache_Registry      HealthStatusComponent = "registry"   // Register namespace at the registry
-	DirectorRegistry_Topology HealthStatusComponent = "topology"   // Fetch data from OSDF topology
-	Server_WebUI              HealthStatusComponent = "web-ui"
-	OriginCache_IOConcurrency HealthStatusComponent = "IO-concurrency" // Keep track of whether or active requests are exceeding configured concurrency limits
-	Prometheus                HealthStatusComponent = "prometheus"     // Prometheus server
-	OriginCache_ConfigUpdates HealthStatusComponent = "config-updates" // Track freshness of Authfile and scitokens.cfg
-	Server_StorageHealth      HealthStatusComponent = "storage"        // Monitor filesystem storage consumption
-	Origin_SSHBackend         HealthStatusComponent = "ssh-backend"    // SSH POSIXv2 backend connection status
+	OriginCache_XRootD HealthStatusComponent = "xrootd"
+	// OriginCache_XRootDLiveness is reported by the probe that asks whether the local
+	// XRootD still answers new connections.  It is deliberately separate from
+	// OriginCache_XRootD: each slot holds whatever was written to it last, so a second
+	// writer with a different notion of "healthy" would overwrite the self-test's verdict
+	// -- a liveness "ok" masking a self-test "critical", or a liveness "warning"
+	// downgrading one.
+	OriginCache_XRootDLiveness HealthStatusComponent = "xrootd-liveness"
+	OriginCache_CMSD           HealthStatusComponent = "cmsd"
+	OriginCache_Federation     HealthStatusComponent = "federation" // Advertise to the director
+	OriginCache_Director       HealthStatusComponent = "director"   // File transfer tests with director
+	OriginCache_Registry       HealthStatusComponent = "registry"   // Register namespace at the registry
+	DirectorRegistry_Topology  HealthStatusComponent = "topology"   // Fetch data from OSDF topology
+	Server_WebUI               HealthStatusComponent = "web-ui"
+	OriginCache_IOConcurrency  HealthStatusComponent = "IO-concurrency" // Keep track of whether or active requests are exceeding configured concurrency limits
+	Prometheus                 HealthStatusComponent = "prometheus"     // Prometheus server
+	OriginCache_ConfigUpdates  HealthStatusComponent = "config-updates" // Track freshness of Authfile and scitokens.cfg
+	Server_StorageHealth       HealthStatusComponent = "storage"        // Monitor filesystem storage consumption
+	Origin_SSHBackend          HealthStatusComponent = "ssh-backend"    // SSH POSIXv2 backend connection status
 )
 
 var (
