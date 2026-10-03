@@ -59,7 +59,7 @@ type EvictionManager struct {
 	dirIDs []StorageID
 
 	// Sorted list of directory IDs eligible for new-object placement
-	// (excludes NoPlacement targets such as S3 buckets).  Read-only
+	// (excludes NoPlacement targets such as tiering targets).  Read-only
 	// after construction.
 	placementIDs []StorageID
 
@@ -119,7 +119,7 @@ type EvictionDirConfig struct {
 	HighWaterBytes      uint64 // Absolute byte threshold (overrides percentage when > 0)
 	LowWaterBytes       uint64 // Absolute byte threshold (overrides percentage when > 0)
 	// NoPlacement excludes this storage target from new-object placement
-	// (ChooseDiskStorage).  Used for S3 targets, which only receive
+	// (ChooseDiskStorage).  Used for tiering targets, which only receive
 	// completed objects tiered by the uploader; they still participate in
 	// usage accounting and eviction.
 	NoPlacement bool
@@ -318,7 +318,7 @@ func (em *EvictionManager) NoteUsageIncrease(storageID StorageID, bytes int64) {
 
 // NoteUsageDecrease adjusts the in-memory estimate downward after bytes
 // were released from a storage target (e.g. the local copy removed after
-// tiering to S3, or a failed upload refunded).  The DB-level counters must
+// tiering to a remote target, or a failed upload refunded).  The DB-level counters must
 // already have been updated by the caller.
 func (em *EvictionManager) NoteUsageDecrease(storageID StorageID, bytes int64) {
 	if counter, ok := em.dirUsage[storageID]; ok {
@@ -452,7 +452,7 @@ func (em *EvictionManager) checkAndEvict() {
 			}).Info("Starting eviction")
 
 			// Namespaces that made no eviction progress this pass (e.g.
-			// every candidate protected by a presign hold) are excluded
+			// every candidate protected by a redirect hold) are excluded
 			// so the loop moves on instead of spinning on them.
 			excluded := make(map[NamespaceID]bool)
 			for dirUsage = em.getDirUsage(sid); dirUsage > 0 && uint64(dirUsage) > limits.lowWater; dirUsage = em.getDirUsage(sid) {
@@ -494,7 +494,7 @@ func (em *EvictionManager) checkAndEvict() {
 				// do the same thing again, so retrying it only burns CPU until
 				// the timeout below.  Exclude the namespace and move on to the
 				// next-greediest one: a namespace whose LRU head is entirely
-				// in use (open readers, or objects under a presign hold) must
+				// in use (open readers, or objects under a redirect hold) must
 				// not stop the whole storage target from draining, or a bucket
 				// sitting above its high-water mark never recovers and tiering
 				// stalls once no target has room.  When every namespace is

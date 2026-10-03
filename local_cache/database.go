@@ -89,10 +89,10 @@ type CacheDB struct {
 	// the database: every mutating entry point checks it first.
 	readOnly bool
 
-	// presignHold is how long after a pre-signed URL was handed out an
+	// redirectHold is how long after a pre-signed URL was handed out an
 	// object is protected from eviction (0 = no protection).  Set during
-	// single-threaded init via setPresignHold; read-only afterwards.
-	presignHold time.Duration
+	// single-threaded init via setRedirectHold; read-only afterwards.
+	redirectHold time.Duration
 }
 
 // ErrReadOnly is returned by every mutating CacheDB method when the handle was
@@ -110,12 +110,12 @@ func (cdb *CacheDB) checkWritable() error {
 // ReadOnly reports whether this handle refuses mutations.
 func (cdb *CacheDB) ReadOnly() bool { return cdb.readOnly }
 
-// setPresignHold configures the eviction protection window for objects with
+// setRedirectHold configures the eviction protection window for objects with
 // a recently issued pre-signed URL.  Must be called during single-threaded
 // initialization.  It only sets an in-memory field (it is not a database
 // write), so it is unexported and needs no read-only guard.
-func (cdb *CacheDB) setPresignHold(d time.Duration) {
-	cdb.presignHold = d
+func (cdb *CacheDB) setRedirectHold(d time.Duration) {
+	cdb.redirectHold = d
 }
 
 // cacheDBOptions builds the BadgerDB options shared by every way of opening a
@@ -700,7 +700,7 @@ func formatSchemaVersion(v SchemaVersion) []byte {
 // function for the cheap in-place cases.
 func migrateSchema(txn *badger.Txn, from SchemaVersion) error {
 	if from == 1 {
-		// 1 -> 2 rewrites nothing: the S3 layout only adds key prefixes (up:,
+		// 1 -> 2 rewrites nothing: the tiering layout only adds key prefixes (up:,
 		// ps:) that a version-1 database simply has none of, and the new
 		// DiskMapping.Backend field decodes as BackendPosix when absent, which
 		// is what every mapping written under version 1 is.  Stamping the new
@@ -1959,18 +1959,18 @@ func (cdb *CacheDB) ComputeActualUsage() (map[StorageUsageKey]int64, error) {
 	return actual, err
 }
 
-// --- S3 Tiering Operations ---
+// --- Tiering Operations ---
 
-// SetS3UploadIntent records an in-progress upload to an S3 target.  Written
+// SetTierUploadIntent records an in-progress upload to a tiering target.  Written
 // before the first byte reaches the bucket so that a crash never leaves an
-// untracked object in S3.
+// untracked object on the target.
 //
-// This and DeleteS3UploadIntent perform a single blind Set/Delete with no
+// This and DeleteTierUploadIntent perform a single blind Set/Delete with no
 // prior read, so their transaction read-set is empty and BadgerDB's
 // serializable-snapshot conflict detection can never flag them — no retry
-// loop is required (unlike RecordPresignIssued or RelocateObject, which read
+// loop is required (unlike RecordRedirectIssued or RelocateObject, which read
 // before writing).
-func (cdb *CacheDB) SetS3UploadIntent(instanceHash InstanceHash, intent *S3UploadIntent) error {
+func (cdb *CacheDB) SetTierUploadIntent(instanceHash InstanceHash, intent *TierUploadIntent) error {
 	if err := cdb.checkWritable(); err != nil {
 		return err
 	}
@@ -1979,17 +1979,17 @@ func (cdb *CacheDB) SetS3UploadIntent(instanceHash InstanceHash, intent *S3Uploa
 		return errors.Wrap(err, "failed to marshal upload intent")
 	}
 	return cdb.db.Update(func(txn *badger.Txn) error {
-		return txn.Set(S3UploadIntentKey(instanceHash), data)
+		return txn.Set(TierUploadIntentKey(instanceHash), data)
 	})
 }
 
-// DeleteS3UploadIntent removes an upload intent record.
-func (cdb *CacheDB) DeleteS3UploadIntent(instanceHash InstanceHash) error {
+// DeleteTierUploadIntent removes an upload intent record.
+func (cdb *CacheDB) DeleteTierUploadIntent(instanceHash InstanceHash) error {
 	if err := cdb.checkWritable(); err != nil {
 		return err
 	}
 	return cdb.db.Update(func(txn *badger.Txn) error {
-		err := txn.Delete(S3UploadIntentKey(instanceHash))
+		err := txn.Delete(TierUploadIntentKey(instanceHash))
 		if errors.Is(err, badger.ErrKeyNotFound) {
 			return nil
 		}
@@ -1997,12 +1997,12 @@ func (cdb *CacheDB) DeleteS3UploadIntent(instanceHash InstanceHash) error {
 	})
 }
 
-// ListS3UploadIntents returns all recorded upload intents, used by crash
+// ListTierUploadIntents returns all recorded upload intents, used by crash
 // recovery to reconcile the bucket with the metadata store.
-func (cdb *CacheDB) ListS3UploadIntents() (map[InstanceHash]*S3UploadIntent, error) {
-	intents := make(map[InstanceHash]*S3UploadIntent)
+func (cdb *CacheDB) ListTierUploadIntents() (map[InstanceHash]*TierUploadIntent, error) {
+	intents := make(map[InstanceHash]*TierUploadIntent)
 	err := cdb.db.View(func(txn *badger.Txn) error {
-		prefix := []byte(PrefixS3Upload)
+		prefix := []byte(PrefixTierUpload)
 		opts := badger.DefaultIteratorOptions
 		opts.Prefix = prefix
 		it := txn.NewIterator(opts)
@@ -2010,13 +2010,13 @@ func (cdb *CacheDB) ListS3UploadIntents() (map[InstanceHash]*S3UploadIntent, err
 
 		for it.Seek(prefix); it.ValidForPrefix(prefix); it.Next() {
 			item := it.Item()
-			hash := InstanceHash(item.Key()[len(PrefixS3Upload):])
-			var intent S3UploadIntent
+			hash := InstanceHash(item.Key()[len(PrefixTierUpload):])
+			var intent TierUploadIntent
 			err := item.Value(func(val []byte) error {
 				return msgpack.Unmarshal(val, &intent)
 			})
 			if err != nil {
-				log.Warnf("Failed to unmarshal S3 upload intent for %s: %v", hash, err)
+				log.Warnf("Failed to unmarshal tiering upload intent for %s: %v", hash, err)
 				continue
 			}
 			intents[hash] = &intent
@@ -2026,13 +2026,13 @@ func (cdb *CacheDB) ListS3UploadIntents() (map[InstanceHash]*S3UploadIntent, err
 	return intents, err
 }
 
-// presignRecordRetries bounds retries of RecordPresignIssued on BadgerDB
+// redirectRecordRetries bounds retries of RecordRedirectIssued on BadgerDB
 // write conflicts (the debounce read makes it a read-modify-write, so two
 // presigns racing on the same object can conflict).
-const presignRecordRetries = 5
+const redirectRecordRetries = 5
 
-// RecordPresignIssued stamps the current time on an object's presign key.
-// Objects with a stamp newer than the configured presign hold window are
+// RecordRedirectIssued stamps the current time on an object's redirect-hold key.
+// Objects with a stamp newer than the configured redirect hold window are
 // skipped by eviction, so a client holding a fresh pre-signed URL never has
 // the object deleted out from under it.
 //
@@ -2041,16 +2041,16 @@ const presignRecordRetries = 5
 // how much slack the hold has over a URL's lifetime: skipping a write leaves
 // the stamp up to one window old, so the protection a caller can still count
 // on is hold-minus-window, which must remain at least as long as the URL it
-// just handed out.  presignHoldHeadroom is the slack the cache guarantees when
+// just handed out.  redirectHoldHeadroom is the slack the cache guarantees when
 // it resolves the hold, and a quarter of the hold is the cheaper bound, so the
 // debounce is the smaller of the two.
-func (cdb *CacheDB) RecordPresignIssued(instanceHash InstanceHash) error {
+func (cdb *CacheDB) RecordRedirectIssued(instanceHash InstanceHash) error {
 	if err := cdb.checkWritable(); err != nil {
 		return err
 	}
 	now := time.Now()
-	debounce := cdb.presignHold / 4
-	if slack := cdb.presignHold - s3PresignExpiry(); slack < debounce {
+	debounce := cdb.redirectHold / 4
+	if slack := cdb.redirectHold - tierRedirectExpiry(); slack < debounce {
 		debounce = slack
 	}
 	val := make([]byte, 8)
@@ -2059,7 +2059,7 @@ func (cdb *CacheDB) RecordPresignIssued(instanceHash InstanceHash) error {
 	for attempt := 0; ; attempt++ {
 		err := cdb.db.Update(func(txn *badger.Txn) error {
 			if debounce > 0 {
-				if item, gErr := txn.Get(PresignKey(instanceHash)); gErr == nil {
+				if item, gErr := txn.Get(RedirectHoldKey(instanceHash)); gErr == nil {
 					var prev int64
 					_ = item.Value(func(v []byte) error {
 						if len(v) >= 8 {
@@ -2072,25 +2072,25 @@ func (cdb *CacheDB) RecordPresignIssued(instanceHash InstanceHash) error {
 					}
 				}
 			}
-			return txn.Set(PresignKey(instanceHash), val)
+			return txn.Set(RedirectHoldKey(instanceHash), val)
 		})
 		if err == nil {
 			return nil
 		}
-		if errors.Is(err, badger.ErrConflict) && attempt < presignRecordRetries {
+		if errors.Is(err, badger.ErrConflict) && attempt < redirectRecordRetries {
 			continue
 		}
 		return err
 	}
 }
 
-// presignHeldInTxn reports whether the object's presign stamp is within the
+// redirectHeldInTxn reports whether the object's redirect-hold stamp is within the
 // eviction protection window.
-func (cdb *CacheDB) presignHeldInTxn(txn *badger.Txn, instanceHash InstanceHash) bool {
-	if cdb.presignHold <= 0 {
+func (cdb *CacheDB) redirectHeldInTxn(txn *badger.Txn, instanceHash InstanceHash) bool {
+	if cdb.redirectHold <= 0 {
 		return false
 	}
-	item, err := txn.Get(PresignKey(instanceHash))
+	item, err := txn.Get(RedirectHoldKey(instanceHash))
 	if err != nil {
 		return false
 	}
@@ -2101,15 +2101,15 @@ func (cdb *CacheDB) presignHeldInTxn(txn *badger.Txn, instanceHash InstanceHash)
 		}
 		return nil
 	})
-	return issuedAt > 0 && time.Since(time.Unix(0, issuedAt)) < cdb.presignHold
+	return issuedAt > 0 && time.Since(time.Unix(0, issuedAt)) < cdb.redirectHold
 }
 
 // RelocateObject atomically moves a completed object's metadata onto the
-// given S3 storage target.  The StorageID is rewritten (bypassing the
+// given tiering target.  The StorageID is rewritten (bypassing the
 // set-once merge rule — this is the one sanctioned transition) and the LRU
 // index entry is moved from the object's base storage ID to the new one.
 //
-// Chunked objects are supported: because an S3 target holds the object as a
+// Chunked objects are supported: because a tiering target holds the object as a
 // single contiguous blob, relocation flattens the chunk layout
 // (ChunkSizeCode / ChunkLocations are cleared).  The returned pre-relocation
 // metadata still carries the original chunk layout so the caller can delete
@@ -2161,7 +2161,7 @@ func (cdb *CacheDB) RelocateObject(instanceHash InstanceHash, newStorageID Stora
 		updated := prev
 		updated.StorageID = newStorageID
 		// The bucket holds one contiguous blob; drop the chunk layout so the
-		// object is a plain single-storage object on the S3 target.
+		// object is a plain single-storage object on the tiering target.
 		updated.ChunkSizeCode = ChunkingDisabled
 		updated.ChunkLocations = nil
 		data, err := msgpack.Marshal(&updated)
@@ -2289,20 +2289,20 @@ func deleteObjectWithMetaInTxn(txn *badger.Txn, salt []byte, instanceHash Instan
 		}
 	}
 
-	// Delete purge-first marker, presign stamp, and any S3 upload intent if
+	// Delete purge-first marker, redirect-hold stamp, and any tiering upload intent if
 	// present (best-effort, ignore not-found).
 	//
 	// Dropping the intent here is safe and necessary: an intent outliving its
-	// object would make the S3 consistency sweep skip that hash in both
+	// object would make the tiering consistency sweep skip that hash in both
 	// directions forever, on the assumption that the uploader owns it.  Any
-	// bucket bytes are handled by the same deletion -- StorageManager.Delete
-	// and EvictByLRU remove the bucket object for an S3-resident version --
+	// remote bytes are handled by the same deletion -- StorageManager.Delete
+	// and EvictByLRU remove the remote object for a tiered version --
 	// and an intent for an upload still in flight belongs to an object whose
 	// metadata is being deleted underneath it, which the uploader detects when
-	// its relocation fails and cleans up the bucket copy itself.
+	// its relocation fails and cleans up the remote copy itself.
 	_ = txn.Delete(PurgeFirstKey(instanceHash))
-	_ = txn.Delete(PresignKey(instanceHash))
-	_ = txn.Delete(S3UploadIntentKey(instanceHash))
+	_ = txn.Delete(RedirectHoldKey(instanceHash))
+	_ = txn.Delete(TierUploadIntentKey(instanceHash))
 
 	// Likewise the append-in-flight marker: whatever removed the object also
 	// removed the thing the marker exists to let us reclaim.
@@ -2442,7 +2442,7 @@ func (cdb *CacheDB) EvictByLRU(storageID StorageID, namespaceID NamespaceID, max
 			// same way: a client may still be downloading directly from the
 			// bucket.  Counts against the skip budget so a namespace full of
 			// held objects cannot spin the LRU walk.
-			if cdb.presignHeldInTxn(txn, hash) {
+			if cdb.redirectHeldInTxn(txn, hash) {
 				log.Debugf("Skipping eviction of %s: pre-signed URL issued within hold window", hash)
 				*skipCounter++
 				return
@@ -2838,7 +2838,7 @@ func (cdb *CacheDB) FindRecyclableStorageID(mountedDirs map[StorageID]string) (S
 			continue // still in use
 		}
 		if dm.Backend != BackendPosix {
-			// S3 targets are never in mountedDirs; they must not be
+			// tiering targets are never in mountedDirs; they must not be
 			// recycled out from under a configured bucket.
 			continue
 		}

@@ -25,9 +25,9 @@ import (
 	log "github.com/sirupsen/logrus"
 )
 
-// s3ScanLoop runs the periodic S3 consistency sweep.  Started only when at
-// least one S3 storage target is configured.
-func (cc *ConsistencyChecker) s3ScanLoop(ctx context.Context) error {
+// tierScanLoop runs the periodic tiering consistency sweep.  Started only when at
+// least one tiering target is configured.
+func (cc *ConsistencyChecker) tierScanLoop(ctx context.Context) error {
 	select {
 	case <-ctx.Done():
 		return nil
@@ -39,8 +39,8 @@ func (cc *ConsistencyChecker) s3ScanLoop(ctx context.Context) error {
 	const scanInterval = 1 * time.Hour
 
 	for {
-		if err := cc.RunS3Scan(ctx); err != nil {
-			log.Warnf("S3 consistency scan error: %v", err)
+		if err := cc.RunTierScan(ctx); err != nil {
+			log.Warnf("tiering consistency scan error: %v", err)
 		}
 
 		select {
@@ -53,49 +53,49 @@ func (cc *ConsistencyChecker) s3ScanLoop(ctx context.Context) error {
 	}
 }
 
-// RunS3Scan reconciles each S3 storage target's bucket contents against the
+// RunTierScan reconciles each tiering target's bucket contents against the
 // metadata store:
 //
-//   - objects in the bucket with no S3-resident metadata (and no in-flight
+//   - objects in the bucket with no tiered metadata (and no in-flight
 //     upload intent) are orphans and deleted from the bucket;
-//   - S3-resident metadata whose bucket object is missing (or whose size
+//   - tiered metadata whose remote object is missing (or whose size
 //     disagrees) is removed so the object is re-fetched from the origin on
 //     the next request.
 //
-// Byte-level usage for S3 storage IDs is reconciled by the regular metadata
+// Byte-level usage for tiering storage IDs is reconciled by the regular metadata
 // scan (usageDuringScan covers every metadata entry regardless of backend).
-func (cc *ConsistencyChecker) RunS3Scan(ctx context.Context) error {
-	for sid, target := range cc.storage.s3Targets {
-		if err := cc.scanS3Target(ctx, sid, target); err != nil {
+func (cc *ConsistencyChecker) RunTierScan(ctx context.Context) error {
+	for sid, target := range cc.storage.tierTargets {
+		if err := cc.scanTierTarget(ctx, sid, target); err != nil {
 			return err
 		}
 	}
 	return nil
 }
 
-// s3BucketEntry is one object observed while listing a bucket.
-type s3BucketEntry struct {
+// tierListEntry is one object observed while listing a bucket.
+type tierListEntry struct {
 	hash     InstanceHash
 	size     int64
 	modified time.Time
 }
 
-// s3MaxOrphansPerScan bounds how many orphan candidates (in either
+// tierMaxOrphansPerScan bounds how many orphan candidates (in either
 // direction) a single sweep collects before it stops accumulating and
 // defers the rest to the next sweep.  This caps the sweep's memory
 // regardless of how large or divergent the bucket is.
-const s3MaxOrphansPerScan = 4096
+const tierMaxOrphansPerScan = 4096
 
-// s3SweepOpTimeout bounds each individual S3 HeadObject / DeleteObject the
+// tierSweepOpTimeout bounds each individual stat / delete the
 // sweep issues while reconciling, so one hung request cannot stall the pass.
-const s3SweepOpTimeout = 2 * time.Minute
+const tierSweepOpTimeout = 2 * time.Minute
 
-func (cc *ConsistencyChecker) scanS3Target(ctx context.Context, sid StorageID, target *s3Target) error {
+func (cc *ConsistencyChecker) scanTierTarget(ctx context.Context, sid StorageID, target *tierTarget) error {
 	scanStart := time.Now()
 
 	// Snapshot the in-flight upload intents; objects covered by an intent
 	// are owned by the uploader and skipped entirely.
-	intents, err := cc.db.ListS3UploadIntents()
+	intents, err := cc.db.ListTierUploadIntents()
 	if err != nil {
 		return err
 	}
@@ -106,15 +106,15 @@ func (cc *ConsistencyChecker) scanS3Target(ctx context.Context, sid StorageID, t
 	// (defer), which unblocks the goroutine if it is parked on a channel
 	// send, and listDone is buffered so its final send never blocks.  We
 	// also join on listDone before returning (see below), so the goroutine
-	// can never outlive scanS3Target — no errgroup needed.
-	listChan := make(chan s3BucketEntry, 256)
+	// can never outlive scanTierTarget — no errgroup needed.
+	listChan := make(chan tierListEntry, 256)
 	listDone := make(chan error, 1)
 	listCtx, cancelList := context.WithCancel(ctx)
 	go func() {
 		defer close(listChan)
 		listDone <- target.listObjects(listCtx, func(hash InstanceHash, size int64, modified time.Time) error {
 			select {
-			case listChan <- s3BucketEntry{hash: hash, size: size, modified: modified}:
+			case listChan <- tierListEntry{hash: hash, size: size, modified: modified}:
 				return nil
 			case <-listCtx.Done():
 				return listCtx.Err()
@@ -145,20 +145,20 @@ func (cc *ConsistencyChecker) scanS3Target(ctx context.Context, sid StorageID, t
 	}
 	defer joinList()
 
-	var orphanBucket []s3BucketEntry // in bucket, not in DB
+	var orphanBucket []tierListEntry // in bucket, not in DB
 	var orphanDB []InstanceHash      // in DB, not in bucket (or size mismatch)
-	capped := false                  // hit s3MaxOrphansPerScan; more remains
+	capped := false                  // hit tierMaxOrphansPerScan; more remains
 
 	// considerBucketOrphan applies the grace period and intent check
-	// before queuing a bucket object for deletion.
-	considerBucketOrphan := func(e s3BucketEntry) {
+	// before queuing a remote object for deletion.
+	considerBucketOrphan := func(e tierListEntry) {
 		if _, uploading := intents[e.hash]; uploading {
 			return
 		}
 		if cc.minAgeForCleanup > 0 && time.Since(e.modified) < cc.minAgeForCleanup {
 			return
 		}
-		if len(orphanBucket) >= s3MaxOrphansPerScan {
+		if len(orphanBucket) >= tierMaxOrphansPerScan {
 			capped = true
 			return
 		}
@@ -190,9 +190,9 @@ func (cc *ConsistencyChecker) scanS3Target(ctx context.Context, sid StorageID, t
 			// Present in both — objects are stored plaintext, so the
 			// bucket size must equal ContentLength exactly.
 			if !meta.Completed.IsZero() && meta.ContentLength != current.size {
-				log.Warnf("S3 object %s size mismatch (bucket %d, metadata %d); removing",
+				log.Warnf("remote object %s size mismatch (bucket %d, metadata %d); removing",
 					instanceHash, current.size, meta.ContentLength)
-				if len(orphanDB) >= s3MaxOrphansPerScan {
+				if len(orphanDB) >= tierMaxOrphansPerScan {
 					capped = true
 				} else {
 					orphanDB = append(orphanDB, instanceHash)
@@ -202,7 +202,7 @@ func (cc *ConsistencyChecker) scanS3Target(ctx context.Context, sid StorageID, t
 			return nil
 		}
 
-		// DB entry with no bucket object.  Grace period guards against
+		// DB entry with no remote object.  Grace period guards against
 		// races with a relocation committing mid-listing.
 		if _, uploading := intents[instanceHash]; uploading {
 			return nil
@@ -210,7 +210,7 @@ func (cc *ConsistencyChecker) scanS3Target(ctx context.Context, sid StorageID, t
 		if cc.minAgeForCleanup > 0 && !meta.Completed.IsZero() && time.Since(meta.Completed) < cc.minAgeForCleanup {
 			return nil
 		}
-		if len(orphanDB) >= s3MaxOrphansPerScan {
+		if len(orphanDB) >= tierMaxOrphansPerScan {
 			capped = true
 			return nil
 		}
@@ -234,24 +234,24 @@ func (cc *ConsistencyChecker) scanS3Target(ctx context.Context, sid StorageID, t
 		// An incomplete listing would make every unseen DB entry look
 		// orphaned — mirror the metadata scan's walk-error policy and
 		// skip all deletions this pass.
-		log.Warnf("S3 listing of %s failed; skipping deletions this pass: %v", target.cfg.DisplayURL(), listErr)
+		log.Warnf("tiering listing of %s failed; skipping deletions this pass: %v", target.DisplayURL(), listErr)
 		return nil
 	}
 
 	deletedBucket, deletedDB := 0, 0
 
 	// One fresh snapshot of the in-flight uploads for the whole deletion pass:
-	// an upload that started since the listing began owns its bucket object,
+	// an upload that started since the listing began owns its remote object,
 	// and taking the snapshot here rather than inside the loop keeps this to a
 	// single prefix scan instead of one per orphan.
-	currentIntents, err := cc.db.ListS3UploadIntents()
+	currentIntents, err := cc.db.ListTierUploadIntents()
 	if err != nil {
-		log.Warnf("Failed to re-read S3 upload intents; skipping deletions this pass: %v", err)
+		log.Warnf("Failed to re-read tiering upload intents; skipping deletions this pass: %v", err)
 		return nil
 	}
 
 	// Delete bucket orphans, re-verifying against current metadata so a
-	// relocation that landed during the scan is not clobbered.  Each S3
+	// relocation that landed during the scan is not clobbered.  Each remote
 	// operation is given a finite timeout so a single hung request cannot
 	// stall the sweep.
 	for _, e := range orphanBucket {
@@ -265,17 +265,17 @@ func (cc *ConsistencyChecker) scanS3Target(ctx context.Context, sid StorageID, t
 		if _, uploading := currentIntents[e.hash]; uploading {
 			continue
 		}
-		opCtx, cancel := context.WithTimeout(ctx, s3SweepOpTimeout)
+		opCtx, cancel := context.WithTimeout(ctx, tierSweepOpTimeout)
 		err = target.deleteObject(opCtx, e.hash)
 		cancel()
 		if err != nil {
-			log.Warnf("Failed to delete orphaned S3 object %s: %v", e.hash, err)
+			log.Warnf("Failed to delete orphaned remote object %s: %v", e.hash, err)
 			continue
 		}
 		deletedBucket++
 	}
 
-	// Delete DB entries whose bucket object is gone, re-probing the bucket
+	// Delete DB entries whose remote object is gone, re-probing the bucket
 	// first so an eventually-consistent listing doesn't nuke a live entry.
 	for _, hash := range orphanDB {
 		if ctx.Err() != nil {
@@ -285,11 +285,11 @@ func (cc *ConsistencyChecker) scanS3Target(ctx context.Context, sid StorageID, t
 		if err != nil || meta == nil || meta.StorageID != sid {
 			continue
 		}
-		opCtx, cancel := context.WithTimeout(ctx, s3SweepOpTimeout)
+		opCtx, cancel := context.WithTimeout(ctx, tierSweepOpTimeout)
 		exists, err := target.objectExists(opCtx, hash)
 		if err != nil {
 			cancel()
-			log.Warnf("Failed to verify S3 object %s before cleanup: %v", hash, err)
+			log.Warnf("Failed to verify remote object %s before cleanup: %v", hash, err)
 			continue
 		}
 		if exists && meta.ContentLength == 0 {
@@ -298,7 +298,7 @@ func (cc *ConsistencyChecker) scanS3Target(ctx context.Context, sid StorageID, t
 		}
 		if exists {
 			// Present after all — only remove when the size disagrees.
-			mismatch := cc.s3SizeMismatch(opCtx, target, hash, meta)
+			mismatch := cc.tierSizeMismatch(opCtx, target, hash, meta)
 			cancel()
 			if !mismatch {
 				continue
@@ -307,19 +307,19 @@ func (cc *ConsistencyChecker) scanS3Target(ctx context.Context, sid StorageID, t
 			cancel()
 		}
 		if err := cc.storage.Delete(hash); err != nil {
-			log.Warnf("Failed to delete S3-orphaned DB entry %s: %v", hash, err)
+			log.Warnf("Failed to delete orphaned DB entry %s for a tiered object: %v", hash, err)
 			continue
 		}
 		deletedDB++
 	}
 
 	if deletedBucket > 0 || deletedDB > 0 {
-		log.Infof("S3 consistency sweep of %s: removed %d orphaned bucket object(s), %d orphaned DB entr(ies) in %s",
-			target.cfg.DisplayURL(), deletedBucket, deletedDB, time.Since(scanStart).Round(time.Millisecond))
+		log.Infof("tiering consistency sweep of %s: removed %d orphaned remote object(s), %d orphaned DB entr(ies) in %s",
+			target.DisplayURL(), deletedBucket, deletedDB, time.Since(scanStart).Round(time.Millisecond))
 	}
 	if capped {
-		log.Infof("S3 consistency sweep of %s hit the %d-orphan cap; remaining divergence will be handled on the next sweep",
-			target.cfg.DisplayURL(), s3MaxOrphansPerScan)
+		log.Infof("tiering consistency sweep of %s hit the %d-orphan cap; remaining divergence will be handled on the next sweep",
+			target.DisplayURL(), tierMaxOrphansPerScan)
 	}
 
 	cc.statsMu.Lock()
@@ -329,9 +329,9 @@ func (cc *ConsistencyChecker) scanS3Target(ctx context.Context, sid StorageID, t
 	return nil
 }
 
-// s3SizeMismatch re-checks an apparent size mismatch with a HeadObject
+// tierSizeMismatch re-checks an apparent size mismatch with a HeadObject
 // probe (the listing snapshot may be stale).
-func (cc *ConsistencyChecker) s3SizeMismatch(ctx context.Context, target *s3Target, hash InstanceHash, meta *CacheMetadata) bool {
+func (cc *ConsistencyChecker) tierSizeMismatch(ctx context.Context, target *tierTarget, hash InstanceHash, meta *CacheMetadata) bool {
 	size, exists, err := target.objectSize(ctx, hash)
 	if err != nil || !exists {
 		return false

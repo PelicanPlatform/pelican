@@ -557,11 +557,11 @@ func (pc *PersistentCache) serveObject(w http.ResponseWriter, r *http.Request) {
 		_ = size
 	}
 
-	// Objects tiered to an S3 storage target are served by redirecting the
+	// Objects tiered to a tiering target are served by redirecting the
 	// client to a pre-signed bucket URL (unless disabled).  Presigned URLs
 	// are self-authenticating; the client's bearer token is dropped on the
 	// cross-host hop, which is exactly what we want.
-	if pc.tryS3Redirect(w, r, objectPath, bearerToken, reqLog, startTime) {
+	if pc.tryTierRedirect(w, r, objectPath, bearerToken, reqLog, startTime) {
 		return
 	}
 

@@ -1,18 +1,22 @@
 import {
   FormProps,
   IntegerField,
-  S3StorageTarget,
+  TieringTarget,
   StringField,
 } from '@/components/configuration';
 import React, { useCallback } from 'react';
 import { Box, Button } from '@mui/material';
 
-const verifyForm = (x: S3StorageTarget) => {
-  return x.serviceurl != '' && x.bucket != '' && x.maxsize != '';
+// A target is named either by a provider URL or by an S3 endpoint plus a
+// bucket, mirroring how the cache parses Cache.TieringTargets.
+const verifyForm = (x: TieringTarget) => {
+  const named = x.providerurl != '' || (x.serviceurl != '' && x.bucket != '');
+  return named && x.maxsize != '';
 };
 
-const createDefaultS3StorageTarget = (): S3StorageTarget => {
+const createDefaultTieringTarget = (): TieringTarget => {
   return {
+    providerurl: '',
     serviceurl: '',
     region: '',
     bucket: '',
@@ -26,12 +30,9 @@ const createDefaultS3StorageTarget = (): S3StorageTarget => {
   };
 };
 
-const S3StorageTargetForm = ({
-  onSubmit,
-  value,
-}: FormProps<S3StorageTarget>) => {
-  const [target, setTarget] = React.useState<S3StorageTarget>(
-    value || createDefaultS3StorageTarget()
+const TieringTargetForm = ({ onSubmit, value }: FormProps<TieringTarget>) => {
+  const [target, setTarget] = React.useState<TieringTarget>(
+    value || createDefaultTieringTarget()
   );
 
   const submitHandler = useCallback(() => {
@@ -44,6 +45,13 @@ const S3StorageTargetForm = ({
   return (
     <>
       <Box my={2}>
+        <StringField
+          name={'ProviderURL'}
+          onChange={(e) => setTarget({ ...target, providerurl: e })}
+          value={target.providerurl}
+        />
+      </Box>
+      <Box mb={2}>
         <StringField
           name={'ServiceUrl'}
           onChange={(e) => setTarget({ ...target, serviceurl: e })}
@@ -120,4 +128,4 @@ const S3StorageTargetForm = ({
   );
 };
 
-export default S3StorageTargetForm;
+export default TieringTargetForm;

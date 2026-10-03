@@ -228,9 +228,9 @@ type PersistentCache struct {
 	// Prestage worker pool manager (created lazily on first API call).
 	prestageManager *PrestageManager
 
-	// s3Uploader tiers completed objects to S3 storage targets.
-	// Nil when no S3 targets are configured.
-	s3Uploader *s3Uploader
+	// tierUploader tiers completed objects to tiering targets.
+	// Nil when no tiering targets are configured.
+	tierUploader *tierUploader
 }
 
 // persistentDownload tracks an active download operation
@@ -566,17 +566,17 @@ func NewPersistentCache(ctx context.Context, egrp *errgroup.Group, cfg Persisten
 		return nil, err
 	}
 
-	// Register any configured S3 storage targets.  They receive their own
+	// Register any configured tiering targets.  They receive their own
 	// storage IDs (persisted via an identity object in the bucket) but are
 	// excluded from new-object placement — objects arrive there only by
 	// tiering after completion.
-	s3TargetConfigs, err := ParseS3TargetsConfig()
+	tierTargetConfigs, err := ParseTierTargetsConfig()
 	if err != nil {
 		return failInit(err)
 	}
-	s3TargetIDs, err := storage.RegisterS3Targets(ctx, s3TargetConfigs)
+	tierTargetIDs, err := storage.RegisterTierTargets(ctx, tierTargetConfigs)
 	if err != nil {
-		return failInit(errors.Wrap(err, "failed to register S3 storage targets"))
+		return failInit(errors.Wrap(err, "failed to register tiering targets"))
 	}
 
 	// Build eviction dir configs now that we know storageID → path mapping.
@@ -622,11 +622,11 @@ func NewPersistentCache(ctx context.Context, egrp *errgroup.Group, cfg Persisten
 		}
 	}
 
-	// S3 targets get their own eviction limits (MaxSize is required in the
+	// tiering targets get their own eviction limits (MaxSize is required in the
 	// config since bucket capacity cannot be auto-detected).  Absolute
 	// default watermarks are not applied — they are tuned for local
 	// directories; buckets use the percentage watermarks.
-	for id, s3cfg := range s3TargetIDs {
+	for id, s3cfg := range tierTargetIDs {
 		hwp := s3cfg.HighWaterMarkPercentage
 		if hwp <= 0 {
 			hwp = defaultHWP
@@ -650,18 +650,18 @@ func NewPersistentCache(ctx context.Context, egrp *errgroup.Group, cfg Persisten
 	// is usable until t+expiry, so a hold of the same length leaves the last
 	// moments of its life unprotected.  Stretch a too-short hold rather than
 	// refusing to start, and say so, since the safe value is derivable.
-	if len(s3TargetIDs) > 0 {
-		hold := param.Cache_S3PresignEvictionHold.GetDuration()
+	if len(tierTargetIDs) > 0 {
+		hold := param.Cache_TieringRedirectEvictionHold.GetDuration()
 		if hold <= 0 {
 			hold = 5 * time.Minute
 		}
-		if minimum := s3PresignExpiry() + presignHoldHeadroom; hold < minimum {
-			log.Warnf("Cache.S3PresignEvictionHold (%s) does not outlast Cache.S3PresignExpiry (%s); "+
+		if minimum := tierRedirectExpiry() + redirectHoldHeadroom; hold < minimum {
+			log.Warnf("Cache.TieringRedirectEvictionHold (%s) does not outlast Cache.TieringRedirectExpiry (%s); "+
 				"using %s so an object cannot be evicted while a pre-signed URL for it is still valid",
-				hold, s3PresignExpiry(), minimum)
+				hold, tierRedirectExpiry(), minimum)
 			hold = minimum
 		}
-		db.setPresignHold(hold)
+		db.setRedirectHold(hold)
 	}
 
 	// Initialize eviction manager
@@ -769,30 +769,30 @@ func NewPersistentCache(ctx context.Context, egrp *errgroup.Group, cfg Persisten
 		log.Infof("Restored %d namespace mappings (max ID %d)", len(nsMap), maxID)
 	}
 
-	// Build the S3 tiering uploader and wire completion notifications now,
+	// Build the tiering uploader and wire completion notifications now,
 	// while initialization is still single-threaded: onObjectComplete is read
 	// by every download that finishes, so it must be in place before anything
 	// below can start one.
-	if len(s3TargetIDs) > 0 {
+	if len(tierTargetIDs) > 0 {
 		threshold := int64(4 * 1024 * 1024)
-		if thresholdStr := param.Cache_S3UploadThreshold.GetString(); thresholdStr != "" {
+		if thresholdStr := param.Cache_TieringThreshold.GetString(); thresholdStr != "" {
 			parsed, err := utils.ParseBytes(thresholdStr)
 			if err != nil {
 				pc.Close()
-				return nil, errors.Wrap(err, "failed to parse Cache.S3UploadThreshold")
+				return nil, errors.Wrap(err, "failed to parse Cache.TieringThreshold")
 			}
 			// ParseBytes returns a uint64; refuse a value that would wrap
 			// negative as an int64 rather than silently turning an absurd
 			// threshold into one that tiers everything.
 			if parsed > math.MaxInt64 {
 				pc.Close()
-				return nil, errors.Errorf("Cache.S3UploadThreshold value %q is too large", thresholdStr)
+				return nil, errors.Errorf("Cache.TieringThreshold value %q is too large", thresholdStr)
 			}
 			threshold = int64(parsed)
 		}
-		uploader := newS3Uploader(db, storage, eviction, threshold)
+		uploader := newTierUploader(db, storage, eviction, threshold)
 		storage.onObjectComplete = uploader.MaybeEnqueue
-		pc.s3Uploader = uploader
+		pc.tierUploader = uploader
 	}
 
 	// Start background tasks
@@ -800,16 +800,16 @@ func NewPersistentCache(ctx context.Context, egrp *errgroup.Group, cfg Persisten
 	eviction.Start(ctx, egrp)
 	consistency.Start(ctx, egrp)
 
-	// Start the S3 tiering uploader.  Its crash recovery runs synchronously
+	// Start the tiering uploader.  Its crash recovery runs synchronously
 	// here, before the cache serves anything: it reconciles the buckets
 	// against the metadata store, and a bucket left inconsistent by a previous
 	// process must not have new uploads layered on top of it.  A failure is
 	// fatal rather than logged -- silently continuing would leave tiering off
 	// for the process lifetime with objects still accumulating locally.
-	if pc.s3Uploader != nil {
-		if err := pc.s3Uploader.Start(ctx, egrp); err != nil {
+	if pc.tierUploader != nil {
+		if err := pc.tierUploader.Start(ctx, egrp); err != nil {
 			pc.Close()
-			return nil, errors.Wrap(err, "failed to start the S3 tiering uploader")
+			return nil, errors.Wrap(err, "failed to start the tiering uploader")
 		}
 	}
 
@@ -1410,10 +1410,10 @@ func (pc *PersistentCache) GetSeekableReader(ctx context.Context, objectPath, be
 			}}, res.meta, nil
 		}
 
-		// Objects tiered to an S3 storage target are proxied through a
+		// Objects tiered to a tiering target are proxied through a
 		// seekable remote stream (no local blocks exist for them).
-		if target := pc.storage.getS3Target(res.meta.StorageID); target != nil {
-			return pc.newS3SeekableReader(ctx, target, res), res.meta, nil
+		if target := pc.storage.getTierTarget(res.meta.StorageID); target != nil {
+			return pc.newTierSeekableReader(ctx, target, res), res.meta, nil
 		}
 
 		rr, err := pc.newFetchingRangeReader(res, 0, res.meta.ContentLength-1)
@@ -1447,11 +1447,11 @@ func (pc *PersistentCache) GetRange(ctx context.Context, objectPath, token, rang
 			return res.noStoreRC, nil
 		}
 
-		// Objects tiered to an S3 storage target stream directly from the
+		// Objects tiered to a tiering target stream directly from the
 		// bucket (optionally limited to the requested range).
-		if target := pc.storage.getS3Target(res.meta.StorageID); target != nil {
-			stream := newS3ObjectStream(ctx, target, res.instanceHash, res.meta.ContentLength)
-			// Pinned for the life of the stream; see newS3SeekableReader.
+		if target := pc.storage.getTierTarget(res.meta.StorageID); target != nil {
+			stream := newTierObjectStream(ctx, target, res.instanceHash, res.meta.ContentLength)
+			// Pinned for the life of the stream; see newTierSeekableReader.
 			stream.onClose = pc.storage.PinObject(res.instanceHash)
 			if rangeHeader != "" {
 				ranges, err := ParseRangeHeader(rangeHeader, res.meta.ContentLength)

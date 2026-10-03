@@ -3263,36 +3263,51 @@ default: false
 components: ["cache"]
 hidden: true
 ---
-name: Cache.S3StorageTargets
+name: Cache.TieringTargets
 description: |+
-  A list of S3 storage targets the V2 (persistent) cache uses as additional object storage.
-  Once an object is fully downloaded to a local storage directory, the cache uploads it
-  (unencrypted) to a configured S3 bucket when the object size meets or exceeds
-  ${Cache.S3UploadThreshold}; the local copy is then removed and the object is served from S3.
+  A list of remote storage targets the V2 (persistent) cache tiers objects to.  Once an
+  object is fully downloaded to a local storage directory, the cache uploads it
+  (unencrypted) to one of these targets when the object size meets or exceeds
+  ${Cache.TieringThreshold}; the local copy is then removed and the object is served from
+  the target.
 
-  Each entry is an object with the following keys:
+  Targets are object stores, reached through the same library the origin's object backends
+  use: S3 and S3-compatible services (MinIO, Ceph RGW), Google Cloud Storage, and Azure Blob
+  Storage.
 
-  - **ServiceUrl** (string, required): S3 endpoint URL (e.g. `https://s3.us-east-1.amazonaws.com`).
+  Each entry is an object.  Name the target either with a single provider URL:
+
+  - **ProviderURL** (string): the backend in URL form — `s3://bucket`, `gs://bucket`,
+    `azblob://container`.  Takes precedence over the S3-specific keys below.  Prefer a
+    keyfile to embedding credentials here; anything that is embedded is redacted before
+    the target is logged.
+
+  ...or with the S3-specific keys, which match how the origin's exports are configured:
+
+  - **ServiceUrl** (string): S3 endpoint URL (e.g. `https://s3.us-east-1.amazonaws.com`).
   - **Region** (string, optional): the S3 region; defaults to `us-east-1`.
-  - **Bucket** (string, required): the bucket that holds cached objects.
-  - **Prefix** (string, optional): a key prefix under which objects are stored.
+  - **Bucket** (string): the bucket that holds cached objects.
   - **UrlStyle** (string, optional): `path` (default) or `virtual` bucket addressing.
-  - **AccessKeyfile** (string, optional): file containing the S3 access key ID.
-  - **SecretKeyfile** (string, optional): file containing the S3 secret key.
-    Both keyfiles must be provided together; when omitted, the ambient AWS credential
-    chain is used.
-  - **MaxSize** (string, required): maximum bytes of cache data stored in the bucket
+
+  The remaining keys apply to every target:
+
+  - **Prefix** (string, optional): a key prefix under which objects are stored.
+  - **AccessKeyfile** (string, optional): file containing the access key ID.
+  - **SecretKeyfile** (string, optional): file containing the secret key.
+    Both keyfiles must be provided together; when omitted, the provider's ambient
+    credential chain is used.
+  - **MaxSize** (string, required): maximum bytes of cache data stored on the target
     (e.g. "5TB").  Unlike directory targets it cannot be auto-detected.
   - **HighWaterMarkPercentage** / **LowWaterMarkPercentage** (int, optional): eviction
     watermarks as a percentage of MaxSize.  When omitted they follow
     ${Cache.HighWaterMark} and ${Cache.LowWaterMark} if those are expressed as
-    percentages; absolute-byte watermarks are not applied to buckets, which fall back
-    to the built-in 90%/80% defaults instead.
+    percentages; absolute-byte watermarks are not applied to tiering targets, which fall
+    back to the built-in 90%/80% defaults instead.
 
   Example YAML:
   ```yaml
   Cache:
-    S3StorageTargets:
+    TieringTargets:
       - ServiceUrl: https://s3.example.com
         Region: us-east-1
         Bucket: pelican-cache
@@ -3302,59 +3317,63 @@ description: |+
         SecretKeyfile: /etc/pelican/s3-secret
   ```
 
-  **The cache assumes exclusive ownership of the bucket (or of the configured
+  **The cache assumes exclusive ownership of the target (or of the configured
   Prefix within it).**  Its consistency sweep deletes any object under the prefix
   it does not recognize, and crash recovery aborts all in-progress multipart
   uploads there — do not share the prefix with other applications or with a
   second cache instance.
 
-  **Objects on an S3 target are protected differently from objects on local disk.**
+  **Objects on a tiering target are protected differently from objects on local disk.**
   On disk the cache encrypts every block and authenticates it on read, so tampering
   and disclosure both require breaking the encryption.  A tiered object is stored as
   plaintext, and the cache verifies only its size:
 
-  - Anyone who can *read* the bucket can read every object tiered to it, including
+  - Anyone who can *read* the target can read every object tiered to it, including
     objects from namespaces that require a token through Pelican.
-  - Anyone who can *write* the bucket can replace an object's bytes with content of
+  - Anyone who can *write* the target can replace an object's bytes with content of
     the same length, and the cache will serve it — with the origin's ETag and
     checksums attached — without detecting the substitution.  The periodic data-
     integrity scan does not checksum tiered objects.
 
-  Treat the bucket as part of the cache's trust boundary: give the cache a
-  dedicated least-privilege credential, keep the bucket private (no anonymous or
-  cross-account access), prefer an `https` endpoint, and consider server-side
-  encryption plus versioning or object lock.  Operators who need the on-disk
-  guarantees for a given namespace should not tier it — raise
-  ${Cache.S3UploadThreshold} above the object sizes involved.
+  Treat the target as part of the cache's trust boundary: give the cache a
+  dedicated least-privilege credential, keep the bucket or container private (no
+  anonymous or cross-account access), prefer an `https` endpoint, and consider
+  server-side encryption plus versioning or object lock.  Operators who need the
+  on-disk guarantees for a given namespace should not tier it — raise
+  ${Cache.TieringThreshold} above the object sizes involved.
 
   This setting only has effect when `${Cache.EnableV2}` is true; the cache logs a
-  warning and ignores S3 targets otherwise.
+  warning and ignores tiering targets otherwise.
 type: object
 default: none
 components: ["cache"]
 ---
-name: Cache.S3UploadThreshold
+name: Cache.TieringThreshold
 description: |+
-  The minimum object size for the V2 cache to tier a completed object to an S3 storage
-  target configured via ${Cache.S3StorageTargets}.  Objects smaller than this threshold
-  stay on local storage.  Accepts byte units (e.g. "4MB", "512MB", "1TB"); the
-  suffixes are binary multiples.
+  The minimum object size for the V2 cache to tier a completed object to a storage target
+  configured via ${Cache.TieringTargets}.  Objects smaller than this threshold stay on
+  local storage.  Accepts byte units (e.g. "4MB", "512MB", "1TB"); the suffixes are
+  binary multiples.
 type: string
 default: 4MB
 components: ["cache"]
 ---
-name: Cache.S3DisableRedirect
+name: Cache.TieringDisableRedirect
 description: |+
-  When objects are stored on an S3 storage target (${Cache.S3StorageTargets}), the V2 cache
-  by default redirects GET requests to a pre-signed S3 URL so clients download directly from
-  the bucket.  Set this to true to instead proxy the object bytes through the cache.
+  When an object has been tiered to a storage target (${Cache.TieringTargets}), the V2
+  cache by default redirects GET requests to a URL the client can fetch directly from the
+  target, so the bytes never pass through the cache.  Set this to true to proxy them
+  instead.
 
-  The pre-signed URL is self-authenticating and never carries the client's Pelican bearer
-  token.  Spec-compliant HTTP clients (including Pelican's own client) drop the Authorization
-  header when following a redirect, unless the destination is the host they connected to or a
-  subdomain of it — so when a request carries such a header and the bucket endpoint falls
-  inside the cache's own DNS domain, the cache proxies that request instead of redirecting it,
-  rather than relying on the operator to notice.
+  Not every target can issue such a URL.  The cache asks each one at startup and proxies
+  for any that cannot, so this setting is only needed to override a target that can.
+
+  Where the URL is a pre-signed one, it is self-authenticating and never carries the
+  client's Pelican bearer token.  Spec-compliant HTTP clients (including Pelican's own
+  client) drop the Authorization header when following a redirect, unless the destination
+  is the host they connected to or a subdomain of it — so when a request carries such a
+  header and the target falls inside the cache's own DNS domain, the cache proxies that
+  request instead of redirecting it, rather than relying on the operator to notice.
 
   Enable this option (proxy instead of redirect) if you serve private namespaces to clients
   that forward Authorization even across unrelated hosts, contrary to the specification
@@ -3367,19 +3386,20 @@ type: bool
 default: false
 components: ["cache"]
 ---
-name: Cache.S3PresignExpiry
+name: Cache.TieringRedirectExpiry
 description: |+
-  The lifetime of pre-signed S3 URLs handed to clients when serving objects from an S3
-  storage target via redirect (see ${Cache.S3DisableRedirect}).
+  The lifetime of the URLs handed to clients when serving an object directly from a
+  tiering storage target (see ${Cache.TieringDisableRedirect}).
 type: duration
 default: 5m
 components: ["cache"]
 ---
-name: Cache.S3PresignEvictionHold
+name: Cache.TieringRedirectEvictionHold
 description: |+
-  How long after handing out a pre-signed S3 URL the referenced object is protected from
-  cache eviction.  This prevents deleting an object out from under a client that is still
-  downloading it via a pre-signed URL.  Should be at least ${Cache.S3PresignExpiry}.
+  How long after handing out a redirect URL the referenced object is protected from
+  cache eviction.  This prevents deleting an object out from under a client that is
+  still downloading it directly from the storage target.  Should be at least
+  ${Cache.TieringRedirectExpiry}.
 type: duration
 default: 5m
 components: ["cache"]

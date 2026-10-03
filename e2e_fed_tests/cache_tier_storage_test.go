@@ -75,10 +75,10 @@ func getWithToken(t *testing.T, httpClient *http.Client, url, token, rangeHeader
 	return resp
 }
 
-// TestCacheS3StorageFederationE2E spins up a complete federation with an
+// TestCacheTierStorageFederationE2E spins up a complete federation with an
 // S3 storage target on the V2 cache and verifies the whole tiering +
 // serving lifecycle against a live minio server.
-func TestCacheS3StorageFederationE2E(t *testing.T) {
+func TestCacheTierStorageFederationE2E(t *testing.T) {
 	test_utils.SkipIfNoMinio(t)
 	endpoint, accessKey, secretKey := test_utils.StartMinio(t, "pelican-cache-fed-e2e")
 
@@ -93,8 +93,8 @@ func TestCacheS3StorageFederationE2E(t *testing.T) {
 	require.NoError(t, os.WriteFile(secretKeyfile, []byte(secretKey), 0600))
 
 	require.NoError(t, param.Cache_EnableV2.Set(true))
-	require.NoError(t, param.Cache_S3UploadThreshold.Set("4KB"))
-	require.NoError(t, param.Cache_S3StorageTargets.Set([]interface{}{
+	require.NoError(t, param.Cache_TieringThreshold.Set("4KB"))
+	require.NoError(t, param.Cache_TieringTargets.Set([]interface{}{
 		map[string]interface{}{
 			"ServiceUrl":    endpoint,
 			"Bucket":        "pelican-cache-fed-e2e",
@@ -199,8 +199,8 @@ func TestCacheS3StorageFederationE2E(t *testing.T) {
 
 	// With redirect disabled, the same tiered object is proxied through
 	// the cache: plain 200 with the bytes streamed from the bucket.
-	require.NoError(t, param.Cache_S3DisableRedirect.Set(true))
-	t.Cleanup(func() { _ = param.Cache_S3DisableRedirect.Set(false) })
+	require.NoError(t, param.Cache_TieringDisableRedirect.Set(true))
+	t.Cleanup(func() { _ = param.Cache_TieringDisableRedirect.Set(false) })
 	resp = getWithToken(t, httpClient, bigCacheURL, token, "")
 	body, err = io.ReadAll(resp.Body)
 	resp.Body.Close()

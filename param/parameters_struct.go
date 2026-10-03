@@ -68,11 +68,6 @@ type Config struct {
 		PermittedNamespaces []string `mapstructure:"permittednamespaces" yaml:"PermittedNamespaces"`
 		Port int `mapstructure:"port" yaml:"Port"`
 		RunLocation string `mapstructure:"runlocation" yaml:"RunLocation"`
-		S3DisableRedirect bool `mapstructure:"s3disableredirect" yaml:"S3DisableRedirect"`
-		S3PresignEvictionHold time.Duration `mapstructure:"s3presignevictionhold" yaml:"S3PresignEvictionHold"`
-		S3PresignExpiry time.Duration `mapstructure:"s3presignexpiry" yaml:"S3PresignExpiry"`
-		S3StorageTargets any `mapstructure:"s3storagetargets" yaml:"S3StorageTargets"`
-		S3UploadThreshold string `mapstructure:"s3uploadthreshold" yaml:"S3UploadThreshold"`
 		SelfTest bool `mapstructure:"selftest" yaml:"SelfTest"`
 		SelfTestInterval time.Duration `mapstructure:"selftestinterval" yaml:"SelfTestInterval"`
 		SelfTestMaxAge time.Duration `mapstructure:"selftestmaxage" yaml:"SelfTestMaxAge"`
@@ -86,6 +81,11 @@ type Config struct {
 			PerOriginStarvingPercent int `mapstructure:"peroriginstarvingpercent" yaml:"PerOriginStarvingPercent"`
 			RetryAfter time.Duration `mapstructure:"retryafter" yaml:"RetryAfter"`
 		} `mapstructure:"throttle" yaml:"Throttle"`
+		TieringDisableRedirect bool `mapstructure:"tieringdisableredirect" yaml:"TieringDisableRedirect"`
+		TieringRedirectEvictionHold time.Duration `mapstructure:"tieringredirectevictionhold" yaml:"TieringRedirectEvictionHold"`
+		TieringRedirectExpiry time.Duration `mapstructure:"tieringredirectexpiry" yaml:"TieringRedirectExpiry"`
+		TieringTargets any `mapstructure:"tieringtargets" yaml:"TieringTargets"`
+		TieringThreshold string `mapstructure:"tieringthreshold" yaml:"TieringThreshold"`
 		Url string `mapstructure:"url" yaml:"Url"`
 		WorkerCount int `mapstructure:"workercount" yaml:"WorkerCount"`
 		XRootDPrefix string `mapstructure:"xrootdprefix" yaml:"XRootDPrefix"`
@@ -670,11 +670,6 @@ type configWithType struct {
 		PermittedNamespaces struct { Type string; Value []string }
 		Port struct { Type string; Value int }
 		RunLocation struct { Type string; Value string }
-		S3DisableRedirect struct { Type string; Value bool }
-		S3PresignEvictionHold struct { Type string; Value time.Duration }
-		S3PresignExpiry struct { Type string; Value time.Duration }
-		S3StorageTargets struct { Type string; Value any }
-		S3UploadThreshold struct { Type string; Value string }
 		SelfTest struct { Type string; Value bool }
 		SelfTestInterval struct { Type string; Value time.Duration }
 		SelfTestMaxAge struct { Type string; Value time.Duration }
@@ -688,6 +683,11 @@ type configWithType struct {
 			PerOriginStarvingPercent struct { Type string; Value int }
 			RetryAfter struct { Type string; Value time.Duration }
 		}
+		TieringDisableRedirect struct { Type string; Value bool }
+		TieringRedirectEvictionHold struct { Type string; Value time.Duration }
+		TieringRedirectExpiry struct { Type string; Value time.Duration }
+		TieringTargets struct { Type string; Value any }
+		TieringThreshold struct { Type string; Value string }
 		Url struct { Type string; Value string }
 		WorkerCount struct { Type string; Value int }
 		XRootDPrefix struct { Type string; Value string }
