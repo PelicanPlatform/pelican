@@ -137,14 +137,6 @@ func sortServerAds(ctx context.Context, ginCtx *gin.Context, clientAddr netip.Ad
 	return truncateAds(sortedAds, sourceServerAdsLimit), nil
 }
 
-// getLongestNSMatch picks the namespace ad whose path is the longest logical
-// prefix of the request path.  The implementation lives in server_structs so
-// that servers answering clients the way the director does (e.g. a standalone
-// origin) resolve namespaces identically.
-func getLongestNSMatch(reqPath string, namespaceAds []server_structs.NamespaceAd) *server_structs.NamespaceAd {
-	return server_structs.LongestNSMatch(reqPath, namespaceAds)
-}
-
 // Given a request path, find all the ads that express willingness to work with
 // a prefix that best matches (i.e. is the longest prefix of) the path. We return
 // a copy ad at this point instead of a pointer to the ad in the TTL cache because
@@ -160,55 +152,58 @@ func getAdsForPath(reqPath string) (oAds []copyAd, cAds []copyAd) {
 	// Move topo sorted ads to the end of our slice
 	sortServerAdsByTopo(ads)
 
-	var bestFedPrefix string
+	// Length of the longest matched namespace prefix seen so far, with -1
+	// meaning "nothing matched yet" -- a root export matches with length 0, so
+	// 0 cannot serve as that sentinel.
+	bestNSLen := -1
 	for _, ad := range ads {
 		// Skip over any ads that are filtered out or marked in downtime
 		if filtered, fType := checkFilter(ad.Name); filtered {
-			log.Tracef("Skipping '%s' server '%s' as it's in the filtered server list with type %s", ad.Type, ad.Name, fType)
+			// Guard the Tracef explicitly: the level gate rejects the entry,
+			// but the variadic argument boxing would still heap-allocate on
+			// this per-ad hot path without the guard.
+			if log.IsLevelEnabled(log.TraceLevel) {
+				log.Tracef("Skipping '%s' server '%s' as it's in the filtered server list with type %s", ad.Type, ad.Name, fType)
+			}
 			continue
 		}
 
-		var nsAd *server_structs.NamespaceAd
-		if nsAd = getLongestNSMatch(reqPath, ad.NamespaceAds); nsAd == nil {
+		nsIdx := server_structs.LongestNSMatchIndex(reqPath, ad.NamespaceAds)
+		if nsIdx < 0 {
 			// This server doesn't support the requested namespace, skip it
 			continue
 		}
 
-		// Normalize the namespace path for comparison
-		nsPath := nsAd.Path
-		if !strings.HasSuffix(nsPath, "/") {
-			nsPath += "/"
-		}
+		// Take the copy once, here: ad.NamespaceAds is live TTL-cache memory
+		// read concurrently by other goroutines, so nothing below may hold a
+		// pointer into it or write through one. We also want returned
+		// namespace paths to forgo any trailing / that might come from
+		// topology, which is a mutation the cached ad must not see.
+		nsCopy := ad.NamespaceAds[nsIdx]
+		nsCopy.Path = strings.TrimSuffix(nsCopy.Path, "/")
 
-		// If we haven't yet encountered a best prefix, set the current one as best
-		if bestFedPrefix == "" {
-			bestFedPrefix = nsPath
-		}
+		// Rank ads by how specific their matched prefix is. Two equal-length
+		// prefixes of the same request path are the same string, so the
+		// already-trimmed path's length orders ads by specificity without
+		// comparing paths.
+		nsLen := len(nsCopy.Path)
 
 		// if the current ad's path matches but is shorter than the best path, skip
-		if len(nsPath) < len(bestFedPrefix) {
+		if nsLen < bestNSLen {
 			continue
 		}
 
 		// If the current nsAd's path has the same best prefix as the longest known,
 		// append the ad
-		if len(nsPath) == len(bestFedPrefix) {
+		if nsLen == bestNSLen {
 			if ad.Type == server_structs.OriginType.String() {
 				// Replace topology origins with Pelican origins if needed
 				if len(oAds) == 0 || (oAds[len(oAds)-1].ServerAd.FromTopology && !ad.ServerAd.FromTopology) {
-					nsCopy := *nsAd
-					// We want returned namespace paths to forgo any trailing / that might come from
-					// topology. To trim the prefix without modifying the original ad, we copy it
-					nsCopy.Path = strings.TrimSuffix(nsCopy.Path, "/")
 					oAds = []copyAd{{ServerAd: ad.ServerAd, NamespaceAd: nsCopy}}
 				} else if !ad.ServerAd.FromTopology || oAds[len(oAds)-1].ServerAd.FromTopology == ad.ServerAd.FromTopology {
-					nsCopy := *nsAd
-					nsCopy.Path = strings.TrimSuffix(nsCopy.Path, "/")
 					oAds = append(oAds, copyAd{ServerAd: ad.ServerAd, NamespaceAd: nsCopy})
 				}
 			} else if ad.Type == server_structs.CacheType.String() {
-				nsCopy := *nsAd
-				nsCopy.Path = strings.TrimSuffix(nsCopy.Path, "/")
 				cAds = append(cAds, copyAd{ServerAd: ad.ServerAd, NamespaceAd: nsCopy})
 			}
 			continue
@@ -216,9 +211,7 @@ func getAdsForPath(reqPath string) (oAds []copyAd, cAds []copyAd) {
 
 		// Otherwise we've found a better match. Overwrite slices we're tracking and
 		// set the new best prefix
-		bestFedPrefix = nsPath
-		nsCopy := *nsAd
-		nsCopy.Path = strings.TrimSuffix(nsCopy.Path, "/")
+		bestNSLen = nsLen
 		if ad.Type == server_structs.OriginType.String() {
 			oAds = []copyAd{{ServerAd: ad.ServerAd, NamespaceAd: nsCopy}}
 			cAds = []copyAd{}
