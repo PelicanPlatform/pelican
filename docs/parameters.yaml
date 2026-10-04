@@ -3456,12 +3456,20 @@ description: |+
   that fails to upload five times while its target passes this check is left on local
   storage until the cache restarts.
 
+  Before redirecting any client to a target, and again with every liveness check, the cache
+  mints a redirect URL for the identity object and fetches it the way a client would, with
+  no credential but the URL's own.  While that fails — the storage interprets the URL
+  differently than the cache expects, or the cache has no credential to mint it from — the
+  target's objects are proxied through the cache instead, the `tiering-storage` health
+  component reports a warning naming the target and the failure, and a single warning is
+  logged; another is logged when redirects work again.
+
   Tiering is monitored through the `pelican_cache_tiering_*` Prometheus metrics, labelled by
   target: uploads and their bytes and duration by result, objects given up on, the upload
   queue's depth and drops, uploads deferred for lack of room, reads by how they were
   served, objects found changed on a target, removals by the consistency sweep and when it
   last completed, whether each target passed its latest liveness check, and whether each
-  target can issue redirect URLs.
+  target's objects are currently served by redirect.
 
   This setting only has effect when `${Cache.EnableV2}` is true; the cache logs a
   warning and ignores tiering targets otherwise.  It applies to the cache server only:
@@ -3488,7 +3496,8 @@ description: |+
   instead.
 
   Not every target can issue such a URL.  The cache asks each one at startup and proxies
-  for any that cannot, so this setting is only needed to override a target that can.
+  for any that cannot, so this setting is only needed to override a target that can.  With
+  it set, the cache neither asks nor tests any target's redirect URLs.
 
   Where the URL is a pre-signed one, it is self-authenticating and never carries the
   client's Pelican bearer token.  Spec-compliant HTTP clients (including Pelican's own

@@ -459,11 +459,11 @@ func chrootPath(base []string, p string) []string {
 func (d *dcacheMacaroons) mint(objPath string, expiry time.Duration) (string, error) {
 	root := d.root.Load()
 	if root == nil {
-		return "", errors.New("no macaroon is available")
+		return "", errors.Wrap(ErrTierRedirectUnavailable, "no macaroon is available")
 	}
 	until := d.now().Add(expiry)
 	if root.expiry.Before(until) {
-		return "", errors.Errorf("the current macaroon expires at %s, too soon for a %s redirect",
+		return "", errors.Wrapf(ErrTierRedirectUnavailable, "the current macaroon expires at %s, too soon for a %s redirect",
 			root.expiry.UTC().Format(time.RFC3339), expiry)
 	}
 	elems := chrootPath(nil, objPath)

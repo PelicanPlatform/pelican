@@ -29,6 +29,8 @@ import (
 	"github.com/google/uuid"
 	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
+
+	"github.com/pelicanplatform/pelican/param"
 )
 
 // tierIdentityKey is the object key holding the target's identity UUID,
@@ -67,6 +69,17 @@ type tierTarget struct {
 	redirectScheme string
 	redirectHost   string
 
+	// identity is the UUID in the target's identity object, which the
+	// redirect self-test fetches.  Set at registration.
+	identity string
+
+	// redirectWorks is the latest redirect self-test's verdict (see
+	// checkRedirect); redirectChecked records that one has run, and
+	// lastRedirectError holds the latest failure's message.
+	redirectWorks     atomic.Bool
+	redirectChecked   atomic.Bool
+	lastRedirectError atomic.Value
+
 	// healthy is the latest liveness probe's verdict (true until a probe
 	// fails); probeFailures counts consecutive failed probes, and
 	// lastProbeError holds the latest failure's message.  See probe.
@@ -93,6 +106,13 @@ func newTierTarget(ctx context.Context, cfg TierTargetConfig) (*tierTarget, erro
 	}
 	t := &tierTarget{cfg: cfg, backend: backend}
 	t.healthy.Store(true)
+	// With redirects disabled, no target redirects, so none is probed for
+	// the capability or, later, self-tested.
+	if param.Cache_TieringDisableRedirect.GetBool() {
+		log.Infof("Cache tier target %s will not redirect clients (Cache.TieringDisableRedirect); its objects "+
+			"will be proxied through the cache", cfg.DisplayURL())
+		return t, nil
+	}
 	if probe, ok := probeTierRedirect(ctx, backend); ok {
 		if u, perr := url.Parse(probe); perr == nil {
 			t.canRedirect = true
