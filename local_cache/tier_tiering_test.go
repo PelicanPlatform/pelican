@@ -40,6 +40,7 @@ import (
 	badger "github.com/dgraph-io/badger/v4"
 	"github.com/google/uuid"
 	"github.com/pkg/errors"
+	"github.com/prometheus/client_golang/prometheus/testutil"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"golang.org/x/sync/errgroup"
@@ -667,7 +668,13 @@ func TestTierRecordsTheUploadedCopy(t *testing.T) {
 	defer cancel()
 	env := setupTierTestEnv(t, ctx)
 
+	label := env.target.metricLabel()
+	uploads := testutil.ToFloat64(tierUploadsTotal.WithLabelValues(label, tierUploadSucceeded))
+	uploadBytes := testutil.ToFloat64(tierUploadBytesTotal.WithLabelValues(label, tierUploadSucceeded))
+
 	data, meta := tierObjectForIntegrity(t, ctx, env, InstanceHash(fmt.Sprintf("%064d", 41)))
+	assert.Equal(t, uploads+1, testutil.ToFloat64(tierUploadsTotal.WithLabelValues(label, tierUploadSucceeded)))
+	assert.Equal(t, uploadBytes+float64(len(data)), testutil.ToFloat64(tierUploadBytesTotal.WithLabelValues(label, tierUploadSucceeded)))
 	require.NotNil(t, meta.Remote, "the uploaded copy should be recorded")
 	assert.NotEmpty(t, meta.Remote.ETag)
 	assert.Equal(t, int64(len(data)), meta.Remote.Size)
@@ -699,6 +706,9 @@ func TestTierDetectsSubstitution(t *testing.T) {
 		require.Error(t, err, "the substituted bytes must not be served")
 		assert.Contains(t, err.Error(), "changed on backing storage")
 		assert.True(t, changed, "the change should be reported so the entry can be dropped")
+		// The metric is counted by the cache's own onChanged hook (see
+		// openTierStream), which this stream bypasses; ChangedCopyIsRefusedAndDropped
+		// in TestTierRedirectServing checks it.
 	})
 
 	t.Run("IntegrityScanFindsIt", func(t *testing.T) {
@@ -715,8 +725,11 @@ func TestTierDetectsSubstitution(t *testing.T) {
 		assert.False(t, ok, "a same-length substitution must fail verification")
 
 		var mismatches, inconsistent, verified int64
+		seen := tierChangedObjectsTotal.WithLabelValues(env.target.metricLabel(), tierChangeSeenByScan)
+		before := testutil.ToFloat64(seen)
 		require.NoError(t, checker.verifyTieredObject(ctx, hash, meta, &mismatches, &inconsistent, &verified))
 		assert.Equal(t, int64(1), mismatches)
+		assert.Equal(t, before+1, testutil.ToFloat64(seen))
 		assert.Equal(t, int64(len(data)), inconsistent)
 		gone, err := env.storage.GetMetadata(hash)
 		require.NoError(t, err)
@@ -1476,6 +1489,11 @@ func TestTierRedirectServing(t *testing.T) {
 	data := bytes.Repeat([]byte("s3-redirect-test-data\n"), 700) // ~15 KiB
 	storeTestObject(t, ctx, pc.storage, instanceHash, data, diskID, NamespaceID(1))
 	require.NoError(t, pc.db.SetLatestETag(objectHash, etag, time.Now()))
+	// Carry the origin's ETag, as a fetched object would.
+	stored, err := pc.storage.GetMetadata(instanceHash)
+	require.NoError(t, err)
+	stored.ETag = etag
+	require.NoError(t, pc.storage.SetMetadata(instanceHash, stored))
 
 	// Nudge the queue directly (storeTestObject bypasses some completion
 	// paths) and wait for the relocation to land.
@@ -1490,14 +1508,28 @@ func TestTierRedirectServing(t *testing.T) {
 	}))
 	t.Cleanup(srv.Close)
 
+	// Each way of answering is counted against the target, so an operator
+	// can see how much of its traffic bypasses the cache.
+	label := pc.storage.getTierTarget(tierID).metricLabel()
+	assert.Equal(t, 1.0, testutil.ToFloat64(tierRedirectCapable.WithLabelValues(label)))
+	served := func(mode string) float64 {
+		return testutil.ToFloat64(tierRequestsTotal.WithLabelValues(label, mode))
+	}
+	redirectedBytes := func() float64 {
+		return testutil.ToFloat64(tierRedirectedBytesTotal.WithLabelValues(label))
+	}
+
 	// Default mode: the GET is answered with a 307 to a pre-signed URL.
 	noRedirectClient := &http.Client{CheckRedirect: func(*http.Request, []*http.Request) error {
 		return http.ErrUseLastResponse
 	}}
+	redirects, handedOff := served(tierServedByRedirect), redirectedBytes()
 	resp, err := noRedirectClient.Get(srv.URL + objectPath)
 	require.NoError(t, err)
 	resp.Body.Close()
 	require.Equal(t, http.StatusTemporaryRedirect, resp.StatusCode)
+	assert.Equal(t, redirects+1, served(tierServedByRedirect))
+	assert.Equal(t, handedOff+float64(len(data)), redirectedBytes(), "a whole-object redirect hands off the whole object")
 	location := resp.Header.Get("Location")
 	require.NotEmpty(t, location)
 	assert.Contains(t, location, "pelican-redirect-test", "redirect should point at the bucket")
@@ -1523,6 +1555,7 @@ func TestTierRedirectServing(t *testing.T) {
 
 	// Range requests survive the redirect (the client re-applies Range to
 	// the pre-signed URL and S3 honors it).
+	handedOff = redirectedBytes()
 	req, err := http.NewRequest(http.MethodGet, srv.URL+objectPath, nil)
 	require.NoError(t, err)
 	req.Header.Set("Range", "bytes=100-199")
@@ -1533,11 +1566,26 @@ func TestTierRedirectServing(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, http.StatusPartialContent, resp.StatusCode)
 	assert.Equal(t, data[100:200], body)
+	assert.Equal(t, handedOff+100, redirectedBytes(), "a ranged redirect hands off only the range")
+
+	// A revalidation with the ETag the client holds is answered by the cache
+	// with a 304, not redirected: the target's own ETag never matches.
+	notModified := served(tierServedNotModified)
+	req, err = http.NewRequest(http.MethodGet, srv.URL+objectPath, nil)
+	require.NoError(t, err)
+	req.Header.Set("If-None-Match", etag)
+	resp, err = noRedirectClient.Do(req)
+	require.NoError(t, err)
+	resp.Body.Close()
+	assert.Equal(t, http.StatusNotModified, resp.StatusCode)
+	assert.Empty(t, resp.Header.Get("Location"))
+	assert.Equal(t, notModified+1, served(tierServedNotModified))
 
 	// With redirect disabled, the same GET proxies the bytes through the
 	// cache (S3 stream mode) with a plain 200.
 	require.NoError(t, param.Cache_TieringDisableRedirect.Set(true))
 	t.Cleanup(func() { _ = param.Cache_TieringDisableRedirect.Set(false) })
+	proxied := served(tierServedByProxy)
 	resp, err = noRedirectClient.Get(srv.URL + objectPath)
 	require.NoError(t, err)
 	body, err = io.ReadAll(resp.Body)
@@ -1545,6 +1593,7 @@ func TestTierRedirectServing(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, http.StatusOK, resp.StatusCode, "proxy-mode GET failed: %s", string(body))
 	assert.Equal(t, data, body)
+	assert.Equal(t, proxied+1, served(tierServedByProxy))
 
 	// Proxy-mode range request is served by the cache itself.
 	req, err = http.NewRequest(http.MethodGet, srv.URL+objectPath, nil)
@@ -1641,11 +1690,14 @@ func TestTierRedirectServing(t *testing.T) {
 		forged := bytes.Repeat([]byte{0xAB}, len(data))
 		require.NoError(t, discardInfo(target.backend.Put(ctx, target.objectKey(instanceHash), "", int64(len(forged)), bytes.NewReader(forged))))
 
+		seenOnRead := tierChangedObjectsTotal.WithLabelValues(label, tierChangeSeenOnRead)
+		before := testutil.ToFloat64(seenOnRead)
 		rc, err := pc.Get(ctx, objectPath, "")
 		require.NoError(t, err)
 		got, err := io.ReadAll(rc)
 		rc.Close()
 		require.Error(t, err, "the replaced bytes must not be served")
+		assert.Equal(t, before+1, testutil.ToFloat64(seenOnRead))
 		assert.NotEqual(t, forged, got)
 		require.Eventually(t, func() bool {
 			meta, err := pc.storage.GetMetadata(instanceHash)
@@ -1781,7 +1833,14 @@ func TestTierConsistencySweep(t *testing.T) {
 
 	// The S3 sweep removes the stray bucket object and the ghost DB entry
 	// while leaving the valid object alone.
+	label := env.target.metricLabel()
+	removedRemote := testutil.ToFloat64(tierSweepRemovedTotal.WithLabelValues(label, tierSweepRemovedRemoteObject))
+	removedEntries := testutil.ToFloat64(tierSweepRemovedTotal.WithLabelValues(label, tierSweepRemovedEntry))
+	sweepStart := float64(time.Now().Unix())
 	require.NoError(t, checker.RunTierScan(ctx))
+	assert.Equal(t, removedRemote+1, testutil.ToFloat64(tierSweepRemovedTotal.WithLabelValues(label, tierSweepRemovedRemoteObject)))
+	assert.Equal(t, removedEntries+1, testutil.ToFloat64(tierSweepRemovedTotal.WithLabelValues(label, tierSweepRemovedEntry)))
+	assert.GreaterOrEqual(t, testutil.ToFloat64(tierSweepLastSuccess.WithLabelValues(label)), sweepStart)
 
 	exists, err := env.target.objectExists(ctx, strayHash)
 	require.NoError(t, err)

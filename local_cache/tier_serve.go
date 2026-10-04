@@ -53,7 +53,9 @@ func (pc *PersistentCache) openTierStream(ctx context.Context, target *tierTarge
 	stream.onClose = pc.storage.PinObject(res.instanceHash)
 	stream.expect = res.meta.Remote
 	hash := res.instanceHash
+	tierRequestsTotal.WithLabelValues(target.metricLabel(), tierServedByProxy).Inc()
 	stream.onChanged = func() {
+		tierChangedObjectsTotal.WithLabelValues(target.metricLabel(), tierChangeSeenOnRead).Inc()
 		pc.egrp.Go(func() error {
 			if err := pc.storage.Delete(hash); err != nil {
 				log.Warnf("Failed to drop tiered object %s after it changed on its target: %v", hash, err)
@@ -264,6 +266,7 @@ func (pc *PersistentCache) tryTierRedirect(w http.ResponseWriter, r *http.Reques
 				w.Header().Set("ETag", meta.ETag)
 				w.Header().Set("Cache-Control", meta.ResponseCacheControl())
 				w.WriteHeader(http.StatusNotModified)
+				tierRequestsTotal.WithLabelValues(target.metricLabel(), tierServedNotModified).Inc()
 				reqLog.WithFields(log.Fields{
 					"status":   http.StatusNotModified,
 					"cache":    "hit-redirect",
@@ -316,12 +319,33 @@ func (pc *PersistentCache) tryTierRedirect(w http.ResponseWriter, r *http.Reques
 	}
 	w.Header().Set("Cache-Control", meta.ResponseCacheControl())
 	http.Redirect(w, r, targetURL, http.StatusTemporaryRedirect)
+	tierRequestsTotal.WithLabelValues(target.metricLabel(), tierServedByRedirect).Inc()
+	tierRedirectedBytesTotal.WithLabelValues(target.metricLabel()).Add(float64(redirectedBytes(r, meta.ContentLength)))
 	reqLog.WithFields(log.Fields{
 		"status":   http.StatusTemporaryRedirect,
 		"cache":    "hit-redirect",
 		"duration": time.Since(startTime).Round(time.Millisecond).String(),
 	}).Info("Request complete")
 	return true
+}
+
+// redirectedBytes is how much of an object a redirected request asked for:
+// the requested ranges, or the whole object when there are none (or the
+// header cannot be parsed, in which case the target decides what to send).
+func redirectedBytes(r *http.Request, size int64) int64 {
+	header := r.Header.Get("Range")
+	if header == "" {
+		return size
+	}
+	ranges, err := ParseRangeHeader(header, size)
+	if err != nil || len(ranges) == 0 {
+		return size
+	}
+	var n int64
+	for _, rg := range ranges {
+		n += rg.End - rg.Start + 1
+	}
+	return n
 }
 
 // limitedReadCloser bounds a stream to n bytes while preserving Close.

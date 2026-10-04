@@ -1521,6 +1521,7 @@ func (cc *ConsistencyChecker) verifyTieredObject(ctx context.Context, instanceHa
 	}
 
 	log.Warnf("Tiered object %s does not match the copy that was uploaded: %s", instanceHash, reason)
+	tierChangedObjectsTotal.WithLabelValues(target.metricLabel(), tierChangeSeenByScan).Inc()
 	*checksumMismatches++
 	*inconsistentBytes += meta.ContentLength
 	if cc.preserveCorruptObjects {

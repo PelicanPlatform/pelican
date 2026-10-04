@@ -1154,9 +1154,10 @@ func (c *TierTargetConfig) TransportScheme() string {
 }
 
 // DisplayURL returns a human-readable identity string for the target.  It is
-// persisted in the DiskMapping.Directory field and written to logs, so it
-// must never carry credentials -- operators may legitimately embed secrets in
-// a provider URL (e.g. "s3://bucket?awssecretkey=...").
+// persisted in the DiskMapping.Directory field, written to logs and used as
+// a metric label, so it must never carry credentials.  A provider URL that
+// embeds them is refused when the configuration is parsed; the redaction here
+// keeps that true for any value that reaches it some other way.
 func (c *TierTargetConfig) DisplayURL() string {
 	if c.ProviderURL != "" {
 		return utils.RedactURLCredentials(c.ProviderURL)

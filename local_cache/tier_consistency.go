@@ -311,6 +311,11 @@ func (cc *ConsistencyChecker) scanTierTarget(ctx context.Context, sid StorageID,
 			target.DisplayURL(), tierMaxOrphansPerScan)
 	}
 
+	label := target.metricLabel()
+	tierSweepRemovedTotal.WithLabelValues(label, tierSweepRemovedRemoteObject).Add(float64(deletedBucket))
+	tierSweepRemovedTotal.WithLabelValues(label, tierSweepRemovedEntry).Add(float64(deletedDB))
+	tierSweepLastSuccess.WithLabelValues(label).SetToCurrentTime()
+
 	cc.statsMu.Lock()
 	cc.stats.OrphanedFiles += int64(deletedBucket)
 	cc.stats.OrphanedDBEntries += int64(deletedDB)

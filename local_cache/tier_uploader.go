@@ -102,12 +102,14 @@ func newTierUploader(db *CacheDB, storage *StorageManager, eviction *EvictionMan
 func (u *tierUploader) markPendingRelease(h InstanceHash) {
 	u.pendingMu.Lock()
 	u.pendingRelease[h] = struct{}{}
+	tierPendingLocalReleases.Set(float64(len(u.pendingRelease)))
 	u.pendingMu.Unlock()
 }
 
 func (u *tierUploader) clearPendingRelease(h InstanceHash) {
 	u.pendingMu.Lock()
 	delete(u.pendingRelease, h)
+	tierPendingLocalReleases.Set(float64(len(u.pendingRelease)))
 	u.pendingMu.Unlock()
 }
 
@@ -222,8 +224,10 @@ func (u *tierUploader) rescanLoop(ctx context.Context) {
 func (u *tierUploader) MaybeEnqueue(instanceHash InstanceHash) {
 	select {
 	case u.queue <- instanceHash:
+		tierQueueDepth.Set(float64(len(u.queue)))
 	default:
 		// Queue full — the periodic sweep will pick the object up later.
+		tierQueueDropsTotal.Inc()
 	}
 }
 
@@ -233,6 +237,7 @@ func (u *tierUploader) workerLoop(ctx context.Context) {
 		case <-ctx.Done():
 			return
 		case hash := <-u.queue:
+			tierQueueDepth.Set(float64(len(u.queue)))
 			if err := u.processObject(ctx, hash); err != nil {
 				log.Warnf("Failed to tier object %s: %v", hash, err)
 			}
@@ -335,6 +340,7 @@ func (u *tierUploader) processObject(ctx context.Context, instanceHash InstanceH
 		// No target currently fits; nudge eviction so space opens up and
 		// let the periodic sweep retry.
 		u.eviction.TriggerEviction()
+		tierDeferredNoRoomTotal.Inc()
 		log.Debugf("No tiering target has room for %s (%d bytes); deferring", instanceHash, fileSize)
 		return nil
 	}
@@ -395,12 +401,15 @@ func (u *tierUploader) processObject(ctx context.Context, instanceHash InstanceH
 		abandon()
 		return errors.Wrap(err, "failed to open object for upload")
 	}
+	uploadStart := time.Now()
 	remote, uploadErr := target.uploadObject(ctx, instanceHash, meta.ContentType, meta.ContentLength, reader)
 	reader.Close()
 	if uploadErr != nil {
+		recordTierUpload(target, tierUploadFailed, meta.ContentLength, 0)
 		abandon()
 		return uploadErr
 	}
+	uploadTime := time.Since(uploadStart)
 
 	// Relocate metadata; retry on OCC conflicts with concurrent metadata
 	// writers (LRU updates, checksum merges).
@@ -426,9 +435,12 @@ func (u *tierUploader) processObject(ctx context.Context, instanceHash InstanceH
 		}
 		// Relocation failed (e.g. object evicted mid-upload) — remove the
 		// remote copy so nothing is leaked.
+		recordTierUpload(target, tierUploadFailed, meta.ContentLength, 0)
 		abandon()
 		return errors.Wrap(err, "failed to relocate object metadata to tiering target")
 	}
+
+	recordTierUpload(target, tierUploadSucceeded, meta.ContentLength, uploadTime)
 
 	// Record that the remote copy is now authoritative before touching the
 	// local one.  If the process dies anywhere below, recovery needs to know
@@ -667,6 +679,7 @@ func (u *tierUploader) backfillScan(ctx context.Context) (queued int, deferred b
 		}
 		select {
 		case u.queue <- instanceHash:
+			tierQueueDepth.Set(float64(len(u.queue)))
 			queued++
 		default:
 			deferred = true // queue full; a later rescan will pick it up

@@ -762,6 +762,11 @@ func (sm *StorageManager) RegisterTierTargets(ctx context.Context, configs []Tie
 		usedIDs[id] = true
 		target.id = id
 		sm.tierTargets[id] = target
+		capable := 0.0
+		if target.canRedirect {
+			capable = 1
+		}
+		tierRedirectCapable.WithLabelValues(target.metricLabel()).Set(capable)
 		result[id] = cfg
 	}
 	return result, nil

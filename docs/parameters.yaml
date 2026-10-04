@@ -3402,6 +3402,12 @@ description: |+
   on-disk guarantees for a given namespace should not tier it — raise
   ${Cache.TieringThreshold} above the object sizes involved.
 
+  Tiering is monitored through the `pelican_cache_tiering_*` Prometheus metrics, labelled by
+  target: uploads and their bytes and duration by result, the upload queue's depth and
+  drops, uploads deferred for lack of room, reads by how they were served, objects found
+  changed on a target, removals by the consistency sweep and when it last completed, and
+  whether each target can issue redirect URLs.
+
   This setting only has effect when `${Cache.EnableV2}` is true; the cache logs a
   warning and ignores tiering targets otherwise.  It applies to the cache server only:
   the local cache module, if it runs in the same process, never tiers.
@@ -3441,8 +3447,13 @@ description: |+
   (e.g. `curl --location-trusted`).
 
   Note that bytes served by redirect do not pass through the cache, so they are not counted
-  in the cache's transfer monitoring.  Proxying restores that accounting at the cost of
-  moving the data through the cache.
+  in the cache's transfer monitoring.  The cache counts what it hands off instead:
+  `pelican_cache_tiering_requests_total` (by `mode`: `redirect`, `proxy` or `not_modified`)
+  and `pelican_cache_tiering_redirected_bytes_total`, the size of each redirected object or
+  requested range.  Those are bytes the client was sent to fetch, not bytes confirmed
+  transferred; the storage provider's access logs are the record of what was actually read.
+  Proxying restores the cache's own accounting at the cost of moving the data through the
+  cache.
 type: bool
 default: false
 components: ["cache"]
