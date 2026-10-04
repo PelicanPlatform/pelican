@@ -193,6 +193,10 @@ func getAdsForPath(reqPath string) (oAds []copyAd, cAds []copyAd) {
 		// namespace paths to forgo any trailing / that might come from
 		// topology, which is a mutation the cached ad must not see.
 		//
+		// Indexing it a second time, after the scan above, is safe because a
+		// published advertisement is replaced rather than edited; see
+		// getServerAdsSnapshot for the invariant and what depends on it.
+		//
 		// This sits below the discard above so that an ad already beaten by a
 		// more specific prefix is ranked and dropped without being copied --
 		// the scan reaches here only for an ad that is about to be kept.
