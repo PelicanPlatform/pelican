@@ -20,8 +20,10 @@ package local_cache
 
 import (
 	"context"
+	"runtime"
 	"sync"
 	"time"
+	"weak"
 
 	"github.com/RoaringBitmap/roaring"
 	"github.com/jellydator/ttlcache/v3"
@@ -263,14 +265,42 @@ func (obs *ObjectBlockState) WaitForBlock(ctx context.Context, block uint32) boo
 // blockStateTTL is how long an idle ObjectBlockState lives in the
 // in-memory cache before being evicted.  Every GetSharedBlockState call
 // touches the entry, so actively-used states stay resident.  Evicted
-// states are simply reloaded from the database on next access.
+// states are simply reloaded from the database on next access -- unless
+// something still holds the evicted one; see blockStateCache.
 const blockStateTTL = 5 * time.Minute
+
+// blockStateCache is the TTL cache of shared ObjectBlockStates, plus a
+// record of every state still in use.
+//
+// Holders keep their *ObjectBlockState for as long as they work on the
+// object: a RangeReader for its life, a promotion while it fills.  Writers
+// update whichever state GetSharedBlockState returns at the time.  If the
+// TTL dropped an idle entry while a holder still had it and a later load
+// built a fresh one, the two would diverge for good: blocks written through
+// the new state would never appear in the held one, and a holder waiting
+// for them would wait forever.  So a load first looks for a state that is
+// still referenced anywhere and hands that back; only a state nobody holds
+// is rebuilt from the database.  Expiry thereby only ever frees memory.
+//
+// Explicit invalidation (InvalidateSharedBlockState) is different: it is
+// called when the object's local data is going away, and deliberately
+// starts a new state that does not share the old one's history.
+type blockStateCache struct {
+	*ttlcache.Cache[InstanceHash, *ObjectBlockState]
+	// live maps a hash to a weak pointer to the state last issued for it.
+	// An entry is removed when that state is collected or invalidated.
+	live sync.Map
+}
 
 // newBlockStateCache creates the TTL cache for shared ObjectBlockState entries.
 // The StorageManager calls this once during construction.
-func newBlockStateCache(db *CacheDB) *ttlcache.Cache[InstanceHash, *ObjectBlockState] {
+func newBlockStateCache(db *CacheDB) *blockStateCache {
+	bc := &blockStateCache{}
 	loader := ttlcache.LoaderFunc[InstanceHash, *ObjectBlockState](
 		func(cache *ttlcache.Cache[InstanceHash, *ObjectBlockState], instanceHash InstanceHash) *ttlcache.Item[InstanceHash, *ObjectBlockState] {
+			if held := bc.liveState(instanceHash); held != nil {
+				return cache.Set(instanceHash, held, ttlcache.DefaultTTL)
+			}
 			bitmap, err := db.GetBlockState(instanceHash)
 			if err != nil {
 				// Return nil — the caller's Get will return nil and
@@ -278,16 +308,37 @@ func newBlockStateCache(db *CacheDB) *ttlcache.Cache[InstanceHash, *ObjectBlockS
 				return nil
 			}
 			obs := NewObjectBlockState(bitmap)
+			wp := weak.Make(obs)
+			bc.live.Store(instanceHash, wp)
+			runtime.AddCleanup(obs, func(h InstanceHash) { bc.live.CompareAndDelete(h, wp) }, instanceHash)
 			return cache.Set(instanceHash, obs, ttlcache.DefaultTTL)
 		},
 	)
 
-	return ttlcache.New[InstanceHash, *ObjectBlockState](
+	bc.Cache = ttlcache.New[InstanceHash, *ObjectBlockState](
 		ttlcache.WithTTL[InstanceHash, *ObjectBlockState](blockStateTTL),
 		ttlcache.WithLoader[InstanceHash, *ObjectBlockState](
 			ttlcache.NewSuppressedLoader[InstanceHash, *ObjectBlockState](loader, nil),
 		),
 	)
+	return bc
+}
+
+// liveState returns the state last issued for a hash if anything still
+// holds it, or nil.
+func (bc *blockStateCache) liveState(instanceHash InstanceHash) *ObjectBlockState {
+	v, ok := bc.live.Load(instanceHash)
+	if !ok {
+		return nil
+	}
+	return v.(weak.Pointer[ObjectBlockState]).Value()
+}
+
+// invalidate drops a hash's state from the cache and forgets any holder's
+// copy, so the next load starts afresh from the database.
+func (bc *blockStateCache) invalidate(instanceHash InstanceHash) {
+	bc.live.Delete(instanceHash)
+	bc.Delete(instanceHash)
 }
 
 // GetSharedBlockState returns the shared, thread-safe block state for the
@@ -308,5 +359,5 @@ func (sm *StorageManager) GetSharedBlockState(instanceHash InstanceHash) (*Objec
 // forcing the next GetSharedBlockState call to reload from the database.
 // This should be called when an object is deleted or evicted.
 func (sm *StorageManager) InvalidateSharedBlockState(instanceHash InstanceHash) {
-	sm.blockStates.Delete(instanceHash)
+	sm.blockStates.invalidate(instanceHash)
 }
