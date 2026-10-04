@@ -22,11 +22,9 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
-	"net/url"
 	"os"
 	"path/filepath"
 	"runtime"
-	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -35,6 +33,7 @@ import (
 	"github.com/pelicanplatform/pelican/param"
 	"github.com/pelicanplatform/pelican/server_structs"
 	"github.com/pelicanplatform/pelican/server_utils"
+	"github.com/pelicanplatform/pelican/utils"
 )
 
 // setFileRedirectRoots points Client.FileRedirectRoots at the given roots for
@@ -50,7 +49,7 @@ func setFileRedirectRoots(t *testing.T, roots ...string) {
 }
 
 // fileURL spells a local path as a file:// URL, the way a cache would.
-func fileURL(path string) string { return pathToFileURL(path).String() }
+func fileURL(path string) string { return utils.PathToFileURL(path).String() }
 
 // TestFileRedirectsOffByDefault pins the default: with no roots configured
 // the client neither advertises the capability nor gains the ability to
@@ -258,28 +257,9 @@ func TestFileRedirectRefusedWhenDisabled(t *testing.T) {
 
 // remoteHostURL is a file URL for path on some other machine.
 func remoteHostURL(path string) string {
-	u := pathToFileURL(path)
+	u := utils.PathToFileURL(path)
 	u.Host = "elsewhere.example.org"
 	return u.String()
-}
-
-// TestFileURLRoundTrip: a local path survives being spelled as a file URL and
-// read back, including a Windows drive letter (file:///C:/...) and characters
-// that must be percent-encoded.  A name containing "%41" must come back as
-// written, not decoded a second time into "A".
-func TestFileURLRoundTrip(t *testing.T) {
-	dir := t.TempDir()
-	for _, name := range []string{"plain.dat", "with space.dat", "a%41.dat", "hash#query?.dat"} {
-		if runtime.GOOS == "windows" && strings.ContainsAny(name, "?") {
-			continue // not a legal Windows file name
-		}
-		path := filepath.Join(dir, name)
-		parsed, err := url.Parse(fileURL(path))
-		require.NoError(t, err)
-		assert.Equal(t, "file", parsed.Scheme)
-		assert.Empty(t, parsed.Host)
-		assert.Equal(t, path, fileURLToPath(parsed), "round trip of %q", name)
-	}
 }
 
 // TestFileRedirectPercentInName follows a redirect to a file whose name
