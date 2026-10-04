@@ -3352,9 +3352,32 @@ description: |+
     without a restart; an empty file is an error rather than a request for anonymous
     access.  The token needs permission to read, write, create collections in,
     delete from and list the collection.
+  - **DisableMacaroons** (bool, optional, default false): never ask the service for
+    macaroons, so objects on the target are always proxied through the cache.
 
-  A WebDAV target cannot issue redirect URLs, so its objects are proxied through the cache;
-  reads are pinned to the entity tag recorded at upload.
+  A WebDAV target redirects clients using dCache macaroons in place of pre-signed URLs.
+  The cache asks the door for a read-only macaroon covering the target's collection (a
+  `POST` with content type `application/macaroon-request`), valid for
+  ${Cache.TieringRedirectExpiry} plus ten minutes, and requests a fresh one every minute in
+  the background.  For each redirect it then restricts that macaroon itself, without
+  contacting dCache — to downloading the one object, until ${Cache.TieringRedirectExpiry}
+  from now — and sends the client to the object's URL with the macaroon as the `authz`
+  query parameter.  When the cache holds no macaroon that outlasts a redirect (the door
+  stopped issuing them, or the token expired), it proxies the object instead.  A door that
+  refuses the first macaroon request outright — macaroons are disabled, the service is not
+  dCache (a macaroon carrying caveats dCache does not issue, as XRootD's do, is refused), or
+  dCache will not issue one for the token — leaves the target proxy-only until the cache
+  restarts, with a warning in the log.  WebDAV keeps no object versions, so a redirected
+  client reads whatever the target currently holds; proxied reads are pinned to the entity
+  tag recorded at upload, as they are for buckets without versioning.
+
+  Not every token can be exchanged for a macaroon.  dCache issues one only when it can
+  express the token's restrictions as macaroon caveats, which it cannot do for the
+  scope-based authorization that WLCG and SciTokens profiles produce (`storage.read:`,
+  `storage.modify:` and similar scopes): with such a token the target is proxy-only.  dCache
+  also issues macaroons only over `https`.  Minted URLs carry an expiry computed from the
+  cache's clock and checked against the door's, so the two clocks must agree to well within
+  ${Cache.TieringRedirectExpiry}, as they must for pre-signed URLs.
 
   The remaining keys apply to every target:
 
@@ -3493,7 +3516,9 @@ components: ["cache"]
 name: Cache.TieringRedirectExpiry
 description: |+
   The lifetime of the URLs handed to clients when serving an object directly from a
-  tiering storage target (see ${Cache.TieringDisableRedirect}).
+  tiering storage target (see ${Cache.TieringDisableRedirect}).  For a WebDAV (dCache)
+  target this is also the lifetime of the macaroon each URL carries, and the macaroon the
+  cache requests from the door is valid for ten minutes longer.
 type: duration
 default: 5m
 components: ["cache"]
