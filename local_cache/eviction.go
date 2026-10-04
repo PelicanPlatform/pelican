@@ -21,7 +21,7 @@ package local_cache
 import (
 	"context"
 	fmt "fmt"
-	"math"
+	"math/bits"
 	rand "math/rand/v2"
 	"sort"
 	"sync"
@@ -79,29 +79,12 @@ type EvictionManager struct {
 	evictRunCounter atomic.Uint64
 }
 
-// dirEvictionLimits holds the size limits for a single storage directory.
+// dirEvictionLimits holds the size limits for a single storage directory,
+// in the signed type the usage counters use.
 type dirEvictionLimits struct {
-	maxSize   uint64
-	highWater uint64
-	lowWater  uint64
-}
-
-// clampToInt64 converts a byte count to the signed arithmetic the eviction
-// bookkeeping uses, saturating rather than wrapping.
-//
-// These limits are already clamped where they are built, but that is several
-// functions away from where they are used: the checks live in
-// NewEvictionManager and the conversions happen wherever a limit meets a usage
-// figure.  Keeping a bound at each conversion means the guarantee is visible
-// at the point it matters -- to a reader, to a future edit that introduces
-// another limit, and to static analysis, which cannot carry the invariant
-// across a struct field and reports every one of these as an unchecked
-// narrowing conversion.
-func clampToInt64(v uint64) int64 {
-	if v > uint64(math.MaxInt64) {
-		return math.MaxInt64
-	}
-	return int64(v)
+	maxSize   int64
+	highWater int64
+	lowWater  int64
 }
 
 // EvictionConfig holds configuration for the eviction manager
@@ -152,10 +135,7 @@ func NewEvictionManager(db *CacheDB, storage *StorageManager, config EvictionCon
 			lowWater = (dcfg.MaxSize * uint64(lwp)) / 100
 		}
 
-		// Sanity: clamp watermarks to MaxSize, ensure high >= low,
-		// and cap everything at MaxInt64 so the uint64→int64 conversions
-		// used throughout eviction (e.g. DirFree) cannot produce a negative
-		// value from an absurdly large configured size.
+		// Sanity: clamp watermarks to MaxSize and ensure high >= low.
 		maxSize := dcfg.MaxSize
 		if highWater > maxSize {
 			highWater = maxSize
@@ -163,20 +143,11 @@ func NewEvictionManager(db *CacheDB, storage *StorageManager, config EvictionCon
 		if lowWater > highWater {
 			lowWater = highWater
 		}
-		if maxSize > uint64(math.MaxInt64) {
-			maxSize = uint64(math.MaxInt64)
-		}
-		if highWater > uint64(math.MaxInt64) {
-			highWater = uint64(math.MaxInt64)
-		}
-		if lowWater > uint64(math.MaxInt64) {
-			lowWater = uint64(math.MaxInt64)
-		}
 
 		dirLimits[id] = &dirEvictionLimits{
-			maxSize:   maxSize,
-			highWater: highWater,
-			lowWater:  lowWater,
+			maxSize:   utils.ClampToInt64(maxSize),
+			highWater: utils.ClampToInt64(highWater),
+			lowWater:  utils.ClampToInt64(lowWater),
 		}
 	}
 
@@ -302,7 +273,7 @@ func (em *EvictionManager) NoteUsageIncrease(storageID StorageID, bytes int64) {
 
 	// Fast path: check the atomic estimate against the watermark.
 	limits, lok := em.dirLimits[storageID]
-	if !lok || newVal <= clampToInt64(limits.highWater) {
+	if !lok || newVal <= limits.highWater {
 		return
 	}
 
@@ -311,7 +282,7 @@ func (em *EvictionManager) NoteUsageIncrease(storageID StorageID, bytes int64) {
 	dbUsage := em.getDirUsage(storageID)
 	counter.Store(dbUsage)
 
-	if dbUsage > clampToInt64(limits.highWater) {
+	if dbUsage > limits.highWater {
 		em.TriggerEviction()
 	}
 }
@@ -337,7 +308,7 @@ func (em *EvictionManager) DirFree(storageID StorageID) int64 {
 	if used < 0 {
 		used = 0
 	}
-	free := clampToInt64(limits.maxSize) - used
+	free := limits.maxSize - used
 	if free < 0 {
 		free = 0
 	}
@@ -441,7 +412,7 @@ func (em *EvictionManager) checkAndEvict() {
 		go func(sid StorageID, limits *dirEvictionLimits) {
 			defer wg.Done()
 			dirUsage := em.getDirUsage(sid)
-			if dirUsage <= 0 || uint64(dirUsage) <= limits.highWater {
+			if dirUsage <= 0 || dirUsage <= limits.highWater {
 				return
 			}
 
@@ -455,7 +426,7 @@ func (em *EvictionManager) checkAndEvict() {
 			// every candidate protected by a redirect hold) are excluded
 			// so the loop moves on instead of spinning on them.
 			excluded := make(map[NamespaceID]bool)
-			for dirUsage = em.getDirUsage(sid); dirUsage > 0 && uint64(dirUsage) > limits.lowWater; dirUsage = em.getDirUsage(sid) {
+			for dirUsage = em.getDirUsage(sid); dirUsage > 0 && dirUsage > limits.lowWater; dirUsage = em.getDirUsage(sid) {
 				// Find the greediest namespace in this directory
 				targetKey, targetUsage, err := em.findGreediestNamespaceInDir(sid, excluded)
 				if err != nil {
@@ -468,7 +439,7 @@ func (em *EvictionManager) checkAndEvict() {
 					break
 				}
 
-				overhead := dirUsage - clampToInt64(limits.lowWater)
+				overhead := dirUsage - limits.lowWater
 				rl.WithFields(log.Fields{
 					"storageID":   targetKey.StorageID,
 					"namespaceID": targetKey.NamespaceID,
@@ -674,9 +645,9 @@ func (em *EvictionManager) GetStats() EvictionStats {
 	dirStats := make(map[StorageID]DirEvictionStats, len(em.dirLimits))
 	for id, limits := range em.dirLimits {
 		dirStats[id] = DirEvictionStats{
-			MaxSize:   limits.maxSize,
-			HighWater: limits.highWater,
-			LowWater:  limits.lowWater,
+			MaxSize:   uint64(limits.maxSize),
+			HighWater: uint64(limits.highWater),
+			LowWater:  uint64(limits.lowWater),
 		}
 	}
 
@@ -705,11 +676,8 @@ type DirEvictionStats struct {
 // directory.  Uses the in-memory atomic estimates (no DB query).
 func (em *EvictionManager) HasSpace(needed uint64) bool {
 	for sid, limits := range em.dirLimits {
-		used := em.dirUsage[sid].Load()
-		if used < 0 {
-			used = 0
-		}
-		if uint64(used)+needed <= limits.maxSize {
+		used := max(em.dirUsage[sid].Load(), 0)
+		if free := limits.maxSize - used; free > 0 && needed <= uint64(free) {
 			return true
 		}
 	}
@@ -746,7 +714,7 @@ func (em *EvictionManager) rebuildRRTable() {
 		if used < 0 {
 			used = 0
 		}
-		free := clampToInt64(em.dirLimits[sid].maxSize) - used
+		free := em.dirLimits[sid].maxSize - used
 		if free < 1 {
 			free = 1
 		}
@@ -842,7 +810,7 @@ func (em *EvictionManager) ChooseDiskStorage() StorageID {
 func (em *EvictionManager) ForcePurge() error {
 	targets := make(map[StorageID]int64, len(em.dirLimits))
 	for sid, limits := range em.dirLimits {
-		targets[sid] = clampToInt64(limits.lowWater)
+		targets[sid] = limits.lowWater
 	}
 	_, _, err := em.forcePurgeToTargets("Force purge", targets)
 	return err
@@ -860,7 +828,7 @@ func (em *EvictionManager) MarkPurgeFirst(instanceHash InstanceHash) error {
 func (em *EvictionManager) ForcePurgeToBytes(targetBytes uint64) (uint64, int64, error) {
 	var totalMax uint64
 	for _, limits := range em.dirLimits {
-		totalMax += limits.maxSize
+		totalMax += uint64(limits.maxSize)
 	}
 	if totalMax == 0 {
 		return 0, 0, errors.New("no storage directories configured")
@@ -868,9 +836,21 @@ func (em *EvictionManager) ForcePurgeToBytes(targetBytes uint64) (uint64, int64,
 
 	targets := make(map[StorageID]int64, len(em.dirLimits))
 	for sid, limits := range em.dirLimits {
-		targets[sid] = clampToInt64((targetBytes * limits.maxSize) / totalMax)
+		targets[sid] = purgeShare(targetBytes, limits.maxSize, totalMax)
 	}
 	return em.forcePurgeToTargets("Purge-to-target", targets)
+}
+
+// purgeShare is a directory's part of a cache-wide purge target, in
+// proportion to its size: targetBytes * maxSize / totalMax, computed in 128
+// bits because the product overflows 64 once both sizes pass a few TB.
+func purgeShare(targetBytes uint64, maxSize int64, totalMax uint64) int64 {
+	hi, lo := bits.Mul64(targetBytes, uint64(maxSize))
+	if hi >= totalMax {
+		return maxSize // the share exceeds the directory itself
+	}
+	share, _ := bits.Div64(hi, lo, totalMax)
+	return min(utils.ClampToInt64(share), maxSize)
 }
 
 // forcePurgeToTargets is the shared implementation behind ForcePurge and

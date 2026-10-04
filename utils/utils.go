@@ -21,6 +21,7 @@ package utils
 import (
 	"encoding/json"
 	"fmt"
+	"math"
 	"net"
 	"os"
 	"slices"
@@ -274,6 +275,14 @@ func HumanBytes[T int64 | uint64](b T) string {
 		exp++
 	}
 	return fmt.Sprintf("%.1f %ciB", float64(b)/float64(div), "KMGTPE"[exp])
+}
+
+// ClampToInt64 converts v to an int64, saturating at math.MaxInt64.
+func ClampToInt64(v uint64) int64 {
+	if v > math.MaxInt64 {
+		return math.MaxInt64
+	}
+	return int64(v)
 }
 
 // ParseBytes parses a human-readable byte-size string (e.g. "10GB",

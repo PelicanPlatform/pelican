@@ -22,7 +22,6 @@ import (
 	"context"
 	"encoding/binary"
 	"io"
-	"math"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -560,14 +559,9 @@ func NewStorageManager(db *CacheDB, dirs []string, inlineMax int, egrp *errgroup
 		}
 	}
 	if ptCacheSize > 0 {
-		// Clamp to MaxInt64 before the int64 conversions below: ristretto's
-		// cost API is int64, and a configured size above MaxInt64 would wrap
-		// to a negative cost.  No real memory cache approaches this bound.
-		if ptCacheSize > uint64(math.MaxInt64) {
-			ptCacheSize = uint64(math.MaxInt64)
-		}
+		maxCost := utils.ClampToInt64(ptCacheSize) // ristretto's cost API is int64
 		// NumCounters should be ~10× the expected max number of entries.
-		numEntries := int64(ptCacheSize) / BlockDataSize
+		numEntries := maxCost / BlockDataSize
 		numCounters := numEntries * 10
 		if numCounters < 1000 {
 			numCounters = 1000
@@ -575,7 +569,7 @@ func NewStorageManager(db *CacheDB, dirs []string, inlineMax int, egrp *errgroup
 		var err error
 		ptCache, err = ristretto.NewCache(&ristretto.Config[uint64, []byte]{
 			NumCounters: numCounters,
-			MaxCost:     int64(ptCacheSize),
+			MaxCost:     maxCost,
 			BufferItems: 64,
 		})
 		if err != nil {
