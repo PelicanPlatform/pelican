@@ -1,0 +1,191 @@
+//go:build !windows
+
+/***************************************************************
+ *
+ * Copyright (C) 2026, Pelican Project, Morgridge Institute for Research
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License"); you
+ * may not use this file except in compliance with the License.  You may
+ * obtain a copy of the License at
+ *
+ *    http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ *
+ ***************************************************************/
+
+// End-to-end test for a shared-filesystem tiering target: a full federation
+// whose V2 cache tiers to a local directory standing in for a site-wide
+// mount.  Clients that share the mount are redirected to the object's path
+// and read it directly; anyone who can read the mount can browse the names
+// view.
+
+package fed_tests
+
+import (
+	"fmt"
+	"io"
+	"net/http"
+	"net/url"
+	"os"
+	"path/filepath"
+	"strings"
+	"testing"
+	"time"
+
+	"github.com/prometheus/client_golang/prometheus"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+
+	"github.com/pelicanplatform/pelican/client"
+	"github.com/pelicanplatform/pelican/fed_test_utils"
+	"github.com/pelicanplatform/pelican/param"
+	"github.com/pelicanplatform/pelican/server_structs"
+	"github.com/pelicanplatform/pelican/server_utils"
+	"github.com/pelicanplatform/pelican/test_utils"
+	"github.com/pelicanplatform/pelican/utils"
+)
+
+// tierRedirectCount reads how many reads of objects on tiering targets the
+// cache has answered with a redirect, across all targets.
+func tierRedirectCount(t *testing.T) float64 {
+	t.Helper()
+	families, err := prometheus.DefaultGatherer.Gather()
+	require.NoError(t, err)
+	total := 0.0
+	for _, family := range families {
+		if family.GetName() != "pelican_cache_tiering_requests_total" {
+			continue
+		}
+		for _, m := range family.GetMetric() {
+			for _, label := range m.GetLabel() {
+				if label.GetName() == "mode" && label.GetValue() == "redirect" {
+					total += m.GetCounter().GetValue()
+				}
+			}
+		}
+	}
+	return total
+}
+
+// TestCacheTierSharedFilesystemE2E fetches an object through the cache, waits
+// for it to be tiered to the shared directory, and then checks every way of
+// reading it: a file:// redirect to a client that asked for one, the bytes
+// themselves to a client that did not, the Pelican client following the
+// redirect under Client.FileRedirectRoots, and the names view.
+func TestCacheTierSharedFilesystemE2E(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
+	server_utils.ResetTestState()
+	t.Cleanup(server_utils.ResetTestState)
+
+	sharedDir := filepath.Join(t.TempDir(), "shared-tier")
+	require.NoError(t, param.Cache_EnableV2.Set(true))
+	require.NoError(t, param.Cache_TieringThreshold.Set("4KB"))
+	require.NoError(t, param.Cache_TieringTargets.Set([]interface{}{
+		map[string]interface{}{
+			"ProviderURL": utils.PathToFileURL(sharedDir).String(),
+			"MaxSize":     "1GB",
+		},
+	}))
+
+	ft := fed_test_utils.NewFedTest(t, persistentCacheConfig)
+	token := getTempTokenForTest(t)
+
+	const objectPath = "/test/shared_fs/dataset@v1/big.bin"
+	content := writeOriginFile(t, ft, "shared_fs/dataset@v1/big.bin", 64*1024)
+	cacheURL := waitForCacheRedirectURL(t, ft, objectPath, token)
+	httpClient := noRedirectHTTPClient()
+
+	// The first GET is a miss, served from local storage; the object is
+	// tiered once it completes.
+	resp := getWithToken(t, httpClient, cacheURL, token, "")
+	body, err := io.ReadAll(resp.Body)
+	resp.Body.Close()
+	require.NoError(t, err)
+	require.Equal(t, http.StatusOK, resp.StatusCode, "cache-miss GET failed: %s", string(body))
+	require.Equal(t, content, body)
+
+	// Once tiered, a client that advertises file:// support is redirected
+	// to the object's path on the shared filesystem.
+	getAdvertising := func() *http.Response {
+		req, err := http.NewRequest(http.MethodGet, cacheURL, nil)
+		require.NoError(t, err)
+		req.Header.Set("Authorization", "Bearer "+token)
+		req.Header.Set(server_structs.AcceptRedirectHeader, server_structs.RedirectSchemeFile)
+		resp, err := httpClient.Do(req)
+		require.NoError(t, err)
+		return resp
+	}
+	var location string
+	require.Eventually(t, func() bool {
+		resp := getAdvertising()
+		_, _ = io.Copy(io.Discard, resp.Body)
+		resp.Body.Close()
+		location = resp.Header.Get("Location")
+		return resp.StatusCode == http.StatusTemporaryRedirect
+	}, 30*time.Second, 250*time.Millisecond, "the cache never redirected to the shared filesystem")
+	locationURL, err := url.Parse(location)
+	require.NoError(t, err)
+	require.Equal(t, "file", locationURL.Scheme)
+	localPath := utils.FileURLToPath(locationURL)
+	assert.True(t, strings.HasPrefix(localPath, filepath.Join(sharedDir, "objects")+string(filepath.Separator)),
+		"the redirect must name the object in the shared directory: %s", localPath)
+	onDisk, err := os.ReadFile(localPath)
+	require.NoError(t, err)
+	assert.Equal(t, content, onDisk)
+	info, err := os.Stat(localPath)
+	require.NoError(t, err)
+	assert.Equal(t, os.FileMode(0o644), info.Mode().Perm())
+
+	// A client that did not advertise it is served the bytes by the cache.
+	resp = getWithToken(t, httpClient, cacheURL, token, "")
+	body, err = io.ReadAll(resp.Body)
+	resp.Body.Close()
+	require.NoError(t, err)
+	require.Equal(t, http.StatusOK, resp.StatusCode)
+	assert.Equal(t, content, body)
+
+	// The names view spells the object by its federation path; the '@'
+	// already in the path is escaped so it cannot be read as a version.
+	// The names are made just after the object becomes redirectable, so they
+	// may not be there quite yet.
+	namesDir := filepath.Join(sharedDir, "names", "test", "shared_fs", "dataset%40v1")
+	require.Eventually(t, func() bool {
+		byName, err := os.ReadFile(filepath.Join(namesDir, "big.bin"))
+		if err != nil || string(byName) != string(content) {
+			return false
+		}
+		versioned, err := filepath.Glob(filepath.Join(namesDir, "big.bin@*"))
+		return err == nil && len(versioned) > 0
+	}, 30*time.Second, 100*time.Millisecond, "the bare and versioned names never appeared")
+	entries, err := os.ReadDir(namesDir)
+	require.NoError(t, err)
+	var versions []string
+	for _, e := range entries {
+		if strings.HasPrefix(e.Name(), "big.bin@") {
+			versions = append(versions, e.Name())
+		}
+	}
+	require.Len(t, versions, 1, "one version link per cached version")
+	dest, err := os.Readlink(filepath.Join(namesDir, "big.bin"))
+	require.NoError(t, err)
+	assert.Equal(t, versions[0], dest)
+
+	// The Pelican client, allowed to follow file:// redirects under the
+	// shared directory, reads the object straight off it.
+	require.NoError(t, param.Client_FileRedirectRoots.Set([]string{sharedDir}))
+	redirectsBefore := tierRedirectCount(t)
+	downloadFile := filepath.Join(t.TempDir(), "via_client.bin")
+	fedURL := fmt.Sprintf("pelican://%s:%d%s", param.Server_Hostname.GetString(), param.Server_WebPort.GetInt(), objectPath)
+	_, err = client.DoGet(ft.Ctx, fedURL, downloadFile, false, client.WithToken(token))
+	require.NoError(t, err)
+	downloaded, err := os.ReadFile(downloadFile)
+	require.NoError(t, err)
+	assert.Equal(t, content, downloaded)
+	assert.Greater(t, tierRedirectCount(t), redirectsBefore,
+		"the client should have been redirected to the shared filesystem rather than served by the cache")
+}
