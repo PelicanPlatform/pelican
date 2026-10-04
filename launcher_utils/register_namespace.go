@@ -44,6 +44,7 @@ import (
 	"github.com/pelicanplatform/pelican/param"
 	"github.com/pelicanplatform/pelican/registry/registry_client"
 	"github.com/pelicanplatform/pelican/server_structs"
+	"github.com/pelicanplatform/pelican/utils"
 )
 
 type (
@@ -340,7 +341,9 @@ func updateRegCompletionLinkFile(prefix string, line string) (contents string, p
 		}
 		return
 	}
-	err = os.WriteFile(path, []byte(contents), 0600)
+	// Written atomically: the file is re-written on every poll cycle while
+	// users (and tests) may be reading it, and must never appear empty.
+	err = utils.WriteFileAtomic(path, []byte(contents), 0600)
 	return
 }
 

@@ -772,7 +772,11 @@ func TestWatchRegistrationCompletion(t *testing.T) {
 		defer wcancel()
 		watchRegistrationCompletion(wctx, wegrp, prefix)
 
-		require.Eventually(t, func() bool { return !fileAbsent() }, 5*time.Second, 10*time.Millisecond)
+		// The watcher writes the file first and logs about it afterwards; wait
+		// for its last log line of the cycle, not just the file.
+		require.Eventually(t, func() bool {
+			return !fileAbsent() && logged(logrus.ErrorLevel, "Server registration is incomplete")
+		}, 5*time.Second, 10*time.Millisecond)
 		contents, err := os.ReadFile(linkFile)
 		require.NoError(t, err)
 		line := strings.TrimSpace(string(contents))
