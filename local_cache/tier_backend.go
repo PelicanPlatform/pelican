@@ -109,6 +109,11 @@ type TierObjectInfo struct {
 // of an object the cache uploaded -- it was overwritten or replaced.
 var ErrTierObjectChanged = errors.New("the tiering target no longer holds the copy of this object that was uploaded")
 
+// ErrTierRedirectUnavailable reports that a backend that can issue redirect
+// URLs cannot issue one at the moment -- it is waiting for a credential to
+// mint them from, say.  The caller proxies instead.
+var ErrTierRedirectUnavailable = errors.New("the tiering target cannot issue a redirect URL right now")
+
 // TierRedirector is implemented by backends that can hand a client a URL it
 // can fetch directly, carrying its own authorization.  This is the capability
 // that lets the cache redirect instead of proxying; a backend that cannot do

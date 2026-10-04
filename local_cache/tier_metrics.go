@@ -112,8 +112,9 @@ var (
 	})
 	tierRedirectCapable = promauto.NewGaugeVec(prometheus.GaugeOpts{
 		Name: "pelican_cache_tiering_redirect_capable",
-		Help: "1 when a tiering target can issue redirect URLs (probed at startup), so its objects can be served " +
-			"by redirect; 0 when they are always proxied through the cache",
+		Help: "1 when a tiering target's objects are served by redirect: it can issue redirect URLs and the latest " +
+			"self-test (a minted URL fetched with no other credential, at startup and with each liveness probe) " +
+			"worked; 0 when they are proxied through the cache",
 	}, []string{"target"})
 
 	tierChangedObjectsTotal = promauto.NewCounterVec(prometheus.CounterOpts{

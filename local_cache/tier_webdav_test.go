@@ -332,8 +332,31 @@ func TestParseWebDAVTierTarget(t *testing.T) {
 func TestWebDAVTierTarget(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	InitIssuerKeyForTests(t)
 	f := newFakeDCache(t)
+	target := registerFakeDCacheTarget(t, ctx, f)
+	assert.True(t, target.canRedirect)
+	assert.Equal(t, "http", target.redirectScheme)
+	assert.Equal(t, f.srv.Listener.Addr().String(), target.redirectHost)
+
+	// The identity object landed under the prefix, through WebDAV.
+	rc, err := target.backend.OpenRange(ctx, tierIdentityKey, 0, nil)
+	require.NoError(t, err)
+	id := readAll(t, rc)
+	resp, err := doWithToken(http.MethodGet, f.url("/data/cache/"+tierIdentityKey))
+	require.NoError(t, err)
+	body, _ := io.ReadAll(resp.Body)
+	resp.Body.Close()
+	assert.Equal(t, id, string(body))
+
+	// The liveness probe round-trips through it too.
+	require.NoError(t, target.probe(ctx))
+}
+
+// registerFakeDCacheTarget registers a target on f, with the prefix "cache",
+// the way the cache registers its configured targets.
+func registerFakeDCacheTarget(t *testing.T, ctx context.Context, f *fakeDCache) *tierTarget {
+	t.Helper()
+	InitIssuerKeyForTests(t)
 	tokenFile := filepath.Join(t.TempDir(), "token")
 	require.NoError(t, os.WriteFile(tokenFile, []byte(fakeDCacheToken), 0600))
 
@@ -356,22 +379,7 @@ func TestWebDAVTierTarget(t *testing.T) {
 		target = storage.getTierTarget(id)
 	}
 	t.Cleanup(func() { _ = target.Close() })
-	assert.True(t, target.canRedirect)
-	assert.Equal(t, "http", target.redirectScheme)
-	assert.Equal(t, f.srv.Listener.Addr().String(), target.redirectHost)
-
-	// The identity object landed under the prefix, through WebDAV.
-	rc, err := target.backend.OpenRange(ctx, tierIdentityKey, 0, nil)
-	require.NoError(t, err)
-	id := readAll(t, rc)
-	resp, err := doWithToken(http.MethodGet, f.url("/data/cache/"+tierIdentityKey))
-	require.NoError(t, err)
-	body, _ := io.ReadAll(resp.Body)
-	resp.Body.Close()
-	assert.Equal(t, id, string(body))
-
-	// The liveness probe round-trips through it too.
-	require.NoError(t, target.probe(ctx))
+	return target
 }
 
 func doWithToken(method, target string) (*http.Response, error) {

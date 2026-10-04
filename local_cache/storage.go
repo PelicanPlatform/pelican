@@ -813,12 +813,12 @@ func (sm *StorageManager) RegisterTierTargets(ctx context.Context, configs []Tie
 		}
 		usedIDs[id] = true
 		target.id = id
+		target.identity = uid
 		sm.tierTargets[id] = target
-		capable := 0.0
-		if target.canRedirect {
-			capable = 1
-		}
-		tierRedirectCapable.WithLabelValues(target.metricLabel()).Set(capable)
+		// Verify that the URLs it mints work before any is handed out.  A
+		// failure is not fatal: the target serves by proxy until a later
+		// check, run with each liveness probe, succeeds.
+		_ = target.checkRedirect(ctx)
 		result[id] = cfg
 	}
 	return result, nil
