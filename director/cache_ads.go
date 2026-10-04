@@ -89,6 +89,20 @@ var (
 // cache lock across their work, so cache reads and writes can't be blocked by a slow
 // caller. Use Items directly only when you also need the keys or Item wrappers, and do
 // not use Range to iterate this cache.
+//
+// The *Advertisement pointers this hands back stay readable after the lock is
+// released because a published advertisement is never edited in place.  A
+// server's namespace list changes by recordAd building a whole new
+// Advertisement and replacing the cache entry (see the serverAds.Set below);
+// the ads that advertise.go appends to belong to its own local maps and have
+// not been published yet.  The one field written on a published ad is IOLoad,
+// through the mutex-guarded SetIOLoad.
+//
+// That is what lets a caller hold an index into ad.NamespaceAds across
+// statements instead of copying every candidate as it scans -- getAdsForPath
+// does exactly this. Anything that makes a published ad's namespaces mutable
+// has to revisit those callers first: today a stale index is merely stale,
+// but against a slice that can shrink it becomes an out-of-range panic.
 func getServerAdsSnapshot() []*server_structs.Advertisement {
 	items := serverAds.Items()
 	ads := make([]*server_structs.Advertisement, 0, len(items))
