@@ -1144,6 +1144,9 @@ type TierTargetConfig struct {
 	// WebDAV server.  It is re-read for every request, so a token rotated
 	// in place is picked up.
 	TokenFile string
+	// DisableMacaroons stops the cache from asking a WebDAV target (dCache)
+	// for macaroons, so its objects are always proxied.
+	DisableMacaroons bool
 	// MaxSize is the maximum bytes of cache data stored on the target.
 	// Required -- remote capacity cannot be auto-detected.
 	MaxSize uint64
@@ -1278,9 +1281,9 @@ func byteSizeHook(from, to reflect.Type, data any) (any, error) {
 // validate checks a decoded entry and fills in defaults.
 func (cfg *TierTargetConfig) validate() error {
 	cfg.Prefix = trimTierPrefix(cfg.Prefix)
-	if cfg.WebDavUrl == "" && cfg.TokenFile != "" {
-		// It would be silently ignored on an object-store target.
-		return errors.New("TokenFile applies only to a WebDavUrl target")
+	if cfg.WebDavUrl == "" && (cfg.TokenFile != "" || cfg.DisableMacaroons) {
+		// They would be silently ignored on an object-store target.
+		return errors.New("TokenFile and DisableMacaroons apply only to a WebDavUrl target")
 	}
 	if cfg.WebDavUrl != "" {
 		if err := cfg.validateWebDAV(); err != nil {

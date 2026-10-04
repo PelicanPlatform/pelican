@@ -48,11 +48,50 @@ import (
 
 const fakeDCacheToken = "fake-dcache-bearer-token"
 
-// fakeDCache is a WebDAV door that authorizes requests with a bearer token.
+// fakeDCache is a WebDAV door that issues macaroons the way dCache's
+// MacaroonRequestHandler does and authorizes requests with them the way
+// dCache's MacaroonProcessor and ContextExtractingCaveatVerifier do.
 type fakeDCache struct {
 	t   *testing.T
 	srv *httptest.Server
+	key []byte
 	dav http.Handler
+
+	mu sync.Mutex
+	// macaroonStatus, when non-zero, is how macaroon requests are answered
+	// instead of issuing one (405: not dCache; 503: an outage).
+	macaroonStatus int
+	// sessionLifetime, when non-zero, is how long the login session stays
+	// valid; dCache refuses a macaroon that would outlive a session with
+	// an expiry of its own -- a login made with a macaroon, the only kind
+	// that carries one in dCache 11.2.
+	sessionLifetime time.Duration
+	// prefixRestriction emulates a login restricted to a path prefix (by
+	// gPlazma's omnisession prefix:, say): dCache then puts the prefix in
+	// the path caveat rather than the request path.
+	prefixRestriction string
+	// refuseRestriction emulates a token with storage.* scopes, whose
+	// restriction dCache cannot serialise as caveats whatever paths the
+	// scopes name: every macaroon request is answered "400 Cannot
+	// serialise restriction MultiTargetedRestriction".  With
+	// refuseInPageOnly the reason is only in the error page, as over
+	// HTTP/2, which has no reason phrase.
+	refuseRestriction bool
+	refuseInPageOnly  bool
+	// xrootd makes the door issue and check macaroons the way XRootD's
+	// XrdMacaroons does: every path: caveat is an absolute prefix of the
+	// request path, rather than relative to the one before.  xrootdName
+	// adds the name: caveat XRootD writes into the macaroons it issues.
+	xrootd     bool
+	xrootdName bool
+	// macaroonRequests counts the macaroon requests the door received,
+	// and issued those it answered with a macaroon.
+	macaroonRequests int
+	issued           int
+	// macaroonReads counts data requests a macaroon authorized, and
+	// lastCaveats is the verified caveat list of the latest one.
+	macaroonReads int
+	lastCaveats   []string
 }
 
 func newFakeDCache(t *testing.T) *fakeDCache { return newFakeDCacheWrapping(t, nil) }
@@ -65,6 +104,7 @@ func newFakeDCacheWrapping(t *testing.T, wrap func(http.Handler) http.Handler) *
 	require.NoError(t, fs.Mkdir(context.Background(), "/data", 0755))
 	f := &fakeDCache{
 		t:   t,
+		key: []byte("fake dCache macaroon secret; only the door knows it"),
 		dav: &webdav.Handler{FileSystem: fs, LockSystem: webdav.NewMemLS()},
 	}
 	if wrap != nil {
@@ -78,8 +118,53 @@ func newFakeDCacheWrapping(t *testing.T, wrap func(http.Handler) http.Handler) *
 // url is the door URL of path.
 func (f *fakeDCache) url(path string) string { return f.srv.URL + path }
 
+func (f *fakeDCache) set(fn func(f *fakeDCache)) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	fn(f)
+}
+
+func (f *fakeDCache) stats() (issued, reads int, caveats []string) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.issued, f.macaroonReads, append([]string(nil), f.lastCaveats...)
+}
+
 func (f *fakeDCache) serve(w http.ResponseWriter, r *http.Request) {
-	if r.Header.Get("Authorization") != "Bearer "+fakeDCacheToken {
+	var macaroons []string
+	if q := r.URL.Query()["authz"]; len(q) > 0 {
+		macaroons = append(macaroons, q...)
+	}
+	bearer, hasBearer := strings.CutPrefix(r.Header.Get("Authorization"), "Bearer ")
+	if hasBearer && bearer != fakeDCacheToken {
+		macaroons = append(macaroons, bearer)
+	}
+
+	// Macaroon requests go to the handler only with exactly this type.
+	if r.Method == http.MethodPost && r.Header.Get("Content-Type") == macaroonRequestType {
+		if bearer != fakeDCacheToken {
+			http.Error(w, "Authentication required", http.StatusUnauthorized)
+			return
+		}
+		f.issueMacaroon(w, r)
+		return
+	}
+
+	switch {
+	case len(macaroons) > 1:
+		http.Error(w, "3rd party macaroons currently not supported", http.StatusBadRequest)
+		return
+	case len(macaroons) == 1:
+		caveats, err := f.authorize(r, macaroons[0])
+		if err != nil {
+			http.Error(w, "macaroon login denied: "+err.Error(), http.StatusForbidden)
+			return
+		}
+		f.mu.Lock()
+		f.macaroonReads++
+		f.lastCaveats = caveats
+		f.mu.Unlock()
+	case bearer != fakeDCacheToken:
 		http.Error(w, "Authentication required", http.StatusUnauthorized)
 		return
 	}
@@ -88,12 +173,13 @@ func (f *fakeDCache) serve(w http.ResponseWriter, r *http.Request) {
 
 // newFakeDCacheBackend builds a WebDAV backend against f with the given
 // prefix, closing it when the test ends.
-func newFakeDCacheBackend(t *testing.T, f *fakeDCache, prefix string) *webdavTierBackend {
+func newFakeDCacheBackend(t *testing.T, f *fakeDCache, prefix string, disableMacaroons bool) *webdavTierBackend {
 	t.Helper()
 	tokenFile := filepath.Join(t.TempDir(), "token")
 	require.NoError(t, os.WriteFile(tokenFile, []byte(fakeDCacheToken+"\n"), 0600))
 	cfg := TierTargetConfig{
-		WebDavUrl: f.url("/data/"), Prefix: prefix, TokenFile: tokenFile, MaxSize: 1 << 30,
+		WebDavUrl: f.url("/data/"), Prefix: prefix, TokenFile: tokenFile,
+		DisableMacaroons: disableMacaroons, MaxSize: 1 << 30,
 	}
 	require.NoError(t, cfg.validate())
 	b, err := newWebDAVTierBackend(cfg, fileTokenSource{path: cfg.TokenFile})
@@ -122,7 +208,7 @@ func readAll(t *testing.T, rc io.ReadCloser) string {
 func TestWebDAVTierBackendContract(t *testing.T) {
 	ctx := context.Background()
 	f := newFakeDCache(t)
-	b := newFakeDCacheBackend(t, f, "pelican/cache")
+	b := newFakeDCacheBackend(t, f, "pelican/cache", true)
 
 	// Listing a target nothing was written to is empty, not an error.
 	require.NoError(t, b.List(ctx, func(string, int64, time.Time) error {
@@ -193,9 +279,11 @@ func TestWebDAVTierBackendContract(t *testing.T) {
 	require.NoError(t, err)
 	assert.False(t, exists)
 
-	// It has no way to issue redirect URLs.
-	_, ok := probeTierRedirect(ctx, b)
+	// With macaroons disabled the target cannot redirect.
+	_, ok := b.probeRedirect(ctx)
 	assert.False(t, ok)
+	issued, _, _ := f.stats()
+	assert.Zero(t, issued, "a target with macaroons disabled must not ask for one")
 }
 
 func TestParseWebDAVTierTarget(t *testing.T) {
@@ -226,6 +314,7 @@ func TestParseWebDAVTierTarget(t *testing.T) {
 		"NotHTTP":          {map[string]any{"WebDavUrl": "davs://d.example.org/data", "MaxSize": "1GB"}, "http or https"},
 		"TokenInURL":       {map[string]any{"WebDavUrl": "https://d.example.org/data?authz=SECRET", "MaxSize": "1GB"}, "TokenFile"},
 		"TokenFileOnS3":    {map[string]any{"ProviderURL": "mem://", "TokenFile": "/t", "MaxSize": "1GB"}, "WebDavUrl"},
+		"MacaroonsOnS3":    {map[string]any{"ProviderURL": "mem://", "DisableMacaroons": true, "MaxSize": "1GB"}, "WebDavUrl"},
 		"MissingMaxSize":   {map[string]any{"WebDavUrl": "https://d.example.org/data"}, "MaxSize"},
 		"UserinfoInURL":    {map[string]any{"WebDavUrl": "https://u:SECRET@d.example.org/data", "MaxSize": "1GB"}, "TokenFile"},
 		"QueryInWebDavUrl": {map[string]any{"WebDavUrl": "https://d.example.org/data?x=1", "MaxSize": "1GB"}, "query"},
@@ -239,7 +328,7 @@ func TestParseWebDAVTierTarget(t *testing.T) {
 }
 
 // TestWebDAVTierTarget registers a WebDAV target through the same path the
-// cache uses, and checks the identity object and the liveness probe.
+// cache uses, and checks the identity object and the startup probe.
 func TestWebDAVTierTarget(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -267,7 +356,9 @@ func TestWebDAVTierTarget(t *testing.T) {
 		target = storage.getTierTarget(id)
 	}
 	t.Cleanup(func() { _ = target.Close() })
-	assert.False(t, target.canRedirect)
+	assert.True(t, target.canRedirect)
+	assert.Equal(t, "http", target.redirectScheme)
+	assert.Equal(t, f.srv.Listener.Addr().String(), target.redirectHost)
 
 	// The identity object landed under the prefix, through WebDAV.
 	rc, err := target.backend.OpenRange(ctx, tierIdentityKey, 0, nil)
@@ -356,7 +447,7 @@ func parsingFormBodies(next http.Handler) http.Handler {
 // never be tiered.
 func TestWebDAVUploadOfFormTypedObject(t *testing.T) {
 	f := newFakeDCacheWrapping(t, parsingFormBodies)
-	b := newFakeDCacheBackend(t, f, "cache")
+	b := newFakeDCacheBackend(t, f, "cache", true)
 	for _, contentType := range []string{
 		"application/x-www-form-urlencoded",
 		"Application/X-WWW-Form-Urlencoded; charset=utf-8",
@@ -380,7 +471,7 @@ func TestWebDAVUploadOfFormTypedObject(t *testing.T) {
 func TestWebDAVListToleratesSizelessMembers(t *testing.T) {
 	ctx := context.Background()
 	f := newFakeDCacheWrapping(t, withoutSizeFor("in-flight"))
-	b := newFakeDCacheBackend(t, f, "cache")
+	b := newFakeDCacheBackend(t, f, "cache", true)
 	putString(t, b, "aa/bb/done", "complete")
 	putString(t, b, "aa/bb/in-flight", "being written")
 
@@ -398,7 +489,7 @@ func TestWebDAVListToleratesSizelessMembers(t *testing.T) {
 func TestWebDAVSpuriousPreconditionFailure(t *testing.T) {
 	ctx := context.Background()
 	f := newFakeDCacheWrapping(t, refusingIfMatch)
-	b := newFakeDCacheBackend(t, f, "cache")
+	b := newFakeDCacheBackend(t, f, "cache", true)
 	info := putString(t, b, "aa/bb/object", "still the same")
 
 	_, err := b.OpenRange(ctx, "aa/bb/object", 0, &info)
@@ -463,7 +554,7 @@ func TestWebDAVProxiedReadEndsWithItsReader(t *testing.T) {
 	// Registered after the server's own cleanup, so it runs first: a
 	// handler the test left stalled must not hold up the server's close.
 	t.Cleanup(release)
-	b := newFakeDCacheBackend(t, f, "pelican")
+	b := newFakeDCacheBackend(t, f, "pelican", true)
 	target := &tierTarget{backend: b}
 	hash := InstanceHash("abcd000000000000000000000000000000000000000000000000000000000001")
 	data := bytes.Repeat([]byte("0123456789abcdef"), size/16)

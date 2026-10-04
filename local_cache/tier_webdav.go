@@ -37,6 +37,7 @@ import (
 	log "github.com/sirupsen/logrus"
 
 	"github.com/pelicanplatform/pelican/config"
+	"github.com/pelicanplatform/pelican/param"
 )
 
 // TierTokenSource supplies the bearer token a tiering backend presents to its
@@ -79,9 +80,9 @@ func (f fileTokenSource) Token(_ context.Context) (string, error) {
 }
 
 // webdavTierBackend implements TierBackend over plain WebDAV: PUT, ranged GET,
-// HEAD, DELETE, MKCOL and PROPFIND.  It is written with dCache in mind, the
-// WebDAV service a cache is most likely to tier to, but uses nothing
-// dCache-specific.  It cannot issue redirect URLs, so its objects are proxied.
+// HEAD, DELETE, MKCOL and PROPFIND.  It is written for dCache, the WebDAV
+// service a cache is most likely to tier to, but uses nothing dCache-specific
+// except for the optional macaroon redirects (see dcacheMacaroons).
 //
 // It does not use gowebdav, which the origin's HTTPS backend and the client
 // do: gowebdav takes no context, so a slow server could not be abandoned when
@@ -113,16 +114,24 @@ type webdavTierBackend struct {
 	// a key whose PUT reports a missing parent.
 	dirsMu    sync.Mutex
 	knownDirs map[string]struct{}
+
+	// macaroons mints redirect URLs; nil when macaroon redirects are
+	// disabled or the door refused them at startup.
+	macaroons *dcacheMacaroons
 }
 
-var _ TierBackend = (*webdavTierBackend)(nil)
+var (
+	_ TierBackend    = (*webdavTierBackend)(nil)
+	_ TierRedirector = (*webdavTierBackend)(nil)
+)
 
 // webdavMaxListingBytes bounds a single PROPFIND response.  One collection in
 // the cache's layout holds at most a few thousand entries; anything near this
 // size is not a listing the cache produced.
 const webdavMaxListingBytes = 64 << 20
 
-// newWebDAVTierBackend builds the backend for cfg.  No I/O happens here.
+// newWebDAVTierBackend builds the backend for cfg.  No I/O happens here; the
+// macaroon issuer, when enabled, makes its first request from probeRedirect.
 func newWebDAVTierBackend(cfg TierTargetConfig, tokens TierTokenSource) (*webdavTierBackend, error) {
 	parsed, err := url.Parse(cfg.WebDavUrl)
 	if err != nil {
@@ -140,13 +149,22 @@ func newWebDAVTierBackend(cfg TierTargetConfig, tokens TierTokenSource) (*webdav
 		display:   cfg.DisplayURL(),
 		knownDirs: make(map[string]struct{}),
 	}
+	if !cfg.DisableMacaroons && !param.Cache_TieringDisableRedirect.GetBool() {
+		b.macaroons = newDCacheMacaroons(b.urlFor(b.prefix, true), b.client, tokens, b.display)
+	}
 	return b, nil
 }
 
 func (b *webdavTierBackend) DisplayURL() string { return b.display }
 
-// Close releases nothing: the HTTP transport is the process's shared one.
-func (b *webdavTierBackend) Close() error { return nil }
+// Close stops the macaroon refresher, if one is running, and returns once it
+// has exited.
+func (b *webdavTierBackend) Close() error {
+	if b.macaroons != nil {
+		b.macaroons.stop()
+	}
+	return nil
+}
 
 // followReadRedirects follows redirects for reads only.  A dCache door sends
 // GETs to a pool this way, with a URL that needs no credential -- and net/http
@@ -681,4 +699,56 @@ func (e davEntry) sortKey() string {
 func propstatOK(status string) bool {
 	fields := strings.Fields(status)
 	return len(fields) >= 2 && fields[1] == "200"
+}
+
+// probeRedirect reports whether this target can hand out redirect URLs, and
+// where they point.  For a WebDAV target that means a dCache door that will
+// issue macaroons: the first one is requested here, and a door that refuses
+// the request outright -- macaroons disabled, or not dCache at all -- leaves
+// the target proxy-only for the life of the process.  A failure that might be
+// transient (an outage, an expired token) does not: the refresher keeps
+// trying, and until it succeeds each redirect fails over to proxying.
+//
+// Probing is also what starts the refresher, so a target that never redirects
+// never runs one.
+func (b *webdavTierBackend) probeRedirect(ctx context.Context) (string, bool) {
+	if b.macaroons == nil {
+		return "", false
+	}
+	if err := b.macaroons.start(ctx); err != nil {
+		if errors.Is(err, errScopedTokenRefused) {
+			log.Warnf("Cache tier target %s did not issue a macaroon because the cache's token carries storage.* "+
+				"scopes, for which dCache issues none (%v); its objects will be proxied through the cache.  To have "+
+				"clients redirected to it, %s", b.display, err, scopedTokenRemedy)
+		} else {
+			log.Warnf("Cache tier target %s did not issue a macaroon (%v); its objects will be proxied through the cache",
+				b.display, err)
+		}
+		b.macaroons = nil
+		return "", false
+	}
+	// The probe URL only tells the caller the scheme and host redirects go
+	// to; it carries no credential.
+	return b.urlFor(b.rootRel(tierRedirectProbeKey), false), true
+}
+
+// RedirectURL returns the object's URL with a macaroon, minted from the root
+// one and restricted to downloading this object until expiry, as ?authz=.
+//
+// A WebDAV server keeps no versions, so expect cannot be honoured: a client
+// sent here reads whatever the server holds.  Proxied reads are still pinned
+// by entity tag, and the integrity scan catches a replacement.
+func (b *webdavTierBackend) RedirectURL(_ context.Context, key string, expiry time.Duration, _ *TierObjectInfo) (string, error) {
+	if b.macaroons == nil {
+		return "", errors.Errorf("cache tier target %s does not issue macaroons", b.display)
+	}
+	objPath := b.objectPath(key)
+	mac, err := b.macaroons.mint(objPath, expiry)
+	if err != nil {
+		return "", errors.Wrapf(err, "cannot redirect to %s on cache tier target %s", key, b.display)
+	}
+	u := *b.root
+	u.Path = objPath
+	u.RawQuery = "authz=" + url.QueryEscape(mac)
+	return u.String(), nil
 }
