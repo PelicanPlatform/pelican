@@ -2051,17 +2051,13 @@ func (sm *StorageManager) Delete(instanceHash InstanceHash) error {
 		return errors.Wrap(err, "failed to get metadata")
 	}
 
-	// Delete from database (handles inline data, block state, LRU)
-	if err := sm.db.DeleteObject(instanceHash); err != nil {
-		return errors.Wrap(err, "failed to delete database entries")
-	}
-
-	// Remove all in-memory cached state for this object.
 	chunkCount := 1
 	if meta != nil {
 		chunkCount = meta.ChunkCount()
 	}
-	sm.invalidateObjectCaches(instanceHash, chunkCount)
+	if err := sm.deleteRecord(instanceHash, chunkCount); err != nil {
+		return err
+	}
 
 	// If stored on a tiering target, delete the remote object; otherwise
 	// delete all chunk files on disk.
@@ -2078,6 +2074,21 @@ func (sm *StorageManager) Delete(instanceHash InstanceHash) error {
 		}
 	}
 
+	return nil
+}
+
+// deleteRecord removes an object's database entries (metadata, inline data,
+// block state, LRU) together with every in-memory cache of it -- block state,
+// disk crypto, file descriptors -- but not its files.  The two go together:
+// a cache entry outliving its record would be handed to the object when it
+// is next created under the same hash, with a fresh data key and an empty
+// bitmap, claiming blocks it does not have.  chunkCount is the number of
+// chunk files (1 for a non-chunked object).
+func (sm *StorageManager) deleteRecord(instanceHash InstanceHash, chunkCount int) error {
+	if err := sm.db.DeleteObject(instanceHash); err != nil {
+		return errors.Wrap(err, "failed to delete database entries")
+	}
+	sm.invalidateObjectCaches(instanceHash, chunkCount)
 	return nil
 }
 
