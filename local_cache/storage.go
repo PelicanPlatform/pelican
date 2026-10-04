@@ -326,7 +326,7 @@ type StorageManager struct {
 	// removals are immediately visible across goroutines.  Idle entries are
 	// evicted after blockStateTTL and reloaded from the database on next
 	// access.
-	blockStates *ttlcache.Cache[InstanceHash, *ObjectBlockState]
+	blockStates *blockStateCache
 
 	// diskCrypto caches metadata + BlockEncryptor for disk-backed objects
 	// so that ReadBlocks / WriteBlocks / NewBlockWriter skip the DB

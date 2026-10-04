@@ -20,8 +20,10 @@ package local_cache
 
 import (
 	"context"
+	"runtime"
 	"sync"
 	"time"
+	"weak"
 
 	"github.com/RoaringBitmap/roaring"
 	"github.com/jellydator/ttlcache/v3"
@@ -263,31 +265,161 @@ func (obs *ObjectBlockState) WaitForBlock(ctx context.Context, block uint32) boo
 // blockStateTTL is how long an idle ObjectBlockState lives in the
 // in-memory cache before being evicted.  Every GetSharedBlockState call
 // touches the entry, so actively-used states stay resident.  Evicted
-// states are simply reloaded from the database on next access.
+// states are simply reloaded from the database on next access -- unless
+// something still holds the evicted one; see blockStateCache.
 const blockStateTTL = 5 * time.Minute
+
+// blockStateCache is the TTL cache of shared ObjectBlockStates, plus a
+// record of every state still in use.
+//
+// Holders keep their *ObjectBlockState for as long as they work on the
+// object: a RangeReader for its life, a promotion while it fills.  Writers
+// update whichever state GetSharedBlockState returns at the time.  If the
+// TTL dropped an idle entry while a holder still had it and a later load
+// built a fresh one, the two would diverge for good: blocks written through
+// the new state would never appear in the held one, and a holder waiting
+// for them would wait forever.  So a load first looks for a state that is
+// still referenced anywhere and hands that back; only a state nobody holds
+// is rebuilt from the database.  Expiry thereby only ever frees memory.
+//
+// Explicit invalidation (InvalidateSharedBlockState) is different: it is
+// called when the object's local data is going away, and deliberately
+// starts a new state that does not share the old one's history.
+//
+// A load runs outside the cache's own lock (ttlcache calls the loader after
+// a miss), so an invalidation can land while it is reading the database or
+// has just found a held state.  Inserting its result then would bring back
+// the state of the data that was just deleted -- blocks the next instance
+// under the same hash does not have.  So every load takes a ticket for its
+// hash before it starts, invalidation marks the tickets of loads in flight,
+// and a load inserts its result only if its ticket is unmarked, checking and
+// inserting under mu, which invalidation also holds; a marked load starts
+// over.  Tickets exist only while a load is in flight, so the registry holds
+// no entry for an object nobody is loading.
+type blockStateCache struct {
+	*ttlcache.Cache[InstanceHash, *ObjectBlockState]
+	// live maps a hash to a weak pointer to the state last issued for it.
+	// An entry is removed when that state is collected or invalidated.
+	live sync.Map
+
+	// mu orders invalidations against the insertion of a load's result.
+	mu sync.Mutex
+	// loading holds the tickets of the loads in flight, by hash.
+	loading map[InstanceHash][]*blockStateLoad
+
+	// beforeInsert, set only by tests, runs after a load has built or
+	// found its state and before it checks its ticket.
+	beforeInsert func(InstanceHash)
+}
+
+// blockStateLoad is one in-flight load's ticket; invalidated is set, under
+// blockStateCache.mu, by an invalidation of its hash.
+type blockStateLoad struct {
+	invalidated bool
+}
 
 // newBlockStateCache creates the TTL cache for shared ObjectBlockState entries.
 // The StorageManager calls this once during construction.
-func newBlockStateCache(db *CacheDB) *ttlcache.Cache[InstanceHash, *ObjectBlockState] {
+func newBlockStateCache(db *CacheDB) *blockStateCache {
+	bc := &blockStateCache{loading: make(map[InstanceHash][]*blockStateLoad)}
 	loader := ttlcache.LoaderFunc[InstanceHash, *ObjectBlockState](
-		func(cache *ttlcache.Cache[InstanceHash, *ObjectBlockState], instanceHash InstanceHash) *ttlcache.Item[InstanceHash, *ObjectBlockState] {
-			bitmap, err := db.GetBlockState(instanceHash)
-			if err != nil {
-				// Return nil — the caller's Get will return nil and
-				// GetSharedBlockState will propagate the error.
-				return nil
+		func(_ *ttlcache.Cache[InstanceHash, *ObjectBlockState], instanceHash InstanceHash) *ttlcache.Item[InstanceHash, *ObjectBlockState] {
+			for {
+				item, ok := bc.load(db, instanceHash)
+				if ok {
+					return item
+				}
 			}
-			obs := NewObjectBlockState(bitmap)
-			return cache.Set(instanceHash, obs, ttlcache.DefaultTTL)
 		},
 	)
 
-	return ttlcache.New[InstanceHash, *ObjectBlockState](
+	bc.Cache = ttlcache.New[InstanceHash, *ObjectBlockState](
 		ttlcache.WithTTL[InstanceHash, *ObjectBlockState](blockStateTTL),
 		ttlcache.WithLoader[InstanceHash, *ObjectBlockState](
 			ttlcache.NewSuppressedLoader[InstanceHash, *ObjectBlockState](loader, nil),
 		),
 	)
+	return bc
+}
+
+// load makes one attempt to load a hash's state: the state still held
+// anywhere, or else one built from the database.  It reports false, having
+// inserted nothing, if the hash was invalidated while it ran; the caller
+// then tries again.  A failed database read returns a nil item, which
+// GetSharedBlockState reports as an error.
+func (bc *blockStateCache) load(db *CacheDB, instanceHash InstanceHash) (*ttlcache.Item[InstanceHash, *ObjectBlockState], bool) {
+	ticket := &blockStateLoad{}
+	bc.mu.Lock()
+	bc.loading[instanceHash] = append(bc.loading[instanceHash], ticket)
+	bc.mu.Unlock()
+
+	held := bc.liveState(instanceHash)
+	obs := held
+	if obs == nil {
+		bitmap, err := db.GetBlockState(instanceHash)
+		if err == nil {
+			obs = NewObjectBlockState(bitmap)
+		}
+	}
+	if bc.beforeInsert != nil {
+		bc.beforeInsert(instanceHash)
+	}
+
+	bc.mu.Lock()
+	defer bc.mu.Unlock()
+	bc.dropTicket(instanceHash, ticket)
+	if ticket.invalidated {
+		return nil, false
+	}
+	if obs == nil {
+		return nil, true
+	}
+	if held == nil {
+		wp := weak.Make(obs)
+		bc.live.Store(instanceHash, wp)
+		runtime.AddCleanup(obs, func(h InstanceHash) { bc.live.CompareAndDelete(h, wp) }, instanceHash)
+	}
+	return bc.Set(instanceHash, obs, ttlcache.DefaultTTL), true
+}
+
+// dropTicket removes a load's ticket, and the hash's entry with its last
+// one.  Called with mu held.
+func (bc *blockStateCache) dropTicket(instanceHash InstanceHash, ticket *blockStateLoad) {
+	tickets := bc.loading[instanceHash]
+	for i, t := range tickets {
+		if t == ticket {
+			tickets = append(tickets[:i], tickets[i+1:]...)
+			break
+		}
+	}
+	if len(tickets) == 0 {
+		delete(bc.loading, instanceHash)
+	} else {
+		bc.loading[instanceHash] = tickets
+	}
+}
+
+// liveState returns the state last issued for a hash if anything still
+// holds it, or nil.
+func (bc *blockStateCache) liveState(instanceHash InstanceHash) *ObjectBlockState {
+	v, ok := bc.live.Load(instanceHash)
+	if !ok {
+		return nil
+	}
+	return v.(weak.Pointer[ObjectBlockState]).Value()
+}
+
+// invalidate drops a hash's state from the cache and forgets any holder's
+// copy, so the next load starts afresh from the database; a load already
+// in flight starts over rather than insert what it found.
+func (bc *blockStateCache) invalidate(instanceHash InstanceHash) {
+	bc.mu.Lock()
+	defer bc.mu.Unlock()
+	for _, t := range bc.loading[instanceHash] {
+		t.invalidated = true
+	}
+	bc.live.Delete(instanceHash)
+	bc.Delete(instanceHash)
 }
 
 // GetSharedBlockState returns the shared, thread-safe block state for the
@@ -308,5 +440,5 @@ func (sm *StorageManager) GetSharedBlockState(instanceHash InstanceHash) (*Objec
 // forcing the next GetSharedBlockState call to reload from the database.
 // This should be called when an object is deleted or evicted.
 func (sm *StorageManager) InvalidateSharedBlockState(instanceHash InstanceHash) {
-	sm.blockStates.Delete(instanceHash)
+	sm.blockStates.invalidate(instanceHash)
 }
