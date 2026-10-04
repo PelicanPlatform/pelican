@@ -820,6 +820,11 @@ func (sm *StorageManager) RegisterTierTargets(ctx context.Context, configs []Tie
 		// check, run with each liveness probe, succeeds.
 		_ = target.checkRedirect(ctx)
 		result[id] = cfg
+		if target.names != nil {
+			// A names view's bare names must follow the latest version
+			// as soon as the cache learns of one.
+			sm.db.ObserveLatestETag(sm.onLatestETagChanged)
+		}
 	}
 	return result, nil
 }
@@ -2344,6 +2349,9 @@ func (sm *StorageManager) deleteExcludedIf(instanceHash InstanceHash, release fu
 	release(true)
 
 	if target != nil {
+		// Withdraw the object's names before the object, so that no link is
+		// left leading to a file that is gone.
+		sm.unpublishTierName(target, instanceHash, meta.SourceURL, meta.ETag)
 		delCtx, delCancel := context.WithTimeout(context.Background(), tierSweepOpTimeout)
 		err := target.deleteObject(delCtx, instanceHash)
 		delCancel()
@@ -2494,6 +2502,7 @@ func (sm *StorageManager) EvictByLRU(storageID StorageID, namespaceID NamespaceI
 		// Delete a tiered object's remote copy; its local files, if any,
 		// went above.
 		if target := sm.getTierTarget(obj.storageID); target != nil {
+			sm.unpublishTierName(target, obj.instanceHash, obj.sourceURL, obj.etag)
 			delCtx, delCancel := context.WithTimeout(context.Background(), tierSweepOpTimeout)
 			err := target.deleteObject(delCtx, obj.instanceHash)
 			delCancel()

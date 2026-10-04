@@ -296,6 +296,23 @@ func (cc *ConsistencyChecker) scanTierTarget(ctx context.Context, sid StorageID,
 	}
 
 	label := target.metricLabel()
+	// The names view is derived from the metadata just reconciled, so it is
+	// rebuilt last.  A failure here costs only the view, not the sweep.
+	if target.names != nil {
+		added, removed, err := cc.reconcileTierNames(ctx, target)
+		if err != nil {
+			if ctx.Err() != nil {
+				return ctx.Err()
+			}
+			log.Warnf("Failed to reconcile the names view of %s: %v", target.DisplayURL(), err)
+		}
+		if added > 0 || removed > 0 {
+			log.Infof("tiering consistency sweep of %s: restored %d and removed %d names-view link(s)",
+				target.DisplayURL(), added, removed)
+		}
+		tierNameLinksRestoredTotal.WithLabelValues(label).Add(float64(added))
+		tierSweepRemovedTotal.WithLabelValues(label, tierSweepRemovedNameLink).Add(float64(removed))
+	}
 	tierSweepRemovedTotal.WithLabelValues(label, tierSweepRemovedRemoteObject).Add(float64(deletedBucket))
 	tierSweepRemovedTotal.WithLabelValues(label, tierSweepRemovedEntry).Add(float64(deletedDB))
 	tierSweepLastSuccess.WithLabelValues(label).SetToCurrentTime()

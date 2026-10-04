@@ -556,6 +556,7 @@ func (u *tierUploader) processObject(ctx context.Context, instanceHash InstanceH
 	u.inflightMu.Lock()
 	delete(u.failures, instanceHash)
 	u.inflightMu.Unlock()
+	u.storage.publishTierName(target, instanceHash)
 
 	// Record that the remote copy is now authoritative before touching the
 	// local one.  If the process dies anywhere below, recovery needs to know
@@ -841,6 +842,7 @@ func (u *tierUploader) recoverIntent(ctx context.Context, hash InstanceHash, int
 		// The metadata already names the target but the intent was never
 		// marked relocated (that write is best-effort), so this is the
 		// same leftover-local-copy case as above.
+		u.storage.publishTierName(target, hash)
 		if !u.releaseLocalCopy(hash, localCopyFromIntent(intent)) {
 			u.markPendingRelease(hash)
 			return // pinned; the reader's release will wake the loop

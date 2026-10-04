@@ -68,7 +68,7 @@ const (
 // files, has no way to pin a read to the copy that was written, and hands out
 // http URLs through a signer; this target exists precisely so that other
 // users can open the files directly, under predictable names, through
-// file:// redirects and the names view.  Matching all of that
+// file:// redirects and the names view (tierNameView).  Matching all of that
 // is less code than adapting fileblob to it.
 //
 // Every operation goes through an os.Root opened on the directory, so even a
