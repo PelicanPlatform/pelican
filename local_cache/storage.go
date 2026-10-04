@@ -738,7 +738,7 @@ func (sm *StorageManager) RegisterTierTargets(ctx context.Context, configs []Tie
 	claimedUUIDs := make(map[string]string, len(configs))
 	for i := range configs {
 		cfg := configs[i]
-		if !strings.EqualFold(cfg.TransportScheme(), "https") {
+		if scheme := strings.ToLower(cfg.TransportScheme()); scheme != "https" && scheme != tierFileScheme {
 			log.Warnf("Cache tiering target %s is configured over %s: object data and pre-signed URLs "+
 				"will cross the network in cleartext", cfg.DisplayURL(), cfg.TransportScheme())
 		}

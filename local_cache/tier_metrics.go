@@ -68,6 +68,9 @@ const (
 	tierSkipCannotRedirect = "cannot_redirect"
 	// It can, but its latest redirect self-test failed.
 	tierSkipSelfTestFailing = "self_test_failing"
+	// A shared-filesystem target is failing its liveness probe, which may
+	// mean its path no longer leads to the cache's files.
+	tierSkipTargetDown = "target_down"
 	// The target's URLs use a scheme the client did not say it accepts.
 	tierSkipSchemeNotAccepted = "scheme_not_accepted"
 	// Redirecting would hand the client's Authorization header to the target.
@@ -175,7 +178,7 @@ var (
 	tierRedirectSkippedTotal = promauto.NewCounterVec(prometheus.CounterOpts{
 		Name: "pelican_cache_tiering_redirect_skipped_total",
 		Help: "Reads of objects resident on a tiering target that were not redirected, by target and reason: " +
-			"cannot_redirect, self_test_failing, scheme_not_accepted, credential_forwarding, needs_revalidation, " +
+			"cannot_redirect, self_test_failing, target_down, scheme_not_accepted, credential_forwarding, needs_revalidation, " +
 			"no_credential, mint_failed, destination_mismatch or hold_failed",
 	}, []string{"target", "reason"})
 	tierProxiedBytesTotal = promauto.NewCounterVec(prometheus.CounterOpts{
