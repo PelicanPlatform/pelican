@@ -22,6 +22,7 @@ import (
 	"context"
 	"io"
 	"net/url"
+	"path"
 	"strings"
 	"sync/atomic"
 	"time"
@@ -87,6 +88,14 @@ type tierTarget struct {
 	healthy        atomic.Bool
 	probeFailures  atomic.Int32
 	lastProbeError atomic.Value
+	// probeRunning is set while a liveness probe is outstanding, including
+	// one abandoned at its deadline that has not yet returned.
+	probeRunning atomic.Bool
+	// probeTimeout overrides tierProbeTimeout (tests).
+	probeTimeout time.Duration
+	// publicReadable answers whether an object path is readable without a
+	// token, and whether that is known yet; see SetTierExposurePolicy.
+	publicReadable func(objectPath string) (allowed, known bool)
 }
 
 // wrapTierBackendForTest, when set, wraps every tier backend as it is opened.
@@ -130,10 +139,73 @@ func newTierTarget(ctx context.Context, cfg TierTargetConfig) (*tierTarget, erro
 
 // newTierBackend opens the kind of backend cfg names.
 func newTierBackend(ctx context.Context, cfg TierTargetConfig) (TierBackend, error) {
+	if cfg.IsSharedFilesystem() {
+		posix, err := newPosixTierBackend(cfg)
+		if err != nil {
+			return nil, err
+		}
+		return posix, nil
+	}
 	if cfg.WebDavUrl != "" {
 		return newWebDAVTierBackend(cfg, fileTokenSource{path: cfg.TokenFile})
 	}
 	return newBlobTierBackend(ctx, cfg)
+}
+
+// servesByPath reports whether readers other than the cache reach this
+// target's objects by path -- a shared filesystem -- rather than through a
+// URL the backend vouches for.  Such a target must not be handed to them
+// while it is failing its liveness probe: the probe is what notices that
+// the path no longer leads to the cache's files.
+func (t *tierTarget) servesByPath() bool { return t.cfg.IsSharedFilesystem() }
+
+// mayHold reports whether an object may be placed on this target, and
+// whether the answer is known yet.
+//
+// Anything goes on an object store, which only the cache can read.  A
+// shared-filesystem target is different: every object on it is readable by
+// every user of that filesystem, so by default it takes only objects anyone
+// could read through Pelican anyway, plus those under the operator's
+// ExposedNamespaces.  Until the federation's namespace list has loaded the
+// answer is unknown, and callers must neither place an object nor withdraw
+// one on its strength.
+func (t *tierTarget) mayHold(sourceURL string) (allowed, known bool) {
+	if !t.cfg.IsSharedFilesystem() {
+		return true, true
+	}
+	objectPath := tierObjectPath(sourceURL)
+	if objectPath == "" {
+		return false, true
+	}
+	if t.cfg.exposesNamespace(objectPath) {
+		return true, true
+	}
+	if t.publicReadable == nil {
+		return false, false
+	}
+	return t.publicReadable(objectPath)
+}
+
+// tierObjectPath extracts the federation path from an object's source URL
+// (pelican://federation/ns/path -> /ns/path).
+func tierObjectPath(sourceURL string) string {
+	if sourceURL == "" {
+		return ""
+	}
+	u, err := url.Parse(sourceURL)
+	if err != nil || u.Path == "" {
+		return ""
+	}
+	return path.Clean("/" + u.Path)
+}
+
+// SetTierExposurePolicy tells the shared-filesystem targets how to decide
+// whether an object is publicly readable (see tierTarget.mayHold).  It must
+// be called during initialization, before the uploader starts.
+func (sm *StorageManager) SetTierExposurePolicy(publicReadable func(objectPath string) (allowed, known bool)) {
+	for _, target := range sm.tierTargets {
+		target.publicReadable = publicReadable
+	}
 }
 
 // probeTierRedirect asks a backend for a sample redirect URL, reporting

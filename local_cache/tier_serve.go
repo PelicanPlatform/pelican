@@ -251,6 +251,14 @@ func (pc *PersistentCache) tryTierRedirect(w http.ResponseWriter, r *http.Reques
 		tierRedirectSkippedTotal.WithLabelValues(target.metricLabel(), reason).Inc()
 		return false
 	}
+	if target.servesByPath() && !target.healthy.Load() {
+		// The client would read by path, and the failing probe may be
+		// saying that the path no longer leads to the cache's files (or
+		// that the filesystem is hung).  The cache's own handle still
+		// does, so serve through it.
+		reqLog.Debug("Shared-filesystem tier target is failing its liveness probe; not redirecting to it")
+		return skip(tierSkipTargetDown)
+	}
 	if !target.redirectUsable() {
 		// The target cannot hand out a URL the client could fetch on its
 		// own -- not at all, or not as of its latest self-test.

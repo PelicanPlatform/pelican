@@ -333,10 +333,26 @@ func (u *tierUploader) anyTargetHealthy() bool {
 	return false
 }
 
-// chooseTarget randomly selects a tiering target that can currently hold the
-// object, weighted by each target's estimated free space, so concurrent
-// uploads spread across targets instead of all piling onto the single
-// emptiest one.  Returns nil when no target fits.
+// anyTargetMayHold reports whether some healthy target may hold an object at
+// all (see tierTarget.mayHold), as opposed to merely lacking room for it.
+// An object no target may take stays on local storage; waiting for eviction
+// to make room would not change that.
+func (u *tierUploader) anyTargetMayHold(sourceURL string) bool {
+	for _, target := range u.storage.tierTargets {
+		if !target.healthy.Load() {
+			continue
+		}
+		if allowed, _ := target.mayHold(sourceURL); allowed {
+			return true
+		}
+	}
+	return false
+}
+
+// chooseTarget randomly selects a tiering target that may, and currently
+// can, hold the object, weighted by each target's estimated free space, so
+// concurrent uploads spread across targets instead of all piling onto the
+// single emptiest one.  Returns nil when no target fits.
 //
 // Concurrency: tierTargets is read-only after initialization and DirFree reads
 // lock-free atomic counters, so this is safe to call from every worker
@@ -345,7 +361,7 @@ func (u *tierUploader) anyTargetHealthy() bool {
 // is the up-front usage charge in processObject (plus watermark eviction), so
 // a stale estimate can at worst cause a transient overshoot that eviction
 // corrects — never a lost or corrupted object.
-func (u *tierUploader) chooseTarget(size int64) *tierTarget {
+func (u *tierUploader) chooseTarget(size int64, sourceURL string) *tierTarget {
 	type candidate struct {
 		target *tierTarget
 		free   int64
@@ -355,6 +371,9 @@ func (u *tierUploader) chooseTarget(size int64) *tierTarget {
 	for id, target := range u.storage.tierTargets {
 		if !target.healthy.Load() {
 			continue // failing its liveness probe; see tierTarget.probe
+		}
+		if allowed, _ := target.mayHold(sourceURL); !allowed {
+			continue // e.g. a private object and a shared filesystem
 		}
 		if free := u.eviction.DirFree(id); free >= size {
 			candidates = append(candidates, candidate{target: target, free: free})
@@ -421,7 +440,11 @@ func (u *tierUploader) processObject(ctx context.Context, instanceHash InstanceH
 	if !u.anyTargetHealthy() {
 		return nil // nothing to upload to; the rescan retries once a probe passes
 	}
-	target := u.chooseTarget(fileSize)
+	if !u.anyTargetMayHold(meta.SourceURL) {
+		log.Debugf("No tiering target may hold %s; it stays on local storage", instanceHash)
+		return nil
+	}
+	target := u.chooseTarget(fileSize, meta.SourceURL)
 	if target == nil {
 		// No target currently fits; nudge eviction so space opens up and
 		// let the periodic sweep retry.
