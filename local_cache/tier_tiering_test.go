@@ -122,6 +122,59 @@ func TestParseTierTargetsConfig(t *testing.T) {
 		_, err := ParseTierTargetsConfig()
 		require.ErrorContains(t, err, "must be set together")
 	})
+
+	t.Run("ProviderURLAccepted", func(t *testing.T) {
+		server_utils.ResetTestState()
+		setTierTargets(t, []interface{}{
+			map[string]interface{}{
+				"ProviderURL": "s3://pelican-cache?region=us-west-2",
+				"MaxSize":     "1GB",
+			},
+		})
+		targets, err := ParseTierTargetsConfig()
+		require.NoError(t, err)
+		require.Len(t, targets, 1)
+		assert.Equal(t, "s3://pelican-cache?region=us-west-2", targets[0].ProviderURL)
+	})
+
+	// Credentials embedded in a provider URL are refused outright: gocloud's
+	// S3 driver would silently ignore userinfo and fall back to ambient
+	// credentials, and any embedded secret ends up in errors and logs.  The
+	// refusal itself must not quote the secret.
+	for name, providerURL := range map[string]string{
+		"UserinfoRejected":    "s3://AKIDEXAMPLE:SUPERSECRET@pelican-cache",
+		"SecretParamRejected": "s3://pelican-cache?awssecretkey=SUPERSECRET",
+		"SASTokenRejected":    "azblob://container?sas_token=SUPERSECRET",
+	} {
+		t.Run("ProviderURL"+name, func(t *testing.T) {
+			server_utils.ResetTestState()
+			setTierTargets(t, []interface{}{
+				map[string]interface{}{"ProviderURL": providerURL, "MaxSize": "1GB"},
+			})
+			_, err := ParseTierTargetsConfig()
+			require.Error(t, err)
+			assert.Contains(t, err.Error(), "outside the URL")
+			assert.Contains(t, err.Error(), "AccessKeyfile", "the refusal should say where credentials go instead")
+			assert.NotContains(t, err.Error(), "SUPERSECRET")
+			assert.NotContains(t, err.Error(), "AKIDEXAMPLE")
+		})
+	}
+
+	// Keyfiles are read only on the S3-keys path, so pairing them with a
+	// provider URL would silently ignore them.
+	t.Run("ProviderURLWithKeyfilesRejected", func(t *testing.T) {
+		server_utils.ResetTestState()
+		setTierTargets(t, []interface{}{
+			map[string]interface{}{
+				"ProviderURL":   "s3://pelican-cache",
+				"MaxSize":       "1GB",
+				"AccessKeyfile": "/etc/access",
+				"SecretKeyfile": "/etc/secret",
+			},
+		})
+		_, err := ParseTierTargetsConfig()
+		require.ErrorContains(t, err, "apply only to the S3 keys")
+	})
 }
 
 func TestTierKeyLayout(t *testing.T) {

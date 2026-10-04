@@ -3317,9 +3317,13 @@ description: |+
   Each entry is an object.  Name the target either with a single provider URL:
 
   - **ProviderURL** (string): the backend in URL form — `s3://bucket`, `gs://bucket`,
-    `azblob://container`.  Takes precedence over the S3-specific keys below.  Prefer a
-    keyfile to embedding credentials here; anything that is embedded is redacted before
-    the target is logged.
+    `azblob://container`.  Takes precedence over the S3-specific keys below.  A target
+    named this way takes its credentials from the provider's ambient credential chain
+    (environment variables, the provider's shared configuration, or an instance role).
+    **Credentials must not be embedded in the URL**, neither as userinfo
+    (`s3://KEY:SECRET@bucket`) nor as query parameters; the cache refuses to start if they
+    are.  Embedded credentials do not work in any case — the S3 driver ignores userinfo and
+    silently falls back to the ambient chain — and they would otherwise end up in logs.
 
   ...or with the S3-specific keys, which match how the origin's exports are configured:
 
@@ -3327,14 +3331,15 @@ description: |+
   - **Region** (string, optional): the S3 region; defaults to `us-east-1`.
   - **Bucket** (string): the bucket that holds cached objects.
   - **UrlStyle** (string, optional): `path` (default) or `virtual` bucket addressing.
+  - **AccessKeyfile** (string, optional): file containing the access key ID.
+  - **SecretKeyfile** (string, optional): file containing the secret key.
+    Both keyfiles must be provided together; when omitted, the ambient AWS credential
+    chain is used.  They apply only to these S3 keys: setting them alongside
+    **ProviderURL** is refused, since they would be silently ignored.
 
   The remaining keys apply to every target:
 
   - **Prefix** (string, optional): a key prefix under which objects are stored.
-  - **AccessKeyfile** (string, optional): file containing the access key ID.
-  - **SecretKeyfile** (string, optional): file containing the secret key.
-    Both keyfiles must be provided together; when omitted, the provider's ambient
-    credential chain is used.
   - **MaxSize** (string, required): maximum bytes of cache data stored on the target
     (e.g. "5TB").  Unlike directory targets it cannot be auto-detected.
   - **HighWaterMarkPercentage** / **LowWaterMarkPercentage** (int, optional): eviction

@@ -26,8 +26,9 @@
 // recognised the bare 404s several S3-compatible services return -- so they
 // live here once.
 //
-// It is deliberately a leaf: it imports no Pelican package, so anything can
-// use it without creating an import cycle.
+// It sits low in the import graph -- it imports only utils, for the URL
+// credential rules it shares with code that must not link a cloud SDK -- so
+// both the origin and the cache can use it without creating a cycle.
 package blobstore
 
 import (
@@ -44,6 +45,8 @@ import (
 	_ "gocloud.dev/blob/azureblob" // register azblob:// URL opener
 	_ "gocloud.dev/blob/gcsblob"   // register gs:// URL opener
 	"gocloud.dev/blob/s3blob"
+
+	"github.com/pelicanplatform/pelican/utils"
 )
 
 // S3Options names an S3 or S3-compatible bucket by its explicit fields.
@@ -125,7 +128,7 @@ func OpenURL(ctx context.Context, rawURL string) (*blob.Bucket, error) {
 	bucket, err := blob.OpenBucket(ctx, rawURL)
 	if err != nil {
 		return nil, &openError{
-			msg:   "failed to open bucket " + RedactURL(rawURL) + ": " + scrubURL(err.Error(), rawURL),
+			msg:   "failed to open bucket " + utils.RedactURLCredentials(rawURL) + ": " + scrubURL(err.Error(), rawURL),
 			cause: err,
 		}
 	}
@@ -146,7 +149,7 @@ func (e *openError) Unwrap() error { return e.cause }
 // is quoted on its own.  The whole-URL forms become the redacted URL; lone
 // secrets become "redacted".
 func scrubURL(msg, rawURL string) string {
-	redacted := RedactURL(rawURL)
+	redacted := utils.RedactURLCredentials(rawURL)
 	wholeForms := []string{rawURL}
 	var secrets []string
 	if u, err := url.Parse(rawURL); err == nil {
@@ -158,7 +161,7 @@ func scrubURL(msg, rawURL string) string {
 			}
 		}
 		for key, values := range u.Query() {
-			if isSecretParam(key) {
+			if utils.IsSecretURLParam(key) {
 				for _, v := range values {
 					secrets = append(secrets, v, url.QueryEscape(v))
 				}

@@ -8,10 +8,16 @@ import React, { useCallback } from 'react';
 import { Box, Button } from '@mui/material';
 
 // A target is named either by a provider URL or by an S3 endpoint plus a
-// bucket, mirroring how the cache parses Cache.TieringTargets.
+// bucket, mirroring how the cache parses Cache.TieringTargets.  Keyfiles
+// apply only to the S3 form -- the cache refuses them alongside a provider
+// URL, which takes its credentials from the provider's ambient chain -- so
+// the form refuses that combination too rather than save a config the cache
+// would not start with.
 const verifyForm = (x: TieringTarget) => {
   const named = x.providerurl != '' || (x.serviceurl != '' && x.bucket != '');
-  return named && x.maxsize != '';
+  const keyfilesWithURL =
+    x.providerurl != '' && (x.accesskeyfile != '' || x.secretkeyfile != '');
+  return named && !keyfilesWithURL && x.maxsize != '';
 };
 
 const createDefaultTieringTarget = (): TieringTarget => {

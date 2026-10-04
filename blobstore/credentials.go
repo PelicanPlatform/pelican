@@ -20,57 +20,9 @@ package blobstore
 
 import (
 	"fmt"
-	"net/url"
 	"os"
 	"strings"
 )
-
-// secretParams are the URL query parameters that carry a secret in some
-// tool's or driver's spelling.  The list is the union of what the origin and
-// the cache each guarded separately -- each of their copies leaked a few the
-// other caught.  Matching is case-insensitive.
-var secretParams = map[string]bool{
-	"accesskey":         true,
-	"access_key":        true,
-	"accountkey":        true,
-	"awsaccesskeyid":    true,
-	"awssecretkey":      true,
-	"awssessiontoken":   true,
-	"password":          true,
-	"sas_token":         true,
-	"secret_access_key": true,
-	"secretkey":         true,
-	"session_token":     true,
-	"token":             true,
-}
-
-func isSecretParam(key string) bool { return secretParams[strings.ToLower(key)] }
-
-// RedactURL returns rawURL with its credentials replaced, for logging and for
-// anything persisted as a human-readable identity: the userinfo component
-// and the value of every secret-bearing query parameter.  An unparsable URL
-// is replaced outright rather than risk echoing part of a secret.
-func RedactURL(rawURL string) string {
-	u, err := url.Parse(rawURL)
-	if err != nil {
-		return "[unparsable blob URL redacted]"
-	}
-	if u.User != nil {
-		u.User = url.UserPassword("redacted", "redacted")
-	}
-	q := u.Query()
-	changed := false
-	for key := range q {
-		if isSecretParam(key) {
-			q.Set(key, "redacted")
-			changed = true
-		}
-	}
-	if changed {
-		u.RawQuery = q.Encode()
-	}
-	return u.String()
-}
 
 // ReadKeyfilePair loads static credentials from an access-key file and a
 // secret-key file, each read whole and trimmed.  When either path is empty

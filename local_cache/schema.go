@@ -31,7 +31,6 @@ import (
 
 	"golang.org/x/net/idna"
 
-	"github.com/pelicanplatform/pelican/blobstore"
 	"github.com/pelicanplatform/pelican/param"
 	"github.com/pelicanplatform/pelican/utils"
 )
@@ -1146,7 +1145,7 @@ func (c *TierTargetConfig) TransportScheme() string {
 // a provider URL (e.g. "s3://bucket?awssecretkey=...").
 func (c *TierTargetConfig) DisplayURL() string {
 	if c.ProviderURL != "" {
-		return blobstore.RedactURL(c.ProviderURL)
+		return utils.RedactURLCredentials(c.ProviderURL)
 	}
 	host := c.ServiceUrl
 	if u, err := url.Parse(c.ServiceUrl); err == nil && u.Host != "" {
@@ -1248,7 +1247,25 @@ func parseTierTargetEntry(idx int, m map[string]interface{}) (TierTargetConfig, 
 		HighWaterMarkPercentage: tierEntryInt(m, "HighWaterMarkPercentage"),
 		LowWaterMarkPercentage:  tierEntryInt(m, "LowWaterMarkPercentage"),
 	}
-	if cfg.ProviderURL == "" {
+	if cfg.ProviderURL != "" {
+		// Credentials belong in the keyfile settings, never in the URL.
+		// Embedded ones do not work through gocloud anyway -- the S3 driver
+		// silently ignores userinfo and uses ambient credentials instead --
+		// and a URL that carries one ends up in errors and logs.
+		if err := utils.CheckNoURLCredentials(cfg.ProviderURL); err != nil {
+			return cfg, fmt.Errorf("Cache.TieringTargets[%d].ProviderURL %w: a provider URL takes its "+
+				"credentials from the provider's ambient credential chain, or use the S3 keys "+
+				"(ServiceUrl, Bucket) with AccessKeyfile and SecretKeyfile", idx, err)
+		}
+		// Keyfiles are read only on the S3-keys path; a provider URL is opened
+		// through gocloud, which takes credentials from the provider's own
+		// chain.  Accepting both would silently ignore the keyfiles -- and
+		// quietly run with whatever ambient identity the host happens to have.
+		if cfg.AccessKeyfile != "" || cfg.SecretKeyfile != "" {
+			return cfg, fmt.Errorf("Cache.TieringTargets[%d]: AccessKeyfile and SecretKeyfile apply only to the "+
+				"S3 keys (ServiceUrl, Bucket), not to ProviderURL, which uses the provider's ambient credential chain", idx)
+		}
+	} else {
 		// Fall back to the explicit S3 spelling, which then has to be complete.
 		if cfg.ServiceUrl == "" {
 			return cfg, fmt.Errorf("Cache.TieringTargets[%d]: set either ProviderURL or both ServiceUrl and Bucket", idx)

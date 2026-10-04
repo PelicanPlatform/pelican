@@ -38,6 +38,7 @@ import (
 
 	"github.com/pelicanplatform/pelican/blobstore"
 	"github.com/pelicanplatform/pelican/server_utils"
+	"github.com/pelicanplatform/pelican/utils"
 )
 
 // ---------------------------------------------------------------------------
@@ -154,7 +155,7 @@ func newBlobBackend(opts BlobBackendOptions) (*blobBackend, error) {
 				blobURL += "?anonymous=true"
 			}
 		}
-		log.Infof("Opening blob bucket via URL: %s", blobstore.RedactURL(blobURL))
+		log.Infof("Opening blob bucket via URL: %s", utils.RedactURLCredentials(blobURL))
 		// blobstore.OpenURL keeps the URL -- and anything embedded in it --
 		// out of the error, which gocloud's openers would otherwise quote.
 		bucket, err = blobstore.OpenURL(ctx, blobURL)

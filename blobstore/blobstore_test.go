@@ -35,41 +35,6 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestRedactURL(t *testing.T) {
-	t.Run("StripsUserinfoPassword", func(t *testing.T) {
-		got := RedactURL("s3://AKIAEXAMPLE:supersecret@my-bucket?region=us-east-1")
-		assert.NotContains(t, got, "supersecret")
-		assert.NotContains(t, got, "AKIAEXAMPLE")
-		assert.Contains(t, got, "my-bucket")
-	})
-
-	t.Run("LeavesCleanURLUntouched", func(t *testing.T) {
-		in := "s3://my-bucket?region=us-east-1&use_path_style=true"
-		got := RedactURL(in)
-		assert.Contains(t, got, "my-bucket")
-		assert.Contains(t, got, "region=us-east-1")
-	})
-
-	t.Run("UnparsableIsFullyRedacted", func(t *testing.T) {
-		assert.Equal(t, "[unparsable blob URL redacted]", RedactURL("://::not-a-url::"))
-	})
-
-	// Every spelling either former copy guarded, plus the ones each copy
-	// missed: before this package existed, the origin logged sas_token and
-	// accountkey in clear and the cache logged token and password.
-	for _, key := range []string{
-		"awssecretkey", "secretkey", "secret_access_key", "access_key", "awsaccesskeyid",
-		"password", "token", "sas_token", "accountkey", "awssessiontoken", "session_token",
-		"AWSSecretKey", // matching is case-insensitive
-	} {
-		t.Run("Redacts_"+key, func(t *testing.T) {
-			got := RedactURL("s3://my-bucket?" + key + "=supersecret&region=us-east-1")
-			assert.NotContains(t, got, "supersecret")
-			assert.Contains(t, got, "region=us-east-1")
-		})
-	}
-}
-
 // TestOpenURLScrubsTheURLFromErrors covers the openers that quote the URL in
 // their errors -- S3 and GCS on an unknown parameter, and the scheme
 // dispatcher on an unregistered scheme -- plus userinfo, which the S3 opener
