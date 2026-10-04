@@ -33,10 +33,20 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// SkipIfNoMinio skips the test if the minio binary is not available on PATH.
+// requireMinioEnv, when set, turns a missing minio from a skip into a
+// failure.  CI sets it wherever it installs minio, so that losing the binary
+// cannot silently stop the S3-backed tests from running.  (Not PELICAN_*: the
+// configuration reads every variable with that prefix as a setting.)
+const requireMinioEnv = "TEST_REQUIRE_MINIO"
+
+// SkipIfNoMinio skips the test if the minio binary is not available on PATH,
+// or fails it if requireMinioEnv is set.
 func SkipIfNoMinio(t *testing.T) {
 	t.Helper()
 	if _, err := exec.LookPath("minio"); err != nil {
+		if os.Getenv(requireMinioEnv) != "" {
+			t.Fatalf("minio not found on PATH, and %s is set", requireMinioEnv)
+		}
 		t.Skip("minio not found on PATH; skipping minio-backed test")
 	}
 }
