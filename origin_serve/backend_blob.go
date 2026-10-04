@@ -31,18 +31,12 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/aws/aws-sdk-go-v2/config"
-	"github.com/aws/aws-sdk-go-v2/credentials"
-	"github.com/aws/aws-sdk-go-v2/service/s3"
 	log "github.com/sirupsen/logrus"
 	"gocloud.dev/blob"
-	_ "gocloud.dev/blob/azureblob" // register azblob:// URL opener
-	_ "gocloud.dev/blob/gcsblob"   // register gs:// URL opener
-	_ "gocloud.dev/blob/memblob"   // register mem:// URL opener (useful for testing)
-	"gocloud.dev/blob/s3blob"
-	"gocloud.dev/gcerrors"
+	_ "gocloud.dev/blob/memblob" // register mem:// URL opener (useful for testing); blobstore registers the rest
 	"golang.org/x/net/webdav"
 
+	"github.com/pelicanplatform/pelican/blobstore"
 	"github.com/pelicanplatform/pelican/server_utils"
 )
 
@@ -126,10 +120,19 @@ func newBlobBackend(opts BlobBackendOptions) (*blobBackend, error) {
 		// environment, which meant two S3 exports configured against
 		// different accounts would clobber one another -- whichever was
 		// initialized last won.
-		bucket, err = openS3BucketWithCredentials(ctx, opts)
+		bucket, _, err = blobstore.OpenS3(ctx, blobstore.S3Options{
+			ServiceURL: opts.ServiceURL,
+			Region:     opts.Region,
+			Bucket:     opts.Bucket,
+			URLStyle:   opts.URLStyle,
+			AccessKey:  opts.AccessKey,
+			SecretKey:  opts.SecretKey,
+		})
 		if err != nil {
 			return nil, err
 		}
+		log.Infof("Opened S3 bucket %q with per-export credentials (endpoint: %q, region: %q)",
+			opts.Bucket, opts.ServiceURL, opts.Region)
 	default:
 		// Generic gocloud.dev path: an explicit BlobURL (s3/gs/azblob/mem), or
 		// an S3 bucket with no per-export credentials (anonymous, or ambient
@@ -151,10 +154,12 @@ func newBlobBackend(opts BlobBackendOptions) (*blobBackend, error) {
 				blobURL += "?anonymous=true"
 			}
 		}
-		log.Infof("Opening blob bucket via URL: %s", redactBlobURL(blobURL))
-		bucket, err = blob.OpenBucket(ctx, blobURL)
+		log.Infof("Opening blob bucket via URL: %s", blobstore.RedactURL(blobURL))
+		// blobstore.OpenURL keeps the URL -- and anything embedded in it --
+		// out of the error, which gocloud's openers would otherwise quote.
+		bucket, err = blobstore.OpenURL(ctx, blobURL)
 		if err != nil {
-			return nil, fmt.Errorf("failed to open blob bucket from URL %q: %w", redactBlobURL(blobURL), err)
+			return nil, err
 		}
 	}
 
@@ -167,83 +172,6 @@ func newBlobBackend(opts BlobBackendOptions) (*blobBackend, error) {
 
 	fs := &blobFileSystem{bucket: bucket}
 	return &blobBackend{bucket: bucket, fs: fs}, nil
-}
-
-// openS3BucketWithCredentials opens an S3 bucket using an explicit *s3.Client
-// configured with static, per-export credentials. Unlike opening via an s3://
-// URL (which relies on the ambient AWS credential chain backed by process-wide
-// environment variables), this keeps each export's credentials local to its
-// own client, so multiple S3 exports with distinct accounts can coexist within
-// a single origin process.
-func openS3BucketWithCredentials(ctx context.Context, opts BlobBackendOptions) (*blob.Bucket, error) {
-	if opts.Bucket == "" {
-		return nil, fmt.Errorf("S3 bucket name is required when BlobURL is not set")
-	}
-
-	cfgOpts := []func(*config.LoadOptions) error{
-		config.WithCredentialsProvider(
-			credentials.NewStaticCredentialsProvider(opts.AccessKey, opts.SecretKey, ""),
-		),
-	}
-	if opts.Region != "" {
-		cfgOpts = append(cfgOpts, config.WithRegion(opts.Region))
-	}
-	awsCfg, err := config.LoadDefaultConfig(ctx, cfgOpts...)
-	if err != nil {
-		return nil, fmt.Errorf("failed to load AWS config for bucket %q: %w", opts.Bucket, err)
-	}
-
-	var s3Opts []func(*s3.Options)
-	// Default to path-style addressing (endpoint/bucket/key) unless virtual-host
-	// style is explicitly requested; path-style is required by most
-	// S3-compatible services (MinIO, Ceph) and custom endpoints.
-	if strings.ToLower(opts.URLStyle) != "virtual" {
-		s3Opts = append(s3Opts, func(o *s3.Options) { o.UsePathStyle = true })
-	}
-	if opts.ServiceURL != "" {
-		endpoint := opts.ServiceURL
-		s3Opts = append(s3Opts, func(o *s3.Options) { o.BaseEndpoint = &endpoint })
-	}
-	client := s3.NewFromConfig(awsCfg, s3Opts...)
-
-	log.Infof("Opening S3 bucket %q with per-export credentials (endpoint: %q, region: %q)",
-		opts.Bucket, opts.ServiceURL, opts.Region)
-
-	// Mirror gocloud's URL opener: the S3 upload manager doesn't pick up the
-	// checksum-calculation setting from the config, so propagate it explicitly
-	// to preserve compatibility with third-party S3 providers.
-	return s3blob.OpenBucket(ctx, client, opts.Bucket, &s3blob.Options{
-		RequestChecksumCalculation: awsCfg.RequestChecksumCalculation,
-	})
-}
-
-// redactBlobURL strips any embedded credentials (the userinfo component and
-// well-known secret query parameters) from a blob URL so it is safe to log.
-// Operators may embed secrets directly in Origin.ObjectProviderURL, e.g.
-// "s3://bucket?awssecretkey=...", and those must never reach the logs.
-func redactBlobURL(raw string) string {
-	u, err := url.Parse(raw)
-	if err != nil {
-		// If it doesn't parse we can't reason about it; don't risk leaking.
-		return "[unparsable blob URL redacted]"
-	}
-	if u.User != nil {
-		u.User = url.UserPassword("redacted", "redacted")
-	}
-	if q := u.Query(); len(q) > 0 {
-		changed := false
-		for key := range q {
-			switch strings.ToLower(key) {
-			case "awssecretkey", "secretkey", "secret_access_key", "access_key", "awsaccesskeyid", "password", "token":
-				q.Set(key, "redacted")
-				changed = true
-			}
-		}
-		if changed {
-			u.RawQuery = q.Encode()
-		}
-	}
-	return u.Redacted()
 }
 
 func (b *blobBackend) CheckAvailability() error {
@@ -378,7 +306,7 @@ func (fs *blobFileSystem) OpenFile(ctx context.Context, name string, flag int, _
 	// Read mode — open via blob.NewReader (supports seek).
 	reader, err := fs.bucket.NewReader(ctx, key, nil)
 	if err != nil {
-		if isNotFound(err) {
+		if blobstore.IsNotFound(err) {
 			return nil, os.ErrNotExist
 		}
 		return nil, fmt.Errorf("blob read %q: %w", key, err)
@@ -407,7 +335,7 @@ func (fs *blobFileSystem) RemoveAll(ctx context.Context, name string) error {
 
 	// First try a plain-object delete (handles non-directory paths).
 	err := fs.bucket.Delete(ctx, key)
-	if err != nil && !isNotFound(err) {
+	if err != nil && !blobstore.IsNotFound(err) {
 		return err
 	}
 
@@ -430,7 +358,7 @@ func (fs *blobFileSystem) RemoveAll(ctx context.Context, name string) error {
 			}
 			break
 		}
-		if delErr := fs.bucket.Delete(ctx, obj.Key); delErr != nil && !isNotFound(delErr) {
+		if delErr := fs.bucket.Delete(ctx, obj.Key); delErr != nil && !blobstore.IsNotFound(delErr) {
 			if firstErr == nil {
 				firstErr = delErr
 			}
@@ -459,10 +387,10 @@ func (fs *blobFileSystem) Rename(ctx context.Context, oldName, newName string) e
 	// Move the object at the exact key, if one exists. A missing object is not
 	// an error here: oldName may be a pure directory prefix with no marker.
 	if err := fs.bucket.Copy(ctx, newKey, oldKey, nil); err != nil {
-		if !isNotFound(err) {
+		if !blobstore.IsNotFound(err) {
 			return fmt.Errorf("blob copy %q -> %q: %w", oldKey, newKey, err)
 		}
-	} else if err := fs.bucket.Delete(ctx, oldKey); err != nil && !isNotFound(err) {
+	} else if err := fs.bucket.Delete(ctx, oldKey); err != nil && !blobstore.IsNotFound(err) {
 		return fmt.Errorf("blob delete %q: %w", oldKey, err)
 	}
 
@@ -496,7 +424,7 @@ func (fs *blobFileSystem) Rename(ctx context.Context, oldName, newName string) e
 			}
 			continue
 		}
-		if err := fs.bucket.Delete(ctx, obj.Key); err != nil && !isNotFound(err) {
+		if err := fs.bucket.Delete(ctx, obj.Key); err != nil && !blobstore.IsNotFound(err) {
 			if firstErr == nil {
 				firstErr = fmt.Errorf("blob delete %q: %w", obj.Key, err)
 			}
@@ -530,18 +458,10 @@ func (fs *blobFileSystem) Stat(ctx context.Context, name string) (os.FileInfo, e
 		return &blobFileInfo{name: path.Base(name), isDir: true}, nil
 	}
 
-	if isNotFound(err) {
+	if blobstore.IsNotFound(err) {
 		return nil, os.ErrNotExist
 	}
 	return nil, err
-}
-
-// isNotFound returns true if the error represents a "not found" condition.
-func isNotFound(err error) bool {
-	if err == nil {
-		return false
-	}
-	return gcerrors.Code(err) == gcerrors.NotFound
 }
 
 // ---------------------------------------------------------------------------
@@ -794,25 +714,6 @@ func (f *blobDirFile) Stat() (os.FileInfo, error) {
 		name:  path.Base(f.name),
 		isDir: true,
 	}, nil
-}
-
-// ---------------------------------------------------------------------------
-// S3 credential loading (reads key files from disk)
-// ---------------------------------------------------------------------------
-
-func loadS3Credentials(accessKeyFile, secretKeyFile string) (accessKey, secretKey string, err error) {
-	if accessKeyFile == "" || secretKeyFile == "" {
-		return "", "", nil
-	}
-	akBytes, rErr := os.ReadFile(accessKeyFile)
-	if rErr != nil {
-		return "", "", fmt.Errorf("failed to read S3 access key file %s: %w", accessKeyFile, rErr)
-	}
-	skBytes, rErr := os.ReadFile(secretKeyFile)
-	if rErr != nil {
-		return "", "", fmt.Errorf("failed to read S3 secret key file %s: %w", secretKeyFile, rErr)
-	}
-	return strings.TrimSpace(string(akBytes)), strings.TrimSpace(string(skBytes)), nil
 }
 
 // parseHTTPDate parses an HTTP-Date header value.

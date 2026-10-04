@@ -21,24 +21,17 @@ package local_cache
 import (
 	"context"
 	"io"
-	"net/http"
 	"net/url"
 	"time"
 
-	awshttp "github.com/aws/aws-sdk-go-v2/aws/transport/http"
-	awsconfig "github.com/aws/aws-sdk-go-v2/config"
-	"github.com/aws/aws-sdk-go-v2/credentials"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
-	s3types "github.com/aws/aws-sdk-go-v2/service/s3/types"
-	"github.com/aws/smithy-go"
 	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
 	"gocloud.dev/blob"
-	_ "gocloud.dev/blob/azureblob" // register azblob:// URL opener
-	_ "gocloud.dev/blob/gcsblob"   // register gs:// URL opener
-	_ "gocloud.dev/blob/memblob"   // register mem:// URL opener (testing)
-	"gocloud.dev/blob/s3blob"
+	_ "gocloud.dev/blob/memblob" // register mem:// URL opener (testing); blobstore registers the rest
 	"gocloud.dev/gcerrors"
+
+	"github.com/pelicanplatform/pelican/blobstore"
 )
 
 // TierBackend is the remote storage a cache tiers completed objects to.
@@ -140,9 +133,11 @@ func newBlobTierBackend(ctx context.Context, cfg TierTargetConfig) (*blobTierBac
 	)
 	bucketName := cfg.Bucket
 	if cfg.ProviderURL != "" {
-		bucket, err = blob.OpenBucket(ctx, cfg.ProviderURL)
+		// blobstore.OpenURL keeps the URL out of the error, which gocloud's
+		// openers would otherwise quote verbatim.
+		bucket, err = blobstore.OpenURL(ctx, cfg.ProviderURL)
 		if err != nil {
-			return nil, errors.Wrapf(err, "failed to open cache tier target %s", cfg.DisplayURL())
+			return nil, errors.Wrap(err, "failed to open cache tier target")
 		}
 		// Recover the S3 client when the URL happened to name an S3 bucket.
 		if !bucket.As(&client) {
@@ -152,9 +147,23 @@ func newBlobTierBackend(ctx context.Context, cfg TierTargetConfig) (*blobTierBac
 			bucketName = u.Host
 		}
 	} else {
-		bucket, client, err = openS3TierBucket(ctx, cfg)
+		accessKey, secretKey, kerr := blobstore.ReadKeyfilePair(cfg.AccessKeyfile, cfg.SecretKeyfile)
+		if kerr != nil {
+			return nil, errors.Wrapf(kerr, "failed to load credentials for cache tier target %s", cfg.DisplayURL())
+		}
+		// With no keyfiles this falls through to the ambient credential
+		// chain rather than anonymous access: a tier target is a bucket the
+		// cache writes plaintext objects to, so it is private by design.
+		bucket, client, err = blobstore.OpenS3(ctx, blobstore.S3Options{
+			ServiceURL: cfg.ServiceUrl,
+			Region:     cfg.Region,
+			Bucket:     cfg.Bucket,
+			URLStyle:   cfg.UrlStyle,
+			AccessKey:  accessKey,
+			SecretKey:  secretKey,
+		})
 		if err != nil {
-			return nil, err
+			return nil, errors.Wrapf(err, "failed to open cache tier target %s", cfg.DisplayURL())
 		}
 	}
 
@@ -174,51 +183,6 @@ func newBlobTierBackend(ctx context.Context, cfg TierTargetConfig) (*blobTierBac
 		s3Bucket: bucketName,
 		s3Prefix: prefix,
 	}, nil
-}
-
-// openS3TierBucket builds an S3 bucket from the explicit S3 fields, mirroring
-// the origin's blob backend so both halves of Pelican reach an S3-compatible
-// service the same way.
-func openS3TierBucket(ctx context.Context, cfg TierTargetConfig) (*blob.Bucket, *s3.Client, error) {
-	cfgOpts := []func(*awsconfig.LoadOptions) error{}
-	if cfg.Region != "" {
-		cfgOpts = append(cfgOpts, awsconfig.WithRegion(cfg.Region))
-	}
-	if cfg.AccessKeyfile != "" {
-		accessKey, secretKey, err := readTierKeyfiles(cfg.AccessKeyfile, cfg.SecretKeyfile)
-		if err != nil {
-			return nil, nil, err
-		}
-		cfgOpts = append(cfgOpts, awsconfig.WithCredentialsProvider(
-			credentials.NewStaticCredentialsProvider(accessKey, secretKey, ""),
-		))
-	}
-	awsCfg, err := awsconfig.LoadDefaultConfig(ctx, cfgOpts...)
-	if err != nil {
-		return nil, nil, errors.Wrapf(err, "failed to load AWS config for cache tier target %s", cfg.DisplayURL())
-	}
-
-	var s3Opts []func(*s3.Options)
-	// Path-style addressing is required by most S3-compatible services and
-	// custom endpoints; virtual-host style is opt-in.
-	if !cfg.UsesVirtualHostStyle() {
-		s3Opts = append(s3Opts, func(o *s3.Options) { o.UsePathStyle = true })
-	}
-	if cfg.ServiceUrl != "" {
-		endpoint := cfg.ServiceUrl
-		s3Opts = append(s3Opts, func(o *s3.Options) { o.BaseEndpoint = &endpoint })
-	}
-	client := s3.NewFromConfig(awsCfg, s3Opts...)
-
-	// The upload manager does not inherit the checksum-calculation setting
-	// from the config, so propagate it for third-party S3 providers.
-	bucket, err := s3blob.OpenBucket(ctx, client, cfg.Bucket, &s3blob.Options{
-		RequestChecksumCalculation: awsCfg.RequestChecksumCalculation,
-	})
-	if err != nil {
-		return nil, nil, errors.Wrapf(err, "failed to open cache tier target %s", cfg.DisplayURL())
-	}
-	return bucket, client, nil
 }
 
 func (b *blobTierBackend) DisplayURL() string { return b.display }
@@ -274,7 +238,7 @@ func (b *blobTierBackend) OpenRange(ctx context.Context, key string, offset int6
 func (b *blobTierBackend) Stat(ctx context.Context, key string) (int64, bool, error) {
 	attrs, err := b.bucket.Attributes(ctx, key)
 	if err != nil {
-		if isTierNotFound(err) {
+		if blobstore.IsNotFound(err) {
 			return 0, false, nil
 		}
 		return 0, false, errors.Wrapf(err, "failed to stat %s on cache tier target %s", key, b.display)
@@ -284,7 +248,7 @@ func (b *blobTierBackend) Stat(ctx context.Context, key string) (int64, bool, er
 
 func (b *blobTierBackend) Delete(ctx context.Context, key string) error {
 	err := b.bucket.Delete(ctx, key)
-	if err != nil && !isTierNotFound(err) {
+	if err != nil && !blobstore.IsNotFound(err) {
 		return errors.Wrapf(err, "failed to delete %s from cache tier target %s", key, b.display)
 	}
 	return nil
@@ -393,49 +357,4 @@ func (b *blobTierBackend) ReapStaleUploads(ctx context.Context, maxAge time.Dura
 		input.KeyMarker = out.NextKeyMarker
 		input.UploadIdMarker = out.NextUploadIdMarker
 	}
-}
-
-// isTierNotFound reports whether an error from the blob layer means the object
-// is absent.  gocloud's own classification covers the documented S3 error
-// codes; isS3NotFound adds the forms it does not.
-func isTierNotFound(err error) bool {
-	return gcerrors.Code(err) == gcerrors.NotFound || isS3NotFound(err)
-}
-
-// isS3NotFound reports whether an S3 error indicates a missing object.
-//
-// The typed errors cover the documented cases, but a HeadObject against a
-// missing key, and several S3-compatible implementations in general, answer
-// with a bare 404 that the SDK surfaces as a generic API error.  Those are
-// recognised by inspecting the HTTP status the response carries rather than by
-// matching error text, so a provider that phrases its errors differently
-// cannot turn "absent" into a hard failure -- which would make deletes
-// non-idempotent and leave the consistency sweep unable to ever reconcile the
-// entry it was checking.
-//
-// gocloud.dev's s3blob classifies by API error code alone, so it misses
-// exactly these: a bare 404 with no parseable code comes back as
-// gcerrors.Unknown.  Its errors keep the underlying cause reachable through
-// Unwrap, which is what lets this check run on them.
-func isS3NotFound(err error) bool {
-	if err == nil {
-		return false
-	}
-	var noKey *s3types.NoSuchKey
-	var notFound *s3types.NotFound
-	if errors.As(err, &noKey) || errors.As(err, &notFound) {
-		return true
-	}
-	var respErr *awshttp.ResponseError
-	if errors.As(err, &respErr) {
-		return respErr.HTTPStatusCode() == http.StatusNotFound
-	}
-	var apiErr smithy.APIError
-	if errors.As(err, &apiErr) {
-		switch apiErr.ErrorCode() {
-		case "NoSuchKey", "NotFound", "404":
-			return true
-		}
-	}
-	return false
 }

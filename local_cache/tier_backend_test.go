@@ -20,18 +20,12 @@ package local_cache
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"io"
-	"net/http"
 	"os"
 	"testing"
 	"time"
 
-	awshttp "github.com/aws/aws-sdk-go-v2/aws/transport/http"
-	s3types "github.com/aws/aws-sdk-go-v2/service/s3/types"
-	"github.com/aws/smithy-go"
-	smithyhttp "github.com/aws/smithy-go/transport/http"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"golang.org/x/sync/errgroup"
@@ -39,48 +33,6 @@ import (
 
 // These tests need neither minio nor symlinks, so unlike the rest of the
 // tiering suite they also run on Windows.
-
-// TestTierNotFoundClassification pins the error shapes that must read as "the
-// object is absent".  gocloud.dev classifies S3 errors by API error code
-// alone, so a bare 404 surfaced as an HTTP response error -- which several
-// S3-compatible services produce -- comes back from it as Unknown.  Treating
-// that as a hard failure would make deletes non-idempotent and leave the
-// consistency sweep unable to reconcile the entry it was checking, so
-// isTierNotFound has to recognise it even after gocloud has wrapped it.
-func TestTierNotFoundClassification(t *testing.T) {
-	bare404 := &awshttp.ResponseError{ResponseError: &smithyhttp.ResponseError{
-		Response: &smithyhttp.Response{Response: &http.Response{StatusCode: http.StatusNotFound}},
-		Err:      errors.New("unparsable error body"),
-	}}
-	bare500 := &awshttp.ResponseError{ResponseError: &smithyhttp.ResponseError{
-		Response: &smithyhttp.Response{Response: &http.Response{StatusCode: http.StatusInternalServerError}},
-		Err:      errors.New("server error"),
-	}}
-	// gocloud wraps driver errors in its own type, which unwraps; %w stands
-	// in for that wrapping.
-	wrap := func(err error) error { return fmt.Errorf("blob (key %q): %w", "42/56/x", err) }
-
-	tests := []struct {
-		name string
-		err  error
-		want bool
-	}{
-		{"typed NoSuchKey", wrap(&s3types.NoSuchKey{}), true},
-		{"typed NotFound", wrap(&s3types.NotFound{}), true},
-		{"bare 404 response", wrap(bare404), true},
-		{"generic API error coded 404", wrap(&smithy.GenericAPIError{Code: "404"}), true},
-		{"generic API error coded NotFound", wrap(&smithy.GenericAPIError{Code: "NotFound"}), true},
-		{"server error is not absence", wrap(bare500), false},
-		{"access denied is not absence", wrap(&smithy.GenericAPIError{Code: "AccessDenied"}), false},
-		{"unrelated error", errors.New("connection reset"), false},
-		{"nil", nil, false},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			assert.Equal(t, tt.want, isTierNotFound(tt.err))
-		})
-	}
-}
 
 // tierTestEnv bundles the pieces needed to exercise tiering.  It lives here,
 // in a file built on every platform, so the backend-agnostic tests can share

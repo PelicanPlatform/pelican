@@ -22,7 +22,6 @@ import (
 	"context"
 	"io"
 	"net/url"
-	"os"
 	"strings"
 	"time"
 
@@ -355,18 +354,4 @@ func (s *tierObjectStream) Close() error {
 		return err
 	}
 	return nil
-}
-
-// readTierKeyfiles loads static credentials from the configured key files,
-// mirroring the origin's credential handling (whole file, trimmed).
-func readTierKeyfiles(accessKeyFile, secretKeyFile string) (accessKey, secretKey string, err error) {
-	akBytes, err := os.ReadFile(accessKeyFile)
-	if err != nil {
-		return "", "", errors.Wrap(err, "failed to read the tier target access keyfile")
-	}
-	skBytes, err := os.ReadFile(secretKeyFile)
-	if err != nil {
-		return "", "", errors.Wrap(err, "failed to read the tier target secret keyfile")
-	}
-	return strings.TrimSpace(string(akBytes)), strings.TrimSpace(string(skBytes)), nil
 }

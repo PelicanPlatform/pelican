@@ -31,6 +31,7 @@ import (
 
 	"golang.org/x/net/idna"
 
+	"github.com/pelicanplatform/pelican/blobstore"
 	"github.com/pelicanplatform/pelican/param"
 	"github.com/pelicanplatform/pelican/utils"
 )
@@ -1145,7 +1146,7 @@ func (c *TierTargetConfig) TransportScheme() string {
 // a provider URL (e.g. "s3://bucket?awssecretkey=...").
 func (c *TierTargetConfig) DisplayURL() string {
 	if c.ProviderURL != "" {
-		return redactTierURL(c.ProviderURL)
+		return blobstore.RedactURL(c.ProviderURL)
 	}
 	host := c.ServiceUrl
 	if u, err := url.Parse(c.ServiceUrl); err == nil && u.Host != "" {
@@ -1156,37 +1157,6 @@ func (c *TierTargetConfig) DisplayURL() string {
 		s += "/" + prefix
 	}
 	return s
-}
-
-// tierSecretQueryKeys are the query parameters gocloud URL openers accept
-// that carry a secret.
-var tierSecretQueryKeys = []string{"awssecretkey", "secretkey", "sas_token", "accountkey"}
-
-// redactTierURL strips credentials from a provider URL: both the userinfo
-// component and the well-known secret query parameters.
-func redactTierURL(raw string) string {
-	u, err := url.Parse(raw)
-	if err != nil {
-		// Unparsable: say nothing rather than risk echoing a secret.
-		return "(unparsable provider URL)"
-	}
-	if u.User != nil {
-		u.User = url.User("redacted")
-	}
-	q := u.Query()
-	changed := false
-	for key := range q {
-		for _, secret := range tierSecretQueryKeys {
-			if strings.EqualFold(key, secret) {
-				q.Set(key, "redacted")
-				changed = true
-			}
-		}
-	}
-	if changed {
-		u.RawQuery = q.Encode()
-	}
-	return u.String()
 }
 
 // trimTierPrefix normalises a configured key prefix (no leading or trailing
