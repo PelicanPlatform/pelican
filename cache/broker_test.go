@@ -22,12 +22,15 @@ package cache_test
 
 import (
 	_ "embed"
+	"net/http"
 	"net/url"
 	"testing"
 	"time"
 
+	"github.com/prometheus/client_golang/prometheus/testutil"
 	"github.com/stretchr/testify/require"
 
+	"github.com/pelicanplatform/pelican/config"
 	"github.com/pelicanplatform/pelican/director"
 	"github.com/pelicanplatform/pelican/fed_test_utils"
 	"github.com/pelicanplatform/pelican/metrics"
@@ -69,4 +72,16 @@ func TestBrokerApi(t *testing.T) {
 	require.Eventually(t, func() bool {
 		return director.HasBrokerForAddr(externalWebUrl.Host)
 	}, 5*time.Second, 50*time.Millisecond, "Director did not register cache broker endpoint for "+externalWebUrl.Host)
+
+	// Now dial that endpoint afresh: the global transport routes it through
+	// the broker, and the cache must pick up the reversal request and serve it.
+	startVal := testutil.ToFloat64(collector)
+	transport := config.GetTransport().Clone()
+	t.Cleanup(transport.CloseIdleConnections)
+	httpc := http.Client{Transport: transport}
+	resp, err := httpc.Get(desiredURL)
+	require.NoError(t, err)
+	defer resp.Body.Close()
+	require.Equal(t, http.StatusOK, resp.StatusCode, "Expected HTTP status code 200 through the cache's broker")
+	require.Greater(t, testutil.ToFloat64(collector), startVal, "Expected the cache to serve a broker reverse connection")
 }
