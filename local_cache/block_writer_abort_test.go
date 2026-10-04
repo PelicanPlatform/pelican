@@ -250,3 +250,29 @@ func TestNoStoreStreamSeesTransferFailure(t *testing.T) {
 	assert.Equal(t, "partial body", string(got))
 	require.Error(t, err, "a failed transfer must not read as a complete body")
 }
+
+// TestOriginFetchDropsAnotherVersion checks the cache's half of refusing a
+// range from a replaced object (the transfer engine's half, refusing the
+// response before writing it, is tested in the client): a fetch that failed
+// because the origin now serves another version drops the cached instance,
+// which can no longer be completed, and any other failure leaves it alone.
+func TestOriginFetchDropsAnotherVersion(t *testing.T) {
+	env := newTornBlockEnv(t, tornObjectBlocks*BlockDataSize-17)
+	meta, err := env.storage.GetMetadata(env.hash)
+	require.NoError(t, err)
+	bf := &BlockFetcherV2{storage: env.storage, instanceHash: env.hash, meta: meta,
+		activeFetches: make(map[fetchKey]*fetchOperation)}
+
+	bf.dropIfVersionChanged(errors.New("connection reset by peer"))
+	kept, err := env.storage.GetMetadata(env.hash)
+	require.NoError(t, err)
+	require.NotNil(t, kept, "an ordinary failure keeps the instance")
+
+	// Wrapped the way the transfer engine reports an attempt's error.
+	changed := fmt.Errorf("transfer failed: %w",
+		errors.Wrap(client.ErrObjectVersionChanged, `origin sent entity tag "v2"; expected "v1"`))
+	bf.dropIfVersionChanged(changed)
+	gone, err := env.storage.GetMetadata(env.hash)
+	require.NoError(t, err)
+	assert.Nil(t, gone, "an instance the origin no longer serves is dropped")
+}
