@@ -236,17 +236,19 @@ func ParseChunkFilename(filename string) (baseHash InstanceHash, chunkIndex int,
 	if idx := strings.LastIndex(filename, "-"); idx > 0 {
 		suffix := filename[idx+1:]
 		if n, err := strconv.Atoi(suffix); err == nil && n >= 2 {
-			baseHash = InstanceHash(filename[:idx])
-			chunkIndex = n - 1 // -2 means chunk index 1, -3 means chunk index 2, etc.
-			ok = true
-			return
+			hash, err := ParseInstanceHash(filename[:idx])
+			if err != nil {
+				return "", 0, false
+			}
+			return hash, n - 1, true // -2 means chunk index 1, -3 means chunk index 2, etc.
 		}
 	}
 	// No valid suffix - treat as base file (chunk 0)
-	baseHash = InstanceHash(filename)
-	chunkIndex = 0
-	ok = true
-	return
+	hash, err := ParseInstanceHash(filename)
+	if err != nil {
+		return "", 0, false
+	}
+	return hash, 0, true
 }
 
 // ChunkInfo holds computed information about a chunk.

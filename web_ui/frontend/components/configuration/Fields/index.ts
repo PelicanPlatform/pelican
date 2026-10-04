@@ -54,7 +54,8 @@ export type ParameterValue =
   | GeoIPOverride[]
   | Export[]
   | PolicyDefinition[]
-  | StorageDir[];
+  | StorageDir[]
+  | TieringTarget[];
 
 export type ParameterValueRecord = { [key: string]: ParameterValue };
 
@@ -152,6 +153,21 @@ export interface StorageDir {
   maxsize: string;
   highwatermarkpercentage: number;
   lowwatermarkpercentage: number;
+}
+
+export interface TieringTarget {
+  providerurl: string;
+  serviceurl: string;
+  region: string;
+  bucket: string;
+  prefix: string;
+  urlstyle: string;
+  accesskeyfile: string;
+  secretkeyfile: string;
+  maxsize: string;
+  highwatermarkpercentage: number;
+  lowwatermarkpercentage: number;
+  adoptexisting: boolean;
 }
 
 export interface Path {

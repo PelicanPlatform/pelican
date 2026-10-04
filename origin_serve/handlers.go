@@ -41,6 +41,7 @@ import (
 	"golang.org/x/net/webdav"
 	"golang.org/x/oauth2"
 
+	"github.com/pelicanplatform/pelican/blobstore"
 	"github.com/pelicanplatform/pelican/config"
 	"github.com/pelicanplatform/pelican/database"
 	"github.com/pelicanplatform/pelican/identity"
@@ -860,7 +861,7 @@ func InitializeHandlers(ctx context.Context, exports []server_utils.OriginExport
 					StoragePrefix: export.StoragePrefix,
 				}
 			} else {
-				accessKey, secretKey, err := loadS3Credentials(export.S3AccessKeyfile, export.S3SecretKeyfile)
+				accessKey, secretKey, err := blobstore.ReadKeyfilePair(export.S3AccessKeyfile, export.S3SecretKeyfile)
 				if err != nil {
 					return fmt.Errorf("failed to load S3 credentials for %s: %w", export.FederationPrefix, err)
 				}
@@ -886,7 +887,7 @@ func InitializeHandlers(ctx context.Context, exports []server_utils.OriginExport
 			}
 			backend = blobBe
 			if blobURL != "" {
-				log.Infof("Initialized blob backend for %s (url: %s)", export.FederationPrefix, redactBlobURL(blobURL))
+				log.Infof("Initialized blob backend for %s (url: %s)", export.FederationPrefix, utils.RedactURLCredentials(blobURL))
 			} else {
 				log.Infof("Initialized native S3 backend for %s (bucket: %s, region: %s)", export.FederationPrefix, export.S3Bucket, param.Origin_S3Region.GetString())
 			}

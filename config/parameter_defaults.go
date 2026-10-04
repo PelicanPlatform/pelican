@@ -163,6 +163,14 @@ func SetParameterDefaults(v *viper.Viper, isRoot bool, isOSDF bool) {
 	v.SetDefault(param.Cache_Throttle_PerOriginStarvingPercent.GetName(), 25)
 	// Cache.Throttle.RetryAfter
 	v.SetDefault(param.Cache_Throttle_RetryAfter.GetName(), "60s")
+	// Cache.TieringDisableRedirect
+	v.SetDefault(param.Cache_TieringDisableRedirect.GetName(), false)
+	// Cache.TieringRedirectEvictionHold
+	v.SetDefault(param.Cache_TieringRedirectEvictionHold.GetName(), "5m")
+	// Cache.TieringRedirectExpiry
+	v.SetDefault(param.Cache_TieringRedirectExpiry.GetName(), "5m")
+	// Cache.TieringThreshold
+	v.SetDefault(param.Cache_TieringThreshold.GetName(), "4MB")
 	// Cache.Url
 	{
 		val := "https://${Server.Hostname}:${Cache.Port}"

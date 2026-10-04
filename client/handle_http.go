@@ -4412,6 +4412,10 @@ func downloadHTTP(ctx context.Context, te *TransferEngine, callback TransferCall
 	} else {
 		client = config.GetClientNoProxy()
 	}
+	// Object transfers are the only requests allowed to follow a file://
+	// redirect, and only when Client.FileRedirectRoots names where.  This is
+	// a no-op (and returns the shared client untouched) otherwise.
+	client = withFileRedirects(client)
 	transferUrl := *transfer.Url
 	if transfer.Url.Scheme == "unix" {
 		transport := config.GetTransport().Clone()
@@ -4466,6 +4470,9 @@ func downloadHTTP(ctx context.Context, te *TransferEngine, callback TransferCall
 	}
 	req.Header.Set("X-Transfer-Status", "true")
 	req.Header.Set("X-Pelican-Timeout", headerTimeout.Round(time.Millisecond).String())
+	// Tell the cache which non-HTTP redirect schemes we can follow.  Silence
+	// means "none", which is what keeps the default behavior unchanged.
+	setAcceptRedirectHeader(req)
 	if bytesSoFar > 0 || byteRangeEnd >= 0 {
 		var rangeHeader string
 		if byteRangeEnd >= 0 {

@@ -601,3 +601,32 @@ func invokeCallbacks(oldConfig, newConfig *Config) {
 		}(cb)
 	}
 }
+
+// Decode decodes this parameter's value into out with the decoding rules the
+// rest of the configuration uses (case-insensitive keys, weakly typed input,
+// the standard hooks plus any given), and rejects keys that match no field,
+// so a misspelled setting is an error instead of being silently ignored.  An
+// unset parameter leaves out untouched.
+func (oP ObjectParam) Decode(out any, hooks ...mapstructure.DecodeHookFunc) error {
+	raw := viper.Get(oP.name)
+	if raw == nil {
+		return nil
+	}
+	decoder, err := mapstructure.NewDecoder(&mapstructure.DecoderConfig{
+		TagName:          "mapstructure",
+		WeaklyTypedInput: true,
+		ErrorUnused:      true,
+		DecodeHook:       mapstructure.ComposeDecodeHookFunc(append([]mapstructure.DecodeHookFunc{buildDecodeHookFunc()}, hooks...)...),
+		MatchName: func(mapKey, fieldName string) bool {
+			return strings.EqualFold(mapKey, fieldName)
+		},
+		Result: out,
+	})
+	if err != nil {
+		return err
+	}
+	if err := decoder.Decode(raw); err != nil {
+		return fmt.Errorf("%s: %w", oP.name, err)
+	}
+	return nil
+}

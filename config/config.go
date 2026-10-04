@@ -1612,10 +1612,51 @@ func PrintConfig() error {
 	if err != nil {
 		return err
 	}
+	if bytes, err = redactConfigCredentials(bytes); err != nil {
+		return err
+	}
 
 	printConfigHelper(bytes)
 
 	return nil
+}
+
+// redactConfigCredentials rewrites every value in a YAML document that is a
+// credential-bearing URL -- userinfo, or a secret query parameter -- into its
+// redacted form, leaving everything else byte-for-byte unchanged.
+//
+// Pelican's convention is that secrets live in files and configuration holds
+// their paths, which is why the configuration dump never needed censoring.
+// A URL with credentials embedded breaks that convention, and the dump runs
+// at startup at Info level -- before the component that would refuse such a
+// URL has even parsed it -- so it must not echo one.  Matching by shape
+// rather than by parameter name covers every URL-valued setting, present and
+// future, without anyone having to remember to mark it.
+func redactConfigCredentials(doc []byte) ([]byte, error) {
+	var root yaml.Node
+	if err := yaml.Unmarshal(doc, &root); err != nil {
+		return nil, err
+	}
+	if !redactYAMLCredentials(&root) {
+		return doc, nil
+	}
+	return yaml.Marshal(&root)
+}
+
+// redactYAMLCredentials redacts credential-bearing URL scalars in place and
+// reports whether it changed anything.
+func redactYAMLCredentials(node *yaml.Node) bool {
+	if node.Kind == yaml.ScalarNode && utils.URLHasCredentials(node.Value) {
+		node.Value = utils.RedactURLCredentials(node.Value)
+		return true
+	}
+	changed := false
+	for _, child := range node.Content {
+		if redactYAMLCredentials(child) {
+			changed = true
+		}
+	}
+	return changed
 }
 
 func contains(slice []string, item string) bool {

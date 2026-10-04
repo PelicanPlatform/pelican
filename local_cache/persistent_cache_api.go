@@ -557,6 +557,14 @@ func (pc *PersistentCache) serveObject(w http.ResponseWriter, r *http.Request) {
 		_ = size
 	}
 
+	// Objects tiered to a tiering target are served by redirecting the
+	// client to a pre-signed bucket URL (unless disabled).  Presigned URLs
+	// are self-authenticating; the client's bearer token is dropped on the
+	// cross-host hop, which is exactly what we want.
+	if pc.tryTierRedirect(w, r, objectPath, bearerToken, reqLog, startTime) {
+		return
+	}
+
 	// Get seekable reader for the object (handles on-demand fetching).
 	// When the client sent a Range header, tell the cache so that on a
 	// miss it can use a lightweight HEAD + on-demand block fetch instead
@@ -1800,7 +1808,11 @@ func (pc *PersistentCache) introspectMetadataHandler(c *gin.Context) {
 		instanceHashStr = string(pc.db.InstanceHash(etag, objectHash))
 	}
 
-	hash := InstanceHash(instanceHashStr)
+	hash, err := ParseInstanceHash(instanceHashStr)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
 	meta, err := pc.storage.GetMetadata(hash)
 	if err != nil || meta == nil {
 		c.JSON(http.StatusNotFound, gin.H{"error": "object instance not found"})
@@ -1906,7 +1918,11 @@ func (pc *PersistentCache) introspectVerifyHandler(c *gin.Context) {
 		instanceHashStr = string(pc.db.InstanceHash(etag, objectHash))
 	}
 
-	hash := InstanceHash(instanceHashStr)
+	hash, err := ParseInstanceHash(instanceHashStr)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
 	meta, err := pc.storage.GetMetadata(hash)
 	if err != nil || meta == nil {
 		c.JSON(http.StatusNotFound, gin.H{"error": "object instance not found"})

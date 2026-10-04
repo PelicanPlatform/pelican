@@ -84,11 +84,12 @@ const (
 	OriginCache_Registry       HealthStatusComponent = "registry"   // Register namespace at the registry
 	DirectorRegistry_Topology  HealthStatusComponent = "topology"   // Fetch data from OSDF topology
 	Server_WebUI               HealthStatusComponent = "web-ui"
-	OriginCache_IOConcurrency  HealthStatusComponent = "IO-concurrency" // Keep track of whether or active requests are exceeding configured concurrency limits
-	Prometheus                 HealthStatusComponent = "prometheus"     // Prometheus server
-	OriginCache_ConfigUpdates  HealthStatusComponent = "config-updates" // Track freshness of Authfile and scitokens.cfg
-	Server_StorageHealth       HealthStatusComponent = "storage"        // Monitor filesystem storage consumption
-	Origin_SSHBackend          HealthStatusComponent = "ssh-backend"    // SSH POSIXv2 backend connection status
+	OriginCache_IOConcurrency  HealthStatusComponent = "IO-concurrency"  // Keep track of whether or active requests are exceeding configured concurrency limits
+	Prometheus                 HealthStatusComponent = "prometheus"      // Prometheus server
+	OriginCache_ConfigUpdates  HealthStatusComponent = "config-updates"  // Track freshness of Authfile and scitokens.cfg
+	Server_StorageHealth       HealthStatusComponent = "storage"         // Monitor filesystem storage consumption
+	Origin_SSHBackend          HealthStatusComponent = "ssh-backend"     // SSH POSIXv2 backend connection status
+	Cache_TieringStorage       HealthStatusComponent = "tiering-storage" // Remote storage the V2 cache tiers objects to
 )
 
 var (

@@ -26,10 +26,13 @@ import (
 	"net"
 	"net/url"
 	"path"
+	"reflect"
 	"strings"
 	"time"
 
 	"golang.org/x/net/idna"
+
+	"github.com/pkg/errors"
 
 	"github.com/pelicanplatform/pelican/param"
 	"github.com/pelicanplatform/pelican/utils"
@@ -45,7 +48,32 @@ type ObjectHash string
 // accidental confusion with ObjectHash or arbitrary strings.
 type InstanceHash string
 
-// Key prefixes for BadgerDB
+// instanceHashLen is the length of an instance hash: hex-encoded SHA-256.
+const instanceHashLen = 2 * sha256.Size
+
+// ParseInstanceHash checks that s has the form of an instance hash -- 64
+// lowercase hex digits -- before treating it as one.  An instance hash names
+// files and remote objects, so one taken from outside the cache (a request,
+// a directory listing, a bucket key) must go through here.
+func ParseInstanceHash(s string) (InstanceHash, error) {
+	if len(s) != instanceHashLen {
+		return "", errors.Errorf("invalid instance hash %q: want %d hex digits", s, instanceHashLen)
+	}
+	for i := 0; i < len(s); i++ {
+		if c := s[i]; !(c >= '0' && c <= '9' || c >= 'a' && c <= 'f') {
+			return "", errors.Errorf("invalid instance hash %q: want %d hex digits", s, instanceHashLen)
+		}
+	}
+	return InstanceHash(s), nil
+}
+
+// Key prefixes for BadgerDB.
+//
+// This block is the authoritative registry of every key namespace used in
+// the cache database; when adding a new namespace, document it here (and add
+// a key constructor next to the others below).  Per-object keys must also be
+// removed in deleteObjectInTxn and PurgeStorageID or they will leak on
+// eviction / storage recycling.
 const (
 	// PrefixMeta stores CacheMetadata (headers, validation info, storage mode)
 	PrefixMeta = "m:"
@@ -76,6 +104,16 @@ const (
 	// remove it, and anything left over belongs to a writer that did not
 	// survive.  See StorageManager.ReclaimAbandonedAppends.
 	PrefixAppendIntent = "aw:"
+	// PrefixTierUpload tracks in-progress uploads to tiering targets:
+	// up:<instance_hash> -> msgpack(TierUploadIntent).  An intent is written
+	// before the first byte reaches S3 and removed only after the object
+	// has been relocated (or the partial upload aborted), so a crash never
+	// leaves untracked objects in the bucket.
+	PrefixTierUpload = "up:"
+	// PrefixRedirectHold records when a pre-signed URL was last handed out for
+	// an object: ps:<instance_hash> -> 8-byte big-endian UnixNano.
+	// Eviction skips objects with a recent redirect timestamp.
+	PrefixRedirectHold = "ps:"
 	// The keys below describe the database as a whole rather than any one
 	// object.  They are single, underscore-prefixed keys, they are written at
 	// open before any consumer touches a record, and none of them is ever
@@ -120,7 +158,18 @@ const (
 	//
 	// Whoever bumps it is responsible for teaching migrateSchema how to bring
 	// a database written under every still-supported older version forward.
-	CurrentSchemaVersion SchemaVersion = 1
+	//
+	// Version 2 added the S3 storage-target layout: the up: and ps: prefixes
+	// and DiskMapping.Backend.  Nothing needs rewriting to read it -- both
+	// prefixes are additive and an absent Backend means BackendPosix -- but
+	// the bump is not cosmetic.  It is what stops a version-1 binary from
+	// opening the database: that binary's FindRecyclableStorageID predates
+	// the "never recycle a non-POSIX mapping" rule, so it would hand an S3
+	// target's storage ID to a local directory and PurgeStorageID would take
+	// every tiered object's metadata with it.  Refusing the database is the
+	// mechanism that turns a silent, unrecoverable data loss into a
+	// startup error telling the operator to upgrade again.
+	CurrentSchemaVersion SchemaVersion = 2
 )
 
 // Prefixes reserved by the pstore origin backend (see docs/pstore-design.md).
@@ -461,6 +510,12 @@ type CacheMetadata struct {
 
 	// LRU tracking
 	LastAccessTime time.Time `msgpack:"la"` // Last access time for LRU index
+
+	// Remote describes the copy a tiering target holds, as the target
+	// reported it at upload: its entity tag, version and size.  Nil for an
+	// object that is not tiered.  Reads are pinned to it and the integrity
+	// scan checks the target against it; see TierObjectInfo.
+	Remote *TierObjectInfo `msgpack:"rmt,omitempty"`
 }
 
 // IsInline returns true when the object data is stored directly in BadgerDB.
@@ -709,13 +764,62 @@ func (m *CacheMetadata) EnsureExpires() {
 	}
 }
 
+// Backend types for DiskMapping.  The zero value ("") means a local POSIX
+// directory for backward compatibility with existing databases.
+const (
+	// BackendPosix is a local directory-backed storage target.
+	BackendPosix = ""
+	// BackendTier is an S3 bucket-backed storage target.
+	BackendTier = "s3"
+)
+
 // DiskMapping stores the mapping of a storage ID to its directory path
 // and UUID.  The UUID file is dropped in the directory root so that
 // directories can be remounted at different paths and re-associated.
+//
+// For tiering targets (Backend == BackendTier), Directory holds a display URL
+// (s3://<endpoint-host>/<bucket>/<prefix>) and the UUID is stored in an
+// identity object inside the bucket, so the same re-association logic
+// applies when a bucket is reconfigured under a different endpoint.
 type DiskMapping struct {
 	ID        StorageID `msgpack:"id"`
 	UUID      string    `msgpack:"uuid"`
 	Directory string    `msgpack:"dir"`
+	Backend   string    `msgpack:"be,omitempty"`
+}
+
+// TierUploadIntent records an in-progress upload of a completed object to an
+// tiering target.  Serialized with msgpack under up:<instance_hash>.
+type TierUploadIntent struct {
+	// TargetStorageID is the tiering target being uploaded to.
+	TargetStorageID StorageID `msgpack:"tid"`
+	// OriginalStorageID is the local (POSIX) storage the object's base
+	// (chunk 0) lives on; used by crash recovery to clean up the local
+	// file(s) when the upload committed but local deletion did not happen.
+	OriginalStorageID StorageID `msgpack:"oid"`
+	// OriginalChunkSizeCode and OriginalChunkLocations capture the object's
+	// pre-relocation chunk layout so crash recovery can delete every local
+	// chunk file after relocation flattened the metadata to a single S3
+	// object.  Both are zero/empty for non-chunked objects.
+	OriginalChunkSizeCode  ChunkSizeCode   `msgpack:"ocsc,omitempty"`
+	OriginalChunkLocations []ChunkLocation `msgpack:"ocl,omitempty"`
+	// Key is the full object key inside the bucket (including prefix).
+	Key string `msgpack:"key"`
+	// Size is the object ContentLength at upload time.
+	Size int64 `msgpack:"sz"`
+	// NamespaceID for usage accounting.
+	NamespaceID NamespaceID `msgpack:"ns"`
+	// StartedAt is when the upload began.
+	StartedAt time.Time `msgpack:"st"`
+	// RelocatedAt is set once the relocation transaction has committed, i.e.
+	// once the remote copy -- not the local one -- is the object's
+	// authoritative storage.  It is what lets crash recovery tell the two
+	// halves of the lifecycle apart when the metadata record is gone: before
+	// relocation the remote bytes and their capacity charge belong to this
+	// intent and must be reclaimed, while afterwards they belong to the
+	// object, so whatever deleted it has already accounted for them and only
+	// the leftover local copy needs cleaning up.  Zero means "not yet".
+	RelocatedAt time.Time `msgpack:"rat,omitempty"`
 }
 
 // MasterKeyFile represents the encrypted master key file format
@@ -916,7 +1020,7 @@ func ParseLRUKey(key []byte) (storageID StorageID, namespaceID NamespaceID, time
 	}
 	timestamp = time.Unix(0, tsNano)
 
-	instanceHash = InstanceHash(parts[3])
+	instanceHash, err = ParseInstanceHash(parts[3])
 	return
 }
 
@@ -987,4 +1091,182 @@ func ContentOffsetWithinBlock(contentOffset int64) int {
 // PurgeFirstKey returns the BadgerDB key for purge first tracking
 func PurgeFirstKey(instanceHash InstanceHash) []byte {
 	return []byte(PrefixPurgeFirst + string(instanceHash))
+}
+
+// TierUploadIntentKey returns the BadgerDB key tracking an in-progress upload
+// of an object to a tiering target.
+func TierUploadIntentKey(instanceHash InstanceHash) []byte {
+	return []byte(PrefixTierUpload + string(instanceHash))
+}
+
+// RedirectHoldKey returns the BadgerDB key recording the last time a pre-signed
+// URL was handed out for an object.
+func RedirectHoldKey(instanceHash InstanceHash) []byte {
+	return []byte(PrefixRedirectHold + string(instanceHash))
+}
+
+// TierTargetConfig describes one remote storage target the cache tiers
+// completed objects to.
+//
+// A target is named either by a gocloud.dev/blob provider URL or, for
+// S3-compatible services, by the explicit S3 fields.  Nothing above this
+// struct is S3-specific: the fields are kept because naming an S3 endpoint,
+// region and credential files separately is how the origin's exports are
+// configured too, and operators should not have to learn a second spelling.
+type TierTargetConfig struct {
+	// ProviderURL names the backend in gocloud.dev/blob form --
+	// "s3://bucket", "gs://bucket", "azblob://container", "mem://".  When
+	// set it takes precedence over the S3-specific fields.
+	ProviderURL string
+	// ServiceUrl is the S3 endpoint (e.g. https://s3.us-east-1.amazonaws.com).
+	ServiceUrl string
+	// Region is the S3 region; defaults to us-east-1 when empty.
+	Region string
+	// Bucket is the bucket name.
+	Bucket string
+	// Prefix is an optional key prefix under which cache objects live.
+	Prefix string
+	// UrlStyle is "path" (default) or "virtual".
+	UrlStyle string
+	// AccessKeyfile / SecretKeyfile point at files holding static
+	// credentials.  Both must be set together; when empty the ambient
+	// credential chain is used.
+	AccessKeyfile string
+	SecretKeyfile string
+	// MaxSize is the maximum bytes of cache data stored on the target.
+	// Required -- remote capacity cannot be auto-detected.
+	MaxSize uint64
+	// Watermark overrides (percent of MaxSize); 0 means use the global default.
+	HighWaterMarkPercentage int
+	LowWaterMarkPercentage  int
+	// AdoptExisting lets the cache take over a target whose identity object
+	// it does not recognise -- one another cache wrote, or this cache wrote
+	// before its database was lost.  Without it such a target is refused:
+	// the cache assumes it owns everything under the prefix, so adopting a
+	// target another cache is still using would have each delete the
+	// other's objects.
+	AdoptExisting bool
+}
+
+// UsesVirtualHostStyle reports whether S3 virtual-host addressing was asked
+// for.  Path style is the default because most S3-compatible services and
+// custom endpoints require it.
+func (c *TierTargetConfig) UsesVirtualHostStyle() bool {
+	return strings.EqualFold(c.UrlStyle, "virtual")
+}
+
+// TransportScheme returns the URL scheme object data travels over, defaulting
+// to https.  For the S3 fields that is the endpoint's scheme; for a provider
+// URL it is the scheme of an explicit endpoint override when one is given
+// (s3://bucket?endpoint=http://...), since the cloud providers' own
+// endpoints are https.
+func (c *TierTargetConfig) TransportScheme() string {
+	endpoint := c.ServiceUrl
+	if c.ProviderURL != "" {
+		endpoint = ""
+		if u, err := url.Parse(c.ProviderURL); err == nil {
+			endpoint = u.Query().Get("endpoint")
+		}
+	}
+	if u, err := url.Parse(endpoint); err == nil && u.Scheme != "" {
+		return strings.ToLower(u.Scheme)
+	}
+	return "https"
+}
+
+// DisplayURL returns a human-readable identity string for the target.  It is
+// persisted in the DiskMapping.Directory field, written to logs and used as
+// a metric label, so it must never carry credentials.  A provider URL that
+// embeds them is refused when the configuration is parsed; the redaction here
+// keeps that true for any value that reaches it some other way.
+func (c *TierTargetConfig) DisplayURL() string {
+	if c.ProviderURL != "" {
+		return utils.RedactURLCredentials(c.ProviderURL)
+	}
+	host := c.ServiceUrl
+	if u, err := url.Parse(c.ServiceUrl); err == nil && u.Host != "" {
+		host = u.Host
+	}
+	s := "s3://" + host + "/" + c.Bucket
+	if prefix := trimTierPrefix(c.Prefix); prefix != "" {
+		s += "/" + prefix
+	}
+	return s
+}
+
+// trimTierPrefix normalises a configured key prefix (no leading or trailing
+// slashes, so callers can join it unconditionally).
+func trimTierPrefix(prefix string) string {
+	return strings.Trim(prefix, "/")
+}
+
+// ParseTierTargetsConfig reads the Cache.TieringTargets setting and returns
+// the parsed target configurations.  Returns nil (not an error) when the key
+// is unset or empty.
+func ParseTierTargetsConfig() ([]TierTargetConfig, error) {
+	var configs []TierTargetConfig
+	if err := param.Cache_TieringTargets.Decode(&configs, byteSizeHook); err != nil {
+		return nil, err
+	}
+	for i := range configs {
+		if err := configs[i].validate(); err != nil {
+			return nil, fmt.Errorf("%s[%d]: %w", param.Cache_TieringTargets.GetName(), i, err)
+		}
+	}
+	return configs, nil
+}
+
+// byteSizeHook decodes a size written as a string ("5TB", "512MB") into an
+// unsigned integer field.  TierTargetConfig's only such field is MaxSize.
+func byteSizeHook(from, to reflect.Type, data any) (any, error) {
+	if from.Kind() != reflect.String || to.Kind() != reflect.Uint64 {
+		return data, nil
+	}
+	return utils.ParseBytes(data.(string))
+}
+
+// validate checks a decoded entry and fills in defaults.
+func (cfg *TierTargetConfig) validate() error {
+	cfg.Prefix = trimTierPrefix(cfg.Prefix)
+	if cfg.ProviderURL != "" {
+		// Credentials belong in the keyfile settings, never in the URL.
+		// Embedded ones do not work through gocloud anyway -- the S3 driver
+		// silently ignores userinfo and uses ambient credentials instead --
+		// and a URL that carries one ends up in errors and logs.
+		if err := utils.CheckNoURLCredentials(cfg.ProviderURL); err != nil {
+			return fmt.Errorf("ProviderURL %w: a provider URL takes its "+
+				"credentials from the provider's ambient credential chain, or use the S3 keys "+
+				"(ServiceUrl, Bucket) with AccessKeyfile and SecretKeyfile", err)
+		}
+		// Keyfiles are read only on the S3-keys path; a provider URL is opened
+		// through gocloud, which takes credentials from the provider's own
+		// chain.  Accepting both would silently ignore the keyfiles -- and
+		// quietly run with whatever ambient identity the host happens to have.
+		if cfg.AccessKeyfile != "" || cfg.SecretKeyfile != "" {
+			return errors.New("AccessKeyfile and SecretKeyfile apply only to the " +
+				"S3 keys (ServiceUrl, Bucket), not to ProviderURL, which uses the provider's ambient credential chain")
+		}
+	} else {
+		// Fall back to the explicit S3 spelling, which then has to be complete.
+		if cfg.ServiceUrl == "" {
+			return errors.New("set either ProviderURL or both ServiceUrl and Bucket")
+		}
+		if cfg.Bucket == "" {
+			return errors.New("missing required Bucket")
+		}
+		if cfg.Region == "" {
+			cfg.Region = "us-east-1"
+		}
+		if cfg.UrlStyle == "" {
+			cfg.UrlStyle = "path"
+		}
+	}
+	if (cfg.AccessKeyfile == "") != (cfg.SecretKeyfile == "") {
+		return errors.New("AccessKeyfile and SecretKeyfile must be set together")
+	}
+
+	if cfg.MaxSize == 0 {
+		return errors.New("MaxSize is required (remote capacity cannot be auto-detected)")
+	}
+	return nil
 }

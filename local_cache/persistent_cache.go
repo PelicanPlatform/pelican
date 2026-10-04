@@ -41,6 +41,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"math"
 	"net/http"
 	"net/url"
 	"os"
@@ -226,6 +227,10 @@ type PersistentCache struct {
 
 	// Prestage worker pool manager (created lazily on first API call).
 	prestageManager *PrestageManager
+
+	// tierUploader tiers completed objects to tiering targets.
+	// Nil when no tiering targets are configured.
+	tierUploader *tierUploader
 }
 
 // persistentDownload tracks an active download operation
@@ -561,6 +566,29 @@ func NewPersistentCache(ctx context.Context, egrp *errgroup.Group, cfg Persisten
 		return nil, err
 	}
 
+	// Register any configured tiering targets.  They receive their own
+	// storage IDs (persisted via an identity object in the bucket) but are
+	// excluded from new-object placement — objects arrive there only by
+	// tiering after completion.
+	//
+	// Only the cache server tiers.  Cache.TieringTargets is a process-wide
+	// setting, and a server process can also run the local cache module,
+	// which is a second PersistentCache with its own database.  If both
+	// registered the targets they would each believe they owned the same
+	// bucket, and each one's consistency sweep and upload reaping would
+	// delete the other's objects.
+	var tierTargetConfigs []TierTargetConfig
+	if cfg.Mode == CacheModeServer {
+		tierTargetConfigs, err = ParseTierTargetsConfig()
+		if err != nil {
+			return failInit(err)
+		}
+	}
+	tierTargetIDs, err := storage.RegisterTierTargets(ctx, tierTargetConfigs)
+	if err != nil {
+		return failInit(errors.Wrap(err, "failed to register tiering targets"))
+	}
+
 	// Build eviction dir configs now that we know storageID → path mapping.
 	// GetDirs() returns paths with /objects appended; strip the suffix to
 	// match against the original config paths.
@@ -602,6 +630,48 @@ func NewPersistentCache(ctx context.Context, egrp *errgroup.Group, cfg Persisten
 			HighWaterBytes:      defaultHWBytes,
 			LowWaterBytes:       defaultLWBytes,
 		}
+	}
+
+	// tiering targets get their own eviction limits (MaxSize is required in the
+	// config since bucket capacity cannot be auto-detected).  Absolute
+	// default watermarks are not applied — they are tuned for local
+	// directories; buckets use the percentage watermarks.
+	for id, s3cfg := range tierTargetIDs {
+		hwp := s3cfg.HighWaterMarkPercentage
+		if hwp <= 0 {
+			hwp = defaultHWP
+		}
+		lwp := s3cfg.LowWaterMarkPercentage
+		if lwp <= 0 {
+			lwp = defaultLWP
+		}
+		evictionDirCfgs[id] = EvictionDirConfig{
+			MaxSize:             s3cfg.MaxSize,
+			HighWaterPercentage: hwp,
+			LowWaterPercentage:  lwp,
+			NoPlacement:         true,
+		}
+	}
+
+	// Objects with a recently issued pre-signed URL must not be evicted —
+	// a client may still be mid-download directly from the bucket.
+	//
+	// The hold has to outlast the URL, not merely match it: a URL minted at t
+	// is usable until t+expiry, so a hold of the same length leaves the last
+	// moments of its life unprotected.  Stretch a too-short hold rather than
+	// refusing to start, and say so, since the safe value is derivable.
+	if len(tierTargetIDs) > 0 {
+		hold := param.Cache_TieringRedirectEvictionHold.GetDuration()
+		if hold <= 0 {
+			hold = 5 * time.Minute
+		}
+		if minimum := tierRedirectExpiry() + redirectHoldHeadroom; hold < minimum {
+			log.Warnf("Cache.TieringRedirectEvictionHold (%s) does not outlast Cache.TieringRedirectExpiry (%s); "+
+				"using %s so an object cannot be evicted while a pre-signed URL for it is still valid",
+				hold, tierRedirectExpiry(), minimum)
+			hold = minimum
+		}
+		db.setRedirectHold(hold)
 	}
 
 	// Initialize eviction manager
@@ -709,10 +779,49 @@ func NewPersistentCache(ctx context.Context, egrp *errgroup.Group, cfg Persisten
 		log.Infof("Restored %d namespace mappings (max ID %d)", len(nsMap), maxID)
 	}
 
+	// Build the tiering uploader and wire completion notifications now,
+	// while initialization is still single-threaded: onObjectComplete is read
+	// by every download that finishes, so it must be in place before anything
+	// below can start one.
+	if len(tierTargetIDs) > 0 {
+		threshold := int64(4 * 1024 * 1024)
+		if thresholdStr := param.Cache_TieringThreshold.GetString(); thresholdStr != "" {
+			parsed, err := utils.ParseBytes(thresholdStr)
+			if err != nil {
+				pc.Close()
+				return nil, errors.Wrap(err, "failed to parse Cache.TieringThreshold")
+			}
+			// ParseBytes returns a uint64; refuse a value that would wrap
+			// negative as an int64 rather than silently turning an absurd
+			// threshold into one that tiers everything.
+			if parsed > math.MaxInt64 {
+				pc.Close()
+				return nil, errors.Errorf("Cache.TieringThreshold value %q is too large", thresholdStr)
+			}
+			threshold = int64(parsed)
+		}
+		uploader := newTierUploader(db, storage, eviction, threshold)
+		storage.onObjectComplete = uploader.MaybeEnqueue
+		pc.tierUploader = uploader
+	}
+
 	// Start background tasks
 	db.StartGC(ctx, egrp)
 	eviction.Start(ctx, egrp)
 	consistency.Start(ctx, egrp)
+
+	// Start the tiering uploader.  Its crash recovery runs synchronously
+	// here, before the cache serves anything: it reconciles the buckets
+	// against the metadata store, and a bucket left inconsistent by a previous
+	// process must not have new uploads layered on top of it.  A failure is
+	// fatal rather than logged -- silently continuing would leave tiering off
+	// for the process lifetime with objects still accumulating locally.
+	if pc.tierUploader != nil {
+		if err := pc.tierUploader.Start(ctx, egrp); err != nil {
+			pc.Close()
+			return nil, errors.Wrap(err, "failed to start the tiering uploader")
+		}
+	}
 
 	// Ensure all resources are released when the context is cancelled.
 	// Without this, the TransferEngine and BadgerDB leak across tests
@@ -1021,6 +1130,16 @@ func (pc *PersistentCache) resolveObject(
 		if err != nil {
 			return nil, errors.Wrap(err, "failed to check cache")
 		}
+		// An object whose storage no longer exists -- most plausibly one left
+		// behind by a bucket that has since been removed from the
+		// configuration -- is a miss, not something to look for on disk.  Its
+		// storage ID resolves to no directory, and treating it as a hit would
+		// send the read to an arbitrary one.
+		if meta != nil && !pc.storage.storageIsResolvable(meta.StorageID) {
+			log.Warnf("Cached object %s names storage %d, which is not configured; treating as a miss",
+				instanceHash, meta.StorageID)
+			meta = nil
+		}
 	}
 
 	var dl *persistentDownload
@@ -1301,6 +1420,12 @@ func (pc *PersistentCache) GetSeekableReader(ctx context.Context, objectPath, be
 			}}, res.meta, nil
 		}
 
+		// Objects tiered to a tiering target are proxied through a
+		// seekable remote stream (no local blocks exist for them).
+		if target := pc.storage.getTierTarget(res.meta.StorageID); target != nil {
+			return pc.newTierSeekableReader(ctx, target, res), res.meta, nil
+		}
+
 		rr, err := pc.newFetchingRangeReader(res, 0, res.meta.ContentLength-1)
 		if err != nil {
 			if attempt < maxAttempts-1 && isEvictedError(err) {
@@ -1330,6 +1455,27 @@ func (pc *PersistentCache) GetRange(ctx context.Context, objectPath, token, rang
 		// Handle no-store streaming response
 		if res.noStoreRC != nil {
 			return res.noStoreRC, nil
+		}
+
+		// Objects tiered to a tiering target stream directly from the
+		// bucket (optionally limited to the requested range).
+		if target := pc.storage.getTierTarget(res.meta.StorageID); target != nil {
+			stream := pc.openTierStream(ctx, target, res)
+			if rangeHeader != "" {
+				ranges, err := ParseRangeHeader(rangeHeader, res.meta.ContentLength)
+				if err != nil {
+					stream.Close()
+					return nil, errors.Wrap(err, "invalid range header")
+				}
+				if len(ranges) > 0 {
+					if _, err := stream.Seek(ranges[0].Start, io.SeekStart); err != nil {
+						stream.Close()
+						return nil, err
+					}
+					return &limitedReadCloser{stream: stream, remain: ranges[0].End - ranges[0].Start + 1}, nil
+				}
+			}
+			return stream, nil
 		}
 
 		// Handle range request

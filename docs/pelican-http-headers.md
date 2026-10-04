@@ -11,6 +11,7 @@ This document describes the custom HTTP headers used throughout the Pelican plat
   - [X-Pelican-User](#x-pelican-user)
   - [X-Transfer-Status](#x-transfer-status)
   - [X-Pelican-Object-Metadata](#x-pelican-object-metadata)
+  - [X-Pelican-Accept-Redirect](#x-pelican-accept-redirect)
 - [Response Headers](#response-headers)
   - [X-Pelican-Authorization](#x-pelican-authorization)
   - [X-Pelican-Token-Generation](#x-pelican-token-generation)
@@ -180,6 +181,32 @@ X-Pelican-Object-Metadata: experiment="atlas", run_number=4172, is_test=?0
 
 - Only meaningful when `Origin.Metadata.Enabled` is true for the export.
 - See the [metadata publish design doc](metadata-publish-design.md) for the full webhook contract.
+
+---
+
+### X-Pelican-Accept-Redirect
+
+**Direction:** Client → Cache
+
+**Purpose:** Tells a cache which non-HTTP URL schemes this client is able to follow if it is redirected to one.
+
+**Format:** A comma-separated list of URL schemes.
+
+**Description:** A cache that has tiered an object to storage the client also has direct access to can answer a request by redirecting to that storage rather than sending the bytes itself. When the redirect target is `http`/`https` no advertisement is needed, since every client can follow it. Anything else only works if the client is in a position to use it, and nothing observable about a request says whether it is — the same subnet does not imply the same mount, and a containerized client can share a host without sharing a mount namespace. So the client states what it can follow and the cache sends such a redirect only to a client that asked.
+
+Silence means "none", which is what keeps the default behavior unchanged for every existing client.
+
+**Example:**
+
+```
+X-Pelican-Accept-Redirect: file
+```
+
+**Notes:**
+
+- The Pelican client sends `file` only when `Client.FileRedirectRoots` is non-empty, and refuses to read a path outside those roots even if a cache sends one anyway.
+- This is an assertion by the client about itself and cannot be verified by the cache, which is why it is required rather than inferred: a cache must never direct a client to read an unrelated local file.
+- Enabling it grants the cache a say in which local paths the client reads, so it is off by default. See `Client.FileRedirectRoots` for the full rationale.
 
 ---
 
