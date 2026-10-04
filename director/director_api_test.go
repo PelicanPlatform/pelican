@@ -265,6 +265,48 @@ func TestCheckFilter(t *testing.T) {
 			assert.Equal(t, tc.filtered, getFilter)
 			assert.Equal(t, tc.ft, getType)
 
+			// getAdsForPath answers this question from a snapshot instead of
+			// re-locking per ad; the two must not be able to disagree.
+			snapFilter, snapType := getFilteredServersSnapshot().check(tc.serverToTest)
+			assert.Equal(t, getFilter, snapFilter, "snapshot disagreed with checkFilter")
+			assert.Equal(t, getType, snapType, "snapshot disagreed with checkFilter")
 		})
 	}
+}
+
+// getFilteredServersSnapshot must be a copy, not a view: getAdsForPath walks it
+// without the lock, so a concurrent writer editing the live map through the
+// returned value would be a data race and would change the answer mid-request.
+func TestFilteredServersSnapshotIsDetached(t *testing.T) {
+	filteredServersMutex.Lock()
+	tmpMap := filteredServers
+	filteredServers = map[string]filterType{"mock": permFiltered}
+	filteredServersMutex.Unlock()
+	defer func() {
+		filteredServersMutex.Lock()
+		filteredServers = tmpMap
+		filteredServersMutex.Unlock()
+	}()
+
+	snapshot := getFilteredServersSnapshot()
+	filtered, ft := snapshot.check("mock")
+	require.True(t, filtered)
+	require.Equal(t, permFiltered, ft)
+
+	// Mutating the live map must not reach a snapshot already handed out...
+	filteredServersMutex.Lock()
+	delete(filteredServers, "mock")
+	filteredServers["later"] = tempFiltered
+	filteredServersMutex.Unlock()
+
+	filtered, ft = snapshot.check("mock")
+	assert.True(t, filtered, "snapshot should still report the instant it was taken")
+	assert.Equal(t, permFiltered, ft)
+	laterFiltered, _ := snapshot.check("later")
+	assert.False(t, laterFiltered, "snapshot should not see entries added after it was taken")
+
+	// ...and writing through the snapshot must not reach the live map.
+	snapshot["injected"] = permFiltered
+	injected, _ := checkFilter("injected")
+	assert.False(t, injected, "the snapshot aliased the live filteredServers map")
 }

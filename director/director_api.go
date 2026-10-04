@@ -60,35 +60,82 @@ func listAdvertisement(serverTypes []server_structs.ServerType) []*server_struct
 	return ads
 }
 
+// evalFilterStatus turns an entry read out of filteredServers into the
+// (filtered, why) answer callers want.  It is pure so that the same decision
+// can be made from a snapshot of the map as from the map itself, without
+// either copy of the switch drifting from the other.
+func evalFilterStatus(status filterType, exists bool) (bool, filterType) {
+	// No filter entry
+	if !exists {
+		return false, ""
+	}
+	// Has filter entry
+	switch status {
+	case permFiltered:
+		return true, permFiltered
+	case tempFiltered:
+		return true, tempFiltered
+	case topoFiltered:
+		return true, topoFiltered
+	case serverFiltered:
+		return true, serverFiltered
+	case shutdownFiltered:
+		return true, shutdownFiltered
+	case tempAllowed:
+		return false, tempAllowed
+	default:
+		log.Error("Unknown filterType: ", status)
+		return false, ""
+	}
+}
+
 // Check if a server is filtered from "production" servers by
 // checking if a serverName is in the filteredServers map
+//
+// Prefer getFilteredServersSnapshot when asking about more than one server at
+// a time: this takes filteredServersMutex on every call, and that mutex also
+// guards serverDowntimes, topologyDowntimes and federationDowntimes.
 func checkFilter(serverName string) (bool, filterType) {
 	filteredServersMutex.RLock()
 	defer filteredServersMutex.RUnlock()
 	status, exists := filteredServers[serverName]
-	// No filter entry
-	if !exists {
-		return false, ""
-	} else {
-		// Has filter entry
-		switch status {
-		case permFiltered:
-			return true, permFiltered
-		case tempFiltered:
-			return true, tempFiltered
-		case topoFiltered:
-			return true, topoFiltered
-		case serverFiltered:
-			return true, serverFiltered
-		case shutdownFiltered:
-			return true, shutdownFiltered
-		case tempAllowed:
-			return false, tempAllowed
-		default:
-			log.Error("Unknown filterType: ", status)
-			return false, ""
-		}
+	return evalFilterStatus(status, exists)
+}
+
+// filteredServerSnapshot is a point-in-time copy of the filtered-server map,
+// answering the same question checkFilter does without re-taking the lock.
+type filteredServerSnapshot map[string]filterType
+
+// getFilteredServersSnapshot returns a point-in-time copy of the filtered-server
+// map.
+//
+// This is the same bargain getServerAdsSnapshot makes, for the same reason: a
+// caller that asks about every advertised server -- getAdsForPath does, on
+// every redirect -- would otherwise acquire filteredServersMutex once per ad,
+// and that mutex is shared with the three downtime maps, so the traffic lands
+// on bookkeeping that has nothing to do with the request.  The map holds only
+// servers that are disabled, so it is far smaller than the ad list it is
+// consulted for.
+//
+// A snapshot may go stale while the caller walks it.  So could the per-ad
+// lookups it replaces: each one answered for a different instant, and nothing
+// held them to a consistent view of the map.  One instant for the whole
+// request is the better of the two.
+func getFilteredServersSnapshot() filteredServerSnapshot {
+	filteredServersMutex.RLock()
+	defer filteredServersMutex.RUnlock()
+	snapshot := make(filteredServerSnapshot, len(filteredServers))
+	for name, status := range filteredServers {
+		snapshot[name] = status
 	}
+	return snapshot
+}
+
+// check reports whether serverName is filtered, and why, as of the instant the
+// snapshot was taken.
+func (s filteredServerSnapshot) check(serverName string) (bool, filterType) {
+	status, exists := s[serverName]
+	return evalFilterStatus(status, exists)
 }
 
 // Configure TTL caches to enable cache eviction and other additional cache events handling logic

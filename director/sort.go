@@ -149,6 +149,11 @@ func getAdsForPath(reqPath string) (oAds []copyAd, cAds []copyAd) {
 
 	ads := getServerAdsSnapshot()
 
+	// One lookup table for the whole request rather than one lock acquisition
+	// per ad; filteredServersMutex is shared with the downtime maps, so the
+	// per-ad traffic was landing on unrelated bookkeeping.
+	filtered := getFilteredServersSnapshot()
+
 	// Move topo sorted ads to the end of our slice
 	sortServerAdsByTopo(ads)
 
@@ -158,7 +163,7 @@ func getAdsForPath(reqPath string) (oAds []copyAd, cAds []copyAd) {
 	bestNSLen := -1
 	for _, ad := range ads {
 		// Skip over any ads that are filtered out or marked in downtime
-		if filtered, fType := checkFilter(ad.Name); filtered {
+		if isFiltered, fType := filtered.check(ad.Name); isFiltered {
 			// Guard the Tracef explicitly: the level gate rejects the entry,
 			// but the variadic argument boxing would still heap-allocate on
 			// this per-ad hot path without the guard.
