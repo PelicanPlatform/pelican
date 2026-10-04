@@ -174,24 +174,30 @@ func getAdsForPath(reqPath string) (oAds []copyAd, cAds []copyAd) {
 			continue
 		}
 
-		// Take the copy once, here: ad.NamespaceAds is live TTL-cache memory
-		// read concurrently by other goroutines, so nothing below may hold a
-		// pointer into it or write through one. We also want returned
-		// namespace paths to forgo any trailing / that might come from
-		// topology, which is a mutation the cached ad must not see.
-		nsCopy := ad.NamespaceAds[nsIdx]
-		nsCopy.Path = strings.TrimSuffix(nsCopy.Path, "/")
-
 		// Rank ads by how specific their matched prefix is. Two equal-length
 		// prefixes of the same request path are the same string, so the
-		// already-trimmed path's length orders ads by specificity without
-		// comparing paths.
-		nsLen := len(nsCopy.Path)
+		// trimmed path's length orders ads by specificity without comparing
+		// paths. TrimSuffix returns a substring, so ranking a candidate reads
+		// the cached ad without copying or allocating.
+		nsPath := strings.TrimSuffix(ad.NamespaceAds[nsIdx].Path, "/")
+		nsLen := len(nsPath)
 
 		// if the current ad's path matches but is shorter than the best path, skip
 		if nsLen < bestNSLen {
 			continue
 		}
+
+		// Take the copy once, here: ad.NamespaceAds is live TTL-cache memory
+		// read concurrently by other goroutines, so nothing below may hold a
+		// pointer into it or write through one. We also want returned
+		// namespace paths to forgo any trailing / that might come from
+		// topology, which is a mutation the cached ad must not see.
+		//
+		// This sits below the discard above so that an ad already beaten by a
+		// more specific prefix is ranked and dropped without being copied --
+		// the scan reaches here only for an ad that is about to be kept.
+		nsCopy := ad.NamespaceAds[nsIdx]
+		nsCopy.Path = nsPath
 
 		// If the current nsAd's path has the same best prefix as the longest known,
 		// append the ad

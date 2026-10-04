@@ -602,9 +602,13 @@ func SetXNamespaceHeaderWithCollections(hdr http.Header, collUrl string, bestNSA
 // path reqPath, comparing at "/" segment boundaries rather than as raw byte
 // prefixes: /foo covers /foo and /foo/bar, but not /foobar.
 //
-// reqPath must carry a trailing "/" and nsBase must not; LongestNSMatchIndex
-// normalizes each of them once, so that scanning a whole federation's worth of
-// candidate ads adds no allocations of its own.
+// reqPath must carry a trailing "/", and nsBase must have had one trailing "/"
+// removed -- which is not the same as nsBase having none, since a stored path
+// written "/foo//" still ends in a slash after the trim.  That case stays
+// correct: the boundary check below then demands a second "/" in reqPath,
+// which is exactly what comparing against the concatenated "/foo//" asked for.
+// LongestNSMatchIndex normalizes each side once, so that scanning a whole
+// federation's worth of candidate ads adds no allocations of its own.
 func nsPathCoversReq(reqPath, nsBase string) bool {
 	// The "/" at the boundary is what separates a child path from a sibling
 	// whose name merely starts the same.  The length test keeps that index in

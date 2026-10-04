@@ -431,7 +431,10 @@ func nsAdsFor(paths []string) []NamespaceAd {
 // silently redirect a request to the wrong namespace's origins.
 func TestLongestNSMatchIndexMatchesReference(t *testing.T) {
 	for _, tc := range nsMatchCorpus {
-		t.Run(fmt.Sprintf("%q_in_%q", tc.reqPath, strings.Join(tc.paths, ",")), func(t *testing.T) {
+		// Format the slice itself rather than joining it: strings.Join renders
+		// both a nil slice and []string{""} as "", which collides two corpus
+		// entries into one subtest name that -run cannot address separately.
+		t.Run(fmt.Sprintf("%q_in_%q", tc.reqPath, tc.paths), func(t *testing.T) {
 			ads := nsAdsFor(tc.paths)
 
 			wantIdx := longestNSMatchIndexReference(tc.reqPath, ads)
