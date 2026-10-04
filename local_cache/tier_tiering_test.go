@@ -35,6 +35,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/aws/aws-sdk-go-v2/service/s3"
+	s3types "github.com/aws/aws-sdk-go-v2/service/s3/types"
 	badger "github.com/dgraph-io/badger/v4"
 	"github.com/google/uuid"
 	"github.com/pkg/errors"
@@ -325,7 +327,7 @@ func TestTierLifecycle(t *testing.T) {
 	assert.Equal(t, fileSize, tierUsage)
 
 	// The bucket object is the plaintext content.
-	stream, err := env.target.openStream(ctx, hash, 0)
+	stream, err := env.target.openStream(ctx, hash, 0, nil)
 	require.NoError(t, err)
 	fetched, err := io.ReadAll(stream)
 	stream.Close()
@@ -343,7 +345,7 @@ func TestTierLifecycle(t *testing.T) {
 	assert.Equal(t, data[BlockDataSize:BlockDataSize+100], buf)
 
 	// A pre-signed URL serves the object without credentials.
-	presigned, err := env.target.redirectURL(ctx, hash, 5*time.Minute)
+	presigned, err := env.target.redirectURL(ctx, hash, 5*time.Minute, nil)
 	require.NoError(t, err)
 	resp, err := http.Get(presigned)
 	require.NoError(t, err)
@@ -488,7 +490,7 @@ func TestTierChunkedObject(t *testing.T) {
 	assert.Equal(t, CalculateFileSize(objectSize), tierUsage)
 
 	// The bucket holds the full contiguous plaintext object.
-	stream, err := target.openStream(ctx, hash, 0)
+	stream, err := target.openStream(ctx, hash, 0, nil)
 	require.NoError(t, err)
 	fetched, err := io.ReadAll(stream)
 	stream.Close()
@@ -631,6 +633,142 @@ func TestTierDeferredReleaseLeavesARebornCopyAlone(t *testing.T) {
 	intents, err := env.db.ListTierUploadIntents()
 	require.NoError(t, err)
 	assert.Empty(t, intents, "the stale intent should be dropped")
+}
+
+// tierObjectForIntegrity stores and tiers a multi-block object with no reader
+// open, returning its data and the metadata the relocation recorded.
+func tierObjectForIntegrity(t *testing.T, ctx context.Context, env *tierTestEnv, hash InstanceHash) ([]byte, *CacheMetadata) {
+	t.Helper()
+	data := make([]byte, 2*BlockDataSize+99)
+	for i := range data {
+		data[i] = byte(i % 241)
+	}
+	storeTestObject(t, ctx, env.storage, hash, data, env.diskID, NamespaceID(8))
+	require.NoError(t, env.uploader.processObject(ctx, hash))
+	meta, err := env.storage.GetMetadata(hash)
+	require.NoError(t, err)
+	require.Equal(t, env.tierID, meta.StorageID)
+	return data, meta
+}
+
+// overwriteTieredCopy replaces a tiered object's bytes in the bucket with
+// different bytes of the same length -- the substitution that size checks
+// alone cannot see.
+func overwriteTieredCopy(t *testing.T, ctx context.Context, env *tierTestEnv, hash InstanceHash, size int) {
+	t.Helper()
+	forged := bytes.Repeat([]byte{0xAB}, size)
+	require.NoError(t, discardInfo(env.target.backend.Put(ctx, env.target.objectKey(hash), "", int64(size), bytes.NewReader(forged))))
+}
+
+// TestTierRecordsTheUploadedCopy: tiering records what the target stored --
+// its entity tag, size and write time -- atomically with the relocation.
+func TestTierRecordsTheUploadedCopy(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	env := setupTierTestEnv(t, ctx)
+
+	data, meta := tierObjectForIntegrity(t, ctx, env, InstanceHash(fmt.Sprintf("%064d", 41)))
+	require.NotNil(t, meta.Remote, "the uploaded copy should be recorded")
+	assert.NotEmpty(t, meta.Remote.ETag)
+	assert.Equal(t, int64(len(data)), meta.Remote.Size)
+	assert.False(t, meta.Remote.ModTime.IsZero())
+}
+
+// TestTierDetectsSubstitution covers the integrity gap a tiered object had:
+// stored in plaintext and checked by size alone, a same-length replacement in
+// the bucket was served with the origin's checksums attached and never
+// noticed.  Now a proxied read refuses the changed copy and drops the entry,
+// and the integrity scan finds it too.
+func TestTierDetectsSubstitution(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	env := setupTierTestEnv(t, ctx)
+	checker := NewConsistencyChecker(env.db, env.storage, ConsistencyConfig{})
+
+	t.Run("ProxiedReadRefusesTheChangedCopy", func(t *testing.T) {
+		hash := InstanceHash(fmt.Sprintf("%064d", 42))
+		data, meta := tierObjectForIntegrity(t, ctx, env, hash)
+		overwriteTieredCopy(t, ctx, env, hash, len(data))
+
+		changed := false
+		stream := newTierObjectStream(ctx, env.target, hash, int64(len(data)))
+		stream.expect = meta.Remote
+		stream.onChanged = func() { changed = true }
+		defer stream.Close()
+		_, err := io.ReadAll(stream)
+		require.Error(t, err, "the substituted bytes must not be served")
+		assert.Contains(t, err.Error(), "changed on backing storage")
+		assert.True(t, changed, "the change should be reported so the entry can be dropped")
+	})
+
+	t.Run("IntegrityScanFindsIt", func(t *testing.T) {
+		hash := InstanceHash(fmt.Sprintf("%064d", 43))
+		data, meta := tierObjectForIntegrity(t, ctx, env, hash)
+
+		ok, err := checker.VerifyObject(hash)
+		require.NoError(t, err)
+		assert.True(t, ok, "an untouched tiered object verifies")
+
+		overwriteTieredCopy(t, ctx, env, hash, len(data))
+		ok, err = checker.VerifyObject(hash)
+		require.NoError(t, err)
+		assert.False(t, ok, "a same-length substitution must fail verification")
+
+		var mismatches, inconsistent, verified int64
+		require.NoError(t, checker.verifyTieredObject(ctx, hash, meta, &mismatches, &inconsistent, &verified))
+		assert.Equal(t, int64(1), mismatches)
+		assert.Equal(t, int64(len(data)), inconsistent)
+		gone, err := env.storage.GetMetadata(hash)
+		require.NoError(t, err)
+		assert.Nil(t, gone, "the entry is dropped so the object is fetched from the origin again")
+	})
+}
+
+// TestTierPinsReadsToTheUploadedVersion: when the bucket keeps versions, the
+// recorded version names the exact bytes uploaded, so both proxied reads and
+// redirects keep returning them even after the key is overwritten.
+func TestTierPinsReadsToTheUploadedVersion(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	env := setupTierTestEnv(t, ctx)
+
+	backend, ok := env.target.backend.(*blobTierBackend)
+	require.True(t, ok)
+	require.NotNil(t, backend.s3Client)
+	_, err := backend.s3Client.PutBucketVersioning(ctx, &s3.PutBucketVersioningInput{
+		Bucket: &backend.s3Bucket,
+		VersioningConfiguration: &s3types.VersioningConfiguration{
+			Status: s3types.BucketVersioningStatusEnabled,
+		},
+	})
+	if err != nil {
+		t.Skipf("this MinIO cannot enable bucket versioning: %v", err)
+	}
+
+	hash := InstanceHash(fmt.Sprintf("%064d", 44))
+	data, meta := tierObjectForIntegrity(t, ctx, env, hash)
+	require.NotNil(t, meta.Remote)
+	require.NotEmpty(t, meta.Remote.Version, "a versioned bucket should report the uploaded version")
+	overwriteTieredCopy(t, ctx, env, hash, len(data))
+
+	// Proxied read: pinned to the version, so still the original bytes.
+	stream := newTierObjectStream(ctx, env.target, hash, int64(len(data)))
+	stream.expect = meta.Remote
+	got, err := io.ReadAll(stream)
+	stream.Close()
+	require.NoError(t, err)
+	assert.Equal(t, data, got, "a version-pinned read returns the uploaded bytes")
+
+	// Redirect: the version is signed into the URL.
+	signed, err := env.target.redirectURL(ctx, hash, time.Minute, meta.Remote)
+	require.NoError(t, err)
+	resp, err := http.Get(signed)
+	require.NoError(t, err)
+	body, err := io.ReadAll(resp.Body)
+	resp.Body.Close()
+	require.NoError(t, err)
+	require.Equal(t, http.StatusOK, resp.StatusCode)
+	assert.Equal(t, data, body, "a client sent to the bucket receives the uploaded bytes, not the overwrite")
 }
 
 func TestTierSkipsSmallAndInlineObjects(t *testing.T) {
@@ -838,7 +976,7 @@ func TestTierUploaderRecoveryAccounting(t *testing.T) {
 			StartedAt:         time.Now().Add(-time.Minute),
 			RelocatedAt:       time.Now().Add(-30 * time.Second),
 		}))
-		_, err := env.db.RelocateObject(hash, env.tierID)
+		_, err := env.db.RelocateObject(hash, env.tierID, nil)
 		require.NoError(t, err)
 
 		require.NoError(t, env.uploader.recover(ctx))
@@ -892,7 +1030,7 @@ func TestTierConcurrentWorkers(t *testing.T) {
 
 	// The object is in the bucket exactly once, with the right bytes, and the
 	// bucket is charged for exactly one copy.
-	stream, err := env.target.openStream(ctx, hash, 0)
+	stream, err := env.target.openStream(ctx, hash, 0, nil)
 	require.NoError(t, err)
 	fetched, err := io.ReadAll(stream)
 	stream.Close()
@@ -1087,7 +1225,7 @@ func TestTierTargetRefusesInvalidIdentity(t *testing.T) {
 	env := setupTierTestEnv(t, ctx)
 
 	junk := "not-a-uuid"
-	require.NoError(t, env.target.backend.Put(ctx, tierIdentityKey, "text/plain", int64(len(junk)), strings.NewReader(junk)))
+	require.NoError(t, discardInfo(env.target.backend.Put(ctx, tierIdentityKey, "text/plain", int64(len(junk)), strings.NewReader(junk))))
 
 	cfg := env.target.cfg
 	_, err := newSecondCacheStorage(t, ctx).RegisterTierTargets(ctx, []TierTargetConfig{cfg})
@@ -1126,7 +1264,7 @@ func TestTierUploaderRecovery(t *testing.T) {
 		NamespaceID:       nsID,
 		StartedAt:         time.Now(),
 	}))
-	require.NoError(t, env.target.uploadObject(ctx, hash, "", int64(len(data)), newZeroReader(len(data))))
+	require.NoError(t, discardInfo(env.target.uploadObject(ctx, hash, "", int64(len(data)), newZeroReader(len(data)))))
 
 	require.NoError(t, env.uploader.recover(ctx))
 
@@ -1492,7 +1630,33 @@ func TestTierRedirectServing(t *testing.T) {
 	evicted, _, _, err := pc.storage.EvictByLRU(tierID, NamespaceID(1), 0, 0)
 	require.NoError(t, err)
 	assert.Empty(t, evicted, "presign hold should protect the object from eviction")
+
+	// Last, since it destroys the object: overwrite the bucket copy and read
+	// through Get (the prestage path), which proxies with its own stream.  The
+	// read must refuse the replacement and drop the entry, so the next
+	// request goes back to the origin.
+	t.Run("ChangedCopyIsRefusedAndDropped", func(t *testing.T) {
+		target := pc.storage.getTierTarget(tierID)
+		require.NotNil(t, target)
+		forged := bytes.Repeat([]byte{0xAB}, len(data))
+		require.NoError(t, discardInfo(target.backend.Put(ctx, target.objectKey(instanceHash), "", int64(len(forged)), bytes.NewReader(forged))))
+
+		rc, err := pc.Get(ctx, objectPath, "")
+		require.NoError(t, err)
+		got, err := io.ReadAll(rc)
+		rc.Close()
+		require.Error(t, err, "the replaced bytes must not be served")
+		assert.NotEqual(t, forged, got)
+		require.Eventually(t, func() bool {
+			meta, err := pc.storage.GetMetadata(instanceHash)
+			return err == nil && meta == nil
+		}, 10*time.Second, 50*time.Millisecond, "the entry should be dropped once the change is seen")
+	})
 }
+
+// discardInfo drops the object info an upload reports, for call sites that
+// only care whether it succeeded.
+func discardInfo(_ TierObjectInfo, err error) error { return err }
 
 // fixedURLBackend wraps a real backend but hands out a fixed redirect URL,
 // so a test can make the target point somewhere other than it reported at
@@ -1502,7 +1666,7 @@ type fixedURLBackend struct {
 	url string
 }
 
-func (f fixedURLBackend) RedirectURL(_ context.Context, _ string, _ time.Duration) (string, error) {
+func (f fixedURLBackend) RedirectURL(_ context.Context, _ string, _ time.Duration, _ *TierObjectInfo) (string, error) {
 	return f.url, nil
 }
 
@@ -1595,7 +1759,7 @@ func TestTierConsistencySweep(t *testing.T) {
 
 	// A stray bucket object with no metadata.
 	strayHash := InstanceHash(fmt.Sprintf("%064d", 5))
-	require.NoError(t, env.target.uploadObject(ctx, strayHash, "", 128, newZeroReader(128)))
+	require.NoError(t, discardInfo(env.target.uploadObject(ctx, strayHash, "", 128, newZeroReader(128))))
 
 	// An S3-resident DB entry whose bucket object is missing.
 	ghostHash := InstanceHash(fmt.Sprintf("%064d", 6))

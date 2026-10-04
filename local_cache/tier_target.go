@@ -171,7 +171,7 @@ func (t *tierTarget) hashFromKey(key string) InstanceHash {
 // not a valid UUID is treated the same way when adopt is false, rather than
 // being quietly rewritten: rewriting it is a takeover by another name.
 func (t *tierTarget) resolveIdentity(ctx context.Context, adopt bool) (uid string, fresh bool, err error) {
-	body, err := t.backend.OpenRange(ctx, tierIdentityKey, 0)
+	body, err := t.backend.OpenRange(ctx, tierIdentityKey, 0, nil)
 	if err == nil {
 		defer body.Close()
 		data, readErr := io.ReadAll(io.LimitReader(body, 128))
@@ -195,14 +195,15 @@ func (t *tierTarget) resolveIdentity(ctx context.Context, adopt bool) (uid strin
 	}
 
 	newID := uuid.New().String()
-	if err := t.backend.Put(ctx, tierIdentityKey, "text/plain", int64(len(newID)), strings.NewReader(newID)); err != nil {
+	if _, err := t.backend.Put(ctx, tierIdentityKey, "text/plain", int64(len(newID)), strings.NewReader(newID)); err != nil {
 		return "", false, errors.Wrapf(err, "failed to write the identity object to cache tier target %s", t.DisplayURL())
 	}
 	return newID, fresh, nil
 }
 
-// uploadObject streams plaintext object bytes to the target.
-func (t *tierTarget) uploadObject(ctx context.Context, instanceHash InstanceHash, contentType string, size int64, body io.Reader) error {
+// uploadObject streams plaintext object bytes to the target and reports the
+// object as the target stored it.
+func (t *tierTarget) uploadObject(ctx context.Context, instanceHash InstanceHash, contentType string, size int64, body io.Reader) (TierObjectInfo, error) {
 	return t.backend.Put(ctx, t.objectKey(instanceHash), contentType, size, body)
 }
 
@@ -213,28 +214,29 @@ func (t *tierTarget) deleteObject(ctx context.Context, instanceHash InstanceHash
 
 // objectExists probes the target for an object.
 func (t *tierTarget) objectExists(ctx context.Context, instanceHash InstanceHash) (bool, error) {
-	_, exists, err := t.objectSize(ctx, instanceHash)
+	_, exists, err := t.objectInfo(ctx, instanceHash)
 	return exists, err
 }
 
-// objectSize probes the target for an object's size.
-func (t *tierTarget) objectSize(ctx context.Context, instanceHash InstanceHash) (int64, bool, error) {
+// objectInfo probes the target for an object as it currently holds it.
+func (t *tierTarget) objectInfo(ctx context.Context, instanceHash InstanceHash) (TierObjectInfo, bool, error) {
 	return t.backend.Stat(ctx, t.objectKey(instanceHash))
 }
 
-// openStream starts a read at the given byte offset.
-func (t *tierTarget) openStream(ctx context.Context, instanceHash InstanceHash, offset int64) (io.ReadCloser, error) {
-	return t.backend.OpenRange(ctx, t.objectKey(instanceHash), offset)
+// openStream starts a read at the given byte offset, pinned to expect when
+// it is non-nil (see TierBackend.OpenRange).
+func (t *tierTarget) openStream(ctx context.Context, instanceHash InstanceHash, offset int64, expect *TierObjectInfo) (io.ReadCloser, error) {
+	return t.backend.OpenRange(ctx, t.objectKey(instanceHash), offset, expect)
 }
 
 // redirectURL returns a URL the client can fetch directly, or an error when
 // the backend cannot issue one.  Callers should check canRedirect first.
-func (t *tierTarget) redirectURL(ctx context.Context, instanceHash InstanceHash, expiry time.Duration) (string, error) {
+func (t *tierTarget) redirectURL(ctx context.Context, instanceHash InstanceHash, expiry time.Duration, expect *TierObjectInfo) (string, error) {
 	redirector, ok := t.backend.(TierRedirector)
 	if !ok {
 		return "", errors.Errorf("cache tier target %s cannot issue redirect URLs", t.DisplayURL())
 	}
-	return redirector.RedirectURL(ctx, t.objectKey(instanceHash), expiry)
+	return redirector.RedirectURL(ctx, t.objectKey(instanceHash), expiry, expect)
 }
 
 // listObjects walks the target in instance-hash order, skipping keys that are
@@ -279,10 +281,39 @@ type tierObjectStream struct {
 	// stream serving a client, the reader pin that keeps eviction from
 	// deleting the remote object mid-transfer.  Called once, by Close.
 	onClose func()
+
+	// expect is the copy of the object the cache uploaded, as recorded at
+	// tiering time; every request the stream makes is pinned to it.  Nil
+	// for objects tiered before that was recorded.
+	expect *TierObjectInfo
+	// onChanged is called, at most once, when the target reports that it
+	// no longer holds that copy -- the object was overwritten in the bucket.
+	onChanged func()
 }
 
 func newTierObjectStream(ctx context.Context, target *tierTarget, hash InstanceHash, size int64) *tierObjectStream {
 	return &tierObjectStream{ctx: ctx, target: target, hash: hash, size: size}
+}
+
+// open starts a request at the current position, pinned to the recorded copy.
+// Errors that reach a client -- through the response body or the
+// X-Transfer-Status trailer -- are generic, so proxy mode does not disclose
+// the backing store; the detail, which names it, is logged.
+func (s *tierObjectStream) open() (io.ReadCloser, error) {
+	body, err := s.target.openStream(s.ctx, s.hash, s.position, s.expect)
+	if err == nil {
+		return body, nil
+	}
+	if errors.Is(err, ErrTierObjectChanged) {
+		log.Warnf("Tiered object %s no longer matches the copy that was uploaded: %v", s.hash, err)
+		if s.onChanged != nil {
+			s.onChanged()
+			s.onChanged = nil
+		}
+		return nil, errors.Errorf("object %s changed on backing storage", s.hash)
+	}
+	log.Warnf("Failed to open a tier stream for %s: %v", s.hash, err)
+	return nil, errors.Errorf("failed to read object %s from backing storage", s.hash)
 }
 
 func (s *tierObjectStream) Read(p []byte) (int, error) {
@@ -294,14 +325,9 @@ func (s *tierObjectStream) Read(p []byte) (int, error) {
 			s.body.Close()
 			s.body = nil
 		}
-		body, err := s.target.openStream(s.ctx, s.hash, s.position)
+		body, err := s.open()
 		if err != nil {
-			// Read errors can surface to clients via the response body or
-			// the X-Transfer-Status trailer; log the detail (which names
-			// the backend) and return a generic error so proxy mode does
-			// not disclose the backing store.
-			log.Warnf("Failed to open a tier stream for %s: %v", s.hash, err)
-			return 0, errors.Errorf("failed to read object %s from backing storage", s.hash)
+			return 0, err
 		}
 		s.body = body
 		s.bodyOffset = s.position
@@ -320,10 +346,9 @@ func (s *tierObjectStream) Read(p []byte) (int, error) {
 		if n > 0 {
 			return n, nil
 		}
-		body, reopenErr := s.target.openStream(s.ctx, s.hash, s.position)
+		body, reopenErr := s.open()
 		if reopenErr != nil {
-			log.Warnf("Failed to reopen the tier stream for %s: %v", s.hash, reopenErr)
-			return 0, errors.Errorf("failed to read object %s from backing storage", s.hash)
+			return 0, reopenErr
 		}
 		s.body = body
 		s.bodyOffset = s.position

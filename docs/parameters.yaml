@@ -3378,14 +3378,22 @@ description: |+
   **Objects on a tiering target are protected differently from objects on local disk.**
   On disk the cache encrypts every block and authenticates it on read, so tampering
   and disclosure both require breaking the encryption.  A tiered object is stored as
-  plaintext, and the cache verifies only its size:
+  plaintext.  When it uploads an object, the cache records the copy the target
+  stored — its entity tag, size and, on a bucket with versioning enabled, its
+  version — and checks later reads against that record:
 
   - Anyone who can *read* the target can read every object tiered to it, including
     objects from namespaces that require a token through Pelican.
-  - Anyone who can *write* the target can replace an object's bytes with content of
-    the same length, and the cache will serve it — with the origin's ETag and
-    checksums attached — without detecting the substitution.  The periodic data-
-    integrity scan does not checksum tiered objects.
+  - Anyone who can *write* the target can replace an object's bytes.  Reads the
+    cache proxies are conditional on the recorded copy, so a replaced object is
+    refused and fetched from the origin again; the periodic data-integrity scan
+    compares each tiered object's entity tag and size with the record and drops
+    any that changed.  A client *redirected* to the target, however, reads the
+    object directly, and receives the replacement until the scan or a proxied read
+    notices it.  Enable versioning on the bucket to close that window: the cache
+    then signs the recorded version into each redirect, so clients receive the
+    bytes the cache uploaded even after an overwrite — provided the credential
+    that can overwrite objects cannot also delete old versions.
 
   Treat the target as part of the cache's trust boundary: give the cache a
   dedicated least-privilege credential, keep the bucket or container private (no

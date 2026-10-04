@@ -58,9 +58,9 @@ func (cc *ConsistencyChecker) tierScanLoop(ctx context.Context) error {
 //
 //   - objects in the bucket with no tiered metadata (and no in-flight
 //     upload intent) are orphans and deleted from the bucket;
-//   - tiered metadata whose remote object is missing (or whose size
-//     disagrees) is removed so the object is re-fetched from the origin on
-//     the next request.
+//   - tiered metadata whose remote object is missing (or no longer matches
+//     the copy that was uploaded) is removed so the object is re-fetched
+//     from the origin on the next request.
 //
 // Byte-level usage for tiering storage IDs is reconciled by the regular metadata
 // scan (usageDuringScan covers every metadata entry regardless of backend).
@@ -286,25 +286,14 @@ func (cc *ConsistencyChecker) scanTierTarget(ctx context.Context, sid StorageID,
 			continue
 		}
 		opCtx, cancel := context.WithTimeout(ctx, tierSweepOpTimeout)
-		exists, err := target.objectExists(opCtx, hash)
+		current, exists, err := target.objectInfo(opCtx, hash)
+		cancel()
 		if err != nil {
-			cancel()
 			log.Warnf("Failed to verify remote object %s before cleanup: %v", hash, err)
 			continue
 		}
-		if exists && meta.ContentLength == 0 {
-			cancel()
-			continue
-		}
-		if exists {
-			// Present after all — only remove when the size disagrees.
-			mismatch := cc.tierSizeMismatch(opCtx, target, hash, meta)
-			cancel()
-			if !mismatch {
-				continue
-			}
-		} else {
-			cancel()
+		if tierCopyMismatch(meta, current, exists) == "" {
+			continue // the listing was stale; the copy is present and unchanged
 		}
 		if err := cc.storage.Delete(hash); err != nil {
 			log.Warnf("Failed to delete orphaned DB entry %s for a tiered object: %v", hash, err)
@@ -327,14 +316,4 @@ func (cc *ConsistencyChecker) scanTierTarget(ctx context.Context, sid StorageID,
 	cc.stats.OrphanedDBEntries += int64(deletedDB)
 	cc.statsMu.Unlock()
 	return nil
-}
-
-// tierSizeMismatch re-checks an apparent size mismatch with a HeadObject
-// probe (the listing snapshot may be stale).
-func (cc *ConsistencyChecker) tierSizeMismatch(ctx context.Context, target *tierTarget, hash InstanceHash, meta *CacheMetadata) bool {
-	size, exists, err := target.objectSize(ctx, hash)
-	if err != nil || !exists {
-		return false
-	}
-	return size != meta.ContentLength
 }

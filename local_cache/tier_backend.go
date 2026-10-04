@@ -46,17 +46,23 @@ import (
 // Keys are supplied by the caller and are backend-agnostic; see
 // tierTarget.objectKey for the layout and why it is ordered.
 type TierBackend interface {
-	// Put stores size bytes read from body under key.  It reports an error
-	// if fewer than size bytes arrive, and makes a best effort to abort a
-	// partial write rather than commit a short object.
-	Put(ctx context.Context, key, contentType string, size int64, body io.Reader) error
+	// Put stores size bytes read from body under key, and reports the
+	// object as the backend then holds it.  It reports an error if fewer
+	// than size bytes arrive, or if the stored object is not size bytes
+	// long, and makes a best effort to abort a partial write rather than
+	// commit a short object.
+	Put(ctx context.Context, key, contentType string, size int64, body io.Reader) (TierObjectInfo, error)
 
-	// OpenRange returns a reader for the object starting at offset.
-	OpenRange(ctx context.Context, key string, offset int64) (io.ReadCloser, error)
+	// OpenRange returns a reader for the object starting at offset.  When
+	// expect is non-nil, the read is pinned to that copy of the object --
+	// by version where the backend keeps versions, otherwise by entity tag
+	// -- and fails with ErrTierObjectChanged if the backend no longer holds
+	// it.  A backend that can do neither ignores expect.
+	OpenRange(ctx context.Context, key string, offset int64, expect *TierObjectInfo) (io.ReadCloser, error)
 
-	// Stat reports an object's size.  A missing object is (0, false, nil),
-	// not an error.
-	Stat(ctx context.Context, key string) (size int64, exists bool, err error)
+	// Stat reports an object as the backend currently holds it.  A missing
+	// object is (TierObjectInfo{}, false, nil), not an error.
+	Stat(ctx context.Context, key string) (info TierObjectInfo, exists bool, err error)
 
 	// Delete removes an object.  Deleting a missing object is not an error.
 	Delete(ctx context.Context, key string) error
@@ -74,6 +80,33 @@ type TierBackend interface {
 	Close() error
 }
 
+// TierObjectInfo describes an object as a tiering target stored it.  The
+// cache records it when an object is tiered, and uses it to tell whether the
+// target still holds the same bytes.
+//
+// That matters because a tiered object is stored in plaintext and, unlike a
+// local block, is not authenticated when read back: without a record, a
+// same-length substitution in the bucket was undetectable.  Any write to an
+// object changes its entity tag, and where the bucket keeps versions, the
+// version identifier names the exact bytes uploaded -- so reads can be
+// pinned to them even after the key is overwritten.
+type TierObjectInfo struct {
+	Size int64 `msgpack:"s"`
+	// ETag is the backend's entity tag, opaque to the cache.  It is
+	// compared only for equality: for S3 it is an MD5 of the content for a
+	// simple upload but not for a multipart one, so it is not a checksum.
+	ETag string `msgpack:"e,omitempty"`
+	// Version is the backend's version identifier, set only where the
+	// target keeps versions (an S3 bucket with versioning enabled).
+	Version string `msgpack:"v,omitempty"`
+	// ModTime is when the backend says the object was written.
+	ModTime time.Time `msgpack:"m,omitempty"`
+}
+
+// ErrTierObjectChanged reports that a tiering target no longer holds the copy
+// of an object the cache uploaded -- it was overwritten or replaced.
+var ErrTierObjectChanged = errors.New("the tiering target no longer holds the copy of this object that was uploaded")
+
 // TierRedirector is implemented by backends that can hand a client a URL it
 // can fetch directly, carrying its own authorization.  This is the capability
 // that lets the cache redirect instead of proxying; a backend that cannot do
@@ -82,8 +115,10 @@ type TierBackend interface {
 type TierRedirector interface {
 	// RedirectURL returns a self-authenticating URL for a GET of key, valid
 	// for expiry.  The URL must not require the caller to present any
-	// Pelican credential.
-	RedirectURL(ctx context.Context, key string, expiry time.Duration) (string, error)
+	// Pelican credential.  When expect names a version, the URL should
+	// fetch that version, so a client sent there receives the bytes the
+	// cache uploaded even if the key has since been overwritten.
+	RedirectURL(ctx context.Context, key string, expiry time.Duration, expect *TierObjectInfo) (string, error)
 }
 
 // TierStaleUploadReaper is implemented by backends with a notion of an
@@ -191,7 +226,7 @@ func (b *blobTierBackend) Close() error { return b.bucket.Close() }
 
 // Put streams body to the bucket.  Multipart chunking, where the driver
 // supports it, is handled inside the writer.
-func (b *blobTierBackend) Put(ctx context.Context, key, contentType string, size int64, body io.Reader) error {
+func (b *blobTierBackend) Put(ctx context.Context, key, contentType string, size int64, body io.Reader) (TierObjectInfo, error) {
 	// Aborting a partially written object means cancelling the writer's
 	// context: blob.Writer has no explicit abort, and Close() on its own
 	// would commit whatever was written.
@@ -210,7 +245,7 @@ func (b *blobTierBackend) Put(ctx context.Context, key, contentType string, size
 
 	w, err := b.bucket.NewWriter(writeCtx, key, opts)
 	if err != nil {
-		return errors.Wrapf(err, "failed to open %s for write on cache tier target %s", key, b.display)
+		return TierObjectInfo{}, errors.Wrapf(err, "failed to open %s for write on cache tier target %s", key, b.display)
 	}
 	n, copyErr := io.Copy(w, body)
 	if copyErr == nil && n != size {
@@ -219,31 +254,70 @@ func (b *blobTierBackend) Put(ctx context.Context, key, contentType string, size
 	if copyErr != nil {
 		cancel()
 		_ = w.Close()
-		return errors.Wrapf(copyErr, "failed to upload %s to cache tier target %s", key, b.display)
+		return TierObjectInfo{}, errors.Wrapf(copyErr, "failed to upload %s to cache tier target %s", key, b.display)
 	}
 	if err := w.Close(); err != nil {
-		return errors.Wrapf(err, "failed to upload %s to cache tier target %s", key, b.display)
+		return TierObjectInfo{}, errors.Wrapf(err, "failed to upload %s to cache tier target %s", key, b.display)
 	}
-	return nil
+	// Read back what the backend actually stored.  This records the entity
+	// tag and version for later verification, and it is also the only
+	// end-to-end confirmation that the whole object landed: a writer that
+	// closed cleanly on a short object would otherwise go unnoticed.
+	info, exists, err := b.Stat(ctx, key)
+	if err != nil {
+		return TierObjectInfo{}, errors.Wrapf(err, "failed to confirm the upload of %s to cache tier target %s", key, b.display)
+	}
+	if !exists || info.Size != size {
+		return TierObjectInfo{}, errors.Errorf("upload of %s to cache tier target %s stored %d bytes; expected %d",
+			key, b.display, info.Size, size)
+	}
+	return info, nil
 }
 
-func (b *blobTierBackend) OpenRange(ctx context.Context, key string, offset int64) (io.ReadCloser, error) {
-	r, err := b.bucket.NewRangeReader(ctx, key, offset, -1, nil)
+func (b *blobTierBackend) OpenRange(ctx context.Context, key string, offset int64, expect *TierObjectInfo) (io.ReadCloser, error) {
+	var opts *blob.ReaderOptions
+	if expect != nil && (expect.Version != "" || expect.ETag != "") {
+		opts = &blob.ReaderOptions{BeforeRead: func(as func(any) bool) error {
+			var in *s3.GetObjectInput
+			if !as(&in) {
+				return nil // not S3: no way to pin the read
+			}
+			// A version names the exact bytes uploaded and survives the key
+			// being overwritten; an entity tag can only detect that it was.
+			if expect.Version != "" {
+				in.VersionId = &expect.Version
+			} else {
+				in.IfMatch = &expect.ETag
+			}
+			return nil
+		}}
+	}
+	r, err := b.bucket.NewRangeReader(ctx, key, offset, -1, opts)
 	if err != nil {
+		if gcerrors.Code(err) == gcerrors.FailedPrecondition {
+			return nil, errors.Wrapf(ErrTierObjectChanged, "%s on cache tier target %s", key, b.display)
+		}
 		return nil, errors.Wrapf(err, "failed to open %s on cache tier target %s", key, b.display)
 	}
 	return r, nil
 }
 
-func (b *blobTierBackend) Stat(ctx context.Context, key string) (int64, bool, error) {
+func (b *blobTierBackend) Stat(ctx context.Context, key string) (TierObjectInfo, bool, error) {
 	attrs, err := b.bucket.Attributes(ctx, key)
 	if err != nil {
 		if blobstore.IsNotFound(err) {
-			return 0, false, nil
+			return TierObjectInfo{}, false, nil
 		}
-		return 0, false, errors.Wrapf(err, "failed to stat %s on cache tier target %s", key, b.display)
+		return TierObjectInfo{}, false, errors.Wrapf(err, "failed to stat %s on cache tier target %s", key, b.display)
 	}
-	return attrs.Size, true, nil
+	info := TierObjectInfo{Size: attrs.Size, ETag: attrs.ETag, ModTime: attrs.ModTime}
+	var head s3.HeadObjectOutput
+	if attrs.As(&head) && head.VersionId != nil && *head.VersionId != "null" {
+		// S3 reports "null" for an object written while versioning was
+		// off, which names no version a read could be pinned to.
+		info.Version = *head.VersionId
+	}
+	return info, true, nil
 }
 
 func (b *blobTierBackend) Delete(ctx context.Context, key string) error {
@@ -279,8 +353,22 @@ func (b *blobTierBackend) List(ctx context.Context, fn func(key string, size int
 // RedirectURL returns a pre-signed URL.  Drivers that cannot sign report
 // gcerrors.Unimplemented, which tierTarget turns into "this backend cannot
 // redirect" at startup.
-func (b *blobTierBackend) RedirectURL(ctx context.Context, key string, expiry time.Duration) (string, error) {
-	url, err := b.bucket.SignedURL(ctx, key, &blob.SignedURLOptions{Expiry: expiry})
+func (b *blobTierBackend) RedirectURL(ctx context.Context, key string, expiry time.Duration, expect *TierObjectInfo) (string, error) {
+	opts := &blob.SignedURLOptions{Expiry: expiry}
+	if expect != nil && expect.Version != "" {
+		// The version is part of the signed URL, so a client sent there
+		// gets the bytes the cache uploaded even if the key was overwritten.
+		// (An entity tag cannot be pinned this way: If-Match would be a
+		// header the client has to send, and clients do not.)
+		opts.BeforeSign = func(as func(any) bool) error {
+			var in *s3.GetObjectInput
+			if as(&in) {
+				in.VersionId = &expect.Version
+			}
+			return nil
+		}
+	}
+	url, err := b.bucket.SignedURL(ctx, key, opts)
 	if err != nil {
 		return "", errors.Wrapf(err, "failed to sign a URL for %s on cache tier target %s", key, b.display)
 	}

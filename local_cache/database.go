@@ -2133,7 +2133,7 @@ func (cdb *CacheDB) redirectHeldInTxn(txn *badger.Txn, instanceHash InstanceHash
 // The caller is responsible for moving the object *data* and for adjusting
 // usage counters after the transaction commits (AddUsage cannot run inside
 // a transaction).  Returns the pre-relocation metadata.
-func (cdb *CacheDB) RelocateObject(instanceHash InstanceHash, newStorageID StorageID) (*CacheMetadata, error) {
+func (cdb *CacheDB) RelocateObject(instanceHash InstanceHash, newStorageID StorageID, remote *TierObjectInfo) (*CacheMetadata, error) {
 	if err := cdb.checkWritable(); err != nil {
 		return nil, err
 	}
@@ -2175,6 +2175,9 @@ func (cdb *CacheDB) RelocateObject(instanceHash InstanceHash, newStorageID Stora
 
 		updated := prev
 		updated.StorageID = newStorageID
+		// Recorded atomically with the move, so metadata that names the
+		// target always says which copy of the object it means.
+		updated.Remote = remote
 		// The bucket holds one contiguous blob; drop the chunk layout so the
 		// object is a plain single-storage object on the tiering target.
 		updated.ChunkSizeCode = ChunkingDisabled

@@ -489,6 +489,12 @@ type CacheMetadata struct {
 
 	// LRU tracking
 	LastAccessTime time.Time `msgpack:"la"` // Last access time for LRU index
+
+	// Remote describes the copy a tiering target holds, as the target
+	// reported it at upload: its entity tag, version and size.  Nil for an
+	// object that is not tiered.  Reads are pinned to it and the integrity
+	// scan checks the target against it; see TierObjectInfo.
+	Remote *TierObjectInfo `msgpack:"rmt,omitempty"`
 }
 
 // IsInline returns true when the object data is stored directly in BadgerDB.

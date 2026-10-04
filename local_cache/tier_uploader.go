@@ -395,7 +395,7 @@ func (u *tierUploader) processObject(ctx context.Context, instanceHash InstanceH
 		abandon()
 		return errors.Wrap(err, "failed to open object for upload")
 	}
-	uploadErr := target.uploadObject(ctx, instanceHash, meta.ContentType, meta.ContentLength, reader)
+	remote, uploadErr := target.uploadObject(ctx, instanceHash, meta.ContentType, meta.ContentLength, reader)
 	reader.Close()
 	if uploadErr != nil {
 		abandon()
@@ -406,7 +406,7 @@ func (u *tierUploader) processObject(ctx context.Context, instanceHash InstanceH
 	// writers (LRU updates, checksum merges).
 	var prev *CacheMetadata
 	for attempt := 0; ; attempt++ {
-		prev, err = u.db.RelocateObject(instanceHash, target.id)
+		prev, err = u.db.RelocateObject(instanceHash, target.id, &remote)
 		if err == nil {
 			break
 		}

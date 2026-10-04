@@ -1460,9 +1460,7 @@ func (pc *PersistentCache) GetRange(ctx context.Context, objectPath, token, rang
 		// Objects tiered to a tiering target stream directly from the
 		// bucket (optionally limited to the requested range).
 		if target := pc.storage.getTierTarget(res.meta.StorageID); target != nil {
-			stream := newTierObjectStream(ctx, target, res.instanceHash, res.meta.ContentLength)
-			// Pinned for the life of the stream; see newTierSeekableReader.
-			stream.onClose = pc.storage.PinObject(res.instanceHash)
+			stream := pc.openTierStream(ctx, target, res)
 			if rangeHeader != "" {
 				ranges, err := ParseRangeHeader(rangeHeader, res.meta.ContentLength)
 				if err != nil {

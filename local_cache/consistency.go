@@ -1394,11 +1394,12 @@ func (cc *ConsistencyChecker) verifyObjectChecksum(
 	bytesLimiter *rate.Limiter,
 	checksumMismatches, inconsistentBytes, bytesVerified, objectsVerified *int64,
 ) error {
-	// Objects resident on a tiering target have no local data to read back.
-	// The bucket provides its own at-rest durability; the tiering sweep
-	// cross-checks existence and size against metadata instead.
+	// Objects resident on a tiering target have no local data to read back,
+	// and reading the remote copy back in full would cost a download per
+	// object per scan.  Check it against what was recorded when it was
+	// tiered instead.
 	if cc.storage.IsTiered(meta.StorageID) {
-		return errChecksumSkipped
+		return cc.verifyTieredObject(ctx, instanceHash, meta, checksumMismatches, inconsistentBytes, objectsVerified)
 	}
 
 	// For disk storage, check if complete before attempting any checksumming
@@ -1485,6 +1486,68 @@ func (cc *ConsistencyChecker) verifyObjectChecksum(
 	cc.markDataVerified(instanceHash)
 	*objectsVerified++
 	return nil
+}
+
+// verifyTieredObject checks that a tiering target still holds the copy of an
+// object the cache uploaded, treating a mismatch like local corruption: it is
+// counted, and the entry dropped so the object is fetched from the origin
+// again.  A tiered object is stored in plaintext and is not authenticated on
+// read, so before this a same-length substitution in the bucket went
+// undetected; any overwrite changes the object's entity tag.
+//
+// An object whose key was overwritten is dropped even when the bucket keeps
+// versions and reads are pinned to the original -- which would still serve
+// the right bytes -- because a write the cache did not make is a sign of
+// tampering worth surfacing, and re-fetching costs only bandwidth.
+//
+// A failure to reach the target is returned as an error, which the scan logs
+// without counting it as corruption.
+func (cc *ConsistencyChecker) verifyTieredObject(ctx context.Context, instanceHash InstanceHash, meta *CacheMetadata,
+	checksumMismatches, inconsistentBytes, objectsVerified *int64) error {
+	target := cc.storage.getTierTarget(meta.StorageID)
+	if target == nil {
+		return errChecksumSkipped
+	}
+	probeCtx, cancel := context.WithTimeout(ctx, tierSweepOpTimeout)
+	defer cancel()
+	current, exists, err := target.objectInfo(probeCtx, instanceHash)
+	if err != nil {
+		return errors.Wrap(err, "failed to check the tiered copy")
+	}
+	reason := tierCopyMismatch(meta, current, exists)
+	if reason == "" {
+		*objectsVerified++
+		return nil
+	}
+
+	log.Warnf("Tiered object %s does not match the copy that was uploaded: %s", instanceHash, reason)
+	*checksumMismatches++
+	*inconsistentBytes += meta.ContentLength
+	if cc.preserveCorruptObjects {
+		log.Errorf("Tiered object %s no longer matches its uploaded copy (%s). It has been LEFT IN PLACE "+
+			"because this store holds the only copy; it cannot be re-fetched.", instanceHash, reason)
+		return nil
+	}
+	if err := cc.storage.Delete(instanceHash); err != nil {
+		log.Warnf("Failed to drop mismatched tiered object %s: %v", instanceHash, err)
+	}
+	return nil
+}
+
+// tierCopyMismatch explains how a target's current copy of an object differs
+// from the one recorded when it was tiered, or returns "" if it does not.
+// Objects tiered before entity tags were recorded are checked by size alone.
+func tierCopyMismatch(meta *CacheMetadata, current TierObjectInfo, exists bool) string {
+	if !exists {
+		return "it is missing from its tiering target"
+	}
+	if current.Size != meta.ContentLength {
+		return fmt.Sprintf("the target holds %d bytes; expected %d", current.Size, meta.ContentLength)
+	}
+	if meta.Remote != nil && meta.Remote.ETag != "" && current.ETag != meta.Remote.ETag {
+		return fmt.Sprintf("its entity tag changed from %s to %s, so it was overwritten", meta.Remote.ETag, current.ETag)
+	}
+	return ""
 }
 
 // markDataVerified records that an object's on-disk data has just been read
@@ -1640,11 +1703,11 @@ func (cc *ConsistencyChecker) VerifyObject(instanceHash InstanceHash) (bool, err
 	if target := cc.storage.getTierTarget(meta.StorageID); target != nil {
 		probeCtx, cancel := context.WithTimeout(context.Background(), tierSweepOpTimeout)
 		defer cancel()
-		size, exists, err := target.objectSize(probeCtx, instanceHash)
+		current, exists, err := target.objectInfo(probeCtx, instanceHash)
 		if err != nil {
 			return false, err
 		}
-		return exists && size == meta.ContentLength, nil
+		return tierCopyMismatch(meta, current, exists) == "", nil
 	}
 
 	// For disk storage, check that all ALLOCATED chunk files exist and object is complete

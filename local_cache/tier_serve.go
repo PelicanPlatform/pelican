@@ -35,18 +35,40 @@ import (
 	"github.com/pelicanplatform/pelican/token_scopes"
 )
 
-// newTierSeekableReader builds a SeekableReader that proxies a tiered
-// object through the cache (used when redirect is disabled, or by internal
-// callers such as the data-integrity scan).
+// openTierStream opens a stream over a tiered object for the cache to proxy.
 //
 // The object is pinned for the life of the stream.  A proxied object gets no
 // redirect-hold stamp -- no URL was handed out -- so the pin is its only protection:
 // without it, eviction could delete the remote object between two of this
-// reader's ranged GETs, which is exactly the configuration operators are
+// stream's ranged GETs, which is exactly the configuration operators are
 // pointed at for private namespaces.
-func (pc *PersistentCache) newTierSeekableReader(ctx context.Context, target *tierTarget, res *objectResolution) *SeekableReader {
+//
+// The stream reads only the copy the cache uploaded.  If the target no longer
+// holds it -- the object was overwritten in the bucket -- the read fails, and
+// dropping the entry lets the next request fetch the object from the origin
+// again rather than fail the same way until the integrity scan notices.  The
+// bucket object goes with it, since it is not ours.
+func (pc *PersistentCache) openTierStream(ctx context.Context, target *tierTarget, res *objectResolution) *tierObjectStream {
 	stream := newTierObjectStream(ctx, target, res.instanceHash, res.meta.ContentLength)
 	stream.onClose = pc.storage.PinObject(res.instanceHash)
+	stream.expect = res.meta.Remote
+	hash := res.instanceHash
+	stream.onChanged = func() {
+		pc.egrp.Go(func() error {
+			if err := pc.storage.Delete(hash); err != nil {
+				log.Warnf("Failed to drop tiered object %s after it changed on its target: %v", hash, err)
+			}
+			return nil
+		})
+	}
+	return stream
+}
+
+// newTierSeekableReader builds a SeekableReader that proxies a tiered
+// object through the cache (used when redirect is disabled, or by internal
+// callers such as the data-integrity scan).
+func (pc *PersistentCache) newTierSeekableReader(ctx context.Context, target *tierTarget, res *objectResolution) *SeekableReader {
+	stream := pc.openTierStream(ctx, target, res)
 	return &SeekableReader{RangeReader: &RangeReader{
 		storage:      pc.storage,
 		instanceHash: res.instanceHash,
@@ -252,7 +274,7 @@ func (pc *PersistentCache) tryTierRedirect(w http.ResponseWriter, r *http.Reques
 		}
 	}
 
-	targetURL, err := target.redirectURL(r.Context(), instanceHash, tierRedirectExpiry())
+	targetURL, err := target.redirectURL(r.Context(), instanceHash, tierRedirectExpiry(), meta.Remote)
 	if err != nil {
 		reqLog.WithError(err).Warn("Failed to build a redirect URL for the tier target; falling back to proxying")
 		return false

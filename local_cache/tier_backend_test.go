@@ -153,7 +153,7 @@ func TestTierOnNonRedirectingBackend(t *testing.T) {
 
 	// Asking for a redirect URL fails loudly rather than returning a URL the
 	// client could not use.
-	_, err = env.target.redirectURL(ctx, hash, time.Minute)
+	_, err = env.target.redirectURL(ctx, hash, time.Minute, nil)
 	assert.Error(t, err, "a backend that cannot sign must not return a URL")
 
 	// The listing the consistency sweep relies on sees exactly the object
