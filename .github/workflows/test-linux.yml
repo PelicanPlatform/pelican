@@ -47,6 +47,7 @@ jobs:
       # to run the full test suite.
 
       - name: Free disk space
+        background: true
         run: |
           echo "::group::Before"
           df -h
@@ -270,8 +271,8 @@ jobs:
             publish "server-specific code" summary-server.md
           } >> "$GITHUB_STEP_SUMMARY"
 
-      # Report a failure in the background step above. If an earlier step
+      # Report a failure in the background steps above. If an earlier step
       # failed, this step is skipped, and the runner reports the failure at
       # the end of the job instead.
-      - name: Wait for the end-to-end tests
+      - name: Wait for the background steps
         wait-all:
