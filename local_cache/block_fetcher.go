@@ -541,9 +541,21 @@ func (bf *BlockFetcherV2) doFetch(ctx context.Context, op *fetchOperation, key f
 
 	// Build transfer options with a byte range so we only download the
 	// blocks we actually need instead of the entire object.
+	//
+	// The range has to come from the version of the object being filled.
+	// The origin may have replaced the object since it was first fetched,
+	// and splicing the new version's bytes into the old one's blocks would
+	// serve a mix of the two as one object.  The engine refuses, on every
+	// attempt and before writing any of its body, a response carrying
+	// another entity tag.  This needs an origin that sends entity tags: an
+	// XRootD-backed origin (XrdHttp) sends none, so its objects have no
+	// tag to hold a range to, and a replaced object is spliced as before.
 	opts := []client.TransferOption{
 		client.WithWriter(writer),
 		client.WithByteRange(startOffset, endOffset),
+	}
+	if bf.meta.ETag != "" {
+		opts = append(opts, client.WithExpectedETag(bf.meta.ETag))
 	}
 	if bf.token != "" {
 		opts = append(opts, client.WithToken(bf.token))
@@ -568,6 +580,23 @@ func (bf *BlockFetcherV2) doFetch(ctx context.Context, op *fetchOperation, key f
 	}
 
 	bf.awaitTransfer(ctx, op, bf.tc.Results(), tj.ID(), writer, prefetchMode, nil)
+	bf.dropIfVersionChanged(op.err)
+}
+
+// dropIfVersionChanged removes the cached instance when a fetch found the
+// origin serving a different version of it (err is the fetch's result).
+// Nothing more of this instance can be fetched, so it can never be
+// completed; dropping it (and the latest-version pointer to it) makes the
+// next request fetch the current version.
+func (bf *BlockFetcherV2) dropIfVersionChanged(err error) {
+	if err == nil || !errors.Is(err, client.ErrObjectVersionChanged) {
+		return
+	}
+	log.Warnf("The origin no longer serves the version of %s being cached (%v); dropping the cached copy so it is fetched again",
+		bf.originURL, err)
+	if err := bf.storage.Delete(bf.instanceHash); err != nil {
+		log.Warnf("Failed to drop %s after its origin changed: %v", bf.instanceHash, err)
+	}
 }
 
 // awaitTransfer drives an in-flight transfer to completion.
