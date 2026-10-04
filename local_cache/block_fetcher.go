@@ -521,11 +521,13 @@ func (bf *BlockFetcherV2) doFetch(ctx context.Context, op *fetchOperation, key f
 		lastRateUpdate: time.Now(),
 		lastFlush:      time.Now(),
 	}
-	// writer.Close is called by awaitTransfer
+	// writer is closed (or aborted) by awaitTransfer once the transfer is
+	// under way; until then every early return aborts it.
 
 	// Parse the origin URL and set up the transfer
 	sourceURL, err := url.Parse(bf.originURL)
 	if err != nil {
+		writer.Abort()
 		op.err = errors.Wrap(err, "invalid source URL")
 		bf.notifyAllChunks(op)
 		return
@@ -552,12 +554,14 @@ func (bf *BlockFetcherV2) doFetch(ctx context.Context, op *fetchOperation, key f
 
 	tj, err := bf.tc.NewTransferJob(ctx, sourceURL, "", false, false, opts...)
 	if err != nil {
+		writer.Abort()
 		op.err = errors.Wrap(err, "failed to create transfer job")
 		bf.notifyAllChunks(op)
 		return
 	}
 
 	if err := bf.tc.Submit(tj); err != nil {
+		writer.Abort()
 		op.err = errors.Wrap(err, "failed to submit transfer job")
 		bf.notifyAllChunks(op)
 		return
@@ -580,7 +584,19 @@ func (bf *BlockFetcherV2) awaitTransfer(
 	prefetchMode bool,
 	onDone func(),
 ) {
-	defer writer.Close()
+	// Only a transfer that finished cleanly may close the writer; on any
+	// other way out the body stopped somewhere arbitrary, possibly
+	// mid-block, and the writer must discard what it has not completed.
+	succeeded := false
+	defer func() {
+		if succeeded {
+			if err := writer.Close(); err != nil {
+				log.Warnf("Failed to finish writing blocks of %s: %v", bf.instanceHash, err)
+			}
+		} else {
+			writer.Abort()
+		}
+	}()
 
 	idleTicker := time.NewTicker(2 * time.Second)
 	defer idleTicker.Stop()
@@ -595,8 +611,11 @@ func (bf *BlockFetcherV2) awaitTransfer(
 			if result.ID() == jobID {
 				if result.Error != nil {
 					op.err = result.Error
-				} else if onDone != nil {
-					onDone()
+				} else {
+					succeeded = true
+					if onDone != nil {
+						onDone()
+					}
 				}
 				// Notify all remaining waiters (both success and error)
 				bf.notifyAllChunks(op)
@@ -718,8 +737,14 @@ func (bf *BlockFetcherV2) AdoptTransfer(
 			tc.Close()
 			// Now safe to close the adapter → closes the underlying
 			// *BlockWriter → fires onComplete if all blocks are
-			// downloaded.
-			adapter.Close()
+			// downloaded.  A transfer that failed, timed out or was
+			// cancelled stopped at an arbitrary byte, so its writer is
+			// aborted instead: see BlockWriter.Abort.
+			if aborter, ok := adapter.(interface{ Abort() }); ok && op.err != nil {
+				aborter.Abort()
+			} else {
+				adapter.Close()
+			}
 			if onExit != nil {
 				onExit(op.err)
 			}
@@ -731,7 +756,16 @@ func (bf *BlockFetcherV2) AdoptTransfer(
 		for {
 			select {
 			case result := <-resultChan:
-				if result != nil && result.Error != nil {
+				switch {
+				case result == nil:
+					// The transfer client shut down without reporting this
+					// job -- performDownload forwards that as nil.  Nothing
+					// says the body arrived whole, so it is a failure, not a
+					// success: closing the writer would finalize an object
+					// of unknown size wherever its input stopped.
+					op.err = errAdoptedTransferUnreported
+					log.Warnf("Adopted transfer for %s ended without a result", bf.instanceHash)
+				case result.Error != nil:
 					op.err = result.Error
 					log.Warnf("Adopted transfer failed for %s: %v", bf.instanceHash, result.Error)
 				}
@@ -789,6 +823,10 @@ func (bf *BlockFetcherV2) AdoptTransfer(
 
 	return op
 }
+
+// errAdoptedTransferUnreported is an adopted transfer's error when the
+// transfer client went away without reporting the job's result.
+var errAdoptedTransferUnreported = errors.New("the transfer ended without reporting a result")
 
 // notifyAllChunks closes all chunk notification channels (for both success and error cases)
 // Using close() is safe - multiple closes are handled, and receivers see the close immediately
@@ -903,6 +941,23 @@ func (w *blockWriter) Write(p []byte) (n int, err error) {
 
 func (w *blockWriter) Close() error {
 	return w.inner.Close()
+}
+
+// Abort closes the writer after a failed or cancelled transfer; see
+// BlockWriter.Abort.
+func (w *blockWriter) Abort() {
+	w.inner.Abort()
+}
+
+// CloseWithError is how the transfer engine closes the writer when a
+// transfer ends -- before BlockFetcherV2 sees the result -- with the
+// transfer's error, or nil on success.
+func (w *blockWriter) CloseWithError(err error) error {
+	if err != nil {
+		w.Abort()
+		return nil
+	}
+	return w.Close()
 }
 
 // CreateFetchCallback returns a callback function for the RangeReader

@@ -2468,12 +2468,13 @@ func (pc *PersistentCache) performDownload(ctx context.Context, dl *persistentDo
 				dl.completionErr.Store(err)
 				// The download finished but failed verification (e.g. the
 				// origin's reported digest doesn't match the bytes we
-				// received).  By the time we get here, BlockWriter.Close has
-				// already fired onComplete -- which unconditionally marked
-				// the instance Completed and stored the latest-ETag mapping.
-				// Tear that down now so the poisoned object is not served as
-				// a cache hit to future requests; the next request will miss
-				// and re-fetch from the origin.
+				// received), or the transfer failed or was cancelled.  The
+				// writer was aborted rather than closed, but blocks written
+				// before the failure -- and the latest-ETag mapping stored
+				// eagerly above -- remain.  Tear that down now so the
+				// poisoned object is not served as a cache hit to future
+				// requests; the next request will miss and re-fetch from the
+				// origin.
 				if delErr := pc.storage.Delete(dl.instanceHash); delErr != nil {
 					log.Warnf("Failed to evict failed-verification instance %s: %v",
 						dl.instanceHash, delErr)
@@ -2607,6 +2608,32 @@ func (w *decisionWriter) Close() error {
 	}
 	if w.pipeMode && w.pipeWriter != nil {
 		return w.pipeWriter.Close()
+	}
+	return nil
+}
+
+// CloseWithError is how the transfer engine closes a writer when a transfer
+// ends (see the client's WithWriter): with the transfer's error, or nil on
+// success.  A failed transfer stopped at an arbitrary byte, so the disk
+// writer is aborted rather than closed (see BlockWriter.Abort), and a
+// no-store stream's reader is handed the error rather than a clean EOF that
+// would make a truncated body look complete.
+func (w *decisionWriter) CloseWithError(err error) error {
+	if err == nil {
+		return w.Close()
+	}
+	w.mu.Lock()
+	defer w.mu.Unlock()
+
+	if w.diskMode && w.blockWriter != nil {
+		if aborter, ok := w.blockWriter.(interface{ Abort() }); ok {
+			aborter.Abort()
+			return nil
+		}
+		return w.blockWriter.Close()
+	}
+	if w.pipeMode && w.pipeWriter != nil {
+		return w.pipeWriter.CloseWithError(err)
 	}
 	return nil
 }

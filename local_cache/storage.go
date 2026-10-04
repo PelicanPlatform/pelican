@@ -2787,13 +2787,24 @@ func (bw *BlockWriter) Close() error {
 		bw.sm.diskCrypto.Delete(bw.instanceHash)
 	}
 
-	// Write any remaining partial block (last block of file).
-	// For unknown-size transfers the updated ContentLength ensures
-	// MarkBlocksDownloaded adds exactly the right usage for this block.
+	// Write any remaining partial block -- but only if it is the object's
+	// final block, complete.  Anything else means the input stopped
+	// mid-block (a failed or cancelled transfer whose caller closed rather
+	// than aborted), and writing the fragment would mark a short,
+	// mis-encrypted block present: every read of it fails authentication,
+	// and anything resuming the fill skips it as done.  For unknown-size
+	// transfers the updated ContentLength makes the buffer the final block
+	// by definition, and ensures MarkBlocksDownloaded adds exactly the right
+	// usage for it.
 	if len(bw.buffer) > 0 {
-		if err := bw.writeCurrentBlock(); err != nil {
-			bw.file.Release()
-			return errors.Wrap(err, "failed to write final block")
+		if bw.bufferIsFinalBlock() {
+			if err := bw.writeCurrentBlock(); err != nil {
+				bw.file.Release()
+				return errors.Wrap(err, "failed to write final block")
+			}
+		} else {
+			log.Debugf("Discarding a partial block %d of %s: the input ended mid-block", bw.currentBlock, bw.instanceHash)
+			bw.buffer = bw.buffer[:0]
 		}
 	}
 
@@ -2855,6 +2866,38 @@ func (bw *BlockWriter) Close() error {
 	}
 
 	return nil
+}
+
+// bufferIsFinalBlock reports whether the buffered partial block is the
+// object's last block, exactly as long as that block should be.
+func (bw *BlockWriter) bufferIsFinalBlock() bool {
+	if bw.meta.ContentLength < 0 {
+		return true // unknown size: Close decides where the object ends
+	}
+	if bw.totalBlocks == 0 || bw.currentBlock != bw.totalBlocks-1 {
+		return false
+	}
+	return int64(len(bw.buffer)) == bw.meta.ContentLength-int64(bw.currentBlock)*BlockDataSize
+}
+
+// Abort closes the writer after a failed or cancelled transfer.  The whole
+// blocks already written are kept -- they are complete and correct, and
+// anything resuming the fill skips them -- but a partial block in the
+// buffer is discarded, and an object of unknown size is not finalized at the
+// point the input happened to stop.  Every error path must use Abort rather
+// than Close.  Safe to call more than once, and after Close.
+func (bw *BlockWriter) Abort() {
+	bw.mu.Lock()
+	defer bw.mu.Unlock()
+	if bw.closed {
+		return
+	}
+	bw.closed = true
+	bw.buffer = bw.buffer[:0]
+	if err := bw.flushWriteBatch(); err != nil {
+		log.Warnf("Failed to flush the whole blocks of %s while aborting a write: %v", bw.instanceHash, err)
+	}
+	bw.file.Release()
 }
 
 // Flush writes any accumulated batch of encrypted blocks to disk and
