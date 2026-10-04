@@ -47,6 +47,25 @@ func TestLoggingFilter(t *testing.T) {
 	assert.Equal(t, `time="0001-01-01T00:00:00Z" level=panic msg="240229 14:13:55 18544 XrdPfc_Cache: info Attach() pelican://u221@itb-osdf-director-origins.dev.osgdev.chtc.io:443//ospool/ap20/data/dvp2/singularity_repos/iebe-music_dev.sif?&authz=Bearer%20eyJ0eXAiOiJKV1QiLCJhbGciOiJFUzI1NiIsImtpZCI6IjhiNjkifQ.eyJzdWIiOiJkdnAyIiwic2NvcGUiOiJyZWFkOi9kYXRhL2R2cDIgd3JpdGU6L2RhdGEvZHZwMiIsInZlciI6InNjaXRva2VuczoyLjAiLCJhdWQiOlsiQU5ZIl0sImlzcyI6Imh0dHBzOi8vYXAyMC51Yy5vc2ctaHRjLm9yZzoxMDk0L29zcG9vbC9hcDIwIiwiZXhwIjoxNzA5MjM4MTk3LCJpYXQiOjE3MDkyMzY5OTcsIm5iZiI6MTcwOTIzNjk5NywianRpIjoiNGNhNGM0NmItZDBiNy00YTFhLTk4NmYtYzk0Mjc1MzAzNDc3In0.REDACTED"`+"\n", result.String())
 }
 
+// TestLoggingFilterMacaroon: a dCache macaroon is not a JWT, but it is just
+// as much a credential when a URL carrying one as ?authz= is logged -- for
+// instance in the error from a client following a cache's redirect.
+func TestLoggingFilterMacaroon(t *testing.T) {
+	logger := log.New()
+	logger.SetFormatter(&log.TextFormatter{DisableColors: true})
+	entry := log.NewEntry(logger)
+	entry.Message = `Get "https://dcache.example.org:2880/data/aa/bb/obj?authz=MDAxY2xvY2F0aW9uIE9wdGlvbmFsLmVtcHR5CjAwMThpZGVudGlmaWVy": EOF`
+	entry.Data = log.Fields{"url": "https://dcache.example.org/data/obj?authz=MDAxY2xvY2F0aW9uIE9wdGlvbmFsLmVtcHR5Cg&x=1"}
+	transform := globalTransform
+	result := &bytes.Buffer{}
+	testHook := &writer.Hook{Writer: &syncWriter{writer: result}}
+	transform.hook.Store(testHook)
+	assert.NoError(t, transform.Fire(entry))
+	assert.NotContains(t, result.String(), "MDAxY2xvY2F0aW9u")
+	assert.Contains(t, result.String(), "obj?authz=REDACTED")
+	assert.Contains(t, result.String(), "authz=REDACTED&x=1")
+}
+
 // TestSetLoggingRevertWithGlobalFilters verifies that calling SetLogging to lower
 // the log level (e.g. reverting a temporary trace change back to error) actually
 // suppresses messages that exceed the new level.
