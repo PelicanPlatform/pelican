@@ -471,20 +471,9 @@ func (cc *ConsistencyChecker) RunMetadataScan(ctx context.Context, progressCh ch
 
 				// Parse the filename to extract base hash and any chunk index
 				// Files can be: <64-hex-hash> (chunk 0) or <64-hex-hash>-N (chunk N-1)
-				baseHash, chunkIndex, ok := ParseChunkFilename(hash)
+				instanceHash, chunkIndex, ok := ParseChunkFilename(hash)
 				if !ok {
-					return nil
-				}
-				instanceHash := baseHash
-
-				// Validate instance hash format: must be 64 hex characters (SHA256)
-				if len(instanceHash) != 64 {
-					return nil
-				}
-				for _, c := range instanceHash {
-					if !((c >= '0' && c <= '9') || (c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F')) {
-						return nil
-					}
+					return nil // not a cache object
 				}
 
 				info, err := d.Info()

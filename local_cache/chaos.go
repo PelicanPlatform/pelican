@@ -74,7 +74,11 @@ type ChaosResult struct {
 func (ci *ChaosInjector) resolveInstanceHash(objectURL, etag, instanceHash string) (InstanceHash, *CacheMetadata, error) {
 	var hash InstanceHash
 	if instanceHash != "" {
-		hash = InstanceHash(instanceHash)
+		parsed, err := ParseInstanceHash(instanceHash)
+		if err != nil {
+			return "", nil, err
+		}
+		hash = parsed
 	} else {
 		normalized := NormalizePelicanURL(objectURL)
 		if normalized == "" {

@@ -149,16 +149,11 @@ func (t *tierTarget) hashFromKey(key string) InstanceHash {
 	if len(parts) != 3 || len(parts[0]) != 2 || len(parts[1]) != 2 {
 		return ""
 	}
-	hash := parts[0] + parts[1] + parts[2]
-	if len(hash) != 64 {
+	hash, err := ParseInstanceHash(parts[0] + parts[1] + parts[2])
+	if err != nil {
 		return ""
 	}
-	for _, c := range hash {
-		if !(c >= '0' && c <= '9' || c >= 'a' && c <= 'f') {
-			return ""
-		}
-	}
-	return InstanceHash(hash)
+	return hash
 }
 
 // resolveIdentity reads the identity UUID from the target.  fresh reports

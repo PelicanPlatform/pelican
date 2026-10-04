@@ -1808,7 +1808,11 @@ func (pc *PersistentCache) introspectMetadataHandler(c *gin.Context) {
 		instanceHashStr = string(pc.db.InstanceHash(etag, objectHash))
 	}
 
-	hash := InstanceHash(instanceHashStr)
+	hash, err := ParseInstanceHash(instanceHashStr)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
 	meta, err := pc.storage.GetMetadata(hash)
 	if err != nil || meta == nil {
 		c.JSON(http.StatusNotFound, gin.H{"error": "object instance not found"})
@@ -1914,7 +1918,11 @@ func (pc *PersistentCache) introspectVerifyHandler(c *gin.Context) {
 		instanceHashStr = string(pc.db.InstanceHash(etag, objectHash))
 	}
 
-	hash := InstanceHash(instanceHashStr)
+	hash, err := ParseInstanceHash(instanceHashStr)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
 	meta, err := pc.storage.GetMetadata(hash)
 	if err != nil || meta == nil {
 		c.JSON(http.StatusNotFound, gin.H{"error": "object instance not found"})

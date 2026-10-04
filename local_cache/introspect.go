@@ -305,7 +305,10 @@ func (api *IntrospectAPIOpen) ListObjectInstances(objectURL string) ([]ObjectIns
 // The instanceHash can be obtained from ListObjectInstances.
 // Alternatively, pass objectURL and etag to look up by those identifiers.
 func (api *IntrospectAPIOpen) GetObjectDetails(instanceHash string) (*ObjectDetails, error) {
-	hash := InstanceHash(instanceHash)
+	hash, err := ParseInstanceHash(instanceHash)
+	if err != nil {
+		return nil, err
+	}
 
 	meta, err := api.storage.GetMetadata(hash)
 	if err != nil {
@@ -419,7 +422,10 @@ func (api *IntrospectAPIOpen) GetObjectDetailsByURL(objectURL, etag string) (*Ob
 // VerifyChecksum triggers a checksum verification for the specified instance.
 // Returns detailed verification results including per-checksum status.
 func (api *IntrospectAPIOpen) VerifyChecksum(instanceHash string) (*VerificationResult, error) {
-	hash := InstanceHash(instanceHash)
+	hash, err := ParseInstanceHash(instanceHash)
+	if err != nil {
+		return nil, err
+	}
 
 	meta, err := api.storage.GetMetadata(hash)
 	if err != nil {

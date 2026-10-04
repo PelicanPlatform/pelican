@@ -1174,40 +1174,51 @@ func TestEvictionDrainsPastHeldNamespace(t *testing.T) {
 	assert.Nil(t, meta, "eviction must move past the held namespace and drain the evictable one")
 }
 
-// TestContainedObjectPath pins the containment rule every object path goes
-// through.  Instance hashes are HMAC hex today and so cannot traverse, but the
-// path is derived from a client-supplied URL and the check is what makes that
-// safe regardless of who supplies the hash later.
-func TestContainedObjectPath(t *testing.T) {
-	root := filepath.Join(string(filepath.Separator), "srv", "cache", "objects")
+// TestParseInstanceHash: an instance hash names a file and a remote object,
+// so one that arrives from outside the cache must have the only form a real
+// one can -- 64 lowercase hex digits -- before it is used as either.
+func TestParseInstanceHash(t *testing.T) {
+	valid := strings.Repeat("0123456789abcdef", 4)
+	hash, err := ParseInstanceHash(valid)
+	require.NoError(t, err)
+	assert.Equal(t, InstanceHash(valid), hash)
 
-	t.Run("NormalHashLayout", func(t *testing.T) {
-		hash := InstanceHash("42561abfe18be8fca1dcd5b6ac0f6b6d42561abfe18be8fca1dcd5b6ac0f6b6d")
-		got := containedObjectPath(root, GetInstanceStoragePath(hash))
-		assert.Equal(t, filepath.Join(root, "42", "56", "1abfe18be8fca1dcd5b6ac0f6b6d42561abfe18be8fca1dcd5b6ac0f6b6d"), got)
-	})
+	for _, bad := range []string{
+		"",
+		valid[:63],
+		valid + "0",
+		strings.ToUpper(valid),
+		"../" + valid[3:],
+		valid[:30] + "/" + valid[31:],
+		valid[:63] + "\x00",
+	} {
+		_, err := ParseInstanceHash(bad)
+		assert.Error(t, err, "%q must be refused", bad)
+	}
+}
 
-	t.Run("ShortSyntheticHash", func(t *testing.T) {
-		// The DB-level tests use readable hashes; those stay inside the
-		// directory and must keep working.
-		got := containedObjectPath(root, GetInstanceStoragePath(InstanceHash("abc")))
-		assert.Equal(t, filepath.Join(root, "abc"), got)
-	})
-
-	t.Run("TraversalIsRefused", func(t *testing.T) {
-		for _, relative := range []string{
-			"../../../etc/passwd",
-			"aa/bb/../../../../etc/passwd",
-			filepath.Join("..", "sibling-dir", "object"),
-		} {
-			assert.Empty(t, containedObjectPath(root, relative),
-				"a path escaping the storage directory must be refused: %q", relative)
-		}
-	})
-
-	t.Run("EmptyDirectoryIsRefused", func(t *testing.T) {
-		assert.Empty(t, containedObjectPath("", "aa/bb/cc"))
-	})
+// TestParseChunkFilenameRefusesStrayFiles: a file in a storage directory
+// whose name is not an instance hash is not a cache object, whatever its
+// suffix.
+func TestParseChunkFilenameRefusesStrayFiles(t *testing.T) {
+	valid := strings.Repeat("ab", 32)
+	for _, tt := range []struct {
+		name  string
+		hash  InstanceHash
+		chunk int
+		ok    bool
+	}{
+		{valid, InstanceHash(valid), 0, true},
+		{valid + "-3", InstanceHash(valid), 2, true},
+		{"notes.txt", "", 0, false},
+		{"notes-2", "", 0, false},
+		{valid + ".tmp", "", 0, false},
+	} {
+		hash, chunk, ok := ParseChunkFilename(tt.name)
+		assert.Equal(t, tt.ok, ok, tt.name)
+		assert.Equal(t, tt.hash, hash, tt.name)
+		assert.Equal(t, tt.chunk, chunk, tt.name)
+	}
 }
 
 // lruKeyExists reports whether the LRU index holds the exact entry for an

@@ -48,6 +48,25 @@ type ObjectHash string
 // accidental confusion with ObjectHash or arbitrary strings.
 type InstanceHash string
 
+// instanceHashLen is the length of an instance hash: hex-encoded SHA-256.
+const instanceHashLen = 2 * sha256.Size
+
+// ParseInstanceHash checks that s has the form of an instance hash -- 64
+// lowercase hex digits -- before treating it as one.  An instance hash names
+// files and remote objects, so one taken from outside the cache (a request,
+// a directory listing, a bucket key) must go through here.
+func ParseInstanceHash(s string) (InstanceHash, error) {
+	if len(s) != instanceHashLen {
+		return "", errors.Errorf("invalid instance hash %q: want %d hex digits", s, instanceHashLen)
+	}
+	for i := 0; i < len(s); i++ {
+		if c := s[i]; !(c >= '0' && c <= '9' || c >= 'a' && c <= 'f') {
+			return "", errors.Errorf("invalid instance hash %q: want %d hex digits", s, instanceHashLen)
+		}
+	}
+	return InstanceHash(s), nil
+}
+
 // Key prefixes for BadgerDB.
 //
 // This block is the authoritative registry of every key namespace used in
@@ -1001,7 +1020,7 @@ func ParseLRUKey(key []byte) (storageID StorageID, namespaceID NamespaceID, time
 	}
 	timestamp = time.Unix(0, tsNano)
 
-	instanceHash = InstanceHash(parts[3])
+	instanceHash, err = ParseInstanceHash(parts[3])
 	return
 }
 

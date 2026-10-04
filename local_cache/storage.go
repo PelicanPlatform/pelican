@@ -954,37 +954,7 @@ func (sm *StorageManager) getObjectPathForDir(storageID StorageID, instanceHash 
 			break
 		}
 	}
-	return containedObjectPath(dir, GetInstanceStoragePath(instanceHash))
-}
-
-// containedObjectPath joins a storage-relative object path onto a storage
-// directory and returns it only if the result stays inside that directory.
-//
-// An instance hash is the hex of an HMAC, so in practice it cannot contain a
-// separator or a "..", and every hash reaching here was produced by
-// ComputeInstanceHash rather than taken from a request.  That is an argument
-// about the callers, though, and it is the sort of argument that quietly stops
-// being true: the hash is derived from a client-supplied URL, it names a path,
-// and a future caller could reasonably pass one from somewhere else -- a
-// bucket listing, a repair tool, a database whose contents are older than the
-// code reading them.  Checking containment here costs one comparison on a path
-// that is about to be opened anyway, and it is the difference between "this
-// cannot escape the cache directory" and "this cannot escape as long as
-// nobody changes how hashes are made".
-//
-// Returns "" when the path would escape, which every os.* call rejects; the
-// caller reports it the same way it reports any other unopenable object.
-func containedObjectPath(dir, relative string) string {
-	if dir == "" {
-		return ""
-	}
-	root := filepath.Clean(dir)
-	full := filepath.Join(root, relative)
-	if full != root && !strings.HasPrefix(full, root+string(os.PathSeparator)) {
-		log.Errorf("Refusing an object path that escapes its storage directory: %q under %q", relative, root)
-		return ""
-	}
-	return full
+	return filepath.Join(dir, GetInstanceStoragePath(instanceHash))
 }
 
 // storageIsResolvable reports whether a storage ID names something this manager
