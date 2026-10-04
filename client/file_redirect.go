@@ -24,10 +24,8 @@ import (
 	"io"
 	"io/fs"
 	"net/http"
-	"net/url"
 	"os"
 	"path/filepath"
-	"runtime"
 	"slices"
 	"strings"
 	"sync"
@@ -36,6 +34,7 @@ import (
 
 	"github.com/pelicanplatform/pelican/param"
 	"github.com/pelicanplatform/pelican/server_structs"
+	"github.com/pelicanplatform/pelican/utils"
 )
 
 // Following a file:// redirect means letting a cache tell this client to read
@@ -143,28 +142,6 @@ func closeFileRedirectRoots() {
 	fileRootsRaw, fileRootsOpen = nil, nil
 }
 
-// fileURLToPath returns the local path a file URL names (RFC 8089).  On
-// Windows the URL path of a drive-letter path carries a leading slash --
-// file:///C:/data/obj -- which is dropped before converting separators.
-func fileURLToPath(u *url.URL) string {
-	p := u.Path
-	if runtime.GOOS == "windows" {
-		if len(p) >= 3 && p[0] == '/' && p[2] == ':' {
-			p = p[1:]
-		}
-	}
-	return filepath.FromSlash(p)
-}
-
-// pathToFileURL is the inverse of fileURLToPath for an absolute local path.
-func pathToFileURL(path string) *url.URL {
-	p := filepath.ToSlash(path)
-	if !strings.HasPrefix(p, "/") {
-		p = "/" + p // a Windows drive-letter path
-	}
-	return &url.URL{Scheme: "file", Path: p}
-}
-
 // fileRedirectsEnabled reports whether any root is configured.
 func fileRedirectsEnabled() bool { return len(allowedFileRedirectRoots()) > 0 }
 
@@ -243,7 +220,7 @@ func (fileRedirectTransport) RoundTrip(req *http.Request) (*http.Response, error
 
 	// URL.Path is already percent-decoded; decoding it again would turn a
 	// file named "a%41" into "aA".
-	requested := fileURLToPath(req.URL)
+	requested := utils.FileURLToPath(req.URL)
 	roots := allowedFileRedirectRoots()
 	if len(roots) == 0 {
 		return deny(http.StatusForbidden, "file:// redirects are not enabled")
