@@ -93,6 +93,10 @@ type tierTarget struct {
 	probeRunning atomic.Bool
 	// probeTimeout overrides tierProbeTimeout (tests).
 	probeTimeout time.Duration
+
+	// names is the browsable tree of logical names on a shared-filesystem
+	// target; nil for every other kind.
+	names *tierNameView
 	// publicReadable answers whether an object path is readable without a
 	// token, and whether that is known yet; see SetTierExposurePolicy.
 	publicReadable func(objectPath string) (allowed, known bool)
@@ -111,10 +115,14 @@ func newTierTarget(ctx context.Context, cfg TierTargetConfig) (*tierTarget, erro
 	if err != nil {
 		return nil, err
 	}
+	var names *tierNameView
+	if posix, ok := backend.(*posixTierBackend); ok {
+		names = newTierNameView(posix, cfg.namesViewEnabled())
+	}
 	if wrap := wrapTierBackendForTest; wrap != nil {
 		backend = wrap(backend)
 	}
-	t := &tierTarget{cfg: cfg, backend: backend}
+	t := &tierTarget{cfg: cfg, backend: backend, names: names}
 	t.healthy.Store(true)
 	// With redirects disabled, no target redirects, so none is probed for
 	// the capability or, later, self-tested.

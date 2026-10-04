@@ -59,6 +59,7 @@ const (
 const (
 	tierSweepRemovedRemoteObject = "remote_object"
 	tierSweepRemovedEntry        = "entry"
+	tierSweepRemovedNameLink     = "name_link"
 )
 
 // Values of the "reason" label on tierRedirectSkippedTotal: why a read of a
@@ -168,8 +169,19 @@ var (
 	tierSweepRemovedTotal = promauto.NewCounterVec(prometheus.CounterOpts{
 		Name: "pelican_cache_tiering_sweep_removed_total",
 		Help: "Removals by the tiering consistency sweep, by target and kind: remote_object (an object on the " +
-			"target the cache has no record of) or entry (a record whose object is missing from, or changed on, the target)",
+			"target the cache has no record of), entry (a record whose object is missing from, or changed on, the " +
+			"target) or name_link (a stale or foreign link in a shared-filesystem target's names view)",
 	}, []string{"target", "kind"})
+	tierNamesSweepDuration = promauto.NewGaugeVec(prometheus.GaugeOpts{
+		Name: "pelican_cache_tiering_names_sweep_duration_seconds",
+		Help: "How long the latest consistency sweep of a shared-filesystem target's names view took; " +
+			"it runs hourly, so a value approaching an hour means the view is too large for the filesystem's latency",
+	}, []string{"target"})
+	tierNameLinksRestoredTotal = promauto.NewCounterVec(prometheus.CounterOpts{
+		Name: "pelican_cache_tiering_name_links_restored_total",
+		Help: "Links the tiering consistency sweep added to, or corrected in, a shared-filesystem target's names " +
+			"view because they were missing or out of date",
+	}, []string{"target"})
 	tierSweepLastSuccess = promauto.NewGaugeVec(prometheus.GaugeOpts{
 		Name: "pelican_cache_tiering_sweep_last_success_timestamp_seconds",
 		Help: "Unix timestamp when the tiering consistency sweep last completed for a target",

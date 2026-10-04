@@ -1168,6 +1168,10 @@ type TierTargetConfig struct {
 	// The remaining fields apply only to a shared-filesystem (file://)
 	// target, whose objects every user of that filesystem can read.
 
+	// NamesView chooses whether and how the cache keeps a browsable tree of
+	// logical names beside the objects: "versioned" (the default) or
+	// "none"; see tierNameView.
+	NamesView string
 	// ExposedNamespaces lists namespace prefixes whose objects may be
 	// tiered to -- and named on -- the shared filesystem even though
 	// reading them through Pelican requires a token.  Without an entry
@@ -1175,6 +1179,15 @@ type TierTargetConfig struct {
 	// putting an object there makes it readable by every local user.
 	ExposedNamespaces []string
 }
+
+// Values of TierTargetConfig.NamesView.
+const (
+	tierNamesVersioned = "versioned"
+	tierNamesNone      = "none"
+)
+
+// namesViewEnabled reports whether the target keeps a names view.
+func (c *TierTargetConfig) namesViewEnabled() bool { return c.NamesView != tierNamesNone }
 
 // tierFileScheme is the ProviderURL scheme of a shared-filesystem target.
 const tierFileScheme = "file"
@@ -1423,8 +1436,14 @@ func (cfg *TierTargetConfig) validate() error {
 		return errors.New("AccessKeyfile and SecretKeyfile must be set together")
 	}
 
-	if !cfg.IsSharedFilesystem() && len(cfg.ExposedNamespaces) > 0 {
-		return errors.New("ExposedNamespaces applies only to a shared-filesystem (file://) target")
+	if !cfg.IsSharedFilesystem() && (cfg.NamesView != "" || len(cfg.ExposedNamespaces) > 0) {
+		return errors.New("NamesView and ExposedNamespaces apply only to a shared-filesystem (file://) target")
+	}
+	switch strings.ToLower(cfg.NamesView) {
+	case "", tierNamesVersioned, tierNamesNone:
+		cfg.NamesView = strings.ToLower(cfg.NamesView)
+	default:
+		return fmt.Errorf("NamesView %q is not one of %q or %q", cfg.NamesView, tierNamesVersioned, tierNamesNone)
 	}
 
 	if cfg.MaxSize == 0 {
