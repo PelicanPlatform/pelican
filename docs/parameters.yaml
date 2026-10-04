@@ -3313,7 +3313,7 @@ description: |+
 
   Targets are object stores, reached through the same library the origin's object backends
   use: S3 and S3-compatible services (MinIO, Ceph RGW), Google Cloud Storage, and Azure Blob
-  Storage.
+  Storage; or a WebDAV service such as dCache.
 
   Each entry is an object.  Name the target either with a single provider URL:
 
@@ -3338,9 +3338,28 @@ description: |+
     chain is used.  They apply only to these S3 keys: setting them alongside
     **ProviderURL** is refused, since they would be silently ignored.
 
+  ...or, for a WebDAV service, with these keys (the object-store keys above may not be
+  combined with them):
+
+  - **WebDavUrl** (string): the URL of an existing WebDAV collection the cache stores
+    objects under (normally `https`; plain `http` is accepted but sends the token in
+    cleartext) — for dCache, a path on a WebDAV door, such as
+    `https://dcache.example.org:2880/pnfs/example.org/data/pelican`.  Collections below it
+    (the **Prefix** and the cache's fan-out directories) are created as needed.
+    Credentials must not be embedded in the URL.
+  - **TokenFile** (string, optional): a file holding the bearer token the cache presents.
+    The file is re-read for every request, so a token rotated in place is picked up
+    without a restart; an empty file is an error rather than a request for anonymous
+    access.  The token needs permission to read, write, create collections in,
+    delete from and list the collection.
+
+  A WebDAV target cannot issue redirect URLs, so its objects are proxied through the cache;
+  reads are pinned to the entity tag recorded at upload.
+
   The remaining keys apply to every target:
 
-  - **Prefix** (string, optional): a key prefix under which objects are stored.
+  - **Prefix** (string, optional): a key prefix under which objects are stored (for a
+    WebDAV target, a path below **WebDavUrl**).
   - **MaxSize** (string, required): maximum bytes of cache data stored on the target
     (e.g. "5TB").  Unlike directory targets it cannot be auto-detected.
   - **HighWaterMarkPercentage** / **LowWaterMarkPercentage** (int, optional): eviction
@@ -3365,6 +3384,10 @@ description: |+
         MaxSize: 10TB
         AccessKeyfile: /etc/pelican/s3-access
         SecretKeyfile: /etc/pelican/s3-secret
+      - WebDavUrl: https://dcache.example.org:2880/pnfs/example.org/data/pelican
+        Prefix: cache
+        MaxSize: 50TB
+        TokenFile: /etc/pelican/dcache.token
   ```
 
   **The cache assumes exclusive ownership of the target (or of the configured

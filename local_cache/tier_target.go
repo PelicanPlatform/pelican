@@ -84,11 +84,10 @@ var wrapTierBackendForTest func(TierBackend) TierBackend
 // object I/O happens beyond the capability probe; identity resolution is a
 // separate, explicit step.
 func newTierTarget(ctx context.Context, cfg TierTargetConfig) (*tierTarget, error) {
-	blob, err := newBlobTierBackend(ctx, cfg)
+	backend, err := newTierBackend(ctx, cfg)
 	if err != nil {
 		return nil, err
 	}
-	var backend TierBackend = blob
 	if wrap := wrapTierBackendForTest; wrap != nil {
 		backend = wrap(backend)
 	}
@@ -106,6 +105,14 @@ func newTierTarget(ctx context.Context, cfg TierTargetConfig) (*tierTarget, erro
 			cfg.DisplayURL())
 	}
 	return t, nil
+}
+
+// newTierBackend opens the kind of backend cfg names.
+func newTierBackend(ctx context.Context, cfg TierTargetConfig) (TierBackend, error) {
+	if cfg.WebDavUrl != "" {
+		return newWebDAVTierBackend(cfg, fileTokenSource{path: cfg.TokenFile})
+	}
+	return newBlobTierBackend(ctx, cfg)
 }
 
 // probeTierRedirect asks a backend for a sample redirect URL, reporting
