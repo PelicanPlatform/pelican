@@ -199,6 +199,63 @@ func TestParseTierTargetsConfig(t *testing.T) {
 		_, err := ParseTierTargetsConfig()
 		require.ErrorContains(t, err, "AdoptExisting")
 	})
+
+	// A misspelled key used to be ignored, leaving the setting at its
+	// default without a word -- for AdoptExisting or a watermark, silently.
+	t.Run("UnknownKeyRejected", func(t *testing.T) {
+		server_utils.ResetTestState()
+		setTierTargets(t, []interface{}{
+			map[string]interface{}{
+				"ServiceUrl":          "https://s3.example.com",
+				"Bucket":              "b",
+				"MaxSize":             "1GB",
+				"AdoptExistingBucket": true,
+			},
+		})
+		_, err := ParseTierTargetsConfig()
+		require.ErrorContains(t, err, "AdoptExistingBucket")
+	})
+
+	// Viper lowercases keys on some paths, and environment variables and form
+	// posts deliver every value as a string; all of it decodes the same.
+	t.Run("LowercaseKeysAndStringValues", func(t *testing.T) {
+		server_utils.ResetTestState()
+		setTierTargets(t, []interface{}{
+			map[string]interface{}{
+				"providerurl":             "s3://bucket",
+				"maxsize":                 "2TB",
+				"highwatermarkpercentage": "95",
+				"adoptexisting":           "true",
+			},
+		})
+		targets, err := ParseTierTargetsConfig()
+		require.NoError(t, err)
+		require.Len(t, targets, 1)
+		assert.Equal(t, "s3://bucket", targets[0].ProviderURL)
+		assert.Equal(t, uint64(2)<<40, targets[0].MaxSize)
+		assert.Equal(t, 95, targets[0].HighWaterMarkPercentage)
+		assert.True(t, targets[0].AdoptExisting)
+	})
+
+	t.Run("NumericMaxSize", func(t *testing.T) {
+		server_utils.ResetTestState()
+		setTierTargets(t, []interface{}{
+			map[string]interface{}{"ProviderURL": "s3://bucket", "MaxSize": 1048576},
+		})
+		targets, err := ParseTierTargetsConfig()
+		require.NoError(t, err)
+		require.Len(t, targets, 1)
+		assert.Equal(t, uint64(1048576), targets[0].MaxSize)
+	})
+
+	t.Run("BadMaxSize", func(t *testing.T) {
+		server_utils.ResetTestState()
+		setTierTargets(t, []interface{}{
+			map[string]interface{}{"ProviderURL": "s3://bucket", "MaxSize": "lots"},
+		})
+		_, err := ParseTierTargetsConfig()
+		require.ErrorContains(t, err, "MaxSize")
+	})
 }
 
 func TestTierKeyLayout(t *testing.T) {

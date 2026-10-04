@@ -26,11 +26,13 @@ import (
 	"net"
 	"net/url"
 	"path"
-	"strconv"
+	"reflect"
 	"strings"
 	"time"
 
 	"golang.org/x/net/idna"
+
+	"github.com/pkg/errors"
 
 	"github.com/pelicanplatform/pelican/param"
 	"github.com/pelicanplatform/pelican/utils"
@@ -1183,138 +1185,55 @@ func trimTierPrefix(prefix string) string {
 // the parsed target configurations.  Returns nil (not an error) when the key
 // is unset or empty.
 func ParseTierTargetsConfig() ([]TierTargetConfig, error) {
-	raw := param.Cache_TieringTargets.GetRaw()
-	if raw == nil {
-		return nil, nil
+	var configs []TierTargetConfig
+	if err := param.Cache_TieringTargets.Decode(&configs, byteSizeHook); err != nil {
+		return nil, err
 	}
-
-	list, ok := raw.([]interface{})
-	if !ok {
-		return nil, fmt.Errorf("Cache.TieringTargets: unsupported type %T; expected a list of objects", raw)
-	}
-	configs := make([]TierTargetConfig, 0, len(list))
-	for i, elem := range list {
-		var m map[string]interface{}
-		switch e := elem.(type) {
-		case map[string]interface{}:
-			m = e
-		case map[interface{}]interface{}:
-			m = make(map[string]interface{}, len(e))
-			for k, val := range e {
-				m[fmt.Sprint(k)] = val
-			}
-		default:
-			return nil, fmt.Errorf("Cache.TieringTargets[%d]: unsupported type %T; expected an object", i, elem)
+	for i := range configs {
+		if err := configs[i].validate(); err != nil {
+			return nil, fmt.Errorf("%s[%d]: %w", param.Cache_TieringTargets.GetName(), i, err)
 		}
-		cfg, err := parseTierTargetEntry(i, m)
-		if err != nil {
-			return nil, err
-		}
-		configs = append(configs, cfg)
 	}
 	return configs, nil
 }
 
-// tierEntryString fetches a string-valued key from a target entry, falling
-// back to the all-lowercase key name (viper lowercases keys in some code
-// paths).
-func tierEntryString(m map[string]interface{}, key string) string {
-	if v, ok := m[key].(string); ok {
-		return v
+// byteSizeHook decodes a size written as a string ("5TB", "512MB") into an
+// unsigned integer field.  TierTargetConfig's only such field is MaxSize.
+func byteSizeHook(from, to reflect.Type, data any) (any, error) {
+	if from.Kind() != reflect.String || to.Kind() != reflect.Uint64 {
+		return data, nil
 	}
-	if v, ok := m[strings.ToLower(key)].(string); ok {
-		return v
-	}
-	return ""
+	return utils.ParseBytes(data.(string))
 }
 
-// tierEntryInt fetches an integer-valued key with lowercase fallback.
-func tierEntryInt(m map[string]interface{}, key string) int {
-	v, ok := m[key]
-	if !ok {
-		v, ok = m[strings.ToLower(key)]
-	}
-	if !ok || v == nil {
-		return 0
-	}
-	switch n := v.(type) {
-	case int:
-		return n
-	case int64:
-		return int(n)
-	case float64:
-		return int(n)
-	}
-	return 0
-}
-
-// tierEntryBool fetches a boolean-valued key with lowercase fallback,
-// accepting the string spellings environment variables and form posts use.
-func tierEntryBool(m map[string]interface{}, key string) (bool, error) {
-	v, ok := m[key]
-	if !ok {
-		v, ok = m[strings.ToLower(key)]
-	}
-	if !ok || v == nil {
-		return false, nil
-	}
-	switch b := v.(type) {
-	case bool:
-		return b, nil
-	case string:
-		parsed, err := strconv.ParseBool(strings.TrimSpace(b))
-		if err != nil {
-			return false, fmt.Errorf("%s: %q is not a boolean", key, b)
-		}
-		return parsed, nil
-	}
-	return false, fmt.Errorf("%s: unsupported type %T; expected a boolean", key, v)
-}
-
-// parseTierTargetEntry converts a map entry into a TierTargetConfig.
-func parseTierTargetEntry(idx int, m map[string]interface{}) (TierTargetConfig, error) {
-	cfg := TierTargetConfig{
-		ProviderURL:             tierEntryString(m, "ProviderURL"),
-		ServiceUrl:              tierEntryString(m, "ServiceUrl"),
-		Region:                  tierEntryString(m, "Region"),
-		Bucket:                  tierEntryString(m, "Bucket"),
-		Prefix:                  trimTierPrefix(tierEntryString(m, "Prefix")),
-		UrlStyle:                tierEntryString(m, "UrlStyle"),
-		AccessKeyfile:           tierEntryString(m, "AccessKeyfile"),
-		SecretKeyfile:           tierEntryString(m, "SecretKeyfile"),
-		HighWaterMarkPercentage: tierEntryInt(m, "HighWaterMarkPercentage"),
-		LowWaterMarkPercentage:  tierEntryInt(m, "LowWaterMarkPercentage"),
-	}
-	adopt, err := tierEntryBool(m, "AdoptExisting")
-	if err != nil {
-		return cfg, fmt.Errorf("Cache.TieringTargets[%d].%w", idx, err)
-	}
-	cfg.AdoptExisting = adopt
+// validate checks a decoded entry and fills in defaults.
+func (cfg *TierTargetConfig) validate() error {
+	cfg.Prefix = trimTierPrefix(cfg.Prefix)
 	if cfg.ProviderURL != "" {
 		// Credentials belong in the keyfile settings, never in the URL.
 		// Embedded ones do not work through gocloud anyway -- the S3 driver
 		// silently ignores userinfo and uses ambient credentials instead --
 		// and a URL that carries one ends up in errors and logs.
 		if err := utils.CheckNoURLCredentials(cfg.ProviderURL); err != nil {
-			return cfg, fmt.Errorf("Cache.TieringTargets[%d].ProviderURL %w: a provider URL takes its "+
+			return fmt.Errorf("ProviderURL %w: a provider URL takes its "+
 				"credentials from the provider's ambient credential chain, or use the S3 keys "+
-				"(ServiceUrl, Bucket) with AccessKeyfile and SecretKeyfile", idx, err)
+				"(ServiceUrl, Bucket) with AccessKeyfile and SecretKeyfile", err)
 		}
 		// Keyfiles are read only on the S3-keys path; a provider URL is opened
 		// through gocloud, which takes credentials from the provider's own
 		// chain.  Accepting both would silently ignore the keyfiles -- and
 		// quietly run with whatever ambient identity the host happens to have.
 		if cfg.AccessKeyfile != "" || cfg.SecretKeyfile != "" {
-			return cfg, fmt.Errorf("Cache.TieringTargets[%d]: AccessKeyfile and SecretKeyfile apply only to the "+
-				"S3 keys (ServiceUrl, Bucket), not to ProviderURL, which uses the provider's ambient credential chain", idx)
+			return errors.New("AccessKeyfile and SecretKeyfile apply only to the " +
+				"S3 keys (ServiceUrl, Bucket), not to ProviderURL, which uses the provider's ambient credential chain")
 		}
 	} else {
 		// Fall back to the explicit S3 spelling, which then has to be complete.
 		if cfg.ServiceUrl == "" {
-			return cfg, fmt.Errorf("Cache.TieringTargets[%d]: set either ProviderURL or both ServiceUrl and Bucket", idx)
+			return errors.New("set either ProviderURL or both ServiceUrl and Bucket")
 		}
 		if cfg.Bucket == "" {
-			return cfg, fmt.Errorf("Cache.TieringTargets[%d]: missing required Bucket", idx)
+			return errors.New("missing required Bucket")
 		}
 		if cfg.Region == "" {
 			cfg.Region = "us-east-1"
@@ -1324,34 +1243,11 @@ func parseTierTargetEntry(idx int, m map[string]interface{}) (TierTargetConfig, 
 		}
 	}
 	if (cfg.AccessKeyfile == "") != (cfg.SecretKeyfile == "") {
-		return cfg, fmt.Errorf("Cache.TieringTargets[%d]: AccessKeyfile and SecretKeyfile must be set together", idx)
+		return errors.New("AccessKeyfile and SecretKeyfile must be set together")
 	}
 
-	// MaxSize (required, string like "5TB" or a byte count)
-	var rawSize interface{}
-	if v, ok := m["MaxSize"]; ok {
-		rawSize = v
-	} else if v, ok := m["maxsize"]; ok {
-		rawSize = v
-	}
-	switch s := rawSize.(type) {
-	case string:
-		if s != "" && s != "0" {
-			n, err := utils.ParseBytes(s)
-			if err != nil {
-				return cfg, fmt.Errorf("Cache.TieringTargets[%d].MaxSize: %w", idx, err)
-			}
-			cfg.MaxSize = n
-		}
-	case int:
-		cfg.MaxSize = uint64(s)
-	case int64:
-		cfg.MaxSize = uint64(s)
-	case float64:
-		cfg.MaxSize = uint64(s)
-	}
 	if cfg.MaxSize == 0 {
-		return cfg, fmt.Errorf("Cache.TieringTargets[%d]: MaxSize is required (remote capacity cannot be auto-detected)", idx)
+		return errors.New("MaxSize is required (remote capacity cannot be auto-detected)")
 	}
-	return cfg, nil
+	return nil
 }
