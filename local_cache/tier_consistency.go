@@ -93,13 +93,6 @@ const tierSweepOpTimeout = 2 * time.Minute
 func (cc *ConsistencyChecker) scanTierTarget(ctx context.Context, sid StorageID, target *tierTarget) error {
 	scanStart := time.Now()
 
-	// Snapshot the in-flight upload intents; objects covered by an intent
-	// are owned by the uploader and skipped entirely.
-	intents, err := cc.db.ListTierUploadIntents()
-	if err != nil {
-		return err
-	}
-
 	// Stream the bucket listing (lexicographic key order == instance-hash
 	// order thanks to the shared aa/bb/rest layout).  The producer goroutine
 	// is bounded to this function: listCtx is cancelled on every return path
@@ -152,7 +145,7 @@ func (cc *ConsistencyChecker) scanTierTarget(ctx context.Context, sid StorageID,
 	// considerBucketOrphan applies the grace period and intent check
 	// before queuing a remote object for deletion.
 	considerBucketOrphan := func(e tierListEntry) {
-		if _, uploading := intents[e.hash]; uploading {
+		if cc.tierUploadInFlight(e.hash) {
 			return
 		}
 		if cc.minAgeForCleanup > 0 && time.Since(e.modified) < cc.minAgeForCleanup {
@@ -204,7 +197,7 @@ func (cc *ConsistencyChecker) scanTierTarget(ctx context.Context, sid StorageID,
 
 		// DB entry with no remote object.  Grace period guards against
 		// races with a relocation committing mid-listing.
-		if _, uploading := intents[instanceHash]; uploading {
+		if cc.tierUploadInFlight(instanceHash) {
 			return nil
 		}
 		if cc.minAgeForCleanup > 0 && !meta.Completed.IsZero() && time.Since(meta.Completed) < cc.minAgeForCleanup {
@@ -240,16 +233,6 @@ func (cc *ConsistencyChecker) scanTierTarget(ctx context.Context, sid StorageID,
 
 	deletedBucket, deletedDB := 0, 0
 
-	// One fresh snapshot of the in-flight uploads for the whole deletion pass:
-	// an upload that started since the listing began owns its remote object,
-	// and taking the snapshot here rather than inside the loop keeps this to a
-	// single prefix scan instead of one per orphan.
-	currentIntents, err := cc.db.ListTierUploadIntents()
-	if err != nil {
-		log.Warnf("Failed to re-read tiering upload intents; skipping deletions this pass: %v", err)
-		return nil
-	}
-
 	// Delete bucket orphans, re-verifying against current metadata so a
 	// relocation that landed during the scan is not clobbered.  Each remote
 	// operation is given a finite timeout so a single hung request cannot
@@ -262,8 +245,8 @@ func (cc *ConsistencyChecker) scanTierTarget(ctx context.Context, sid StorageID,
 		if err == nil && meta != nil && meta.StorageID == sid {
 			continue // relocated here since the scan; no longer an orphan
 		}
-		if _, uploading := currentIntents[e.hash]; uploading {
-			continue
+		if cc.tierUploadInFlight(e.hash) {
+			continue // an upload that started since the listing owns this object
 		}
 		opCtx, cancel := context.WithTimeout(ctx, tierSweepOpTimeout)
 		err = target.deleteObject(opCtx, e.hash)
@@ -321,4 +304,16 @@ func (cc *ConsistencyChecker) scanTierTarget(ctx context.Context, sid StorageID,
 	cc.stats.OrphanedDBEntries += int64(deletedDB)
 	cc.statsMu.Unlock()
 	return nil
+}
+
+// tierUploadInFlight reports whether an upload intent covers an object, in
+// which case the uploader owns its remote copy and the sweep must leave it
+// alone.  An intent that cannot be read counts as one.
+func (cc *ConsistencyChecker) tierUploadInFlight(hash InstanceHash) bool {
+	intent, err := cc.db.GetTierUploadIntent(hash)
+	if err != nil {
+		log.Warnf("Treating %s as being uploaded: %v", hash, err)
+		return true
+	}
+	return intent != nil
 }

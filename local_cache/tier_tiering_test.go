@@ -369,8 +369,7 @@ func TestTierLifecycle(t *testing.T) {
 	require.NoError(t, err)
 	require.NotNil(t, meta)
 	assert.Equal(t, env.tierID, meta.StorageID)
-	intents, err := env.db.ListTierUploadIntents()
-	require.NoError(t, err)
+	intents := allTierIntents(t, env.db)
 	assert.Empty(t, intents)
 
 	// The local file is gone; usage moved from the directory to the bucket.
@@ -556,8 +555,7 @@ func TestTierChunkedObject(t *testing.T) {
 	assert.Equal(t, data, fetched)
 
 	// No upload intent left behind.
-	intents, err := db.ListTierUploadIntents()
-	require.NoError(t, err)
+	intents := allTierIntents(t, db)
 	assert.Empty(t, intents)
 }
 
@@ -606,8 +604,7 @@ func TestTierDeferredReleaseSurvivesEviction(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, evicted, 1)
 
-	intents, err := env.db.ListTierUploadIntents()
-	require.NoError(t, err)
+	intents := allTierIntents(t, env.db)
 	require.Contains(t, intents, hash, "eviction must keep a committed relocation's intent")
 
 	env.uploader.finishDeferredReleases(ctx)
@@ -620,8 +617,7 @@ func TestTierDeferredReleaseSurvivesEviction(t *testing.T) {
 	tierUsage, err := env.db.GetUsage(env.tierID, nsID)
 	require.NoError(t, err)
 	assert.Zero(t, tierUsage, "eviction refunded the target once; nothing may refund it again")
-	intents, err = env.db.ListTierUploadIntents()
-	require.NoError(t, err)
+	intents = allTierIntents(t, env.db)
 	assert.Empty(t, intents)
 }
 
@@ -688,8 +684,7 @@ func TestTierDeferredReleaseLeavesARebornCopyAlone(t *testing.T) {
 	tierUsageAfter, err := env.db.GetUsage(env.tierID, nsID)
 	require.NoError(t, err)
 	assert.Equal(t, tierUsageBefore, tierUsageAfter, "the target must not be refunded a second time")
-	intents, err := env.db.ListTierUploadIntents()
-	require.NoError(t, err)
+	intents := allTierIntents(t, env.db)
 	assert.Empty(t, intents, "the stale intent should be dropped")
 }
 
@@ -969,16 +964,14 @@ func TestTierDefersReleaseWhileReaderOpen(t *testing.T) {
 
 	// The intent is kept so the cleanup can be retried, and the retry pass
 	// finishes it once the reader is gone.
-	intents, err := env.db.ListTierUploadIntents()
-	require.NoError(t, err)
+	intents := allTierIntents(t, env.db)
 	require.Contains(t, intents, hash, "the deferred cleanup must stay recorded")
 
 	env.uploader.finishDeferredReleases(ctx)
 
 	_, statErr = os.Stat(localPath)
 	assert.True(t, os.IsNotExist(statErr), "local file should be removed once unpinned")
-	intents, err = env.db.ListTierUploadIntents()
-	require.NoError(t, err)
+	intents = allTierIntents(t, env.db)
 	assert.Empty(t, intents, "the intent should be cleared after cleanup completes")
 	diskUsage, err := env.db.GetUsage(env.diskID, nsID)
 	require.NoError(t, err)
@@ -1017,8 +1010,7 @@ func TestTierUploaderRecoveryAccounting(t *testing.T) {
 		tierUsage, err := env.db.GetUsage(env.tierID, nsID)
 		require.NoError(t, err)
 		assert.Zero(t, tierUsage, "recovery must not refund a charge the deletion already returned")
-		intents, err := env.db.ListTierUploadIntents()
-		require.NoError(t, err)
+		intents := allTierIntents(t, env.db)
 		assert.Empty(t, intents)
 	})
 
@@ -1111,8 +1103,7 @@ func TestTierConcurrentWorkers(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, CalculateFileSize(int64(len(data))), tierUsage,
 		"only one worker's charge may stick")
-	intents, err := env.db.ListTierUploadIntents()
-	require.NoError(t, err)
+	intents := allTierIntents(t, env.db)
 	assert.Empty(t, intents)
 }
 
@@ -1357,8 +1348,7 @@ func TestTierUploaderRecovery(t *testing.T) {
 	tierUsage, err := env.db.GetUsage(env.tierID, nsID)
 	require.NoError(t, err)
 	assert.Zero(t, tierUsage)
-	intents, err := env.db.ListTierUploadIntents()
-	require.NoError(t, err)
+	intents := allTierIntents(t, env.db)
 	assert.Empty(t, intents)
 	select {
 	case queued := <-env.uploader.queue:
@@ -1772,6 +1762,18 @@ func TestTierRedirectServing(t *testing.T) {
 			return err == nil && meta == nil
 		}, 10*time.Second, 50*time.Millisecond, "the entry should be dropped once the change is seen")
 	})
+}
+
+// allTierIntents returns every recorded upload intent, keyed by hash.
+func allTierIntents(t *testing.T, db *CacheDB) map[InstanceHash]*TierUploadIntent {
+	t.Helper()
+	page, err := db.ListTierUploadIntents("", 1<<20)
+	require.NoError(t, err)
+	intents := make(map[InstanceHash]*TierUploadIntent, len(page))
+	for _, e := range page {
+		intents[e.Hash] = e.Intent
+	}
+	return intents
 }
 
 // discardInfo drops the object info an upload reports, for call sites that

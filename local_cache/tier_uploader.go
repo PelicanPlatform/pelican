@@ -49,6 +49,13 @@ const (
 	// abandoned.  It runs on a context detached from the request/shutdown
 	// context, so it needs its own deadline.
 	tierCleanupTimeout = 2 * time.Minute
+	// tierIntentPage bounds how many upload intents are held in memory at
+	// once while walking them.
+	tierIntentPage = 1000
+	// tierMaxUploadAttempts is how many times one object may fail to tier,
+	// while its target is otherwise working, before the uploader stops trying
+	// it.  The count is kept in memory, so a restart grants another round.
+	tierMaxUploadAttempts = 5
 )
 
 // tierUploader tiers completed objects from local storage directories to
@@ -68,6 +75,9 @@ type tierUploader struct {
 	// (completion notifications can fire more than once per object).
 	inflightMu sync.Mutex
 	inflight   map[InstanceHash]bool
+	// failures counts each object's failed attempts; see noteUploadFailure.
+	// Guarded by inflightMu.
+	failures map[InstanceHash]int
 
 	// pendingRelease holds the objects whose bucket copy is live but whose
 	// local copy is still waiting on a reader.  The unpin observer consults
@@ -88,6 +98,7 @@ func newTierUploader(db *CacheDB, storage *StorageManager, eviction *EvictionMan
 		threshold:      threshold,
 		queue:          make(chan InstanceHash, tierUploadQueueDepth),
 		inflight:       make(map[InstanceHash]bool),
+		failures:       make(map[InstanceHash]int),
 		pendingRelease: make(map[InstanceHash]struct{}),
 		releaseKick:    make(chan struct{}, 1),
 	}
@@ -138,37 +149,77 @@ func (u *tierUploader) releaseLoop(ctx context.Context) {
 		case <-ctx.Done():
 			return
 		case <-u.releaseKick:
-			u.finishDeferredReleases(ctx)
+			u.finishPendingReleases(ctx)
 		}
 	}
 }
 
-// Start runs crash recovery synchronously, then launches the upload
-// workers and a background backfill scan.
+// Start launches crash recovery and, once it finishes, the upload workers
+// and background scans.  It returns immediately.
+//
+// Recovery runs before any upload starts, because a worker must not begin
+// tiering an object whose previous attempt has not been settled.  It runs off
+// the startup path because it makes a remote call per leftover intent: a slow
+// or unreachable target must not hold up the cache.  Serving does not wait
+// for it; an object's metadata names wherever its authoritative copy is.
 func (u *tierUploader) Start(ctx context.Context, egrp *errgroup.Group) error {
 	u.ctx = ctx
-	if err := u.recover(ctx); err != nil {
-		return err
-	}
-	for i := 0; i < tierUploadWorkers; i++ {
+	egrp.Go(func() error {
+		u.probeLoop(ctx)
+		return nil
+	})
+	egrp.Go(func() error {
+		if err := u.recover(ctx); err != nil && ctx.Err() == nil {
+			log.Warnf("Tiering recovery did not finish; the next rescan retries what it left: %v", err)
+		}
+		if ctx.Err() != nil {
+			return nil
+		}
+		for i := 0; i < tierUploadWorkers; i++ {
+			egrp.Go(func() error {
+				u.workerLoop(ctx)
+				return nil
+			})
+		}
 		egrp.Go(func() error {
-			u.workerLoop(ctx)
+			u.backfillScan(ctx)
 			return nil
 		})
-	}
-	egrp.Go(func() error {
-		u.backfillScan(ctx)
-		return nil
-	})
-	egrp.Go(func() error {
-		u.rescanLoop(ctx)
-		return nil
-	})
-	egrp.Go(func() error {
-		u.releaseLoop(ctx)
+		egrp.Go(func() error {
+			u.rescanLoop(ctx)
+			return nil
+		})
+		egrp.Go(func() error {
+			u.releaseLoop(ctx)
+			return nil
+		})
 		return nil
 	})
 	return nil
+}
+
+// forEachIntent calls fn for every recorded upload intent, a page at a time,
+// stopping at the first error fn returns.
+func (u *tierUploader) forEachIntent(ctx context.Context, fn func(InstanceHash, *TierUploadIntent) error) error {
+	var after InstanceHash
+	for {
+		page, err := u.db.ListTierUploadIntents(after, tierIntentPage)
+		if err != nil {
+			return errors.Wrap(err, "failed to list tiering upload intents")
+		}
+		for _, e := range page {
+			if ctx.Err() != nil {
+				return ctx.Err()
+			}
+			if err := fn(e.Hash, e.Intent); err != nil {
+				return err
+			}
+		}
+		if len(page) < tierIntentPage {
+			return nil
+		}
+		after = page[len(page)-1].Hash
+	}
 }
 
 // rescanLoop periodically re-enqueues eligible objects that were deferred
@@ -257,6 +308,17 @@ func (u *tierUploader) eligible(meta *CacheMetadata) bool {
 		meta.ContentLength >= u.threshold
 }
 
+// anyTargetHealthy reports whether any tiering target passed its latest
+// liveness probe.
+func (u *tierUploader) anyTargetHealthy() bool {
+	for _, target := range u.storage.tierTargets {
+		if target.healthy.Load() {
+			return true
+		}
+	}
+	return false
+}
+
 // chooseTarget randomly selects a tiering target that can currently hold the
 // object, weighted by each target's estimated free space, so concurrent
 // uploads spread across targets instead of all piling onto the single
@@ -277,6 +339,9 @@ func (u *tierUploader) chooseTarget(size int64) *tierTarget {
 	var candidates []candidate
 	var totalFree int64
 	for id, target := range u.storage.tierTargets {
+		if !target.healthy.Load() {
+			continue // failing its liveness probe; see tierTarget.probe
+		}
 		if free := u.eviction.DirFree(id); free >= size {
 			candidates = append(candidates, candidate{target: target, free: free})
 			totalFree += free
@@ -317,6 +382,10 @@ func (u *tierUploader) processObject(ctx context.Context, instanceHash InstanceH
 		u.inflightMu.Unlock()
 		return nil // another worker is already tiering this object
 	}
+	if u.failures[instanceHash] >= tierMaxUploadAttempts {
+		u.inflightMu.Unlock()
+		return nil // given up on; see noteUploadFailure
+	}
 	u.inflight[instanceHash] = true
 	u.inflightMu.Unlock()
 	defer func() {
@@ -335,6 +404,9 @@ func (u *tierUploader) processObject(ctx context.Context, instanceHash InstanceH
 	localID := meta.StorageID
 	fileSize := CalculateFileSize(meta.ContentLength)
 
+	if !u.anyTargetHealthy() {
+		return nil // nothing to upload to; the rescan retries once a probe passes
+	}
 	target := u.chooseTarget(fileSize)
 	if target == nil {
 		// No target currently fits; nudge eviction so space opens up and
@@ -399,6 +471,7 @@ func (u *tierUploader) processObject(ctx context.Context, instanceHash InstanceH
 	reader, err := u.storage.NewObjectReader(instanceHash)
 	if err != nil {
 		abandon()
+		u.noteUploadFailure(ctx, instanceHash, nil)
 		return errors.Wrap(err, "failed to open object for upload")
 	}
 	uploadStart := time.Now()
@@ -407,6 +480,7 @@ func (u *tierUploader) processObject(ctx context.Context, instanceHash InstanceH
 	if uploadErr != nil {
 		recordTierUpload(target, tierUploadFailed, meta.ContentLength, 0)
 		abandon()
+		u.noteUploadFailure(ctx, instanceHash, target)
 		return uploadErr
 	}
 	uploadTime := time.Since(uploadStart)
@@ -437,10 +511,14 @@ func (u *tierUploader) processObject(ctx context.Context, instanceHash InstanceH
 		// remote copy so nothing is leaked.
 		recordTierUpload(target, tierUploadFailed, meta.ContentLength, 0)
 		abandon()
+		u.noteUploadFailure(ctx, instanceHash, nil)
 		return errors.Wrap(err, "failed to relocate object metadata to tiering target")
 	}
 
 	recordTierUpload(target, tierUploadSucceeded, meta.ContentLength, uploadTime)
+	u.inflightMu.Lock()
+	delete(u.failures, instanceHash)
+	u.inflightMu.Unlock()
 
 	// Record that the remote copy is now authoritative before touching the
 	// local one.  If the process dies anywhere below, recovery needs to know
@@ -472,6 +550,33 @@ func (u *tierUploader) processObject(ctx context.Context, instanceHash InstanceH
 	}
 	log.Debugf("Tiered object %s (%d bytes) to tiering target %d", instanceHash, meta.ContentLength, target.id)
 	return nil
+}
+
+// noteUploadFailure counts a failed attempt against an object, and stops
+// trying it after tierMaxUploadAttempts.  A failure talking to the target is
+// counted only if the target then passes a liveness probe: if it does not,
+// the failure says nothing about the object, and the failed probe has already
+// taken the target out of rotation.  Pass a nil target for failures that did
+// not involve one.
+func (u *tierUploader) noteUploadFailure(ctx context.Context, hash InstanceHash, target *tierTarget) {
+	if target != nil && target.probe(ctx) != nil {
+		return
+	}
+	u.inflightMu.Lock()
+	u.failures[hash]++
+	attempts := u.failures[hash]
+	u.inflightMu.Unlock()
+	if attempts == tierMaxUploadAttempts {
+		tierUploadsAbandonedTotal.Inc()
+		log.Warnf("Giving up on tiering object %s after %d failed attempts; it stays on local storage", hash, attempts)
+	}
+}
+
+// givenUp reports whether the uploader has stopped trying an object.
+func (u *tierUploader) givenUp(hash InstanceHash) bool {
+	u.inflightMu.Lock()
+	defer u.inflightMu.Unlock()
+	return u.failures[hash] >= tierMaxUploadAttempts
 }
 
 // releaseLocalCopy removes a tiered object's local files and returns their
@@ -540,112 +645,77 @@ func (u *tierUploader) settleRelocatedIntent(hash InstanceHash, intent *TierUplo
 // relocation committed while a reader still held the local copy.  Only
 // committed relocations are touched: an upload still in flight belongs to
 // its worker, which cleans up after itself if its object disappears.
+//
+// It walks every intent, as a backstop for releases the unpin observer
+// missed; finishPendingReleases handles the common case.
 func (u *tierUploader) finishDeferredReleases(ctx context.Context) {
-	intents, err := u.db.ListTierUploadIntents()
-	if err != nil {
-		log.Warnf("Failed to list tiering upload intents for deferred cleanup: %v", err)
-		return
+	err := u.forEachIntent(ctx, func(hash InstanceHash, intent *TierUploadIntent) error {
+		u.finishDeferredRelease(hash, intent)
+		return nil
+	})
+	if err != nil && ctx.Err() == nil {
+		log.Warnf("Failed to finish deferred tiering cleanups: %v", err)
 	}
-	for hash, intent := range intents {
+}
+
+// finishPendingReleases retries the deferred releases the uploader knows are
+// waiting, which is what a reader letting go can have unblocked.
+func (u *tierUploader) finishPendingReleases(ctx context.Context) {
+	u.pendingMu.Lock()
+	pending := make([]InstanceHash, 0, len(u.pendingRelease))
+	for h := range u.pendingRelease {
+		pending = append(pending, h)
+	}
+	u.pendingMu.Unlock()
+
+	for _, hash := range pending {
 		if ctx.Err() != nil {
 			return
 		}
-		if intent.RelocatedAt.IsZero() {
-			continue
-		}
-		meta, err := u.storage.GetMetadata(hash)
+		intent, err := u.db.GetTierUploadIntent(hash)
 		if err != nil {
+			log.Warnf("Failed to read the upload intent for %s: %v", hash, err)
 			continue
 		}
-		u.markPendingRelease(hash)
-		if !u.settleRelocatedIntent(hash, intent, meta) {
-			continue // still pinned; the reader's release will wake us
-		}
-		u.clearPendingRelease(hash)
-		if err := u.db.DeleteTierUploadIntent(hash); err != nil {
-			log.Warnf("Failed to delete upload intent for %s: %v", hash, err)
+		if intent == nil {
+			u.clearPendingRelease(hash) // settled elsewhere
 			continue
 		}
-		log.Debugf("Completed deferred local cleanup of tiered object %s", hash)
+		u.finishDeferredRelease(hash, intent)
 	}
+}
+
+// finishDeferredRelease settles one intent if its relocation committed.
+func (u *tierUploader) finishDeferredRelease(hash InstanceHash, intent *TierUploadIntent) {
+	if intent.RelocatedAt.IsZero() {
+		return
+	}
+	meta, err := u.storage.GetMetadata(hash)
+	if err != nil {
+		return
+	}
+	u.markPendingRelease(hash)
+	if !u.settleRelocatedIntent(hash, intent, meta) {
+		return // still pinned; the reader's release will wake us
+	}
+	u.clearPendingRelease(hash)
+	if err := u.db.DeleteTierUploadIntent(hash); err != nil {
+		log.Warnf("Failed to delete upload intent for %s: %v", hash, err)
+		return
+	}
+	log.Debugf("Completed deferred local cleanup of tiered object %s", hash)
 }
 
 // recover reconciles upload intents left behind by a crash.  Invariant:
 // any object bytes in a bucket are referenced either by relocated metadata
 // or by an intent — so walking the intents finds every possible leak.
 func (u *tierUploader) recover(ctx context.Context) error {
-	intents, err := u.db.ListTierUploadIntents()
+	err := u.forEachIntent(ctx, func(hash InstanceHash, intent *TierUploadIntent) error {
+		u.recoverIntent(ctx, hash, intent)
+		return nil
+	})
 	if err != nil {
-		return errors.Wrap(err, "failed to list tiering upload intents")
-	}
-	for hash, intent := range intents {
-		target := u.storage.getTierTarget(intent.TargetStorageID)
-		if target == nil {
-			// Target no longer configured; drop the intent — the object
-			// (if any) will be found if the bucket is ever re-attached.
-			log.Warnf("Upload intent for %s references unknown tiering target %d; dropping", hash, intent.TargetStorageID)
-			if err := u.db.DeleteTierUploadIntent(hash); err != nil {
-				log.Warnf("Failed to delete stale upload intent for %s: %v", hash, err)
-			}
-			continue
-		}
-
-		meta, err := u.storage.GetMetadata(hash)
-		if err != nil {
-			return errors.Wrapf(err, "failed to load metadata for pending upload %s", hash)
-		}
-		switch {
-		case !intent.RelocatedAt.IsZero():
-			// The relocation committed.  Whatever happened to the object
-			// since, the target's charge is accounted for -- by the live
-			// metadata, or refunded by the deletion -- so only the local
-			// side can be left over.  See settleRelocatedIntent.
-			if !u.settleRelocatedIntent(hash, intent, meta) {
-				u.markPendingRelease(hash)
-				continue // pinned; the reader's release will wake the loop
-			}
-			if meta == nil {
-				// Belt and braces: the remote object should already be gone.
-				if err := target.deleteObject(ctx, hash); err != nil {
-					log.Warnf("Failed to confirm removal of remote object %s during recovery: %v", hash, err)
-				}
-			}
-		case meta == nil:
-			// The object was deleted while the upload was still in flight, so
-			// the remote bytes are this intent's to reclaim, as is the charge
-			// taken for them.  The deletion refunded only the local storage.
-			if err := target.deleteObject(ctx, hash); err != nil {
-				log.Warnf("Failed to delete orphaned remote object %s during recovery: %v", hash, err)
-				continue // keep the intent so a later pass retries
-			}
-			if err := u.db.AddUsage(intent.TargetStorageID, intent.NamespaceID, -CalculateFileSize(intent.Size)); err != nil {
-				log.Warnf("Failed to refund tiering usage for %s during recovery: %v", hash, err)
-			}
-			u.eviction.NoteUsageDecrease(intent.TargetStorageID, CalculateFileSize(intent.Size))
-		case meta.StorageID == intent.TargetStorageID:
-			// The metadata already names the target but the intent was never
-			// marked relocated (that write is best-effort), so this is the
-			// same leftover-local-copy case as above.
-			if !u.releaseLocalCopy(hash, localCopyFromIntent(intent)) {
-				u.markPendingRelease(hash)
-				continue // pinned; the reader's release will wake the loop
-			}
-		default:
-			// Upload did not commit.  Remove any partial/complete bucket
-			// copy, refund the up-front charge, and re-queue the object.
-			if err := target.deleteObject(ctx, hash); err != nil {
-				log.Warnf("Failed to delete uncommitted remote object %s during recovery: %v", hash, err)
-				continue // keep the intent so a later pass retries
-			}
-			if err := u.db.AddUsage(intent.TargetStorageID, intent.NamespaceID, -CalculateFileSize(intent.Size)); err != nil {
-				log.Warnf("Failed to refund tiering usage for %s during recovery: %v", hash, err)
-			}
-			u.eviction.NoteUsageDecrease(intent.TargetStorageID, CalculateFileSize(intent.Size))
-			u.MaybeEnqueue(hash)
-		}
-		if err := u.db.DeleteTierUploadIntent(hash); err != nil {
-			log.Warnf("Failed to delete upload intent for %s during recovery: %v", hash, err)
-		}
+		return err
 	}
 
 	// Reap any incomplete uploads left over from a previous process.  Only
@@ -662,6 +732,86 @@ func (u *tierUploader) recover(ctx context.Context) error {
 	return nil
 }
 
+// recoverIntent settles one intent left behind by a previous process.  A
+// failure is logged and the intent kept, so a later pass retries it.
+func (u *tierUploader) recoverIntent(ctx context.Context, hash InstanceHash, intent *TierUploadIntent) {
+	target := u.storage.getTierTarget(intent.TargetStorageID)
+	if target == nil {
+		// Target no longer configured; drop the intent — the object
+		// (if any) will be found if the bucket is ever re-attached.
+		log.Warnf("Upload intent for %s references unknown tiering target %d; dropping", hash, intent.TargetStorageID)
+		if err := u.db.DeleteTierUploadIntent(hash); err != nil {
+			log.Warnf("Failed to delete stale upload intent for %s: %v", hash, err)
+		}
+		return
+	}
+	// deleteRemote is bounded so that one unresponsive request cannot stall
+	// recovery of everything behind it.
+	deleteRemote := func() error {
+		opCtx, cancel := context.WithTimeout(ctx, tierCleanupTimeout)
+		defer cancel()
+		return target.deleteObject(opCtx, hash)
+	}
+	refund := func() {
+		if err := u.db.AddUsage(intent.TargetStorageID, intent.NamespaceID, -CalculateFileSize(intent.Size)); err != nil {
+			log.Warnf("Failed to refund tiering usage for %s during recovery: %v", hash, err)
+		}
+		u.eviction.NoteUsageDecrease(intent.TargetStorageID, CalculateFileSize(intent.Size))
+	}
+
+	meta, err := u.storage.GetMetadata(hash)
+	if err != nil {
+		log.Warnf("Failed to load metadata for pending upload %s; leaving its intent for a later pass: %v", hash, err)
+		return
+	}
+	switch {
+	case !intent.RelocatedAt.IsZero():
+		// The relocation committed.  Whatever happened to the object
+		// since, the target's charge is accounted for -- by the live
+		// metadata, or refunded by the deletion -- so only the local
+		// side can be left over.  See settleRelocatedIntent.
+		if !u.settleRelocatedIntent(hash, intent, meta) {
+			u.markPendingRelease(hash)
+			return // pinned; the reader's release will wake the loop
+		}
+		if meta == nil {
+			// Belt and braces: the remote object should already be gone.
+			if err := deleteRemote(); err != nil {
+				log.Warnf("Failed to confirm removal of remote object %s during recovery: %v", hash, err)
+			}
+		}
+	case meta == nil:
+		// The object was deleted while the upload was still in flight, so
+		// the remote bytes are this intent's to reclaim, as is the charge
+		// taken for them.  The deletion refunded only the local storage.
+		if err := deleteRemote(); err != nil {
+			log.Warnf("Failed to delete orphaned remote object %s during recovery: %v", hash, err)
+			return // keep the intent so a later pass retries
+		}
+		refund()
+	case meta.StorageID == intent.TargetStorageID:
+		// The metadata already names the target but the intent was never
+		// marked relocated (that write is best-effort), so this is the
+		// same leftover-local-copy case as above.
+		if !u.releaseLocalCopy(hash, localCopyFromIntent(intent)) {
+			u.markPendingRelease(hash)
+			return // pinned; the reader's release will wake the loop
+		}
+	default:
+		// Upload did not commit.  Remove any partial/complete bucket
+		// copy, refund the up-front charge, and re-queue the object.
+		if err := deleteRemote(); err != nil {
+			log.Warnf("Failed to delete uncommitted remote object %s during recovery: %v", hash, err)
+			return // keep the intent so a later pass retries
+		}
+		refund()
+		u.MaybeEnqueue(hash)
+	}
+	if err := u.db.DeleteTierUploadIntent(hash); err != nil {
+		log.Warnf("Failed to delete upload intent for %s during recovery: %v", hash, err)
+	}
+}
+
 // backfillScan walks existing metadata once and enqueues completed local
 // objects that meet the tiering threshold (e.g. objects cached before a tiering
 // target was configured, or deferred when the queue was previously full).
@@ -674,7 +824,7 @@ func (u *tierUploader) backfillScan(ctx context.Context) (queued int, deferred b
 		if ctx.Err() != nil {
 			return ctx.Err()
 		}
-		if !u.eligible(meta) {
+		if !u.eligible(meta) || u.givenUp(instanceHash) {
 			return nil
 		}
 		select {

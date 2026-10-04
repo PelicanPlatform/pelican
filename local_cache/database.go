@@ -2012,10 +2012,39 @@ func (cdb *CacheDB) DeleteTierUploadIntent(instanceHash InstanceHash) error {
 	})
 }
 
-// ListTierUploadIntents returns all recorded upload intents, used by crash
-// recovery to reconcile the bucket with the metadata store.
-func (cdb *CacheDB) ListTierUploadIntents() (map[InstanceHash]*TierUploadIntent, error) {
-	intents := make(map[InstanceHash]*TierUploadIntent)
+// GetTierUploadIntent returns an object's upload intent, or nil if it has
+// none.  An unreadable intent is returned as an error.
+func (cdb *CacheDB) GetTierUploadIntent(instanceHash InstanceHash) (*TierUploadIntent, error) {
+	var intent *TierUploadIntent
+	err := cdb.db.View(func(txn *badger.Txn) error {
+		item, err := txn.Get(TierUploadIntentKey(instanceHash))
+		if errors.Is(err, badger.ErrKeyNotFound) {
+			return nil
+		}
+		if err != nil {
+			return err
+		}
+		intent = &TierUploadIntent{}
+		return item.Value(func(v []byte) error { return msgpack.Unmarshal(v, intent) })
+	})
+	if err != nil {
+		return nil, errors.Wrapf(err, "failed to read upload intent for %s", instanceHash)
+	}
+	return intent, nil
+}
+
+// TierUploadIntentEntry is one intent returned by ListTierUploadIntents.
+type TierUploadIntentEntry struct {
+	Hash   InstanceHash
+	Intent *TierUploadIntent
+}
+
+// ListTierUploadIntents returns up to limit upload intents whose hashes sort
+// after the given one ("" to start from the beginning), in hash order.  Pass
+// the last hash returned to fetch the next page.  Intents that fail to
+// unmarshal are skipped with a warning.
+func (cdb *CacheDB) ListTierUploadIntents(after InstanceHash, limit int) ([]TierUploadIntentEntry, error) {
+	var entries []TierUploadIntentEntry
 	err := cdb.db.View(func(txn *badger.Txn) error {
 		prefix := []byte(PrefixTierUpload)
 		opts := badger.DefaultIteratorOptions
@@ -2023,22 +2052,26 @@ func (cdb *CacheDB) ListTierUploadIntents() (map[InstanceHash]*TierUploadIntent,
 		it := txn.NewIterator(opts)
 		defer it.Close()
 
-		for it.Seek(prefix); it.ValidForPrefix(prefix); it.Next() {
+		start := prefix
+		if after != "" {
+			start = TierUploadIntentKey(after)
+		}
+		for it.Seek(start); it.ValidForPrefix(prefix) && len(entries) < limit; it.Next() {
 			item := it.Item()
 			hash := InstanceHash(item.Key()[len(PrefixTierUpload):])
+			if hash == after {
+				continue
+			}
 			var intent TierUploadIntent
-			err := item.Value(func(val []byte) error {
-				return msgpack.Unmarshal(val, &intent)
-			})
-			if err != nil {
+			if err := item.Value(func(val []byte) error { return msgpack.Unmarshal(val, &intent) }); err != nil {
 				log.Warnf("Failed to unmarshal tiering upload intent for %s: %v", hash, err)
 				continue
 			}
-			intents[hash] = &intent
+			entries = append(entries, TierUploadIntentEntry{Hash: hash, Intent: &intent})
 		}
 		return nil
 	})
-	return intents, err
+	return entries, err
 }
 
 // redirectRecordRetries bounds retries of RecordRedirectIssued on BadgerDB

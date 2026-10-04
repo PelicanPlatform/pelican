@@ -3402,11 +3402,19 @@ description: |+
   on-disk guarantees for a given namespace should not tier it — raise
   ${Cache.TieringThreshold} above the object sizes involved.
 
+  Every minute the cache writes a small object (`.pelican-health`, beside the identity
+  object) to each target and reads it back.  A target that fails is not given new uploads
+  until it passes again, and the result is reported as the `tiering-storage` health
+  component: a warning on the first failure, degraded after three in a row.  An object
+  that fails to upload five times while its target passes this check is left on local
+  storage until the cache restarts.
+
   Tiering is monitored through the `pelican_cache_tiering_*` Prometheus metrics, labelled by
-  target: uploads and their bytes and duration by result, the upload queue's depth and
-  drops, uploads deferred for lack of room, reads by how they were served, objects found
-  changed on a target, removals by the consistency sweep and when it last completed, and
-  whether each target can issue redirect URLs.
+  target: uploads and their bytes and duration by result, objects given up on, the upload
+  queue's depth and drops, uploads deferred for lack of room, reads by how they were
+  served, objects found changed on a target, removals by the consistency sweep and when it
+  last completed, whether each target passed its latest liveness check, and whether each
+  target can issue redirect URLs.
 
   This setting only has effect when `${Cache.EnableV2}` is true; the cache logs a
   warning and ignores tiering targets otherwise.  It applies to the cache server only:

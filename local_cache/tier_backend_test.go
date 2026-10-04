@@ -26,9 +26,13 @@ import (
 	"testing"
 	"time"
 
+	"github.com/pkg/errors"
+	"github.com/prometheus/client_golang/prometheus/testutil"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"golang.org/x/sync/errgroup"
+
+	"github.com/pelicanplatform/pelican/metrics"
 )
 
 // These tests need neither minio nor symlinks, so unlike the rest of the
@@ -171,4 +175,204 @@ func TestTierOnNonRedirectingBackend(t *testing.T) {
 	require.NoError(t, err)
 	assert.False(t, exists)
 	assert.NoError(t, env.target.deleteObject(ctx, hash), "deletes must be idempotent")
+}
+
+// TestTierIntentsArePaged: a long outage can leave an intent behind for every
+// object whose upload failed, so intents are walked a page at a time rather
+// than loaded at once.  Every intent must be visited exactly once, across
+// page boundaries and while the callback deletes the ones it visits.
+func TestTierIntentsArePaged(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	env := newMemTierEnv(t, ctx)
+
+	const n = 2*tierIntentPage + 7
+	for i := 0; i < n; i++ {
+		require.NoError(t, env.db.SetTierUploadIntent(InstanceHash(fmt.Sprintf("%064d", i)),
+			&TierUploadIntent{TargetStorageID: env.tierID, Size: 1}))
+	}
+
+	seen := make(map[InstanceHash]int, n)
+	var previous InstanceHash
+	require.NoError(t, env.uploader.forEachIntent(ctx, func(h InstanceHash, _ *TierUploadIntent) error {
+		seen[h]++
+		assert.Greater(t, h, previous, "intents are visited in hash order")
+		previous = h
+		return env.db.DeleteTierUploadIntent(h)
+	}))
+	assert.Len(t, seen, n)
+	for h, count := range seen {
+		assert.Equal(t, 1, count, "intent %s visited more than once", h)
+	}
+	rest, err := env.db.ListTierUploadIntents("", tierIntentPage)
+	require.NoError(t, err)
+	assert.Empty(t, rest)
+}
+
+// blockingDeleteBackend stalls every Delete until released, standing in for a
+// tiering target that has stopped answering.
+type blockingDeleteBackend struct {
+	TierBackend
+	entered chan struct{}
+	release chan struct{}
+}
+
+func (b blockingDeleteBackend) Delete(ctx context.Context, key string) error {
+	select {
+	case b.entered <- struct{}{}:
+	default:
+	}
+	select {
+	case <-b.release:
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+	return b.TierBackend.Delete(ctx, key)
+}
+
+// TestTierStartDoesNotWaitForRecovery: recovery makes a remote call per
+// leftover intent, so with a target that has stopped answering, a cache that
+// recovered on its startup path would never come up.  Start must return while
+// recovery is still blocked, and the uploads must start only after it ends.
+func TestTierStartDoesNotWaitForRecovery(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	env := newMemTierEnv(t, ctx)
+
+	// An upload that never committed: recovery deletes its remote copy,
+	// refunds the charge and re-queues the object.
+	hash := InstanceHash(fmt.Sprintf("%064d", 77))
+	data := make([]byte, 4*BlockDataSize)
+	storeTestObject(t, ctx, env.storage, hash, data, env.diskID, NamespaceID(1))
+	require.NoError(t, env.db.SetTierUploadIntent(hash, &TierUploadIntent{
+		TargetStorageID: env.tierID, Size: int64(len(data)), NamespaceID: 1,
+	}))
+
+	blocking := blockingDeleteBackend{
+		TierBackend: env.target.backend,
+		entered:     make(chan struct{}, 1),
+		release:     make(chan struct{}),
+	}
+	env.target.backend = blocking
+
+	egrp, egrpCtx := errgroup.WithContext(ctx)
+	require.NoError(t, env.uploader.Start(egrpCtx, egrp), "Start returns while recovery is still running")
+	defer func() {
+		cancel()
+		_ = egrp.Wait()
+	}()
+
+	<-blocking.entered // recovery is stuck on the target
+	meta, err := env.storage.GetMetadata(hash)
+	require.NoError(t, err)
+	assert.Equal(t, env.diskID, meta.StorageID, "nothing is uploaded while recovery is unsettled")
+
+	close(blocking.release)
+	require.Eventually(t, func() bool {
+		meta, err := env.storage.GetMetadata(hash)
+		return err == nil && meta != nil && meta.StorageID == env.tierID
+	}, 10*time.Second, 20*time.Millisecond, "once recovery ends, the re-queued object is tiered")
+}
+
+// failingPutBackend fails uploads -- of every key, or, with objectsOnly, of
+// cache objects but not the liveness probe's -- standing in for a target that
+// is down and for one that works but rejects particular objects.
+type failingPutBackend struct {
+	TierBackend
+	objectsOnly bool
+}
+
+func (b failingPutBackend) Put(ctx context.Context, key, contentType string, size int64, body io.Reader) (TierObjectInfo, error) {
+	if b.objectsOnly && key == tierProbeKey {
+		return b.TierBackend.Put(ctx, key, contentType, size, body)
+	}
+	return TierObjectInfo{}, errors.New("injected upload failure")
+}
+
+// TestTierLivenessProbe: a target that stops accepting writes is taken out
+// of rotation and reported through the health framework -- a warning at
+// first, degraded once it keeps failing -- and put back when it recovers.
+func TestTierLivenessProbe(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	env := newMemTierEnv(t, ctx)
+	working := env.target.backend
+	label := env.target.metricLabel()
+
+	require.NoError(t, env.target.probe(ctx))
+	env.uploader.publishHealth()
+	assert.True(t, env.target.healthy.Load())
+	assert.Equal(t, 1.0, testutil.ToFloat64(tierTargetUp.WithLabelValues(label)))
+	status, err := metrics.GetComponentStatus(metrics.Cache_TieringStorage)
+	require.NoError(t, err)
+	assert.Equal(t, metrics.StatusOK.String(), status)
+
+	env.target.backend = failingPutBackend{TierBackend: working}
+	require.Error(t, env.target.probe(ctx))
+	env.uploader.publishHealth()
+	assert.False(t, env.target.healthy.Load())
+	assert.Nil(t, env.uploader.chooseTarget(1), "a failing target is not chosen for uploads")
+	assert.Equal(t, 0.0, testutil.ToFloat64(tierTargetUp.WithLabelValues(label)))
+	status, err = metrics.GetComponentStatus(metrics.Cache_TieringStorage)
+	require.NoError(t, err)
+	assert.Equal(t, metrics.StatusWarning.String(), status, "one failure may be a blip")
+
+	for i := 1; i < tierProbeDegradedAfter; i++ {
+		require.Error(t, env.target.probe(ctx))
+	}
+	env.uploader.publishHealth()
+	status, err = metrics.GetComponentStatus(metrics.Cache_TieringStorage)
+	require.NoError(t, err)
+	assert.Equal(t, metrics.StatusDegraded.String(), status)
+
+	env.target.backend = working
+	require.NoError(t, env.target.probe(ctx))
+	env.uploader.publishHealth()
+	assert.True(t, env.target.healthy.Load())
+	assert.NotNil(t, env.uploader.chooseTarget(1))
+	status, err = metrics.GetComponentStatus(metrics.Cache_TieringStorage)
+	require.NoError(t, err)
+	assert.Equal(t, metrics.StatusOK.String(), status)
+}
+
+// TestTierGivesUpOnAnObject: an object that keeps failing to upload while its
+// target is otherwise fine is retried a bounded number of times and then left
+// on local storage, instead of costing a full upload attempt on every rescan
+// forever.  Failures while the target itself is down are not held against it.
+func TestTierGivesUpOnAnObject(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	env := newMemTierEnv(t, ctx)
+	working := env.target.backend
+
+	hash := InstanceHash(fmt.Sprintf("%064d", 91))
+	data := make([]byte, 4*BlockDataSize)
+	storeTestObject(t, ctx, env.storage, hash, data, env.diskID, NamespaceID(1))
+
+	// Target down: the probe fails, so nothing is counted.
+	env.target.backend = failingPutBackend{TierBackend: working}
+	require.Error(t, env.uploader.processObject(ctx, hash))
+	assert.False(t, env.uploader.givenUp(hash))
+	assert.Equal(t, 0, env.uploader.failures[hash])
+	require.NoError(t, env.uploader.processObject(ctx, hash), "with no healthy target, uploads wait")
+
+	// Target up but refusing this object: every failure counts.
+	env.target.backend = failingPutBackend{TierBackend: working, objectsOnly: true}
+	require.NoError(t, env.target.probe(ctx))
+	abandoned := testutil.ToFloat64(tierUploadsAbandonedTotal)
+	for i := 0; i < tierMaxUploadAttempts; i++ {
+		require.Error(t, env.uploader.processObject(ctx, hash))
+	}
+	assert.True(t, env.uploader.givenUp(hash))
+	assert.Equal(t, abandoned+1, testutil.ToFloat64(tierUploadsAbandonedTotal))
+
+	// Given up: no further attempts, even once the target would accept it,
+	// and the rescan no longer queues it.
+	env.target.backend = working
+	require.NoError(t, env.uploader.processObject(ctx, hash))
+	meta, err := env.storage.GetMetadata(hash)
+	require.NoError(t, err)
+	assert.Equal(t, env.diskID, meta.StorageID, "the object stays on local storage")
+	queued, _ := env.uploader.backfillScan(ctx)
+	assert.Zero(t, queued)
 }

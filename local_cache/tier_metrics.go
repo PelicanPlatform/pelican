@@ -101,6 +101,15 @@ var (
 			"The target serves them, so they are absent from the cache's transfer monitoring; " +
 			"this counts what was handed off, not what was confirmed transferred",
 	}, []string{"target"})
+	tierTargetUp = promauto.NewGaugeVec(prometheus.GaugeOpts{
+		Name: "pelican_cache_tiering_target_up",
+		Help: "1 when a tiering target passed its latest liveness probe (a small write read back); 0 when it failed",
+	}, []string{"target"})
+	tierUploadsAbandonedTotal = promauto.NewCounter(prometheus.CounterOpts{
+		Name: "pelican_cache_tiering_uploads_abandoned_total",
+		Help: "Objects the uploader stopped trying to tier after repeated failures while their target was healthy; " +
+			"they stay on local storage",
+	})
 	tierRedirectCapable = promauto.NewGaugeVec(prometheus.GaugeOpts{
 		Name: "pelican_cache_tiering_redirect_capable",
 		Help: "1 when a tiering target can issue redirect URLs (probed at startup), so its objects can be served " +

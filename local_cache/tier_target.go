@@ -23,6 +23,7 @@ import (
 	"io"
 	"net/url"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/google/uuid"
@@ -65,6 +66,13 @@ type tierTarget struct {
 	// request that is going to be proxied anyway should not pay for one.
 	redirectScheme string
 	redirectHost   string
+
+	// healthy is the latest liveness probe's verdict (true until a probe
+	// fails); probeFailures counts consecutive failed probes, and
+	// lastProbeError holds the latest failure's message.  See probe.
+	healthy        atomic.Bool
+	probeFailures  atomic.Int32
+	lastProbeError atomic.Value
 }
 
 // newTierTarget opens the backend for cfg and probes its capabilities.  No
@@ -76,6 +84,7 @@ func newTierTarget(ctx context.Context, cfg TierTargetConfig) (*tierTarget, erro
 		return nil, err
 	}
 	t := &tierTarget{cfg: cfg, backend: backend}
+	t.healthy.Store(true)
 	if probe, ok := probeTierRedirect(ctx, backend); ok {
 		if u, perr := url.Parse(probe); perr == nil {
 			t.canRedirect = true
