@@ -53,6 +53,7 @@ import (
 	"github.com/pelicanplatform/pelican/param"
 	"github.com/pelicanplatform/pelican/server_structs"
 	"github.com/pelicanplatform/pelican/server_utils"
+	"github.com/pelicanplatform/pelican/utils"
 )
 
 type (
@@ -221,32 +222,22 @@ func writeScitokensConfiguration(modules server_structs.ServerType, cfg *Scitoke
 		xrootdRun = param.Cache_RunLocation.GetString()
 	}
 
-	configPath := filepath.Join(xrootdRun, "scitokens-generated.cfg.tmp")
-	file, err := os.OpenFile(configPath, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0640)
-	if err != nil {
-		return errors.Wrapf(err, "failed to create a temporary scitokens file %s", configPath)
-	}
-	defer file.Close()
-	if err = os.Chown(configPath, -1, gid); err != nil {
-		return errors.Wrapf(err, "unable to change ownership of generated scitokens"+
-			" configuration file %v to desired daemon gid %v", configPath, gid)
-	}
-
-	deduplicateBasePaths(cfg)
-	err = templ.Execute(file, cfg)
-	if err != nil {
-		return errors.Wrapf(err, "unable to create scitokens.cfg template")
-	}
-
-	// Note that we write to the file then rename it into place.  This is because the
+	// Note that we write to a temporary file then rename it into place.  This is because the
 	// xrootd daemon will periodically reload the scitokens.cfg and, in some cases,
 	// we may want to update it without restarting the server.
 	finalConfigPath := filepath.Join(xrootdRun, "scitokens-origin-generated.cfg")
 	if modules.IsEnabled(server_structs.CacheType) {
 		finalConfigPath = filepath.Join(xrootdRun, "scitokens-cache-generated.cfg")
 	}
-	if err = os.Rename(configPath, finalConfigPath); err != nil {
-		return errors.Wrapf(err, "failed to rename scitokens.cfg to final location")
+	deduplicateBasePaths(cfg)
+	err = utils.WriteFileAtomicFrom(finalConfigPath, 0640, func(w io.Writer) error {
+		if err := templ.Execute(w, cfg); err != nil {
+			return errors.Wrap(err, "unable to create scitokens.cfg template")
+		}
+		return nil
+	}, utils.WithOwner(-1, gid))
+	if err != nil {
+		return errors.Wrapf(err, "failed to write the scitokens configuration %s", finalConfigPath)
 	}
 	return nil
 }

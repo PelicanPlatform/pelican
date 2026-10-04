@@ -150,10 +150,14 @@ func TestWriteAddressFile(t *testing.T) {
 		err := WriteAddressFile(modules)
 		require.NoError(t, err)
 
-		// Verify that the temp file doesn't exist
-		tempFilePath := filepath.Join(tmpDir, "pelican.addresses.tmp")
-		_, err = os.Stat(tempFilePath)
-		assert.True(t, os.IsNotExist(err), "Temporary file should not exist after atomic write")
+		// Verify that no temporary file is left behind
+		entries, err := os.ReadDir(tmpDir)
+		require.NoError(t, err)
+		for _, e := range entries {
+			if strings.Contains(e.Name(), "pelican.addresses") {
+				assert.Equal(t, "pelican.addresses", e.Name(), "Temporary file should not exist after atomic write")
+			}
+		}
 
 		// Verify that the final file exists
 		addressFilePath := filepath.Join(tmpDir, "pelican.addresses")

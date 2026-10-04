@@ -47,6 +47,7 @@ import (
 	"github.com/pelicanplatform/pelican/server_structs"
 	"github.com/pelicanplatform/pelican/server_utils"
 	"github.com/pelicanplatform/pelican/token"
+	"github.com/pelicanplatform/pelican/utils"
 )
 
 var (
@@ -539,24 +540,8 @@ func setupDiskUsageToken(ctx context.Context, egrp *errgroup.Group) (string, err
 			return errors.Wrap(err, "failed to create disk usage token")
 		}
 
-		// Write to temp file first
-		tmpFile, err := os.CreateTemp(filepath.Dir(tokenPath), "token-update-*")
-		if err != nil {
-			return errors.Wrap(err, "failed to create temp file for token update")
-		}
-
-		tmpName := tmpFile.Name()
-		defer os.Remove(tmpName)
-
-		if _, err := tmpFile.WriteString(tc); err != nil {
-			tmpFile.Close()
-			return errors.Wrap(err, "failed to write token to temp file")
-		}
-		tmpFile.Close()
-
-		// Atomic rename
-		if err := os.Rename(tmpName, tokenPath); err != nil {
-			return errors.Wrap(err, "failed to rename token file")
+		if err := utils.WriteFileAtomic(tokenPath, []byte(tc), 0600); err != nil {
+			return errors.Wrap(err, "failed to write disk usage token file")
 		}
 		return nil
 	}

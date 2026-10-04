@@ -41,6 +41,7 @@ import (
 	"github.com/pelicanplatform/pelican/server_utils"
 	"github.com/pelicanplatform/pelican/token"
 	"github.com/pelicanplatform/pelican/token_scopes"
+	"github.com/pelicanplatform/pelican/utils"
 )
 
 const (
@@ -128,7 +129,6 @@ func generateTestFile() (string, error) {
 
 	finalFilePath := filepath.Join(selfTestPath, testFileName)
 
-	tmpFileCinfoPath := filepath.Join(selfTestPath, testFileCinfoName+".tmp")
 	finalFileCinfoPath := filepath.Join(selfTestPath, testFileCinfoName)
 
 	// This is for web URL path, do not use filepath
@@ -141,28 +141,17 @@ func generateTestFile() (string, error) {
 	defer file.Close()
 	defer log.Debug("Cache self-test file created at: ", finalFilePath)
 
-	cinfoFile, err := os.OpenFile(tmpFileCinfoPath, os.O_WRONLY|os.O_CREATE, 0600)
-	if err != nil {
-		return "", errors.Wrapf(err, "failed to create self-test cinfo file %s", tmpFileCinfoPath)
-	}
-	defer cinfoFile.Close()
-
 	if _, err := file.Write(testFileBytes); err != nil {
 		return "", errors.Wrapf(err, "failed to write test content to self-test file %s", finalFilePath)
 	}
-	if _, err := cinfoFile.Write(cinfoBytes); err != nil {
-		return "", errors.Wrapf(err, "failed to write cinfo content to self-test cinfo file %s", tmpFileCinfoPath)
-	}
-
 	if err = file.Chown(uid, gid); err != nil {
 		return "", errors.Wrapf(err, "unable to change ownership of self-test file %v to desired daemon gid %v", file, gid)
 	}
-	if err = cinfoFile.Chown(uid, gid); err != nil {
-		return "", errors.Wrapf(err, "unable to change ownership of self-test cinfo file %v to desired daemon gid %v", file, gid)
-	}
 
-	if err := os.Rename(tmpFileCinfoPath, finalFileCinfoPath); err != nil {
-		return "", errors.Wrapf(err, "unable to move self-test cinfo file from temp location %q to desired location %q", tmpFileCinfoPath, finalFileCinfoPath)
+	// The cinfo file is what makes the cache treat the test file as present, so
+	// it appears (atomically) only once the test file is complete.
+	if err := utils.WriteFileAtomic(finalFileCinfoPath, cinfoBytes, 0600, utils.WithOwner(uid, gid)); err != nil {
+		return "", errors.Wrapf(err, "failed to write self-test cinfo file %s", finalFileCinfoPath)
 	}
 
 	cachePort := param.Cache_Port.GetInt()

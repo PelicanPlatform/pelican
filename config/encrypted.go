@@ -43,6 +43,7 @@ import (
 	"gopkg.in/yaml.v3"
 
 	"github.com/pelicanplatform/pelican/param"
+	"github.com/pelicanplatform/pelican/utils"
 )
 
 // If we prompted the user for a new password while setting up the file,
@@ -163,42 +164,10 @@ func GetEncryptedContents() (string, error) {
 // saveToFile atomically writes data to filePath, creating parent
 // directories as needed with mode 0700 and setting file mode to 0600.
 func saveToFile(data []byte, filePath string) error {
-	configDir := filepath.Dir(filePath)
-	if err := os.MkdirAll(configDir, 0700); err != nil {
+	if err := os.MkdirAll(filepath.Dir(filePath), 0700); err != nil {
 		return err
 	}
-	fp, err := os.CreateTemp(configDir, "credentials.pem")
-	if err != nil {
-		return err
-	}
-	tempName := fp.Name()
-	// Ensure that the file is closed before we attempt to rename it.
-	// Otherwise, on Windows, the rename operation will fail.
-	err = func() error {
-		defer fp.Close()
-		if _, err := fp.Write(data); err != nil {
-			os.Remove(tempName)
-			return err
-		}
-		if err := fp.Sync(); err != nil {
-			os.Remove(tempName)
-			return err
-		}
-		if err := os.Chmod(tempName, 0600); err != nil {
-			os.Remove(tempName)
-			return err
-		}
-		return nil
-	}()
-	if err != nil {
-		return err
-	}
-
-	if err := os.Rename(tempName, filePath); err != nil {
-		os.Remove(tempName)
-		return err
-	}
-	return nil
+	return utils.WriteFileAtomic(filePath, data, 0600)
 }
 
 func SaveEncryptedContents(encContents []byte) error {
