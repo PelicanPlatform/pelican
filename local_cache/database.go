@@ -1983,6 +1983,21 @@ func (cdb *CacheDB) SetTierUploadIntent(instanceHash InstanceHash, intent *TierU
 	})
 }
 
+// tierIntentRelocatedInTxn reports whether an object has a tiering upload
+// intent whose relocation has committed.  An unreadable intent reports false,
+// so the caller falls back to dropping it, as before.
+func tierIntentRelocatedInTxn(txn *badger.Txn, instanceHash InstanceHash) bool {
+	item, err := txn.Get(TierUploadIntentKey(instanceHash))
+	if err != nil {
+		return false
+	}
+	var intent TierUploadIntent
+	if err := item.Value(func(v []byte) error { return msgpack.Unmarshal(v, &intent) }); err != nil {
+		return false
+	}
+	return !intent.RelocatedAt.IsZero()
+}
+
 // DeleteTierUploadIntent removes an upload intent record.
 func (cdb *CacheDB) DeleteTierUploadIntent(instanceHash InstanceHash) error {
 	if err := cdb.checkWritable(); err != nil {
@@ -2289,20 +2304,29 @@ func deleteObjectWithMetaInTxn(txn *badger.Txn, salt []byte, instanceHash Instan
 		}
 	}
 
-	// Delete purge-first marker, redirect-hold stamp, and any tiering upload intent if
-	// present (best-effort, ignore not-found).
+	// Delete purge-first marker, redirect-hold stamp, and the tiering upload
+	// intent if present (best-effort, ignore not-found) -- with one
+	// exception for the intent.
 	//
-	// Dropping the intent here is safe and necessary: an intent outliving its
-	// object would make the tiering consistency sweep skip that hash in both
-	// directions forever, on the assumption that the uploader owns it.  Any
-	// remote bytes are handled by the same deletion -- StorageManager.Delete
-	// and EvictByLRU remove the remote object for a tiered version --
-	// and an intent for an upload still in flight belongs to an object whose
-	// metadata is being deleted underneath it, which the uploader detects when
+	// Dropping an intent for an upload still in flight is safe and
+	// necessary: an intent outliving its object would make the tiering
+	// consistency sweep skip that hash in both directions, on the assumption
+	// that the uploader owns it, and the uploader detects the deletion when
 	// its relocation fails and cleans up the remote copy itself.
+	//
+	// An intent whose relocation has committed is different, and is kept.
+	// It exists only because the object's *local* copy was still under a
+	// reader when it was tiered, and it is the only remaining record of that
+	// copy's layout: this deletion removes the remote copy and refunds the
+	// target, since the metadata names only the target by now, but never
+	// sees the local files or their charge.  Dropping the intent here leaked
+	// both until the daily data scan.  The tiering uploader's release loop
+	// clears it as soon as the reader lets go.
 	_ = txn.Delete(PurgeFirstKey(instanceHash))
 	_ = txn.Delete(RedirectHoldKey(instanceHash))
-	_ = txn.Delete(TierUploadIntentKey(instanceHash))
+	if !tierIntentRelocatedInTxn(txn, instanceHash) {
+		_ = txn.Delete(TierUploadIntentKey(instanceHash))
+	}
 
 	// Likewise the append-in-flight marker: whatever removed the object also
 	// removed the thing the marker exists to let us reclaim.

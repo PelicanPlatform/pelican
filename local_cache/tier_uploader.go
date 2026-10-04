@@ -68,18 +68,76 @@ type tierUploader struct {
 	// (completion notifications can fire more than once per object).
 	inflightMu sync.Mutex
 	inflight   map[InstanceHash]bool
+
+	// pendingRelease holds the objects whose bucket copy is live but whose
+	// local copy is still waiting on a reader.  The unpin observer consults
+	// it to wake the release loop the moment such a reader lets go, rather
+	// than leaving the local copy charged until the next hourly rescan.
+	pendingMu      sync.Mutex
+	pendingRelease map[InstanceHash]struct{}
+	releaseKick    chan struct{}
 }
 
 // newTierUploader creates the uploader.  threshold is the minimum object
 // ContentLength for tiering.
 func newTierUploader(db *CacheDB, storage *StorageManager, eviction *EvictionManager, threshold int64) *tierUploader {
-	return &tierUploader{
-		db:        db,
-		storage:   storage,
-		eviction:  eviction,
-		threshold: threshold,
-		queue:     make(chan InstanceHash, tierUploadQueueDepth),
-		inflight:  make(map[InstanceHash]bool),
+	u := &tierUploader{
+		db:             db,
+		storage:        storage,
+		eviction:       eviction,
+		threshold:      threshold,
+		queue:          make(chan InstanceHash, tierUploadQueueDepth),
+		inflight:       make(map[InstanceHash]bool),
+		pendingRelease: make(map[InstanceHash]struct{}),
+		releaseKick:    make(chan struct{}, 1),
+	}
+	storage.SetUnpinObserver(u.onUnpin)
+	return u
+}
+
+// markPendingRelease records that an object's local copy still needs
+// releasing.  Callers mark *before* checking whether the object is pinned,
+// so a reader that lets go in between is guaranteed to find the mark and
+// wake the release loop -- otherwise its unpin could slip past unnoticed.
+func (u *tierUploader) markPendingRelease(h InstanceHash) {
+	u.pendingMu.Lock()
+	u.pendingRelease[h] = struct{}{}
+	u.pendingMu.Unlock()
+}
+
+func (u *tierUploader) clearPendingRelease(h InstanceHash) {
+	u.pendingMu.Lock()
+	delete(u.pendingRelease, h)
+	u.pendingMu.Unlock()
+}
+
+// onUnpin is the storage manager's unpin observer.  It runs on the reader's
+// goroutine as the reader closes, so it only looks the hash up and, if a
+// release is waiting on it, nudges the release loop without blocking.
+func (u *tierUploader) onUnpin(h InstanceHash) {
+	u.pendingMu.Lock()
+	_, waiting := u.pendingRelease[h]
+	u.pendingMu.Unlock()
+	if !waiting {
+		return
+	}
+	select {
+	case u.releaseKick <- struct{}{}:
+	default: // a wake-up is already queued; it will see this object too
+	}
+}
+
+// releaseLoop finishes deferred local releases as soon as the readers that
+// held them let go.  The hourly rescan still runs the same pass, as a
+// backstop for anything this misses.
+func (u *tierUploader) releaseLoop(ctx context.Context) {
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-u.releaseKick:
+			u.finishDeferredReleases(ctx)
+		}
 	}
 }
 
@@ -102,6 +160,10 @@ func (u *tierUploader) Start(ctx context.Context, egrp *errgroup.Group) error {
 	})
 	egrp.Go(func() error {
 		u.rescanLoop(ctx)
+		return nil
+	})
+	egrp.Go(func() error {
+		u.releaseLoop(ctx)
 		return nil
 	})
 	return nil
@@ -380,15 +442,18 @@ func (u *tierUploader) processObject(ctx context.Context, instanceHash InstanceH
 	}
 
 	// Release the local copy, unless a reader is still working from it.
+	// Mark first: see markPendingRelease.
+	u.markPendingRelease(instanceHash)
 	if !u.releaseLocalCopy(instanceHash, prev) {
 		// A reader holds this version.  Its RangeReader captured the
 		// pre-relocation metadata, so it is still reading the local chunk
 		// files; deleting them now would break the transfer.  Leave the
-		// intent in place -- finishDeferredReleases retries once the reader
-		// is gone, and crash recovery finishes the job after a restart.
+		// intent in place: the release loop finishes the job as soon as the
+		// reader lets go, and crash recovery does so after a restart.
 		log.Debugf("Deferring local cleanup of tiered object %s: a reader still holds it", instanceHash)
 		return nil
 	}
+	u.clearPendingRelease(instanceHash)
 
 	if err := u.db.DeleteTierUploadIntent(instanceHash); err != nil {
 		log.Warnf("Failed to delete upload intent for %s: %v", instanceHash, err)
@@ -435,12 +500,34 @@ func localCopyFromIntent(intent *TierUploadIntent) *CacheMetadata {
 	}
 }
 
+// settleRelocatedIntent finishes the local side of an intent whose relocation
+// committed, reporting whether the intent may now be dropped.  It is the one
+// place that decides this, so the release loop and crash recovery cannot
+// disagree.
+//
+//   - Still tiered (metadata names the target): release the local copy,
+//     unless a reader still holds it.
+//   - Gone (no metadata): the object was deleted after it was tiered, while
+//     its local copy was still waiting on a reader.  The deletion removed the
+//     remote copy and refunded the target, because by then the metadata
+//     named only the target -- it never saw the local copy.  Release that.
+//   - Reborn (metadata names local storage): the object was deleted and
+//     fetched again under the same instance hash, so the files at the
+//     recorded layout now belong to the new copy.  Touch nothing; the old
+//     copy's local charge, if any remains, is reconciled by the next usage
+//     scan.
+func (u *tierUploader) settleRelocatedIntent(hash InstanceHash, intent *TierUploadIntent, meta *CacheMetadata) bool {
+	if meta != nil && meta.StorageID != intent.TargetStorageID {
+		log.Debugf("Tiered object %s was fetched again before its deferred local release; leaving the new copy alone", hash)
+		return true
+	}
+	return u.releaseLocalCopy(hash, localCopyFromIntent(intent))
+}
+
 // finishDeferredReleases completes the local cleanup for objects whose
-// relocation committed but whose local copy was still under a reader at the
-// time.  Only that state is retried here: it is unambiguous (an in-flight
-// upload has not relocated yet, so its metadata still names local storage),
-// which makes the pass safe to run at any point, unlike the broader
-// reconciliation in recover().
+// relocation committed while a reader still held the local copy.  Only
+// committed relocations are touched: an upload still in flight belongs to
+// its worker, which cleans up after itself if its object disappears.
 func (u *tierUploader) finishDeferredReleases(ctx context.Context) {
 	intents, err := u.db.ListTierUploadIntents()
 	if err != nil {
@@ -451,13 +538,18 @@ func (u *tierUploader) finishDeferredReleases(ctx context.Context) {
 		if ctx.Err() != nil {
 			return
 		}
-		meta, err := u.storage.GetMetadata(hash)
-		if err != nil || meta == nil || meta.StorageID != intent.TargetStorageID {
+		if intent.RelocatedAt.IsZero() {
 			continue
 		}
-		if !u.releaseLocalCopy(hash, localCopyFromIntent(intent)) {
-			continue // still pinned; try again next pass
+		meta, err := u.storage.GetMetadata(hash)
+		if err != nil {
+			continue
 		}
+		u.markPendingRelease(hash)
+		if !u.settleRelocatedIntent(hash, intent, meta) {
+			continue // still pinned; the reader's release will wake us
+		}
+		u.clearPendingRelease(hash)
 		if err := u.db.DeleteTierUploadIntent(hash); err != nil {
 			log.Warnf("Failed to delete upload intent for %s: %v", hash, err)
 			continue
@@ -491,18 +583,20 @@ func (u *tierUploader) recover(ctx context.Context) error {
 			return errors.Wrapf(err, "failed to load metadata for pending upload %s", hash)
 		}
 		switch {
-		case meta == nil && !intent.RelocatedAt.IsZero():
-			// The object was deleted after its relocation committed, so the
-			// remote bytes and their charge belonged to the object: whatever
-			// deleted it already removed the remote copy and refunded the
-			// target.  Refunding again here would drive the counter negative.
-			// What can remain is a local copy whose release was deferred
-			// (reader pinned) and whose charge the deletion did not see,
-			// because by then the metadata named only the bucket.
-			u.releaseLocalCopy(hash, localCopyFromIntent(intent))
-			// Belt and braces: the remote object should already be gone.
-			if err := target.deleteObject(ctx, hash); err != nil {
-				log.Warnf("Failed to confirm removal of remote object %s during recovery: %v", hash, err)
+		case !intent.RelocatedAt.IsZero():
+			// The relocation committed.  Whatever happened to the object
+			// since, the target's charge is accounted for -- by the live
+			// metadata, or refunded by the deletion -- so only the local
+			// side can be left over.  See settleRelocatedIntent.
+			if !u.settleRelocatedIntent(hash, intent, meta) {
+				u.markPendingRelease(hash)
+				continue // pinned; the reader's release will wake the loop
+			}
+			if meta == nil {
+				// Belt and braces: the remote object should already be gone.
+				if err := target.deleteObject(ctx, hash); err != nil {
+					log.Warnf("Failed to confirm removal of remote object %s during recovery: %v", hash, err)
+				}
 			}
 		case meta == nil:
 			// The object was deleted while the upload was still in flight, so
@@ -517,13 +611,12 @@ func (u *tierUploader) recover(ctx context.Context) error {
 			}
 			u.eviction.NoteUsageDecrease(intent.TargetStorageID, CalculateFileSize(intent.Size))
 		case meta.StorageID == intent.TargetStorageID:
-			// Relocation committed but local cleanup didn't finish — remove
-			// the leftover local file(s) and refund the capacity they still
-			// hold.  The intent carries the original chunk layout, so every
-			// chunk file is removed and every directory that held one is
-			// credited, not just chunk 0's.
+			// The metadata already names the target but the intent was never
+			// marked relocated (that write is best-effort), so this is the
+			// same leftover-local-copy case as above.
 			if !u.releaseLocalCopy(hash, localCopyFromIntent(intent)) {
-				continue // pinned; finishDeferredReleases will retry
+				u.markPendingRelease(hash)
+				continue // pinned; the reader's release will wake the loop
 			}
 		default:
 			// Upload did not commit.  Remove any partial/complete bucket

@@ -48,12 +48,19 @@
 
 package local_cache
 
-import "sync"
+import (
+	"sync"
+	"sync/atomic"
+)
 
 // pinSet counts live readers per object version.
 type pinSet struct {
 	mu    sync.Mutex
 	count map[InstanceHash]int
+
+	// onRelease, when set, is called with a version's hash once its last
+	// reader lets go.  It runs outside mu and must not block.
+	onRelease atomic.Pointer[func(InstanceHash)]
 }
 
 func newPinSet() *pinSet {
@@ -71,11 +78,20 @@ func (p *pinSet) pin(h InstanceHash) func() {
 	return func() {
 		once.Do(func() {
 			p.mu.Lock()
-			defer p.mu.Unlock()
+			last := false
 			if n := p.count[h]; n <= 1 {
 				delete(p.count, h)
+				last = true
 			} else {
 				p.count[h] = n - 1
+			}
+			p.mu.Unlock()
+			// Notify outside the lock, so an observer that checks pins (or
+			// takes its own locks) cannot deadlock against a reader.
+			if last {
+				if fn := p.onRelease.Load(); fn != nil {
+					(*fn)(h)
+				}
 			}
 		})
 	}
@@ -96,6 +112,21 @@ func (p *pinSet) isPinned(h InstanceHash) bool {
 // a version across something other than an ObjectReader.
 func (sm *StorageManager) PinObject(instanceHash InstanceHash) func() {
 	return sm.pins.pin(instanceHash)
+}
+
+// SetUnpinObserver registers fn to be called whenever an object version's
+// last reader releases it.  fn runs on the releasing goroutine, so it must
+// return promptly and must not block; there is one observer at a time.
+//
+// It exists for work that has to wait for a version to be unread -- the
+// tiering uploader's deferred release of a local copy -- and would otherwise
+// have to poll for it.
+func (sm *StorageManager) SetUnpinObserver(fn func(InstanceHash)) {
+	if fn == nil {
+		sm.pins.onRelease.Store(nil)
+		return
+	}
+	sm.pins.onRelease.Store(&fn)
 }
 
 // IsObjectPinned reports whether a reader currently holds the version.

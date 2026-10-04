@@ -501,6 +501,138 @@ func TestTierChunkedObject(t *testing.T) {
 	assert.Empty(t, intents)
 }
 
+// tierWithReaderOpen stores an object, opens a reader on it, and tiers it, so
+// the relocation commits while the local copy's release has to wait.  It
+// returns the open reader and the local path.
+func tierWithReaderOpen(t *testing.T, ctx context.Context, env *tierTestEnv, hash InstanceHash, nsID NamespaceID) (*ObjectReader, string, []byte) {
+	t.Helper()
+	data := make([]byte, 3*BlockDataSize+7)
+	for i := range data {
+		data[i] = byte(i % 251)
+	}
+	storeTestObject(t, ctx, env.storage, hash, data, env.diskID, nsID)
+	reader, err := env.storage.NewObjectReader(hash)
+	require.NoError(t, err)
+	require.NoError(t, env.uploader.processObject(ctx, hash))
+	meta, err := env.storage.GetMetadata(hash)
+	require.NoError(t, err)
+	require.Equal(t, env.tierID, meta.StorageID, "relocation should commit while the reader is open")
+	localPath := env.storage.getObjectPathForDir(env.diskID, hash)
+	_, statErr := os.Stat(localPath)
+	require.NoError(t, statErr, "the local copy is held for the reader")
+	return reader, localPath, data
+}
+
+// TestTierDeferredReleaseSurvivesEviction reproduces a leak a reviewer found
+// with a probe: the reader closes, and the object is evicted from the target
+// before the deferred release runs.  Eviction deleted the upload intent along
+// with the object, and the intent was the only record of the local copy's
+// layout -- so the local files and their usage charge leaked until the daily
+// data scan, invisible to local eviction because their LRU key had already
+// moved to the target.
+func TestTierDeferredReleaseSurvivesEviction(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	env := setupTierTestEnv(t, ctx)
+
+	hash := InstanceHash(fmt.Sprintf("%064d", 31))
+	nsID := NamespaceID(5)
+	reader, localPath, _ := tierWithReaderOpen(t, ctx, env, hash, nsID)
+	require.NoError(t, env.db.UpdateLRU(hash, 0)) // give it an LRU entry on the target to evict by
+	require.NoError(t, reader.Close())
+
+	// Evicted from the target before any release has run.
+	evicted, _, _, err := env.storage.EvictByLRU(env.tierID, nsID, 0, 0)
+	require.NoError(t, err)
+	require.Len(t, evicted, 1)
+
+	intents, err := env.db.ListTierUploadIntents()
+	require.NoError(t, err)
+	require.Contains(t, intents, hash, "eviction must keep a committed relocation's intent")
+
+	env.uploader.finishDeferredReleases(ctx)
+
+	_, statErr := os.Stat(localPath)
+	assert.True(t, os.IsNotExist(statErr), "the deferred local copy must be released after eviction")
+	diskUsage, err := env.db.GetUsage(env.diskID, nsID)
+	require.NoError(t, err)
+	assert.Zero(t, diskUsage, "the local directory's charge must be refunded")
+	tierUsage, err := env.db.GetUsage(env.tierID, nsID)
+	require.NoError(t, err)
+	assert.Zero(t, tierUsage, "eviction refunded the target once; nothing may refund it again")
+	intents, err = env.db.ListTierUploadIntents()
+	require.NoError(t, err)
+	assert.Empty(t, intents)
+}
+
+// TestTierDeferredReleaseRunsWhenReaderCloses covers the timing half.  The
+// release used to wait for the hourly rescan, and finishing an upload before
+// the first reader is the normal order for a large object read over a WAN,
+// so local copies routinely sat charged, and invisible to local eviction, for
+// up to an hour.  The release now follows the reader's close directly.
+// Nothing here calls finishDeferredReleases: only the production wiring runs.
+func TestTierDeferredReleaseRunsWhenReaderCloses(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	env := setupTierTestEnv(t, ctx)
+	loopDone := make(chan struct{})
+	go func() {
+		defer close(loopDone)
+		env.uploader.releaseLoop(ctx)
+	}()
+	t.Cleanup(func() { cancel(); <-loopDone })
+
+	hash := InstanceHash(fmt.Sprintf("%064d", 32))
+	nsID := NamespaceID(6)
+	reader, localPath, _ := tierWithReaderOpen(t, ctx, env, hash, nsID)
+	require.NoError(t, reader.Close())
+
+	require.Eventually(t, func() bool {
+		_, statErr := os.Stat(localPath)
+		return os.IsNotExist(statErr)
+	}, 10*time.Second, 20*time.Millisecond, "the local copy should be released once its reader closes")
+	require.Eventually(t, func() bool {
+		usage, err := env.db.GetUsage(env.diskID, nsID)
+		return err == nil && usage == 0
+	}, 10*time.Second, 20*time.Millisecond, "and its charge refunded")
+}
+
+// TestTierDeferredReleaseLeavesARebornCopyAlone: if a tiered object is deleted
+// and fetched again under the same instance hash before its deferred release
+// runs, the files at the recorded layout now belong to the new copy.  The
+// release must drop its intent without touching them, and without refunding
+// a target the deletion already refunded.
+func TestTierDeferredReleaseLeavesARebornCopyAlone(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	env := setupTierTestEnv(t, ctx)
+
+	hash := InstanceHash(fmt.Sprintf("%064d", 33))
+	nsID := NamespaceID(7)
+	reader, localPath, data := tierWithReaderOpen(t, ctx, env, hash, nsID)
+
+	require.NoError(t, env.storage.Delete(hash))
+	require.NoError(t, reader.Close())
+	storeTestObject(t, ctx, env.storage, hash, data, env.diskID, nsID) // fetched again
+	tierUsageBefore, err := env.db.GetUsage(env.tierID, nsID)
+	require.NoError(t, err)
+
+	env.uploader.finishDeferredReleases(ctx)
+
+	_, statErr := os.Stat(localPath)
+	assert.NoError(t, statErr, "the new copy's files must not be deleted")
+	meta, err := env.storage.GetMetadata(hash)
+	require.NoError(t, err)
+	require.NotNil(t, meta)
+	assert.Equal(t, env.diskID, meta.StorageID)
+	tierUsageAfter, err := env.db.GetUsage(env.tierID, nsID)
+	require.NoError(t, err)
+	assert.Equal(t, tierUsageBefore, tierUsageAfter, "the target must not be refunded a second time")
+	intents, err := env.db.ListTierUploadIntents()
+	require.NoError(t, err)
+	assert.Empty(t, intents, "the stale intent should be dropped")
+}
+
 func TestTierSkipsSmallAndInlineObjects(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()

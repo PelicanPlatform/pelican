@@ -218,19 +218,28 @@ func TestCacheTierStorageFederationE2E(t *testing.T) {
 
 	// Sanity: the local copy of the tiered object is gone — the objects
 	// directory holds only the small object's file.
+	//
+	// "Eventually", because the release legitimately waits for readers: the
+	// upload can finish while the first GET is still streaming the local
+	// copy, in which case the release runs when that reader closes.  On a
+	// loaded machine that ordering is common, and asserting immediately made
+	// this test depend on which side won.
 	cacheStorageLocation := param.Cache_StorageLocation.GetString()
 	require.NotEmpty(t, cacheStorageLocation)
 	objectsDir := filepath.Join(cacheStorageLocation, "persistent-cache", "objects")
-	bigOnDiskSize := int64(0)
-	_ = filepath.Walk(objectsDir, func(path string, info os.FileInfo, err error) error {
-		if err != nil || info.IsDir() || strings.HasSuffix(path, ".pelican-cache-id") {
+	largestLocalFile := func() int64 {
+		largest := int64(0)
+		_ = filepath.Walk(objectsDir, func(path string, info os.FileInfo, err error) error {
+			if err != nil || info.IsDir() || strings.HasSuffix(path, ".pelican-cache-id") {
+				return nil
+			}
+			if info.Size() > largest {
+				largest = info.Size()
+			}
 			return nil
-		}
-		if info.Size() > bigOnDiskSize {
-			bigOnDiskSize = info.Size()
-		}
-		return nil
-	})
-	assert.Less(t, bigOnDiskSize, int64(32*1024),
+		})
+		return largest
+	}
+	require.Eventually(t, func() bool { return largestLocalFile() < 32*1024 }, 30*time.Second, 50*time.Millisecond,
 		"the 64KB object should no longer have a local file after tiering")
 }
