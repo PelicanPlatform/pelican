@@ -1108,11 +1108,12 @@ func RedirectHoldKey(instanceHash InstanceHash) []byte {
 // TierTargetConfig describes one remote storage target the cache tiers
 // completed objects to.
 //
-// A target is named either by a gocloud.dev/blob provider URL or, for
-// S3-compatible services, by the explicit S3 fields.  Nothing above this
-// struct is S3-specific: the fields are kept because naming an S3 endpoint,
-// region and credential files separately is how the origin's exports are
-// configured too, and operators should not have to learn a second spelling.
+// A target is named by a gocloud.dev/blob provider URL, by the explicit S3
+// fields for S3-compatible services, or by a WebDAV collection URL.  Nothing
+// above this struct is S3-specific: the fields are kept because naming an S3
+// endpoint, region and credential files separately is how the origin's
+// exports are configured too, and operators should not have to learn a
+// second spelling.
 type TierTargetConfig struct {
 	// ProviderURL names the backend in gocloud.dev/blob form --
 	// "s3://bucket", "gs://bucket", "azblob://container", "mem://".  When
@@ -1133,6 +1134,16 @@ type TierTargetConfig struct {
 	// credential chain is used.
 	AccessKeyfile string
 	SecretKeyfile string
+	// WebDavUrl names a WebDAV collection (https://door.example.org:2880/data/pelican)
+	// to tier to instead of an object store.  It is a separate key rather
+	// than a ProviderURL scheme because a provider URL is opened through
+	// gocloud.dev/blob, which has no WebDAV driver, and because it takes
+	// different credentials.
+	WebDavUrl string
+	// TokenFile names a file holding the bearer token presented to the
+	// WebDAV server.  It is re-read for every request, so a token rotated
+	// in place is picked up.
+	TokenFile string
 	// MaxSize is the maximum bytes of cache data stored on the target.
 	// Required -- remote capacity cannot be auto-detected.
 	MaxSize uint64
@@ -1161,6 +1172,12 @@ func (c *TierTargetConfig) UsesVirtualHostStyle() bool {
 // (s3://bucket?endpoint=http://...), since the cloud providers' own
 // endpoints are https.
 func (c *TierTargetConfig) TransportScheme() string {
+	if c.WebDavUrl != "" {
+		if u, err := url.Parse(c.WebDavUrl); err == nil && u.Scheme != "" {
+			return strings.ToLower(u.Scheme)
+		}
+		return "https"
+	}
 	endpoint := c.ServiceUrl
 	if c.ProviderURL != "" {
 		endpoint = ""
@@ -1180,6 +1197,13 @@ func (c *TierTargetConfig) TransportScheme() string {
 // embeds them is refused when the configuration is parsed; the redaction here
 // keeps that true for any value that reaches it some other way.
 func (c *TierTargetConfig) DisplayURL() string {
+	if c.WebDavUrl != "" {
+		s := strings.TrimRight(c.WebDavUrl, "/")
+		if prefix := trimTierPrefix(c.Prefix); prefix != "" {
+			s += "/" + prefix
+		}
+		return utils.RedactURLCredentials(s)
+	}
 	if c.ProviderURL != "" {
 		return utils.RedactURLCredentials(c.ProviderURL)
 	}
@@ -1198,6 +1222,32 @@ func (c *TierTargetConfig) DisplayURL() string {
 // slashes, so callers can join it unconditionally).
 func trimTierPrefix(prefix string) string {
 	return strings.Trim(prefix, "/")
+}
+
+// validateWebDAV checks a WebDavUrl target.  The object-store keys are
+// refused rather than ignored: an operator who set them meant something by
+// them, and a target that quietly is not what was configured is worse than
+// one that refuses to start.
+func (cfg *TierTargetConfig) validateWebDAV() error {
+	if cfg.ProviderURL != "" || cfg.ServiceUrl != "" || cfg.Bucket != "" || cfg.Region != "" ||
+		cfg.UrlStyle != "" || cfg.AccessKeyfile != "" || cfg.SecretKeyfile != "" {
+		return errors.New("WebDavUrl cannot be combined with the object-store keys " +
+			"(ProviderURL, ServiceUrl, Bucket, Region, UrlStyle, AccessKeyfile, SecretKeyfile)")
+	}
+	if err := utils.CheckNoURLCredentials(cfg.WebDavUrl); err != nil {
+		return fmt.Errorf("WebDavUrl %w: put the token in a file and name it with TokenFile", err)
+	}
+	u, err := url.Parse(cfg.WebDavUrl)
+	if err != nil {
+		return errors.New("WebDavUrl is not a valid URL")
+	}
+	if scheme := strings.ToLower(u.Scheme); (scheme != "https" && scheme != "http") || u.Host == "" {
+		return errors.New("WebDavUrl must be an http or https URL naming a host")
+	}
+	if u.RawQuery != "" || u.Fragment != "" {
+		return errors.New("WebDavUrl must not have a query or fragment")
+	}
+	return nil
 }
 
 // ParseTierTargetsConfig reads the Cache.TieringTargets setting and returns
@@ -1228,7 +1278,15 @@ func byteSizeHook(from, to reflect.Type, data any) (any, error) {
 // validate checks a decoded entry and fills in defaults.
 func (cfg *TierTargetConfig) validate() error {
 	cfg.Prefix = trimTierPrefix(cfg.Prefix)
-	if cfg.ProviderURL != "" {
+	if cfg.WebDavUrl == "" && cfg.TokenFile != "" {
+		// It would be silently ignored on an object-store target.
+		return errors.New("TokenFile applies only to a WebDavUrl target")
+	}
+	if cfg.WebDavUrl != "" {
+		if err := cfg.validateWebDAV(); err != nil {
+			return err
+		}
+	} else if cfg.ProviderURL != "" {
 		// Credentials belong in the keyfile settings, never in the URL.
 		// Embedded ones do not work through gocloud anyway -- the S3 driver
 		// silently ignores userinfo and uses ambient credentials instead --
@@ -1249,7 +1307,7 @@ func (cfg *TierTargetConfig) validate() error {
 	} else {
 		// Fall back to the explicit S3 spelling, which then has to be complete.
 		if cfg.ServiceUrl == "" {
-			return errors.New("set either ProviderURL or both ServiceUrl and Bucket")
+			return errors.New("set WebDavUrl, ProviderURL, or both ServiceUrl and Bucket")
 		}
 		if cfg.Bucket == "" {
 			return errors.New("missing required Bucket")

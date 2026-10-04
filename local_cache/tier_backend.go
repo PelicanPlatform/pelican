@@ -70,6 +70,8 @@ type TierBackend interface {
 	// List walks every object under the backend's prefix in ascending key
 	// order, which is what lets the consistency sweep merge-join the
 	// listing against hash-ordered metadata instead of buffering it.
+	// A size the backend cannot report (an object still being written,
+	// say) is passed as -1.
 	List(ctx context.Context, fn func(key string, size int64, modified time.Time) error) error
 
 	// DisplayURL is a human-readable identity for logs and for the
