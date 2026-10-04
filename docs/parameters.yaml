@@ -3347,6 +3347,11 @@ description: |+
     ${Cache.HighWaterMark} and ${Cache.LowWaterMark} if those are expressed as
     percentages; absolute-byte watermarks are not applied to tiering targets, which fall
     back to the built-in 90%/80% defaults instead.
+  - **AdoptExisting** (bool, optional, default false): take over a target whose identity
+    object this cache did not create — for instance after this cache's database was lost
+    and the target is genuinely its own.  Without it, the cache refuses to start against
+    such a target (see the ownership note below).  Never use it to point two caches at
+    one target.
 
   Example YAML:
   ```yaml
@@ -3365,7 +3370,10 @@ description: |+
   Prefix within it).**  Its consistency sweep deletes any object under the prefix
   it does not recognize, and crash recovery aborts all in-progress multipart
   uploads there — do not share the prefix with other applications or with a
-  second cache instance.
+  second cache instance.  The cache enforces this against other caches: it marks a
+  target with an identity object the first time it uses it, and refuses a target whose
+  identity it does not recognize unless **AdoptExisting** is set.  It cannot detect
+  other applications writing under the prefix.
 
   **Objects on a tiering target are protected differently from objects on local disk.**
   On disk the cache encrypts every block and authenticates it on read, so tampering
@@ -3387,7 +3395,8 @@ description: |+
   ${Cache.TieringThreshold} above the object sizes involved.
 
   This setting only has effect when `${Cache.EnableV2}` is true; the cache logs a
-  warning and ignores tiering targets otherwise.
+  warning and ignores tiering targets otherwise.  It applies to the cache server only:
+  the local cache module, if it runs in the same process, never tiers.
 type: object
 default: none
 components: ["cache"]

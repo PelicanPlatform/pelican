@@ -30,11 +30,13 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
 	"time"
 
 	badger "github.com/dgraph-io/badger/v4"
+	"github.com/google/uuid"
 	"github.com/pkg/errors"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -174,6 +176,25 @@ func TestParseTierTargetsConfig(t *testing.T) {
 		})
 		_, err := ParseTierTargetsConfig()
 		require.ErrorContains(t, err, "apply only to the S3 keys")
+	})
+
+	t.Run("AdoptExisting", func(t *testing.T) {
+		for raw, want := range map[interface{}]bool{true: true, false: false, "true": true, "False": false} {
+			server_utils.ResetTestState()
+			setTierTargets(t, []interface{}{
+				map[string]interface{}{"ProviderURL": "s3://b", "MaxSize": "1GB", "AdoptExisting": raw},
+			})
+			targets, err := ParseTierTargetsConfig()
+			require.NoError(t, err, "value %v", raw)
+			assert.Equal(t, want, targets[0].AdoptExisting, "value %v", raw)
+		}
+
+		server_utils.ResetTestState()
+		setTierTargets(t, []interface{}{
+			map[string]interface{}{"ProviderURL": "s3://b", "MaxSize": "1GB", "AdoptExisting": "sometimes"},
+		})
+		_, err := ParseTierTargetsConfig()
+		require.ErrorContains(t, err, "AdoptExisting")
 	})
 }
 
@@ -882,6 +903,73 @@ func TestTierTargetIdentityStable(t *testing.T) {
 	for id := range registered {
 		assert.Equal(t, env.tierID, id)
 	}
+}
+
+// newSecondCacheStorage builds a second, independent cache -- its own
+// database and directory -- for tests about two caches meeting at one target.
+func newSecondCacheStorage(t *testing.T, ctx context.Context) *StorageManager {
+	t.Helper()
+	dir := t.TempDir()
+	db, err := NewCacheDB(ctx, dir)
+	require.NoError(t, err)
+	t.Cleanup(func() { db.Close() })
+	egrp, _ := errgroup.WithContext(ctx)
+	storage, err := NewStorageManager(db, []string{dir}, 0, egrp)
+	require.NoError(t, err)
+	t.Cleanup(func() { storage.Close() })
+	return storage
+}
+
+// TestTierTargetRefusesForeignIdentity covers two caches pointed at one
+// bucket and prefix.  The cache assumes it owns everything under the prefix
+// -- its sweep deletes objects it has no record of, and recovery aborts every
+// incomplete upload there -- so a second cache adopting the first's target
+// would have each deleting the other's objects.  It must be refused unless
+// the operator explicitly takes the target over.
+func TestTierTargetRefusesForeignIdentity(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	env := setupTierTestEnv(t, ctx) // cache A owns the target
+
+	cfg := env.target.cfg
+	other := newSecondCacheStorage(t, ctx)
+	_, err := other.RegisterTierTargets(ctx, []TierTargetConfig{cfg})
+	require.Error(t, err, "a second cache must not silently share the target")
+	assert.Contains(t, err.Error(), "already belongs to another cache")
+	assert.Contains(t, err.Error(), "AdoptExisting")
+
+	// Told to take it over -- after losing its database, say -- it may.
+	cfg.AdoptExisting = true
+	adopter := newSecondCacheStorage(t, ctx)
+	registered, err := adopter.RegisterTierTargets(ctx, []TierTargetConfig{cfg})
+	require.NoError(t, err)
+	assert.Len(t, registered, 1)
+}
+
+// TestTierTargetRefusesInvalidIdentity: an identity object that is present
+// but not a valid UUID used to be rewritten silently, which is a takeover by
+// another name.  It is now refused the same way unless adopted.
+func TestTierTargetRefusesInvalidIdentity(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	env := setupTierTestEnv(t, ctx)
+
+	junk := "not-a-uuid"
+	require.NoError(t, env.target.backend.Put(ctx, tierIdentityKey, "text/plain", int64(len(junk)), strings.NewReader(junk)))
+
+	cfg := env.target.cfg
+	_, err := newSecondCacheStorage(t, ctx).RegisterTierTargets(ctx, []TierTargetConfig{cfg})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "not a valid cache identity")
+
+	cfg.AdoptExisting = true
+	_, err = newSecondCacheStorage(t, ctx).RegisterTierTargets(ctx, []TierTargetConfig{cfg})
+	require.NoError(t, err)
+	uid, fresh, err := env.target.resolveIdentity(ctx, false)
+	require.NoError(t, err)
+	assert.False(t, fresh)
+	_, parseErr := uuid.Parse(uid)
+	assert.NoError(t, parseErr, "adopting should leave a valid identity behind")
 }
 
 func TestTierUploaderRecovery(t *testing.T) {

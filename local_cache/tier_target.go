@@ -161,9 +161,16 @@ func (t *tierTarget) hashFromKey(key string) InstanceHash {
 	return InstanceHash(hash)
 }
 
-// resolveIdentity reads the identity UUID from the target, creating it when
-// missing.  This is backend-agnostic: it is just a small well-known object.
-func (t *tierTarget) resolveIdentity(ctx context.Context) (string, error) {
+// resolveIdentity reads the identity UUID from the target.  fresh reports
+// that the target had none, so this call created one: an empty target is the
+// only kind the cache may claim without being told to.
+//
+// A target that already has an identity is someone's -- another cache's, or
+// this cache's from before its database was lost -- and the caller decides
+// whether this cache may have it.  An identity object that is present but
+// not a valid UUID is treated the same way when adopt is false, rather than
+// being quietly rewritten: rewriting it is a takeover by another name.
+func (t *tierTarget) resolveIdentity(ctx context.Context, adopt bool) (uid string, fresh bool, err error) {
 	body, err := t.backend.OpenRange(ctx, tierIdentityKey, 0)
 	if err == nil {
 		defer body.Close()
@@ -171,21 +178,27 @@ func (t *tierTarget) resolveIdentity(ctx context.Context) (string, error) {
 		if readErr == nil {
 			id := strings.TrimSpace(string(data))
 			if _, parseErr := uuid.Parse(id); parseErr == nil {
-				return id, nil
+				return id, false, nil
 			}
 		}
-		log.Warnf("Cache tier target %s has an invalid identity object; rewriting", t.DisplayURL())
+		if !adopt {
+			return "", false, errors.Errorf("cache tier target %s has an identity object that is not a valid "+
+				"cache identity; set AdoptExisting on the target to take it over", t.DisplayURL())
+		}
+		log.Warnf("Cache tier target %s has an invalid identity object; adopting the target and rewriting it", t.DisplayURL())
 	} else if _, exists, statErr := t.backend.Stat(ctx, tierIdentityKey); statErr == nil && exists {
 		// The object is there but unreadable -- that is a real failure, not
-		// a first-use case, so do not silently take ownership of the target.
-		return "", errors.Wrapf(err, "failed to read the identity object from cache tier target %s", t.DisplayURL())
+		// a first-use case, so do not take ownership of the target.
+		return "", false, errors.Wrapf(err, "failed to read the identity object from cache tier target %s", t.DisplayURL())
+	} else {
+		fresh = true
 	}
 
 	newID := uuid.New().String()
 	if err := t.backend.Put(ctx, tierIdentityKey, "text/plain", int64(len(newID)), strings.NewReader(newID)); err != nil {
-		return "", errors.Wrapf(err, "failed to write the identity object to cache tier target %s", t.DisplayURL())
+		return "", false, errors.Wrapf(err, "failed to write the identity object to cache tier target %s", t.DisplayURL())
 	}
-	return newID, nil
+	return newID, fresh, nil
 }
 
 // uploadObject streams plaintext object bytes to the target.

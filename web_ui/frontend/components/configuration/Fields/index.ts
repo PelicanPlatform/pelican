@@ -167,6 +167,7 @@ export interface TieringTarget {
   maxsize: string;
   highwatermarkpercentage: number;
   lowwatermarkpercentage: number;
+  adoptexisting: boolean;
 }
 
 export interface Path {

@@ -695,9 +695,27 @@ func (sm *StorageManager) RegisterTierTargets(ctx context.Context, configs []Tie
 		if err != nil {
 			return nil, err
 		}
-		uid, err := target.resolveIdentity(ctx)
+		uid, fresh, err := target.resolveIdentity(ctx, cfg.AdoptExisting)
 		if err != nil {
 			return nil, err
+		}
+		// The cache assumes it owns everything under a target's prefix: its
+		// consistency sweep deletes objects it has no record of, and crash
+		// recovery aborts every incomplete upload there.  So a target that
+		// already carries an identity this database does not know belongs
+		// to someone else -- most likely another cache, which would then
+		// have each one deleting the other's objects -- and it is refused
+		// unless the operator says to take it over.
+		if _, known := byUUID[uid]; !known && !fresh {
+			if !cfg.AdoptExisting {
+				return nil, errors.Errorf("cache tiering target %s already belongs to another cache "+
+					"(identity %s is not one this cache created); refusing to share it, since each cache "+
+					"would delete the other's objects.  If this cache's database was lost and the target "+
+					"is genuinely its own, set AdoptExisting on the target to take it over", cfg.DisplayURL(), uid)
+			}
+			log.Warnf("Adopting cache tiering target %s (identity %s) as instructed by AdoptExisting; objects "+
+				"under its prefix that this cache has no record of will be removed by the consistency sweep",
+				cfg.DisplayURL(), uid)
 		}
 		// Two entries that resolve to the same bucket and prefix share an
 		// identity object, so they would be assigned one storage ID and the

@@ -570,9 +570,19 @@ func NewPersistentCache(ctx context.Context, egrp *errgroup.Group, cfg Persisten
 	// storage IDs (persisted via an identity object in the bucket) but are
 	// excluded from new-object placement — objects arrive there only by
 	// tiering after completion.
-	tierTargetConfigs, err := ParseTierTargetsConfig()
-	if err != nil {
-		return failInit(err)
+	//
+	// Only the cache server tiers.  Cache.TieringTargets is a process-wide
+	// setting, and a server process can also run the local cache module,
+	// which is a second PersistentCache with its own database.  If both
+	// registered the targets they would each believe they owned the same
+	// bucket, and each one's consistency sweep and upload reaping would
+	// delete the other's objects.
+	var tierTargetConfigs []TierTargetConfig
+	if cfg.Mode == CacheModeServer {
+		tierTargetConfigs, err = ParseTierTargetsConfig()
+		if err != nil {
+			return failInit(err)
+		}
 	}
 	tierTargetIDs, err := storage.RegisterTierTargets(ctx, tierTargetConfigs)
 	if err != nil {

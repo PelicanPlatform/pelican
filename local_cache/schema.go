@@ -26,6 +26,7 @@ import (
 	"net"
 	"net/url"
 	"path"
+	"strconv"
 	"strings"
 	"time"
 
@@ -1111,6 +1112,13 @@ type TierTargetConfig struct {
 	// Watermark overrides (percent of MaxSize); 0 means use the global default.
 	HighWaterMarkPercentage int
 	LowWaterMarkPercentage  int
+	// AdoptExisting lets the cache take over a target whose identity object
+	// it does not recognise -- one another cache wrote, or this cache wrote
+	// before its database was lost.  Without it such a target is refused:
+	// the cache assumes it owns everything under the prefix, so adopting a
+	// target another cache is still using would have each delete the
+	// other's objects.
+	AdoptExisting bool
 }
 
 // UsesVirtualHostStyle reports whether S3 virtual-host addressing was asked
@@ -1233,6 +1241,29 @@ func tierEntryInt(m map[string]interface{}, key string) int {
 	return 0
 }
 
+// tierEntryBool fetches a boolean-valued key with lowercase fallback,
+// accepting the string spellings environment variables and form posts use.
+func tierEntryBool(m map[string]interface{}, key string) (bool, error) {
+	v, ok := m[key]
+	if !ok {
+		v, ok = m[strings.ToLower(key)]
+	}
+	if !ok || v == nil {
+		return false, nil
+	}
+	switch b := v.(type) {
+	case bool:
+		return b, nil
+	case string:
+		parsed, err := strconv.ParseBool(strings.TrimSpace(b))
+		if err != nil {
+			return false, fmt.Errorf("%s: %q is not a boolean", key, b)
+		}
+		return parsed, nil
+	}
+	return false, fmt.Errorf("%s: unsupported type %T; expected a boolean", key, v)
+}
+
 // parseTierTargetEntry converts a map entry into a TierTargetConfig.
 func parseTierTargetEntry(idx int, m map[string]interface{}) (TierTargetConfig, error) {
 	cfg := TierTargetConfig{
@@ -1247,6 +1278,11 @@ func parseTierTargetEntry(idx int, m map[string]interface{}) (TierTargetConfig, 
 		HighWaterMarkPercentage: tierEntryInt(m, "HighWaterMarkPercentage"),
 		LowWaterMarkPercentage:  tierEntryInt(m, "LowWaterMarkPercentage"),
 	}
+	adopt, err := tierEntryBool(m, "AdoptExisting")
+	if err != nil {
+		return cfg, fmt.Errorf("Cache.TieringTargets[%d].%w", idx, err)
+	}
+	cfg.AdoptExisting = adopt
 	if cfg.ProviderURL != "" {
 		// Credentials belong in the keyfile settings, never in the URL.
 		// Embedded ones do not work through gocloud anyway -- the S3 driver

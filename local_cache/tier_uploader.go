@@ -543,9 +543,10 @@ func (u *tierUploader) recover(ctx context.Context) error {
 		}
 	}
 
-	// Reap any incomplete uploads left over from a previous process.  The
-	// identity object marks the bucket as owned by this cache, so nothing
-	// else can have live uploads under our prefix.
+	// Reap any incomplete uploads left over from a previous process.  Only
+	// this cache can have live uploads under the prefix: registration
+	// refuses a target whose identity object this cache did not create
+	// unless the operator explicitly adopted it.
 	for _, target := range u.storage.tierTargets {
 		if aborted, err := target.reapStaleUploads(ctx, 0); err != nil {
 			log.Warnf("Failed to reap stale uploads on %s: %v", target.DisplayURL(), err)
