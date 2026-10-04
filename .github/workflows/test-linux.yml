@@ -47,6 +47,7 @@ jobs:
       # to run the full test suite.
 
       - name: Free disk space
+        background: true
         run: |
           echo "::group::Before"
           df -h
