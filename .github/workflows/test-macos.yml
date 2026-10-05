@@ -70,16 +70,17 @@ jobs:
             echo "$(go env GOPATH)/bin" >> "$GITHUB_PATH"
           fi
 
-      - name: Install macOS dependencies
-        run: ./github_scripts/osx_install.sh
-
       - name: Check which packages depend on the build tags
         id: tags
-        # List the packages to test again with -tags=server. The script
-        # explains why the others can be skipped, and fails if they can't.
+        # List the packages to test again with -tags=server.
+        # The script fails if this workflow's assumptions do not hold;
+        # read the script for details.
         run: |
           packages=$(./.github/scripts/go-test/build_tag_packages.sh)
           echo "packages=$packages" >> "$GITHUB_OUTPUT"
+
+      - name: Install macOS dependencies
+        run: ./github_scripts/osx_install.sh
 
       - name: Generate GoReleaser config
         run: |
@@ -95,8 +96,7 @@ jobs:
 
       - name: Point the tests at the GoReleaser binaries
         id: binaries
-        # See test_utils/binaries.go. The script fails if dist/artifacts.json
-        # lacks any binary named here.
+        # See test_utils/binaries.go.
         run: |
           ./.github/scripts/go-test/goreleaser_binaries.sh \
             TEST_PELICAN_BINARY TEST_PELICAN_SERVER_BINARY |
@@ -176,8 +176,9 @@ jobs:
       - name: Publish the test summaries
         if: always()
         run: |
-          # test-summary/action has no title input, so head each run's
-          # summary with the name of the step that ran the tests.
+          # test-summary/action has no title input,
+          # so head each run's summary with the name of the step
+          # that ran the tests.
           publish() {
             printf '### Run "go test" on %s\n\n' "$1"
             if [ -f "$2" ]; then cat "$2"; else echo "No test results."; fi

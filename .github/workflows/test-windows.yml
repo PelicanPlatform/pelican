@@ -83,11 +83,10 @@ jobs:
           args: build --single-target --clean --snapshot --skip=before --config .goreleaser.generated.yml --id pelican
 
       - name: Point the tests at the GoReleaser binaries
-        # See test_utils/binaries.go. The script fails if dist/artifacts.json
-        # lacks any binary named here.
+        # See test_utils/binaries.go.
         run: |
-          # No test that runs on Windows uses pelican-server.
-          ./.github/scripts/go-test/goreleaser_binaries.sh TEST_PELICAN_BINARY |
+          ./.github/scripts/go-test/goreleaser_binaries.sh \
+            TEST_PELICAN_BINARY |
             tee -a "$GITHUB_ENV"
 
       - name: Run "go test" on shared and client-specific code
@@ -123,8 +122,9 @@ jobs:
       - name: Publish the test summaries
         if: always()
         run: |
-          # test-summary/action has no title input, so head each run's
-          # summary with the name of the step that ran the tests.
+          # test-summary/action has no title input,
+          # so head each run's summary with the name of the step
+          # that ran the tests.
           publish() {
             printf '### Run "go test" on %s\n\n' "$1"
             if [ -f "$2" ]; then cat "$2"; else echo "No test results."; fi
