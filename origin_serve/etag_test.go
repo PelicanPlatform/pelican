@@ -261,3 +261,34 @@ func TestGetETag_ChangesAfterRewrite(t *testing.T) {
 	assert.Equal(t, http.StatusOK, resp3.StatusCode,
 		"stale ETag must not yield 304 after rewrite")
 }
+
+// TestPOSIXv2ETagIsTheSameOnEveryPath pins that the POSIXv2 origin gives one
+// version of a file one ETag.  The GET handler computes it from the host
+// filesystem, while WebDAV (PROPFIND, HEAD), preconditions and the
+// object-metadata layer ask the backend through aferoFileSystem.Stat; the two
+// once used different formats, so a client that learned an object's ETag one
+// way could not match it against the other -- a cache, for one, took every
+// range fill for a new version of the object.
+func TestPOSIXv2ETagIsTheSameOnEveryPath(t *testing.T) {
+	storage := t.TempDir()
+	path := filepath.Join(storage, "obj.bin")
+	require.NoError(t, os.WriteFile(path, []byte("some object bytes"), 0o644))
+
+	srv := newTestGetServer(t, storage)
+	defer srv.Close()
+	resp, _ := doGet(t, srv.URL+"/test/obj.bin", nil)
+	require.Equal(t, http.StatusOK, resp.StatusCode)
+	fromGET := resp.Header.Get("ETag")
+	require.NotEmpty(t, fromGET)
+
+	afs := newAferoFileSystem(afero.NewBasePathFs(afero.NewOsFs(), storage), "", nil)
+	info, err := afs.Stat(context.Background(), "/obj.bin")
+	require.NoError(t, err)
+	assert.Equal(t, fromGET, BackendETag(info), "the backend's ETag must be the one GET sends")
+
+	tagger, ok := info.(webdav.ETager)
+	require.True(t, ok, "WebDAV must get the backend's ETag, not its own default")
+	fromWebDAV, err := tagger.ETag(context.Background())
+	require.NoError(t, err)
+	assert.Equal(t, fromGET, fromWebDAV, "PROPFIND and HEAD must send the ETag GET sends")
+}

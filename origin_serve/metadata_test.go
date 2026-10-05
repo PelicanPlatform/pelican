@@ -28,7 +28,6 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
-	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -973,20 +972,21 @@ func (f *fakeFileInfoNoETag) IsDir() bool        { return false }
 func (f *fakeFileInfoNoETag) Sys() any           { return nil }
 
 // TestPosixv2BackendETag_HasStableValue confirms the POSIXv2 backend
-// (the etagFileInfo wrapper installed by aferoFileSystem.Stat)
-// supplies a stable, non-empty ETag matching the WebDAV-default shape.
+// (the etagFileInfo wrapper installed by aferoFileSystem.Stat) supplies a
+// stable, non-empty ETag, and that it is computeETag -- the one the GET and
+// PUT handlers send -- so a GET and a commit webhook agree on the ETag for
+// the same object.
 func TestPosixv2BackendETag_HasStableValue(t *testing.T) {
 	mtime := time.Unix(1745934855, 0).UTC()
-	wrapped := withBackendETag(&fakeFileInfoNoETag{name: "x", size: 12345, mtime: mtime})
-	got := BackendETag(wrapped)
+	info := &fakeFileInfoNoETag{name: "x", size: 12345, mtime: mtime}
+	got := BackendETag(withBackendETag(info))
 	if got == "" {
 		t.Fatal("expected non-empty ETag from POSIXv2 backend wrapper")
 	}
-	// Sanity-check the format matches the stdlib webdav default
-	// (`"<hex(mtime)><hex(size)>"`) so a GET and a commit webhook
-	// agree on the ETag for the same object.
-	want := `"` + strconv.FormatInt(mtime.UnixNano(), 16) + strconv.FormatInt(12345, 16) + `"`
-	if got != want {
-		t.Fatalf("ETag = %q; want %q", got, want)
+	if want := computeETag(info); got != want {
+		t.Fatalf("ETag = %q; want computeETag's %q", got, want)
+	}
+	if again := BackendETag(withBackendETag(info)); again != got {
+		t.Fatalf("ETag is not stable: %q then %q", got, again)
 	}
 }
