@@ -41,7 +41,7 @@ import (
 // versionBeforeIDKeyedAuthz is the migration immediately preceding
 // 20260916120000. Seeding happens at this version, where
 // `collections.owner` and `collection_acls.group_id` still exist.
-const versionBeforeIDKeyedAuthz = 20260911120000
+const versionBeforeIDKeyedAuthz = 20260812000000
 
 // versionBeforeIDKeyedAPIKeys is the migration immediately preceding
 // 20260917110000, i.e. the last version where `api_keys.created_by` may
