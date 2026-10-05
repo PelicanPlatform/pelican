@@ -83,7 +83,10 @@ func TestCreateJob(t *testing.T) {
 	require.NoError(t, err)
 
 	assert.NotEmpty(t, resp.JobID)
-	assert.Equal(t, StatusPending, resp.Status)
+	// The response is a snapshot of the job, which starts executing as soon as
+	// it is created; the unreachable osdf:// source can make it fail before the
+	// snapshot is taken.
+	assert.Contains(t, []string{StatusPending, StatusRunning, StatusFailed}, resp.Status)
 	assert.Len(t, resp.Transfers, 1)
 	assert.Equal(t, "get", resp.Transfers[0].Operation)
 }
