@@ -39,6 +39,7 @@ import (
 	"github.com/pelicanplatform/pelican/client"
 	"github.com/pelicanplatform/pelican/config"
 	"github.com/pelicanplatform/pelican/fed_test_utils"
+	"github.com/pelicanplatform/pelican/metrics"
 	"github.com/pelicanplatform/pelican/param"
 	"github.com/pelicanplatform/pelican/server_utils"
 	"github.com/pelicanplatform/pelican/test_utils"
@@ -78,6 +79,23 @@ func getCacheRedirectURL(ctx context.Context, t testing.TB, objectPath string, t
 	require.NotEmpty(t, redirectLocation, "Director should provide a redirect location")
 
 	return redirectLocation
+}
+
+func TestPersistentCache_StartOK(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
+	server_utils.ResetTestState()
+	defer server_utils.ResetTestState()
+
+	// Enable persistent cache
+	require.NoError(t, param.Cache_EnableV2.Set(true))
+
+	// Start the federation with persistent cache
+	ft := fed_test_utils.NewFedTest(t, persistentCacheConfig)
+	require.NotNil(t, ft)
+
+	// Check the XRootD health status should be missing
+	_, err := metrics.GetComponentStatus(metrics.OriginCache_XRootD)
+	require.Error(t, err, "V2 Cache should never set XRootD health status.")
 }
 
 // TestPersistentCache_BasicDownload tests that the persistent cache can serve content.
