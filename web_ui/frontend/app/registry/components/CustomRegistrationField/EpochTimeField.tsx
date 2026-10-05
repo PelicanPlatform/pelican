@@ -13,11 +13,13 @@ const EpochTimeField = ({
   required,
   description,
   value,
+  disabled,
 }: BaseCustomRegistrationFieldProps<number>) => {
   return (
     <FormControl fullWidth>
       <DateTimePicker
         label={displayed_name}
+        disabled={disabled}
         slotProps={{
           textField: {
             name: name,

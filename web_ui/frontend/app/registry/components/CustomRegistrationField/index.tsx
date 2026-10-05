@@ -20,6 +20,7 @@ export interface BaseCustomRegistrationFieldProps<T>
   onChange: (value: T | null) => void;
   value?: T;
   displayed_name: string;
+  disabled?: boolean;
 }
 
 const CustomRegistrationField = ({

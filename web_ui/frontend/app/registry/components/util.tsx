@@ -29,10 +29,12 @@ export const calculateKeys = (key: string) => {
  * @param key List of keys to traverse
  */
 export const getValue = (
-  o: Record<string, any> | undefined,
+  o: Record<string, any> | null | undefined,
   key: string[]
 ): any => {
-  if (o === undefined) {
+  // Intermediate objects can come back null from the API (e.g. custom_fields
+  // on a registration stored before any were filled in), not just undefined
+  if (o === undefined || o === null) {
     return undefined;
   }
 

@@ -11,6 +11,7 @@ const EnumerationField = ({
   description,
   value,
   options,
+  disabled,
 }: BaseCustomRegistrationFieldProps<string>) => {
   const textValue = useMemo(
     () => options?.find((option) => option.id === value),
@@ -21,6 +22,7 @@ const EnumerationField = ({
     <Autocomplete
       fullWidth
       size='small'
+      disabled={disabled}
       renderInput={(params) => {
         return (
           <TextField

@@ -28,6 +28,15 @@ interface FormProps {
   onSubmit: (data: Partial<RegistryNamespace>) => Promise<void>;
 }
 
+// The fields the owner of an Approved registration may still change. The
+// registry pins every other field to its stored value for non-admin edits so
+// the administrator's approval keeps meaning what was reviewed.
+const OWNER_EDITABLE_APPROVED_FIELDS = [
+  'admin_metadata.description',
+  'admin_metadata.institution',
+  'admin_metadata.security_contact_user_id',
+];
+
 const onChange = (
   name: string,
   value: string | number | boolean | null | undefined,
@@ -72,9 +81,15 @@ const Form = ({ namespace, onSubmit }: FormProps) => {
     { fallbackData: [] }
   );
 
+  const { data: user } = useSWR('getUser', getUser);
+
+  // A non-admin editing an Approved registration can only change the
+  // descriptive fields; treat an unknown role as non-admin until it loads
+  const restrictedEdit =
+    namespace?.admin_metadata?.status === 'Approved' && user?.role !== 'admin';
+
   // Auto-fill the security contact when the current user is the operator of
   // this registration and no contact has been set yet
-  const { data: user } = useSWR('getUser', getUser);
   useEffect(() => {
     if (
       user === undefined ||
@@ -116,6 +131,13 @@ const Form = ({ namespace, onSubmit }: FormProps) => {
       {error && (
         <Alert severity={'error'}>{error.message}; Retry is automatic.</Alert>
       )}
+      {restrictedEdit && (
+        <Alert severity={'info'} sx={{ mb: 2 }}>
+          This registration is approved. You can update its description,
+          institution, and security contact; the remaining fields are locked and
+          can only be changed by a registry administrator.
+        </Alert>
+      )}
       {fields &&
         fields.map((field, index) => {
           return (
@@ -126,6 +148,11 @@ const Form = ({ namespace, onSubmit }: FormProps) => {
                 }
                 value={getValue(formNamespace, calculateKeys(field.name))}
                 {...field}
+                // Last, so nothing in the field definition can re-enable a locked field
+                disabled={
+                  restrictedEdit &&
+                  !OWNER_EDITABLE_APPROVED_FIELDS.includes(field.name)
+                }
               />
             </Box>
           );
