@@ -22,18 +22,12 @@ package main
 
 import (
 	"github.com/spf13/cobra"
-
-	"github.com/pelicanplatform/pelican/metrics"
 )
 
 var (
 	cacheCmd = &cobra.Command{
 		Use:   "cache",
 		Short: "Operate a Pelican cache service",
-		PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
-			err := initCache()
-			return err
-		},
 	}
 
 	cacheServeCmd = &cobra.Command{
@@ -43,11 +37,6 @@ var (
 		SilenceUsage: true,
 	}
 )
-
-func initCache() error {
-	metrics.SetComponentHealthStatus(metrics.OriginCache_XRootD, metrics.StatusCritical, "xrootd has not been started")
-	return nil
-}
 
 func init() {
 	rootCmd.AddCommand(cacheCmd)
