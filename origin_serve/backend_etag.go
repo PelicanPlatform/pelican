@@ -33,9 +33,13 @@ package origin_serve
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/binary"
 	"fmt"
 	"os"
 	"time"
+
+	"github.com/pelicanplatform/pelican/utils"
 )
 
 // BackendETager is the optional interface a FileInfo (or its
@@ -71,26 +75,60 @@ func BackendETag(info os.FileInfo) string {
 	return ""
 }
 
-// etagFileInfo wraps an os.FileInfo with a BackendETag implementation
-// suitable for the POSIXv2 backend. The format mirrors the default
-// used by golang.org/x/net/webdav so a receiver who saw the object
-// via GET sees the same ETag in the commit webhook. This is the
-// *backend*'s answer for the POSIXv2 backend, not a generic synthesis.
+// etagFileInfo wraps an os.FileInfo with the POSIXv2 backend's ETag, so that
+// every path that asks the backend -- WebDAV PROPFIND and HEAD, preconditions,
+// the object-metadata layer and its webhooks -- gets the same ETag the GET and
+// PUT handlers send (computeETag).  This is the *backend*'s answer for
+// POSIXv2, not a generic synthesis.
 type etagFileInfo struct {
 	os.FileInfo
 }
 
-// ETag implements BackendETager. The format is `"<hex(mtime)><hex(size)>"`,
-// matching the stdlib webdav default.
+// ETag implements BackendETager; see computeETag.
 func (e etagFileInfo) ETag(_ context.Context) (string, error) {
 	if e.FileInfo == nil {
 		return "", nil
 	}
-	mt := e.ModTime()
-	if mt.IsZero() {
-		return fmt.Sprintf(`"%x"`, e.Size()), nil
+	return computeETag(e.FileInfo), nil
+}
+
+// computeETag generates an opaque, quoted ETag string that uniquely identifies
+// a specific instance of a file on disk.
+//
+// The ETag is the first 8 bytes of SHA-256 over (dev, inode, size, mtime),
+// rendered as 16 hex characters. The (dev, inode) pair is a VFS-level file
+// identifier: inodes alone are only unique within a single filesystem, so
+// including the device id keeps the ETag distinct when an origin exports
+// multiple volumes (separate disks, bind mounts, etc.) that happen to reuse
+// the same inode number. mtime ensures the ETag changes when a file is
+// rewritten in place. Size is folded in for cheap collision insurance.
+//
+// On platforms that don't expose a stable VFS id (Windows, or synthesized
+// FileInfo values such as afero's in-memory FS), the dev/inode portion is
+// omitted and only (size, mtime) feed the hash. The output width and shape
+// are unchanged in that case.
+//
+// The previous format -- size and mtime concatenated as a single hex blob --
+// matched the golang.org/x/net/webdav default but caused two different files
+// with the same size and mtime (common for empty/freshly-created files on
+// filesystems with second-precision mtime, or batches of fixed-size records)
+// to receive identical ETags. Mixing in the VFS id and running the tuple
+// through a hash fixes that.
+func computeETag(info os.FileInfo) string {
+	h := sha256.New()
+	var buf [8]byte
+	if dev, ino, ok := utils.FileVFSID(info); ok {
+		binary.BigEndian.PutUint64(buf[:], dev)
+		h.Write(buf[:])
+		binary.BigEndian.PutUint64(buf[:], ino)
+		h.Write(buf[:])
 	}
-	return fmt.Sprintf(`"%x%x"`, mt.UnixNano(), e.Size()), nil
+	binary.BigEndian.PutUint64(buf[:], uint64(info.Size()))
+	h.Write(buf[:])
+	binary.BigEndian.PutUint64(buf[:], uint64(info.ModTime().UnixNano()))
+	h.Write(buf[:])
+	sum := h.Sum(nil)
+	return fmt.Sprintf(`"%x"`, sum[:8])
 }
 
 // withBackendETag returns its argument wrapped with the POSIXv2
