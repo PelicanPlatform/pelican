@@ -597,14 +597,16 @@ func TestBuildPropfindMultistatus(t *testing.T) {
 	})
 }
 
-// A director that resolves no origins for a path answers with Specification
-// (5000), the generic member of the family, not Specification.FileNotFound
+// A director that resolves no origins for a path answers with
+// Specification.NamespaceNotFound (5013), not Specification.FileNotFound
 // (5011). The local cache must still re-export that as a 404: it is a
 // definitive "nothing in the federation serves this", and a 500 would instead
 // tell the caller the cache itself had failed and invite a pointless retry.
 //
 // Only these two members of the family qualify. FileNotCreated and
-// FileAlreadyExists are write-path answers and must not become 404s on a read.
+// FileAlreadyExists are write-path answers, and the bare Specification code is
+// the client's catch-all for an unclassified 4xx or a TLS certificate problem;
+// none of those may become a 404 on a read.
 func TestHandleErrorSpecificationFamilyMapping(t *testing.T) {
 	reqLog := log.NewEntry(log.New())
 
@@ -614,8 +616,8 @@ func TestHandleErrorSpecificationFamilyMapping(t *testing.T) {
 		wantStatus int
 	}{
 		{
-			name:       "Specification",
-			err:        error_codes.NewSpecificationError(errors.New("the director could not resolve the path")),
+			name:       "SpecificationNamespaceNotFound",
+			err:        error_codes.NewSpecification_NamespaceNotFoundError(errors.New("the director could not resolve the path")),
 			wantStatus: http.StatusNotFound,
 		},
 		{
@@ -629,6 +631,13 @@ func TestHandleErrorSpecificationFamilyMapping(t *testing.T) {
 			wantStatus: http.StatusInternalServerError,
 		},
 		{
+			// The bare code is what the client attaches to a TLS certificate
+			// failure or an unclassified 4xx. Neither says the object is absent.
+			name:       "BareSpecificationIsNotAbsent",
+			err:        error_codes.NewSpecificationError(errors.New("tls: failed to verify certificate")),
+			wantStatus: http.StatusInternalServerError,
+		},
+		{
 			name:       "Authorization",
 			err:        error_codes.NewAuthorizationError(errors.New("credential refused")),
 			wantStatus: http.StatusForbidden,
@@ -638,7 +647,7 @@ func TestHandleErrorSpecificationFamilyMapping(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			rec := httptest.NewRecorder()
-			handleError(rec, tt.err, false, reqLog)
+			(&PersistentCache{}).handleError(rec, tt.err, "/test/object", false, reqLog)
 			assert.Equal(t, tt.wantStatus, rec.Code)
 		})
 	}

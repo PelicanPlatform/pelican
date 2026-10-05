@@ -156,6 +156,13 @@ var (
 		retryable:   false,
 		description: "If the client successfully contacted the server but the desired file does not exist for download. The user might have entered the wrong URL or the file might not yet be at the specified origin.",
 	}
+	ErrSpecification_NamespaceNotFound = &PelicanError{
+		errorType:   "Specification.NamespaceNotFound",
+		exitCode:    8,
+		code:        5013,
+		retryable:   false,
+		description: "If the client successfully contacted the director but the director reported that no namespace in the federation serves the requested path. The user might have entered the wrong federation or the wrong path prefix.",
+	}
 	ErrSpecification_FileNotCreated = &PelicanError{
 		errorType:   "Specification.FileNotCreated",
 		exitCode:    8,
@@ -263,6 +270,7 @@ var sentinels = []*PelicanError{
 	ErrContact_ConnectionSetup,
 	ErrAuthorization_TokenNotFound,
 	ErrSpecification_FileNotFound,
+	ErrSpecification_NamespaceNotFound,
 	ErrSpecification_FileNotCreated,
 	ErrSpecification_FileAlreadyExists,
 	ErrTransfer_StoppedTransfer,
@@ -455,6 +463,17 @@ func NewSpecification_FileNotFoundError(err error) *PelicanError {
 		code:        5011,
 		retryable:   false,
 		description: "If the client successfully contacted the server but the desired file does not exist for download. The user might have entered the wrong URL or the file might not yet be at the specified origin.",
+		err:         err,
+	}
+}
+
+func NewSpecification_NamespaceNotFoundError(err error) *PelicanError {
+	return &PelicanError{
+		errorType:   "Specification.NamespaceNotFound",
+		exitCode:    8,
+		code:        5013,
+		retryable:   false,
+		description: "If the client successfully contacted the director but the director reported that no namespace in the federation serves the requested path. The user might have entered the wrong federation or the wrong path prefix.",
 		err:         err,
 	}
 }

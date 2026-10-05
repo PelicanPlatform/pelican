@@ -220,18 +220,20 @@ func onlyThrottled(err error) bool {
 // the Unwrap() []error branches an accumulator produces, and stops only on a
 // match.
 //
-// Two classifications qualify. Specification.FileNotFound is the direct answer.
-// The bare Specification code is how a director reports that nothing in the
-// federation serves the requested path, which on a read is the same answer --
-// hence IsExactly, since the family's other members (FileNotCreated,
-// FileAlreadyExists) are write-path answers and never mean "absent".
+// Two classifications qualify. Specification.FileNotFound is an object server
+// saying the object is not there. Specification.NamespaceNotFound is the
+// director saying nothing in the federation serves the path at all, which on a
+// read is the same answer. The rest of the Specification family is deliberately
+// left out: FileNotCreated and FileAlreadyExists are write-path answers, and
+// the bare Specification code is the client's catch-all for an unclassified
+// 4xx or a TLS certificate problem, none of which mean "absent".
 //
 // This only ranks not-found above the *unclassified* remainder. A status code
 // relayed from upstream, and an authorization failure, still win: they say
 // something about the object that a sibling's 404 does not.
 func anyAttemptNotFound(err error) bool {
 	return errors.Is(err, error_codes.ErrSpecification_FileNotFound) ||
-		error_codes.IsExactly(err, error_codes.ErrSpecification)
+		errors.Is(err, error_codes.ErrSpecification_NamespaceNotFound)
 }
 
 // validShedReason returns reason if it is one of the known shed reasons, and

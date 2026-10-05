@@ -16,6 +16,43 @@
  *
  ***************************************************************/
 
+// Package error_codes classifies client failures into the taxonomy documented
+// in docs/error_codes.yaml, and lets callers ask which classification an error
+// carries with the standard errors.Is.
+//
+// # The model
+//
+// Every classification has a dotted name, such as "Specification" or
+// "Specification.FileNotFound". The dots are the taxonomy: a name is the child
+// of whatever precedes its last dot. That is the only place the hierarchy
+// exists. A child error does not wrap its parent, and no PelicanError ever
+// wraps a sentinel; the relationship is spelled out in the name string alone.
+//
+// There are two kinds of value:
+//
+//   - An error to return, built by a New*Error constructor. It carries a
+//     classification and a cause, and is wrapped and unwrapped like any other
+//     Go error.
+//   - A sentinel, one per classification (ErrSpecification,
+//     ErrSpecification_FileNotFound, ...). It carries the classification and
+//     nothing else, and is only ever the target argument of errors.Is.
+//
+// # Matching
+//
+// errors.Is(err, sentinel) walks err's Unwrap chain exactly as it does for any
+// error, including the Unwrap() []error branches an accumulator produces. At
+// each PelicanError it visits, it asks the Is method below whether that
+// error's name is the sentinel's name or a descendant of it:
+//
+//	errors.Is(NewSpecification_FileNotFoundError(cause), ErrSpecification)             // true
+//	errors.Is(NewSpecification_FileNotFoundError(cause), ErrSpecification_FileNotFound) // true
+//	errors.Is(NewSpecificationError(cause), ErrSpecification_FileNotFound)             // false
+//
+// So a sentinel for a parent asks "anything in this family?" and a sentinel for
+// a leaf asks "this one exactly?". A caller that needs one specific answer
+// matches a leaf; a caller that needs a whole category matches the parent.
+// Nothing here changes how far errors.Is walks, only what counts as a match at
+// each step.
 package error_codes
 
 import (
@@ -28,15 +65,11 @@ import (
 // which is what the CLI exit paths ask before choosing an exit code.
 var ErrPelican = &PelicanError{}
 
-// Is reports whether e satisfies target, so that errors.Is can compare an
-// error against the sentinels. Two kinds of target are recognised: a
-// *PelicanError matches hierarchically; an exactMatch matches that one
-// classification only. Any other target is not a Pelican sentinel and
+// Is reports whether e's classification is target's classification or one of
+// its descendants, so that errors.Is can compare an error against the
+// sentinels. A target that is not a *PelicanError is not a Pelican sentinel and
 // never matches.
 func (e *PelicanError) Is(target error) bool {
-	if exact, ok := target.(exactMatch); ok {
-		return e.errorType == exact.errorType
-	}
 	t, ok := target.(*PelicanError)
 	if !ok {
 		return false
@@ -48,28 +81,6 @@ func (e *PelicanError) Is(target error) bool {
 		return false
 	}
 	return e.errorType == t.errorType || strings.HasPrefix(e.errorType, t.errorType+".")
-}
-
-// exactMatch marks a target as wanting one classification and none of its
-// descendants. errors.Is hands the target to Is unchanged, so the only way to
-// ask Is for a different kind of match is to hand it a different type of
-// target; exactMatch is that type. Embedding the sentinel is what lets it
-// satisfy error, which errors.Is requires of every target, with no code of
-// its own. It is comparable, as errors.Is also requires.
-type exactMatch struct{ *PelicanError }
-
-// IsExactly reports whether err carries this classification itself, and not
-// one of its descendants:
-//
-//	errors.Is(err, error_codes.ErrSpecification)             // any Specification.*
-//	error_codes.IsExactly(err, error_codes.ErrSpecification) // the bare code only
-//
-// Needed where a parent code carries a meaning its children do not share. A
-// bare Specification says the object is not there, while its FileNotCreated
-// and FileAlreadyExists descendants are write-path answers that must not be
-// read as "absent".
-func IsExactly(err error, sentinel *PelicanError) bool {
-	return errors.Is(err, exactMatch{sentinel})
 }
 
 // ExitCodeFor returns the documented client exit code for the classification in

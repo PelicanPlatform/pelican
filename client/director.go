@@ -348,7 +348,7 @@ func getDirectorInfoForPath(ctx context.Context, pUrl *pelican_url.PelicanURL, h
 					// Contact.Director here claims the client failed to reach
 					// the director, which is not what happened, and sends the
 					// reader off to check the network instead of the path.
-					err = errors.Wrapf(error_codes.NewSpecificationError(err), "the director at %s could not resolve %s", pUrl.FedInfo.DirectorEndpoint, pUrl.Path)
+					err = errors.Wrapf(error_codes.NewSpecification_NamespaceNotFoundError(err), "the director at %s could not resolve %s", pUrl.FedInfo.DirectorEndpoint, pUrl.Path)
 				} else if dirResp != nil && (dirResp.StatusCode == http.StatusUnauthorized || dirResp.StatusCode == http.StatusForbidden) {
 					// Likewise the director answered here -- it refused the
 					// credential (it returns 401 for an expired token). That is

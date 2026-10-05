@@ -659,11 +659,11 @@ func TestDirectorResponseClassification(t *testing.T) {
 	}{
 		{
 			// Nothing in the federation serves the path: a definitive answer
-			// about what was asked for, so Specification.
-			name:         "NotFoundIsSpecification",
+			// about what was asked for, so Specification.NamespaceNotFound.
+			name:         "NotFoundIsNamespaceNotFound",
 			status:       http.StatusNotFound,
 			msg:          "No sources found for the requested path: no origins found for the requested namespace '/nope'",
-			wantType:     error_codes.NewSpecificationError(nil).ErrorType(),
+			wantType:     error_codes.NewSpecification_NamespaceNotFoundError(nil).ErrorType(),
 			wantExitCode: 8,
 		},
 		{
