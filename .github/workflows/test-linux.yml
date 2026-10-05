@@ -102,6 +102,15 @@ jobs:
             echo "$(go env GOPATH)/bin" >> "$GITHUB_PATH"
           fi
 
+      - name: Check which packages depend on the build tags
+        id: tags
+        # List the packages to test again with -tags=server.
+        # The script fails if this workflow's assumptions do not hold;
+        # read the script for details.
+        run: |
+          packages=$(./.github/scripts/go-test/build_tag_packages.sh)
+          echo "packages=$packages" >> "$GITHUB_OUTPUT"
+
       # The S3-backed tests (the origin's S3 backend, cache tiering) need a
       # minio server and skip themselves without one.  The open-source MinIO
       # project is archived and no longer publishes binaries, so build its
@@ -124,14 +133,6 @@ jobs:
           echo "$HOME/minio-bin" >> "$GITHUB_PATH"
           echo "TEST_REQUIRE_MINIO=1" >> "$GITHUB_ENV"
 
-      - name: Check which packages depend on the build tags
-        id: tags
-        # List the packages to test again with -tags=server. The script
-        # explains why the others can be skipped, and fails if they can't.
-        run: |
-          packages=$(./.github/scripts/go-test/build_tag_packages.sh)
-          echo "packages=$packages" >> "$GITHUB_OUTPUT"
-
       - name: Generate GoReleaser config
         run: |
           ./scripts/generate_goreleaser.sh .goreleaser.in.yml .goreleaser.generated.yml
@@ -146,16 +147,15 @@ jobs:
 
       - name: Point the tests at the GoReleaser binaries
         id: binaries
-        # See test_utils/binaries.go. The script fails if dist/artifacts.json
-        # lacks any binary named here.
+        # See test_utils/binaries.go.
         run: |
           ./.github/scripts/go-test/goreleaser_binaries.sh \
             TEST_PELICAN_BINARY TEST_PELICAN_SERVER_BINARY |
             tee -a "$GITHUB_ENV"
 
       - name: Run the end-to-end tests
-        # These tests mostly wait on servers and the network, so run them
-        # alongside "go test" instead of after it.
+        # These tests mostly wait on servers and the network,
+        # so run them alongside "go test" instead of after it.
         #
         # Each script fails on its own once its time budget runs out
         # (see github_scripts/e2e_common.sh). The step's time limit is
@@ -259,8 +259,9 @@ jobs:
       - name: Publish the test summaries
         if: always()
         run: |
-          # test-summary/action has no title input, so head each run's
-          # summary with the name of the step that ran the tests.
+          # test-summary/action has no title input,
+          # so head each run's summary with the name of the step
+          # that ran the tests.
           publish() {
             printf '### Run "go test" on %s\n\n' "$1"
             if [ -f "$2" ]; then cat "$2"; else echo "No test results."; fi
