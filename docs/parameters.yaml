@@ -2841,9 +2841,10 @@ components: ["localcache"]
 ---
 name: LocalCache.PrefetchTimeout
 description: |+
-  The maximum time to wait for a prefetch operation to complete before giving up.
-  If a prefetch takes longer than this timeout, the operation is abandoned and the
-  client is expected to retry later.
+  How long a background fill of an object from the origin goes on once no client is reading the object.
+  A cache miss is filled from the origin in the background while the client is served from the cache's own disk, and a partly cached object is filled the same way.
+  The fill continues for as long as any client is reading the object, however slowly, and is cancelled once none has been for this long.
+  The whole blocks already written are kept, and a later read fetches only the rest.
 type: duration
 default: 10s
 hidden: true

@@ -267,31 +267,13 @@ type persistentDownload struct {
 	completionDone chan struct{} // Closed when background finalization completes
 	completionErr  atomic.Value  // Stores error from background finalization (type error)
 
-	// Client tracking: stores the UnixNano timestamp of the last
-	// time a client registered with this download.  completeDownload
-	// periodically checks this timestamp and cancels the download
-	// if the time since the last activity exceeds
-	// LocalCache.PrefetchTimeout.
-	lastClientActivity atomic.Int64
-	cancelFn           context.CancelFunc // Cancels the per-download context
+	cancelFn context.CancelFunc // Cancels the per-download context
 
 	// fetcher is the BlockFetcherV2 driving the background download.
 	// Set by performDownload during the disk-mode handoff.
 	// Reused by newFetchingRangeReader so concurrent readers share
 	// the same fetcher instead of creating duplicate transfers.
 	fetcher *BlockFetcherV2
-}
-
-// RegisterClient records that a client is actively consuming data from
-// this download and returns a deregistration function (currently a no-op
-// kept for symmetry).  Each call updates the activity timestamp so the
-// idle timer in completeDownload sees recent activity.
-func (dl *persistentDownload) RegisterClient() func() {
-	dl.lastClientActivity.Store(time.Now().UnixNano())
-	return func() {
-		// No-op: the idle timer checks elapsed time since last activity
-		// rather than a client count, so deregistration is unnecessary.
-	}
 }
 
 // revalidation carries no-store streaming data from revalidateObject back
@@ -1233,9 +1215,10 @@ func (pc *PersistentCache) resolveObject(
 }
 
 // newFetchingRangeReader creates a RangeReader for the given byte range with
-// an attached BlockFetcherV2 for on-demand fetching, plus client registration
-// for a background download (if any).  All cleanup is wired into the
-// RangeReader's onClose callback.
+// an attached BlockFetcherV2 for on-demand fetching.  All cleanup is wired
+// into the RangeReader's onClose callback.  (Like every RangeReader, it also
+// counts as an open reader of the object for as long as it is open, which
+// keeps any background fill of the object going; see NewRangeReader.)
 //
 // When an active download (res.dl) has an attached fetcher, the reader reuses
 // it instead of creating a new one.  This avoids duplicate origin transfers:
@@ -1319,11 +1302,6 @@ func (pc *PersistentCache) newFetchingRangeReader(
 		}
 	}
 
-	var dlClientDone func()
-	if res.dl != nil {
-		dlClientDone = res.dl.RegisterClient()
-	}
-
 	// Pin the version for the life of the reader.  This is the cache's real
 	// serving path -- every HTTP GET arrives here via GetSeekableReader or
 	// GetRange -- so without a pin here the protection that
@@ -1333,8 +1311,8 @@ func (pc *PersistentCache) newFetchingRangeReader(
 	// so a reader that loses its object mid-stream fails the transfer.
 	//
 	// The release is chained into onClose below, and onClose is the same
-	// callback that already deregisters the download client and closes the
-	// lazy fetcher: if a caller leaks a RangeReader it leaks those too, so
+	// callback that already closes the lazy fetcher, and Close also detaches
+	// the reader from the object's block state: if a caller leaks a RangeReader it leaks those too, so
 	// this adds no new lifetime requirement.  The pin's release function is
 	// idempotent, so a double Close is harmless.
 	unpin := pc.storage.PinObject(res.instanceHash)
@@ -1342,9 +1320,6 @@ func (pc *PersistentCache) newFetchingRangeReader(
 	rr, err := NewRangeReader(pc.storage, res.instanceHash, startByte, endByte, fetchCallback)
 	if err != nil {
 		unpin()
-		if dlClientDone != nil {
-			dlClientDone()
-		}
 		closeLazy()
 		return nil, err
 	}
@@ -1367,9 +1342,6 @@ func (pc *PersistentCache) newFetchingRangeReader(
 	}
 
 	rr.onClose = func() {
-		if dlClientDone != nil {
-			dlClientDone()
-		}
 		// Close the lazy fetcher if it was ever created.  For the
 		// reused-fetcher path (fetcher != nil), lazyBf is always nil
 		// so closeLazy is a no-op.
@@ -2459,36 +2431,62 @@ func (pc *PersistentCache) performDownload(ctx context.Context, dl *persistentDo
 	dl.fetcher = fetcher
 
 	tcHandedOff = true
-	fetcher.AdoptTransfer(dlCtx, tc, dw, resultChan, pc.egrp, &pc.downloadWg,
+	fetcher.AdoptTransfer(dlCtx, dl.cancelFn, tc, dw, resultChan, pc.egrp, &pc.downloadWg,
 		func(err error) {
 			if sharedState, stateErr := pc.storage.GetSharedBlockState(dl.instanceHash); stateErr == nil {
 				sharedState.ClearDownloading()
 			}
-			if err != nil {
-				dl.completionErr.Store(err)
-				// The download finished but failed verification (e.g. the
-				// origin's reported digest doesn't match the bytes we
-				// received), or the transfer failed or was cancelled.  The
-				// writer was aborted rather than closed, but blocks written
-				// before the failure -- and the latest-ETag mapping stored
-				// eagerly above -- remain.  Tear that down now so the
-				// poisoned object is not served as a cache hit to future
-				// requests; the next request will miss and re-fetch from the
-				// origin.
-				if delErr := pc.storage.Delete(dl.instanceHash); delErr != nil {
-					log.Warnf("Failed to evict failed-verification instance %s: %v",
-						dl.instanceHash, delErr)
-				}
-				if delErr := pc.db.DeleteLatestETag(dl.objectHash); delErr != nil {
-					log.Warnf("Failed to clear latest-ETag for failed-verification %s: %v",
-						dl.objectHash, delErr)
-				}
+			if err == nil {
+				close(dl.completionDone)
+				return
+			}
+			if !pc.adoptedTransferDataIsBad(dl.instanceHash, err) {
+				// The transfer stopped early -- cancelled because no reader
+				// remained, cut off by the origin, or the cache shutting
+				// down -- but the writer was aborted, which keeps the whole
+				// blocks already written and drops only the fragment after
+				// them.  They are good data, so the object stays, partly
+				// cached, and later reads fetch the rest by range like any
+				// other partial object.  No error is recorded either: a
+				// reader still attached fetches its missing blocks the same
+				// way, so the failure is not its to report.
+				log.Debugf("Download of %s stopped early (%v); keeping the blocks already written",
+					dl.instanceHash, err)
+				close(dl.completionDone)
+				return
+			}
+			dl.completionErr.Store(err)
+			// The bytes themselves are suspect, or the object can never be
+			// completed: tear it down so it is not served, and so the next
+			// request misses and fetches the object from the origin again.
+			if delErr := pc.storage.Delete(dl.instanceHash); delErr != nil {
+				log.Warnf("Failed to evict instance %s after a failed download: %v",
+					dl.instanceHash, delErr)
+			}
+			if delErr := pc.db.DeleteLatestETag(dl.objectHash); delErr != nil {
+				log.Warnf("Failed to clear latest-ETag for %s after a failed download: %v",
+					dl.objectHash, delErr)
 			}
 			close(dl.completionDone)
 		},
 	)
 
 	return nil
+}
+
+// adoptedTransferDataIsBad reports whether a download that ended in err left
+// data that must not be kept, as opposed to stopping early with whole blocks
+// that are good.  It is bad when the bytes failed verification against the
+// origin's checksum, when the origin moved on to another version (the object
+// can then never be completed), or when the object's size is unknown, so the
+// blocks written cannot be placed.
+func (pc *PersistentCache) adoptedTransferDataIsBad(instanceHash InstanceHash, err error) bool {
+	var mismatch *client.ChecksumMismatchError
+	if errors.As(err, &mismatch) || errors.Is(err, client.ErrObjectVersionChanged) {
+		return true
+	}
+	meta, metaErr := pc.storage.GetMetadata(instanceHash)
+	return metaErr != nil || meta == nil || meta.ContentLength < 0
 }
 
 // multiReadCloser combines an io.Reader (e.g. io.MultiReader) with a
