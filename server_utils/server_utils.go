@@ -380,6 +380,7 @@ func ResetTestState() {
 	if webUIReset != nil {
 		webUIReset()
 	}
+	metrics.ResetHealthStatus()
 	ResetOriginExports()
 	logging.ResetLogFlush()
 	logging.ResetGlobalManager()
