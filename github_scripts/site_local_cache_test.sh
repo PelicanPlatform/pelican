@@ -30,6 +30,9 @@
 
 set -e
 
+# shellcheck source=github_scripts/stop_server.sh
+source "$(dirname "${BASH_SOURCE[0]}")/stop_server.sh"
+
 # Create temporary directories for the test
 tmpbase="${TMPDIR:-/tmp}"
 SITE_TEST_ROOT=$(mktemp -d "${tmpbase%/}/pelican_site_local_test.XXXXXX")
@@ -103,20 +106,12 @@ cleanup() {
 
     if [ -n "$fed_pid" ]; then
         echo "Stopping federation (PID $fed_pid)..."
-        kill -SIGINT "$fed_pid" 2>/dev/null || true
-        # Wait a moment for graceful shutdown
-        sleep 2
-        # Force kill if still running
-        kill -9 "$fed_pid" 2>/dev/null || true
+        stop_server "$fed_pid"
     fi
 
     if [ -n "$site_local_pid" ]; then
         echo "Stopping site-local cache (PID $site_local_pid)..."
-        kill -SIGINT "$site_local_pid" 2>/dev/null || true
-        # Wait a moment for graceful shutdown
-        sleep 2
-        # Force kill if still running
-        kill -9 "$site_local_pid" 2>/dev/null || true
+        stop_server "$site_local_pid"
     fi
 
     echo "Removing temporary directories..."

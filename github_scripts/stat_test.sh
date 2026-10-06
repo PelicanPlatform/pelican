@@ -19,6 +19,9 @@
 
 set -e
 
+# shellcheck source=github_scripts/stop_server.sh
+source "$(dirname "${BASH_SOURCE[0]}")/stop_server.sh"
+
 # Note we don't use $TMPDIR here to avoid issues with long temp paths;
 # XRootD uses Unix domain sockets which have a max path length of 108 characters.
 TEST_ROOT="$(mktemp -d "/tmp/pelican-stat-test.XXXXXX")"
@@ -63,8 +66,8 @@ fi
 cleanup() {
     echo "Cleaning up..."
     if [ -n "${pid_federationServe:-}" ]; then
-        echo "Sending SIGINT to PID ${pid_federationServe}"
-        kill -SIGINT "${pid_federationServe}"
+        echo "Stopping server PID ${pid_federationServe}"
+        stop_server "${pid_federationServe}"
     else
         echo "No PID provided for cleanup."
     fi

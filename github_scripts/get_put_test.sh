@@ -20,6 +20,9 @@
 
 set -e
 
+# shellcheck source=github_scripts/stop_server.sh
+source "$(dirname "${BASH_SOURCE[0]}")/stop_server.sh"
+
 GET_PUT_ROOT=$(mktemp -d "${TMPDIR:-/tmp}/pelican_get_put.XXXXXX")
 chmod 755 "$GET_PUT_ROOT"
 GET_PUT_CONFIG="$GET_PUT_ROOT/config"
@@ -59,8 +62,8 @@ cleanup() {
     local pid=$1  # Get the PID from the function argument
     echo "Cleaning up..."
     if [ -n "$pid" ]; then
-        echo "Sending SIGINT to PID $pid"
-        kill -SIGINT "$pid" 2>/dev/null || true
+        echo "Stopping server PID $pid"
+        stop_server "$pid"
     else
     echo "No PID provided for cleanup."
     fi
