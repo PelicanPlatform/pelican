@@ -55,6 +55,8 @@ export PELICAN_ORIGIN_ENABLEDIRECTREADS=true
 export PELICAN_ORIGIN_ENABLEPUBLICREADS=true
 export PELICAN_ORIGIN_ENABLEVOMS=false
 export PELICAN_DIRECTOR_STATTIMEOUT=1s
+export PELICAN_REGISTRY_REQUIRECACHEAPPROVAL=false
+export PELICAN_REGISTRY_REQUIREORIGINAPPROVAL=false
 
 # ---------------------------------------------------------------------------
 # 1. Start the federation

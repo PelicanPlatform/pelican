@@ -51,6 +51,8 @@ export PELICAN_ORIGIN_RUNLOCATION="${TEST_ROOT}/origin-run"
 export PELICAN_ORIGIN_FEDERATIONPREFIX="/test"
 export PELICAN_ORIGIN_STORAGEPREFIX="${ORIGIN_DIR}"
 export PELICAN_ORIGIN_ENABLEDIRECTREADS=true
+export PELICAN_REGISTRY_REQUIRECACHEAPPROVAL=false
+export PELICAN_REGISTRY_REQUIREORIGINAPPROVAL=false
 
 # ---------------------------------------------------------------------------
 # 1. Start the federation
