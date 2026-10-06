@@ -133,11 +133,11 @@ make web-build
 
 **Go tests:**
 
-Many packages use `client` and `server` build tags to gate tests. Running `go test ./...` without tags skips those tests. For Go tests, Linux and macOS CI runs client and server tests in separate passes:
+Some packages use `client` and `server` build tags to gate tests. Running `go test ./...` without tags skips those tests. For Go tests, Linux and macOS CI runs every package with the `client` tag, then reruns with the `server` tag only the packages whose files differ between the tags. As of this writing, those are `cmd` and `launchers`, but run `.github/scripts/go-test/build_tag_packages.sh` to get the current list, which CI computes on each run:
 
 ```bash
 go test -tags client ./...
-go test -tags server ./...
+go test -tags server ./cmd ./launchers
 ```
 
 For Go tests on Windows, CI runs only client-tagged tests:
@@ -151,6 +151,8 @@ To run the widest possible set of unit tests locally (a superset of both CI pass
 ```bash
 go test -tags "client,server" ./...
 ```
+
+Tests that run `pelican` or `pelican-server` as a subprocess get them from the helpers in `test_utils/binaries.go`, which build each binary on first use. CI instead points them at its GoReleaser builds by setting `TEST_PELICAN_BINARY` and `TEST_PELICAN_SERVER_BINARY` (Windows sets only the former). To test the same kind of binaries locally, build them with GoReleaser (see above) and set these variables to the binaries' absolute paths, which `.github/scripts/go-test/goreleaser_binaries.sh` prints; `test_utils/binaries.go` documents these and the other `TEST_PELICAN_*` variables.
 
 **Test individual modules (use whichever tags apply to that module):**
 

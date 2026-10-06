@@ -26,25 +26,20 @@ permissions:
 
 jobs:
   run-tests:
-    name: Linux (${{ matrix.binary_name }})
+    name: Linux
     runs-on: ubuntu-latest
     container:
       image: ${{ inputs.image }}
       volumes:
         # Expose directories on the host that we'd like to empty.
         - /usr/local/lib/android:/host/usr/local/lib/android
+    defaults:
+      run:
+        shell: bash
     env:
+      # GoReleaser always builds without cgo.
+      CGO_ENABLED: ${{ inputs.race_detection && '1' || '0' }}
       MINIO_VERSION: v0.0.0-20260212201848-7aac2a2c5b7c
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - binary_name: pelican
-            coverprofile: coverage.out
-            tags: client
-          - binary_name: pelican-server
-            coverprofile: coverage-server.out
-            tags: server
     steps:
 
       # As of 2026-01-26, GitHub documents the Ubuntu runners as having
@@ -52,6 +47,7 @@ jobs:
       # to run the full test suite.
 
       - name: Free disk space
+        background: true
         run: |
           echo "::group::Before"
           df -h
@@ -66,54 +62,17 @@ jobs:
 
       - name: Checkout repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
-
-      - name: Set up Node.js
-        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020  # v7.0.0
         with:
-          node-version-file: "web_ui/frontend/package.json"
-          check-latest: true
+          fetch-depth: 0  # GoReleaser needs history to look up the previous tag, and so on
 
-      # pnpm/action-setup is deliberately not used here: it bootstraps itself by
-      # shelling out to "npm ci", which dies with "spawn npm ENOENT" in
-      # container-based jobs, where the Actions-provided Node.js is not
-      # co-located with an npm. Installing pnpm with the npm that setup-node has
-      # just put on PATH sidesteps that. The version comes from the
-      # "packageManager" field, so it always matches the lockfile.
-      - name: Set up pnpm
-        id: pnpm
-        working-directory: web_ui/frontend
+      - name: Mark the checkout as safe
+        # When this workflow runs in a custom container image, we trigger
+        # Git's "dubious ownership" warning when trying to interact with the
+        # checkout, unless we mark it as "safe".
         run: |
-          npm install -g "$(node -p "require('./package.json').packageManager")"
-          # Resolve the store path in its own assignment rather than inline in
-          # the echo, so that a failure aborts the step instead of quietly
-          # caching an empty path. pnpm chooses the store location based on the
-          # working directory's filesystem, so resolve it where installs run.
-          store="$(pnpm store path)"
-          echo "store=${store}" >> "$GITHUB_OUTPUT"
-
-      # Replaces setup-node's "cache: pnpm", which cannot be used because it
-      # requires pnpm to already be installed when setup-node runs.
-      - name: Cache the pnpm store
-        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9  # v6.1.0
-        with:
-          path: ${{ steps.pnpm.outputs.store }}
-          key: ${{ runner.os }}-pnpm-store-${{ hashFiles('web_ui/frontend/pnpm-lock.yaml') }}
-          restore-keys: |
-            ${{ runner.os }}-pnpm-store-
-
-      - name: Cache Next.js
-        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9  # v6.1.0
-        with:
-          # Reference: https://nextjs.org/docs/pages/guides/ci-build-caching#github-actions
-          # Only the Next.js build cache lives here; the pnpm store is cached
-          # by the separate "Cache the pnpm store" step above.
-          path: |
-            ${{ github.workspace }}/web_ui/frontend/.next/cache
-          # Generate a new cache whenever packages or source files change.
-          key: ${{ runner.os }}-nextjs-${{ hashFiles('web_ui/frontend/pnpm-lock.yaml') }}-${{ hashFiles('web_ui/frontend/**/*.js', 'web_ui/frontend/**/*.jsx', 'web_ui/frontend/**/*.ts', 'web_ui/frontend/**/*.tsx', '!web_ui/frontend/**/node_modules/**') }}
-          # If source files changed but packages didn't, rebuild from a prior cache.
-          restore-keys: |
-            ${{ runner.os }}-nextjs-${{ hashFiles('web_ui/frontend/pnpm-lock.yaml') }}-
+          # NOTE: Refer to '${{ github.repository }}' in workflow step
+          # definitions, but '$GITHUB_WORKSPACE' in scripts.
+          git config --global --add safe.directory "$GITHUB_WORKSPACE"
 
       - name: Set Go version
         # Determine the string to use in setup-go's "go-version" input.
@@ -127,19 +86,30 @@ jobs:
         with:
           go-version: "${{ steps.go-version.outputs.version }}"
           check-latest: true
+          cache: false
 
       - name: Pin the Go build cache
-        # Point every later Go build, including those run by tests,
-        # at the cache that setup-go restored.
+        # Point every later Go build, including those run by tests, at the
+        # same cache. Tests that start an origin or cache set
+        # XDG_CACHE_HOME, which on Linux would otherwise move Go's default.
         run: echo "GOCACHE=$(go env GOCACHE)" >> "$GITHUB_ENV"
 
       - name: Install gotestsum
         run: |
           if ! command -v gotestsum &> /dev/null; then
             go install gotest.tools/gotestsum@latest
-            # Ensure that ~/go/bin is in PATH for subsequent steps.
-            echo "$HOME/go/bin" >> $GITHUB_PATH
+            # Ensure that GOPATH/bin is in PATH for subsequent steps.
+            echo "$(go env GOPATH)/bin" >> "$GITHUB_PATH"
           fi
+
+      - name: Check which packages depend on the build tags
+        id: tags
+        # List the packages to test again with -tags=server.
+        # The script fails if this workflow's assumptions do not hold;
+        # read the script for details.
+        run: |
+          packages=$(./.github/scripts/go-test/build_tag_packages.sh)
+          echo "packages=$packages" >> "$GITHUB_OUTPUT"
 
       # The S3-backed tests (the origin's S3 backend, cache tiering) need a
       # minio server and skip themselves without one.  The open-source MinIO
@@ -163,126 +133,147 @@ jobs:
           echo "$HOME/minio-bin" >> "$GITHUB_PATH"
           echo "TEST_REQUIRE_MINIO=1" >> "$GITHUB_ENV"
 
-      - name: Run "go test"
-        env:
-          JUNIT_FILE: junit-${{ matrix.binary_name }}.xml
-        run: |
-          echo "::group::Building web UI"
-          make web-build
-          echo "::endgroup::"
-          # e2e_fed_tests and local_cache take longest, so start them first.
-          gotestsum \
-            --format pkgname-and-test-fails \
-            --hide-summary=output \
-            --junitfile "$JUNIT_FILE" \
-            -- \
-            -p=4 \
-            -timeout=${{ inputs.race_detection && '30m' || '15m' }} \
-            ${{ inputs.race_detection && '-race' || '' }} \
-            ${{ !inputs.race_detection && '-coverpkg=./...' || '' }} \
-            ${{ !inputs.race_detection && '-covermode=count' || '' }} \
-            ${{ !inputs.race_detection && format('-coverprofile={0}', matrix.coverprofile) || '' }} \
-            -tags=${{ matrix.tags }} \
-            ./e2e_fed_tests \
-            ./local_cache \
-            ./...
-
-      - name: Upload JUnit report
-        if: always()
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7.0.1
-        with:
-          name: junit-${{ matrix.binary_name }}-${{ runner.os }}
-          path: junit-${{ matrix.binary_name }}.xml
-          overwrite: true  # allow the workflow to be re-run, e.g., for flakey tests
-
-      - name: Publish JUnit summary
-        if: always()
-        uses: test-summary/action@37b508cfee6d4d080eedd00b5bb240a6a784a6a5  # v2.6
-        with:
-          paths: junit-${{ matrix.binary_name }}.xml
-
-      - name: Get total code coverage
-        if: github.event_name == 'pull_request'
-        id: cc
-        run: |
-          set -x
-          # Anchored to the summary line: an unanchored "total" also matches
-          # any function whose name contains it, which makes $GITHUB_OUTPUT
-          # multi-line and fails the step.
-          cc_total=`go tool cover -func=${{ matrix.coverprofile }} | grep -E '^total:' | grep -Eo '[0-9]+\.[0-9]+'`
-          echo "cc_total=$cc_total" >> $GITHUB_OUTPUT
-
-      - name: Add coverage information to action summary
-        if: github.event_name == 'pull_request'
-        run: echo 'Code coverage ${{ steps.cc.outputs.cc_total }}%' >> $GITHUB_STEP_SUMMARY
-
-  goreleaser:
-    name: Linux (GoReleaser, end-to-end)
-    runs-on: ubuntu-latest
-    container:
-      image: ${{ inputs.image }}
-    defaults:
-      run:
-        shell: bash
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
-        with:
-          fetch-depth: 0  # GoReleaser needs history to look up the previous tag, and so on
-
-      - name: Mark the checkout as safe
-        # Because we're using a custom container image to run this workflow,
-        # we trigger Git's "dubious ownership" warning when trying to interact
-        # with the checkout, unless we mark it as "safe".
-        run: |
-          # NOTE: Refer to '${{ github.repository }}' in workflow step
-          # definitions, but '$GITHUB_WORKSPACE' in scripts.
-          git config --global --add safe.directory "$GITHUB_WORKSPACE"
-
-      - name: Set Go version
-        # Determine the string to use in setup-go's "go-version" input.
-        id: go-version
-        run: |
-          version=$(grep -E '^go[[:space:]]*[0-9]+\.[0-9]+' go.mod | grep -oE '[0-9]+\.[0-9]+')
-          echo "version=${version}.x" >> $GITHUB_OUTPUT
-
-      - name: Set up Go
-        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e  # v7.0.0
-        with:
-          go-version: "${{ steps.go-version.outputs.version }}"
-          check-latest: true
-
-      - name: Stub out the web UI
-        # The binaries embed web_ui/frontend/out, so it must exist,
-        # but nothing in this job needs the real web UI.
-        run: |
-          mkdir -p web_ui/frontend/out
-          touch web_ui/frontend/out/index.html
-
       - name: Generate GoReleaser config
         run: |
           ./scripts/generate_goreleaser.sh .goreleaser.in.yml .goreleaser.generated.yml
 
       - name: Run GoReleaser
+        id: goreleaser
         uses: goreleaser/goreleaser-action@f06c13b6b1a9625abc9e6e439d9c05a8f2190e94  # v7.2.3
         with:
           distribution: goreleaser
           version: "~> v2"
-          args: build --single-target --clean --snapshot --skip=before --config .goreleaser.generated.yml
+          args: build --single-target --clean --snapshot --skip=before --config .goreleaser.generated.yml --id pelican --id pelican-server
 
-      - name: Copy the pelican binaries for the end-to-end tests
+      - name: Point the tests at the GoReleaser binaries
+        id: binaries
+        # See test_utils/binaries.go.
         run: |
-          cp dist/pelican_linux_amd64_v1/pelican ./pelican
-          cp dist/pelican-server_linux_amd64_v1/pelican-server ./pelican-server
-      - name: Run integration tests
-        run: ./github_scripts/citests.sh
-      - name: Run end-to-end test for object get/put
-        run: ./github_scripts/get_put_test.sh
-      - name: Run end-to-end test for director stat
-        run: ./github_scripts/stat_test.sh
-      - name: Run end-to-end test for --version flag
-        run: ./github_scripts/version_test.sh
-      - name: Run end-to-end test for site-local cache standup
-        run: ./github_scripts/site_local_cache_test.sh
-      - name: Run end-to-end test for Cache Availability/Stat weighting
-        run: ./github_scripts/cache_availability_test.sh
+          ./.github/scripts/go-test/goreleaser_binaries.sh \
+            TEST_PELICAN_BINARY TEST_PELICAN_SERVER_BINARY |
+            tee -a "$GITHUB_ENV"
+
+      - name: Run the end-to-end tests
+        # These tests mostly wait on servers and the network,
+        # so run them alongside "go test" instead of after it.
+        #
+        # Each script fails on its own once its time budget runs out
+        # (see github_scripts/e2e_common.sh). The step's time limit is
+        # a loose guard.
+        if: ${{ !cancelled() && steps.binaries.outcome == 'success' }}
+        background: true
+        timeout-minutes: 10
+        run: |
+          cp "$TEST_PELICAN_BINARY" ./pelican
+          cp "$TEST_PELICAN_SERVER_BINARY" ./pelican-server
+
+          failed=()
+          for script in \
+            citests \
+            get_put_test \
+            stat_test \
+            version_test \
+            site_local_cache_test \
+            cache_availability_test
+          do
+            echo "::group::${script}.sh"
+            status=0
+            "./github_scripts/${script}.sh" || status=$?
+            if [ "$status" -ne 0 ]; then
+              echo "::error::${script}.sh failed"
+              failed+=("${script}.sh")
+            fi
+            echo "::endgroup::"
+          done
+          if [ "${#failed[@]}" -gt 0 ]; then
+            echo "Failed: ${failed[*]}"
+            exit 1
+          fi
+
+      - name: Run "go test" on shared and client-specific code
+        if: ${{ !cancelled() && steps.binaries.outcome == 'success' }}
+        run: |
+          # e2e_fed_tests and local_cache take longest, so start them first.
+          gotestsum \
+            --format pkgname-and-test-fails \
+            --hide-summary=output \
+            --junitfile junit-client.xml \
+            -- \
+            -p=4 \
+            -timeout=${{ inputs.race_detection && '30m' || '15m' }} \
+            ${{ inputs.race_detection && '-race' || '' }} \
+            -tags=client \
+            ./e2e_fed_tests \
+            ./local_cache \
+            ./...
+
+      - name: Run "go test" on server-specific code
+        if: ${{ !cancelled() && steps.binaries.outcome == 'success' }}
+        env:
+          PACKAGES: ${{ steps.tags.outputs.packages }}
+        run: |
+          # The check step found that only these packages differ from the
+          # client run above.
+          # shellcheck disable=SC2086  # PACKAGES is a list
+          gotestsum \
+            --format pkgname-and-test-fails \
+            --hide-summary=output \
+            --junitfile junit-server.xml \
+            -- \
+            -p=4 \
+            -timeout=${{ inputs.race_detection && '30m' || '15m' }} \
+            ${{ inputs.race_detection && '-race' || '' }} \
+            -tags=server \
+            $PACKAGES
+
+      - name: Upload the JUnit report for shared and client-specific code
+        if: ${{ always() && hashFiles('junit-client.xml') != '' }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7.0.1
+        with:
+          name: junit-pelican-${{ runner.os }}
+          path: junit-client.xml
+          overwrite: true  # allow the workflow to be re-run, e.g., for flakey tests
+
+      - name: Upload the JUnit report for server-specific code
+        if: ${{ always() && hashFiles('junit-server.xml') != '' }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7.0.1
+        with:
+          name: junit-pelican-server-${{ runner.os }}
+          path: junit-server.xml
+          overwrite: true  # allow the workflow to be re-run, e.g., for flakey tests
+
+      - name: Summarize "go test" on shared and client-specific code
+        if: ${{ always() && hashFiles('junit-client.xml') != '' }}
+        uses: test-summary/action@37b508cfee6d4d080eedd00b5bb240a6a784a6a5  # v2.6
+        with:
+          paths: junit-client.xml
+          output: summary-client.md
+
+      - name: Summarize "go test" on server-specific code
+        if: ${{ always() && hashFiles('junit-server.xml') != '' }}
+        uses: test-summary/action@37b508cfee6d4d080eedd00b5bb240a6a784a6a5  # v2.6
+        with:
+          paths: junit-server.xml
+          output: summary-server.md
+
+      - name: Publish the test summaries
+        if: always()
+        run: |
+          # test-summary/action has no title input,
+          # so head each run's summary with the name of the step
+          # that ran the tests.
+          publish() {
+            printf '### Run "go test" on %s\n\n' "$1"
+            if [ -f "$2" ]; then cat "$2"; else echo "No test results."; fi
+            printf '\n\n'
+          }
+          {
+            publish "shared and client-specific code" summary-client.md
+            publish "server-specific code" summary-server.md
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      # Report a failure in the background steps above. If an earlier step
+      # failed, this step is skipped, and the runner reports the failure at
+      # the end of the job instead.
+      - name: Wait for the background steps
+        wait-all:

@@ -130,7 +130,7 @@ func runCrossOriginTPCBench(b *testing.B, storageType string) {
 	transferToken := generateTransferScopeToken(b)
 	transferTokenFile := writeTokenFile(b, "transfer-token", transferToken)
 
-	cliPath := getPelicanBinary(b)
+	cliPath := test_utils.GetPelicanBinary(b)
 	cliEnv := append(os.Environ(),
 		"PELICAN_FEDERATION_DISCOVERYURL="+param.Federation_DiscoveryUrl.GetString(),
 		"PELICAN_TLSSKIPVERIFY=true",

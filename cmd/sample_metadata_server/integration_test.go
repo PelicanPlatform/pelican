@@ -49,7 +49,15 @@ import (
 	"github.com/lestrrat-go/jwx/v2/jwa"
 	"github.com/lestrrat-go/jwx/v2/jwk"
 	"github.com/lestrrat-go/jwx/v2/jwt"
+
+	"github.com/pelicanplatform/pelican/test_utils"
 )
+
+func TestMain(m *testing.M) {
+	code := m.Run()
+	test_utils.RemoveTestBinaries()
+	os.Exit(code)
+}
 
 // TestIntegration_SampleServerVerifiesToken builds and launches the real
 // binary and drives it with webhook POSTs carrying real origin-style JWTs. A
@@ -158,12 +166,12 @@ func (b *syncBuffer) String() string {
 	return b.buf.String()
 }
 
-// launchServer builds the binary and starts it with -addr 127.0.0.1:0 plus the
-// given args. It parses the OS-assigned bound URL from the server's stdout
+// launchServer starts the binary with -addr 127.0.0.1:0 plus the given args.
+// It parses the OS-assigned bound URL from the server's stdout
 // (the listeningLinePrefix line) — no port pre-reservation, so no bind race.
 func launchServer(t *testing.T, args ...string) (baseURL string) {
 	t.Helper()
-	bin := buildSampleServer(t)
+	bin := test_utils.GetSampleMetadataServerBinary(t)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	full := append([]string{"-addr", "127.0.0.1:0"}, args...)
@@ -207,21 +215,6 @@ func launchServer(t *testing.T, args ...string) (baseURL string) {
 		t.Fatalf("server never reported its listening address; stderr:\n%s", logs.String())
 		return ""
 	}
-}
-
-// buildSampleServer compiles the current package into a temp binary.
-func buildSampleServer(t *testing.T) string {
-	t.Helper()
-	bin := filepath.Join(t.TempDir(), "sample_metadata_server")
-	// -buildvcs=false: the CI test container checks out the repo as a
-	// different owner than the build user, so git refuses to run ("dubious
-	// ownership", exit 128) and VCS stamping fails. No version stamp is needed
-	// on a throwaway test binary.
-	out, err := exec.Command("go", "build", "-buildvcs=false", "-o", bin, ".").CombinedOutput()
-	if err != nil {
-		t.Fatalf("go build: %v\n%s", err, out)
-	}
-	return bin
 }
 
 // writeIssuerCA persists the httptest TLS server's self-signed certificate to a

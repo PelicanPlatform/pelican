@@ -36,7 +36,6 @@ import (
 	"net/http/httptest"
 	"os"
 	"os/exec"
-	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -46,6 +45,7 @@ import (
 
 	"github.com/pelicanplatform/pelican/config"
 	"github.com/pelicanplatform/pelican/param"
+	"github.com/pelicanplatform/pelican/test_utils"
 )
 
 // sampleServerListeningPrefix must match listeningLinePrefix in
@@ -98,19 +98,12 @@ func setupRealTokenIssuer(t *testing.T) string {
 	return issuerURL
 }
 
-// launchSampleServer builds and launches the real sample_metadata_server binary
-// on an OS-assigned port and returns its base URL (parsed from the stdout
+// launchSampleServer launches the real sample_metadata_server binary on an
+// OS-assigned port and returns its base URL (parsed from the stdout
 // readiness line the binary prints). The webhook endpoint is baseURL+"/events".
 func launchSampleServer(t *testing.T, args ...string) string {
 	t.Helper()
-	bin := filepath.Join(t.TempDir(), "sample_metadata_server")
-	// -buildvcs=false: the CI test container checks out the repo as a
-	// different owner than the build user, so git refuses to run ("dubious
-	// ownership", exit 128) and VCS stamping fails. We don't need a version
-	// stamp on a throwaway test binary. Matches getPelicanBinary in main_test.go.
-	if out, err := exec.Command("go", "build", "-buildvcs=false", "-o", bin, "../cmd/sample_metadata_server").CombinedOutput(); err != nil {
-		t.Fatalf("build sample server: %v\n%s", err, out)
-	}
+	bin := test_utils.GetSampleMetadataServerBinary(t)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	full := append([]string{"-addr", "127.0.0.1:0", "-path", "/events"}, args...)

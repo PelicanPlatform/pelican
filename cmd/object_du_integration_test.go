@@ -49,7 +49,7 @@ func TestObjectDuCLI(t *testing.T) {
 	server_utils.ResetTestState()
 	t.Cleanup(server_utils.ResetTestState)
 
-	cliPath := getPelicanBinary(t)
+	cliPath := test_utils.GetPelicanBinary(t)
 
 	// Bring up a POSIXv2 fed with a public export at /test that supports
 	// recursive listings (required for du to walk anything at all).

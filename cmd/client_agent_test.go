@@ -34,6 +34,7 @@ import (
 	"github.com/pelicanplatform/pelican/client_agent"
 	"github.com/pelicanplatform/pelican/client_agent/apiclient"
 	"github.com/pelicanplatform/pelican/server_utils"
+	"github.com/pelicanplatform/pelican/test_utils"
 )
 
 // getTempDir returns a temp directory, preferring t.TempDir() but falling back to /tmp
@@ -64,8 +65,8 @@ func getTempDir(t *testing.T) string {
 func TestClientAgentCLI(t *testing.T) {
 	server_utils.ResetTestState()
 
-	// Get the pelican binary (built once via sync.Once)
-	binaryPath := getPelicanBinary(t)
+	// Get the pelican binary
+	binaryPath := test_utils.GetPelicanBinary(t)
 
 	// Set up test paths
 	tempDir := getTempDir(t)
@@ -171,8 +172,8 @@ func TestClientAgentCLI(t *testing.T) {
 func TestClientAgentForeground(t *testing.T) {
 	server_utils.ResetTestState()
 
-	// Get the pelican binary (built once via sync.Once)
-	binaryPath := getPelicanBinary(t)
+	// Get the pelican binary
+	binaryPath := test_utils.GetPelicanBinary(t)
 
 	// Set up test paths
 	tempDir := getTempDir(t)
@@ -230,8 +231,8 @@ func TestClientAgentForeground(t *testing.T) {
 func TestClientAgentRestart(t *testing.T) {
 	server_utils.ResetTestState()
 
-	// Get the pelican binary (built once via sync.Once)
-	binaryPath := getPelicanBinary(t)
+	// Get the pelican binary
+	binaryPath := test_utils.GetPelicanBinary(t)
 
 	// Set up test paths
 	tempDir := getTempDir(t)
@@ -328,8 +329,8 @@ func TestClientAgentRestart(t *testing.T) {
 func TestClientAgentAutoSpawn(t *testing.T) {
 	server_utils.ResetTestState()
 
-	// Get the pelican binary (built once via sync.Once)
-	binaryPath := getPelicanBinary(t)
+	// Get the pelican binary
+	binaryPath := test_utils.GetPelicanBinary(t)
 
 	// Set up test paths
 	tempDir := getTempDir(t)
@@ -410,8 +411,8 @@ func TestClientAgentAutoSpawn(t *testing.T) {
 func TestClientAgentIdleShutdown(t *testing.T) {
 	server_utils.ResetTestState()
 
-	// Get the pelican binary (built once via sync.Once)
-	binaryPath := getPelicanBinary(t)
+	// Get the pelican binary
+	binaryPath := test_utils.GetPelicanBinary(t)
 
 	// Set up test paths
 	tempDir := getTempDir(t)

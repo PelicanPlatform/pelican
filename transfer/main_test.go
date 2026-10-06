@@ -18,7 +18,7 @@
  *
  ***************************************************************/
 
-package fed_tests
+package transfer_test
 
 import (
 	"os"
@@ -27,7 +27,7 @@ import (
 	"github.com/pelicanplatform/pelican/test_utils"
 )
 
-// TestMain handles test setup and cleanup for the e2e_fed_tests package.
+// TestMain handles test setup and cleanup for the transfer_test package.
 func TestMain(m *testing.M) {
 	code := m.Run()
 	test_utils.RemoveTestBinaries()

@@ -33,6 +33,7 @@ import (
 	"github.com/pelicanplatform/pelican/client_agent"
 	"github.com/pelicanplatform/pelican/client_agent/apiclient"
 	"github.com/pelicanplatform/pelican/server_utils"
+	"github.com/pelicanplatform/pelican/test_utils"
 )
 
 // getTempDir returns a temp directory, preferring t.TempDir() but falling back to /tmp
@@ -79,8 +80,8 @@ func TestDaemonStartAndLock(t *testing.T) {
 	t.Logf("Socket path: %s (length: %d)", socketPath, len(socketPath))
 	t.Logf("Temp dir: %s", tempDir)
 
-	// Build pelican binary for testing
-	pelicanBin := buildPelicanBinary(t)
+	// Get the pelican binary for testing
+	pelicanBin := test_utils.GetPelicanBinary(t)
 
 	// Start daemon with short idle timeout for testing
 	config := client_agent.DaemonConfig{
@@ -153,8 +154,8 @@ func TestDaemonWithActivity(t *testing.T) {
 	t.Logf("Socket path: %s (length: %d)", socketPath, len(socketPath))
 	t.Logf("Temp dir: %s", tempDir)
 
-	// Build pelican binary for testing
-	pelicanBin := buildPelicanBinary(t)
+	// Get the pelican binary for testing
+	pelicanBin := test_utils.GetPelicanBinary(t)
 
 	// Start daemon with short idle timeout
 	config := client_agent.DaemonConfig{
