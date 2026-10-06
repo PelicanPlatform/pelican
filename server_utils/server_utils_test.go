@@ -36,6 +36,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/pelicanplatform/pelican/config"
+	"github.com/pelicanplatform/pelican/metrics"
 	"github.com/pelicanplatform/pelican/param"
 	"github.com/pelicanplatform/pelican/server_structs"
 	"github.com/pelicanplatform/pelican/test_utils"
@@ -361,4 +362,17 @@ func TestSetFedTok(t *testing.T) {
 			assert.Equal(t, os.FileMode(0600), info.Mode().Perm())
 		})
 	}
+}
+
+// A server launched by one test must not inherit the health status of the
+// server a previous test ran in the same process: it is advertised to the
+// director as the new server's overall status.
+func TestResetTestStateClearsHealthStatus(t *testing.T) {
+	t.Cleanup(ResetTestState)
+	metrics.SetComponentHealthStatus(metrics.OriginCache_XRootD, metrics.StatusShuttingDown, "XRootD restart in progress")
+
+	ResetTestState()
+
+	_, err := metrics.GetComponentStatus(metrics.OriginCache_XRootD)
+	assert.Error(t, err, "the XRootD status from the previous server must be gone")
 }
