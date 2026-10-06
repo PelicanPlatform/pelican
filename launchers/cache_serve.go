@@ -233,6 +233,7 @@ func cacheServeWithPersistentCache(ctx context.Context, engine *gin.Engine, egrp
 
 // cacheServeWithXRootD launches the traditional XRootD-based cache
 func cacheServeWithXRootD(ctx context.Context, engine *gin.Engine, egrp *errgroup.Group, modules server_structs.ServerType) (server_structs.XRootDServer, error) {
+	metrics.SetComponentHealthStatus(metrics.OriginCache_XRootD, metrics.StatusCritical, "xrootd has not been started")
 	err := xrootd.SetUpMonitoring(ctx, egrp)
 	if err != nil {
 		return nil, err

@@ -226,3 +226,10 @@ func ValidateComponentHealthAge(component HealthStatusComponent, maxAge time.Dur
 		SetComponentHealthStatus(component, StatusCritical, "Component health stale; last update "+age.String()+" ago")
 	}
 }
+
+// ResetHealthStatus drops all health metrics.
+func ResetHealthStatus() {
+	healthStatus.Clear()
+	PelicanHealthStatus.Reset()
+	PelicanHealthLastUpdate.Reset()
+}
