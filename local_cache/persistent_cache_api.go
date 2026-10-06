@@ -952,7 +952,21 @@ func (pc *PersistentCache) proxyPropfind(w http.ResponseWriter, r *http.Request,
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
-	proxyReq, err := http.NewRequestWithContext(ctx, "PROPFIND", originURL.String(), r.Body)
+	// Buffer the (small, XML) request body so it can be sent again: to the
+	// origin after the director's redirect, and on a retry if the pooled
+	// connection the request went out on turns out to have been closed.
+	const maxPropfindBody = 1 << 20
+	reqBody, err := io.ReadAll(io.LimitReader(r.Body, maxPropfindBody+1))
+	if err != nil {
+		reqLog.Errorln("Failed to read PROPFIND request body:", err)
+		w.WriteHeader(http.StatusBadRequest)
+		return
+	}
+	if len(reqBody) > maxPropfindBody {
+		w.WriteHeader(http.StatusRequestEntityTooLarge)
+		return
+	}
+	proxyReq, err := http.NewRequestWithContext(ctx, "PROPFIND", originURL.String(), bytes.NewReader(reqBody))
 	if err != nil {
 		reqLog.Errorln("Failed to create PROPFIND request:", err)
 		w.WriteHeader(http.StatusInternalServerError)
@@ -981,7 +995,9 @@ func (pc *PersistentCache) proxyPropfind(w http.ResponseWriter, r *http.Request,
 	// Authorization header.  Use a custom CheckRedirect that preserves it
 	// and adds the federation token as access_token on the origin URL.
 	httpClient := &http.Client{
-		Transport: config.GetTransport(),
+		// PROPFIND is safe to resend on a stale pooled connection; see
+		// utils.MarkRetryableIfSafe.
+		Transport: utils.RetrySafeMethods(config.GetTransport()),
 		Timeout:   30 * time.Second,
 		CheckRedirect: func(req *http.Request, via []*http.Request) error {
 			if len(via) >= 10 {

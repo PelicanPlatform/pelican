@@ -65,6 +65,7 @@ import (
 	"github.com/pelicanplatform/pelican/param"
 	"github.com/pelicanplatform/pelican/pelican_url"
 	"github.com/pelicanplatform/pelican/server_structs"
+	"github.com/pelicanplatform/pelican/utils"
 )
 
 var (
@@ -5724,8 +5725,9 @@ func createWebDavClient(collectionsUrl *url.URL, token *tokenGenerator, project 
 	auth := &bearerAuth{token: token}
 	client = gowebdav.NewAuthClient(collectionsUrl.String(), auth)
 	client.SetHeader("User-Agent", getUserAgent(project))
-	transport := config.GetTransport()
-	client.SetTransport(transport)
+	// Listings and stats are PROPFINDs, which are safe to resend if their
+	// pooled connection was closed; see utils.MarkRetryableIfSafe.
+	client.SetTransport(utils.RetrySafeMethods(config.GetTransport()))
 	return
 }
 

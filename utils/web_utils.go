@@ -66,6 +66,44 @@ func MakeRequest(ctx context.Context, tr *http.Transport, url string, method str
 	return body, nil
 }
 
+// MarkRetryableIfSafe lets net/http transparently retry req when it was sent
+// on a pooled keep-alive connection the server had just closed -- the race
+// behind "http: server closed idle connection".  net/http retries that only
+// for requests it knows to be idempotent: GET, HEAD, OPTIONS and TRACE, or
+// any request carrying an Idempotency-Key header.  PROPFIND is safe and
+// idempotent too (RFC 4918, section 9.1) but is not on that list, so it is
+// marked here with a zero-length Idempotency-Key, which net/http honors
+// without sending the header.  The retry also needs a body net/http can
+// rewind: none, http.NoBody, or one with GetBody set.
+func MarkRetryableIfSafe(req *http.Request) {
+	if req.Method == "PROPFIND" && req.Header.Get("Idempotency-Key") == "" {
+		if req.Header == nil {
+			req.Header = make(http.Header)
+		}
+		req.Header["Idempotency-Key"] = nil
+	}
+}
+
+// RetrySafeMethods wraps rt so that every request it sends is marked by
+// MarkRetryableIfSafe, for clients whose requests are built elsewhere (for
+// example by a WebDAV library).
+func RetrySafeMethods(rt http.RoundTripper) http.RoundTripper {
+	return retrySafeMethods{rt}
+}
+
+type retrySafeMethods struct {
+	rt http.RoundTripper
+}
+
+func (t retrySafeMethods) RoundTrip(req *http.Request) (*http.Response, error) {
+	if req.Method == "PROPFIND" {
+		// A RoundTripper must not modify the request it was given.
+		req = req.Clone(req.Context())
+		MarkRetryableIfSafe(req)
+	}
+	return t.rt.RoundTrip(req)
+}
+
 // Copy headers from proxied src to dst, removing those defined
 // by HTTP as "hop-by-hop" and not to be forwarded (see
 // https://www.rfc-editor.org/rfc/rfc9110#field.connection)
