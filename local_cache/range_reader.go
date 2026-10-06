@@ -174,9 +174,13 @@ type RangeReader struct {
 	// when noStoreReader is set.
 	size int64
 
-	// onClose is called when the reader is closed (e.g., to deregister
-	// from the BlockFetcherV2 client tracking).
+	// onClose is called when the reader is closed (e.g., to close a lazily
+	// created fetcher and release the reader's pin).
 	onClose func()
+
+	// detach records the reader closing with the object's shared block
+	// state (see ObjectBlockState.AttachReader); it is idempotent.
+	detach func()
 
 	// completionDone / completionErr expose the terminal state of the
 	// backing download (if any).  completionDone is closed when the
@@ -269,6 +273,9 @@ func NewRangeReader(
 		}
 	}
 
+	// Every reader of the object, whatever path it came through, keeps any
+	// fill of the object going until it closes.
+	rr.detach = blockState.AttachReader()
 	return rr, nil
 }
 
@@ -603,6 +610,9 @@ func (rr *RangeReader) Close() error {
 	}
 	if rr.remoteStream != nil {
 		err = rr.remoteStream.Close()
+	}
+	if rr.detach != nil {
+		rr.detach()
 	}
 	if rr.onClose != nil {
 		rr.onClose()
