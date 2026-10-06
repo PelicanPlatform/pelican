@@ -22,6 +22,7 @@ import (
 	"context"
 	"runtime"
 	"sync"
+	"sync/atomic"
 	"time"
 	"weak"
 
@@ -54,6 +55,14 @@ type ObjectBlockState struct {
 	// until the requested block appears or downloading becomes false.
 	// Guarded by mu (read under RLock, written under Lock).
 	downloading bool
+
+	// readers counts the readers of the object that are open (see
+	// AttachReader), and lastReaderChange is when one last attached or
+	// detached (UnixNano).  A background fill of the object goes on while
+	// any reader is open, and is idle once none has been for the fill's
+	// timeout.
+	readers          atomic.Int32
+	lastReaderChange atomic.Int64
 }
 
 // NewObjectBlockState wraps an existing bitmap in a thread-safe container.
@@ -64,6 +73,33 @@ func NewObjectBlockState(bitmap *roaring.Bitmap) *ObjectBlockState {
 	obs := &ObjectBlockState{bitmap: bitmap}
 	obs.cond = sync.NewCond(obs.mu.RLocker())
 	return obs
+}
+
+// AttachReader records that a reader of the object is open and returns the
+// function to call when it closes; calling that more than once is harmless.
+//
+// The count lives here, on the one state every reader of the object shares,
+// rather than with whichever download or fetcher a reader happened to come
+// through: a reader that arrived through a cache hit while a miss was still
+// filling the object waits on this state, not on the miss's fetcher, and
+// must keep that fill going just the same.
+func (obs *ObjectBlockState) AttachReader() (detach func()) {
+	obs.readers.Add(1)
+	obs.lastReaderChange.Store(time.Now().UnixNano())
+	return sync.OnceFunc(func() {
+		obs.lastReaderChange.Store(time.Now().UnixNano())
+		obs.readers.Add(-1)
+	})
+}
+
+// readerActivity reports whether any reader is open and when one last
+// attached or detached (the zero time if none ever has).
+func (obs *ObjectBlockState) readerActivity() (open bool, last time.Time) {
+	open = obs.readers.Load() > 0
+	if ns := obs.lastReaderChange.Load(); ns != 0 {
+		last = time.Unix(0, ns)
+	}
+	return open, last
 }
 
 // Contains returns true if the given block is marked as downloaded.
