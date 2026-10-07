@@ -119,6 +119,9 @@ func TestVerify(t *testing.T) {
 	}
 
 	authChecker = mock
+	// Every case starts from this default mock, so a case that installs a
+	// stricter checker cannot leak it into the case that follows
+	defaultMock := *mock
 
 	// Batch-create test cases, see "name" section for the purpose of each test case
 	tests := []struct {
@@ -149,6 +152,31 @@ func TestVerify(t *testing.T) {
 			},
 			tokenSetup: func() *gin.Context {
 				return createContextWithToken("", "valid-header-token", "")
+			},
+			expectedResult: true,
+		},
+		{
+			// The scheme name is case-insensitive (RFC 7235). The header source
+			// is the one API endpoints use, so pin that a lowercase scheme is
+			// accepted and that the scheme itself never reaches the checker.
+			name: "valid-token-from-header-source-lowercase-scheme",
+			authOption: AuthOption{
+				Sources: []TokenSource{Header},
+				Issuers: []TokenIssuer{FederationIssuer},
+			},
+			setupMock: func() {
+				mock.FederationCheckFunc = func(ctx *gin.Context, token string, expectedScopes []token_scopes.TokenScope, allScope bool) error {
+					if token == "valid-header-token" {
+						ctx.Set("User", "Federation")
+						return nil
+					}
+					return errors.New(fmt.Sprint("scheme not removed from the header value: ", token))
+				}
+			},
+			tokenSetup: func() *gin.Context {
+				ctx := createContextWithToken("", "", "")
+				ctx.Request.Header.Set("Authorization", "bearer valid-header-token")
+				return ctx
 			},
 			expectedResult: true,
 		},
@@ -391,6 +419,7 @@ func TestVerify(t *testing.T) {
 	// Batch-run the test cases
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
+			*mock = defaultMock
 			if tc.setupMock != nil {
 				// We might have different mocks to the checker function,
 				// so we have this flexibility by calling setupmock if there is such function

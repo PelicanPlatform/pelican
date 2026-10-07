@@ -24,7 +24,6 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
-	"strings"
 	"sync/atomic"
 	"time"
 
@@ -399,7 +398,7 @@ func Verify(ctx *gin.Context, authOption AuthOption) (status int, verified bool,
 				continue
 			} else {
 				var found bool
-				token, found = strings.CutPrefix(headerToken[0], "Bearer ")
+				token, found = CutBearerPrefix(headerToken[0])
 				if found {
 					tokenFound = true
 					foundSource = Header
