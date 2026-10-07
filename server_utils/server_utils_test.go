@@ -27,6 +27,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -57,6 +58,26 @@ func TestWaitUntilWorking(t *testing.T) {
 	})
 
 	require.NoError(t, param.Server_StartupTimeout.SetString("10s"))
+	// cancelOnFirstFailure returns a context that is cancelled the moment
+	// WaitUntilWorking logs its first failed attempt.  By then it has recorded
+	// that attempt's cause, so the error it returns always carries it -- unlike
+	// cancelling on a timer, which loses the cause whenever the attempt takes
+	// longer than expected.
+	cancelOnFirstFailure := func(t *testing.T) context.Context {
+		failCtx, failCancel := context.WithCancel(ctx)
+		t.Cleanup(failCancel)
+		logger := logrus.StandardLogger()
+		prev := logger.ReplaceHooks(make(logrus.LevelHooks))
+		for _, hooks := range prev {
+			for _, h := range hooks {
+				logger.AddHook(h)
+			}
+		}
+		logger.AddHook(&cancelOnMessageHook{substr: "Failed to send request", cancel: failCancel})
+		t.Cleanup(func() { logger.ReplaceHooks(prev) })
+		return failCtx
+	}
+
 	t.Run("success-with-HTTP-200", func(t *testing.T) {
 		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			w.WriteHeader(http.StatusOK) // 200
@@ -122,27 +143,16 @@ func TestWaitUntilWorking(t *testing.T) {
 	})
 
 	t.Run("server-does-not-exist", func(t *testing.T) {
-		// cancel wait until working after 1000ms so that we don't wait for 10s before it returns
-		// Note: this was bumped up due to sporadic test failures on CI with 200ms; 1s should
-		// be sufficient for a DNS resolution failure to return.
-		earlyCancelCtx, earlyCancel := context.WithCancel(ctx)
-		go func() {
-			<-time.After(1000 * time.Millisecond)
-			earlyCancel()
-		}()
-		err := WaitUntilWorking(earlyCancelCtx, "GET", "https://noserverexists.com", "testServer", http.StatusOK, false)
+		// The lookup fails as it would for a nonexistent name, without a real
+		// resolver whose speed the test would depend on.
+		test_utils.FailLookupsOf(t, test_utils.UnresolvableHost)
+		err := WaitUntilWorking(cancelOnFirstFailure(t), "GET", "https://"+test_utils.UnresolvableHost, "testServer", http.StatusOK, false)
 		require.Error(t, err)
-		assert.Contains(t, err.Error(), "no such host")
+		assert.Contains(t, err.Error(), "no such host", "the cause of the failed attempts must be reported")
 		hook.Reset()
 	})
 
 	t.Run("server-timeout", func(t *testing.T) {
-		// cancel wait until working after 1500ms so that we don't wait for 10s before it returns
-		earlyCancelCtx, earlyCancel := context.WithCancel(ctx)
-		go func() {
-			<-time.After(1500 * time.Millisecond)
-			earlyCancel()
-		}()
 		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			// WaitUntilWorking as a 1s timeout, so we make sure to wait longer than that
 			<-time.After(1100 * time.Millisecond)
@@ -150,7 +160,7 @@ func TestWaitUntilWorking(t *testing.T) {
 		}))
 		defer server.Close()
 
-		err := WaitUntilWorking(earlyCancelCtx, "GET", server.URL, "testServer", http.StatusOK, false)
+		err := WaitUntilWorking(cancelOnFirstFailure(t), "GET", server.URL, "testServer", http.StatusOK, false)
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "exceeded while awaiting headers")
 		require.NotNil(t, hook.LastEntry())
@@ -375,4 +385,20 @@ func TestResetTestStateClearsHealthStatus(t *testing.T) {
 
 	_, err := metrics.GetComponentStatus(metrics.OriginCache_XRootD)
 	assert.Error(t, err, "the XRootD status from the previous server must be gone")
+}
+
+// cancelOnMessageHook cancels a context the first time a log message
+// containing substr is written.
+type cancelOnMessageHook struct {
+	substr string
+	cancel context.CancelFunc
+}
+
+func (h *cancelOnMessageHook) Levels() []logrus.Level { return logrus.AllLevels }
+
+func (h *cancelOnMessageHook) Fire(entry *logrus.Entry) error {
+	if strings.Contains(entry.Message, h.substr) {
+		h.cancel()
+	}
+	return nil
 }

@@ -2902,6 +2902,9 @@ func TestNewTransferEngine(t *testing.T) {
 
 func TestListHttp(t *testing.T) {
 	t.Cleanup(test_utils.SetupTestLogging(t))
+	// The collections server's name fails to resolve, without a real resolver
+	// whose speed the test would depend on.
+	test_utils.FailLookupsOf(t, test_utils.UnresolvableHost)
 	type test struct {
 		name          string
 		pUrl          *pelican_url.PelicanURL
@@ -2922,7 +2925,7 @@ func TestListHttp(t *testing.T) {
 					Namespace:    "/foo/bar",
 					CollectionsUrl: &url.URL{
 						Scheme: "https",
-						Host:   "collections.example.com",
+						Host:   test_utils.UnresolvableHost,
 					},
 				},
 			},
