@@ -2161,6 +2161,19 @@ func (pc *PersistentCache) performDownload(ctx context.Context, dl *persistentDo
 		return nil
 	})
 
+	// awaitResult returns the transfer's result, waiting for it the first
+	// time it is asked for: the forwarder above sends exactly one, and more
+	// than one path below may want it.
+	var result *client.TransferResults
+	var resultReceived bool
+	awaitResult := func() *client.TransferResults {
+		if !resultReceived {
+			result = <-resultChan
+			resultReceived = true
+		}
+		return result
+	}
+
 	// Wait for either metadata or result (whichever comes first).
 	// We watch both the request context and the download context so that
 	// PersistentCache.Close() (which cancels downloadCtx) can abort the
@@ -2177,10 +2190,11 @@ func (pc *PersistentCache) performDownload(ctx context.Context, dl *persistentDo
 			"etag":       etag,
 			"url":        sourceURL.String(),
 		}).Debug("Received early metadata")
-	case result := <-resultChan:
+	case result = <-resultChan:
 		// Transfer completed before we got metadata (shouldn't happen for successful transfers)
-		if result != nil && result.Error != nil {
-			return result.Error
+		resultReceived = true
+		if err := transferResultErr(result); err != nil {
+			return err
 		}
 		// If we got here without metadata, the transfer completed very quickly
 		// Check the decision writer's buffer for size
@@ -2265,9 +2279,8 @@ func (pc *PersistentCache) performDownload(ctx context.Context, dl *persistentDo
 				defer pc.downloadWg.Done()
 				defer tc.Close()
 				defer close(dl.completionDone)
-				result := <-resultChan
-				if result != nil && result.Error != nil {
-					pw.CloseWithError(result.Error)
+				if err := transferResultErr(awaitResult()); err != nil {
+					pw.CloseWithError(err)
 				} else {
 					pw.Close()
 				}
@@ -2328,22 +2341,19 @@ func (pc *PersistentCache) performDownload(ctx context.Context, dl *persistentDo
 				} else if statErr != nil {
 					log.Debugf("performDownload: HEAD stat failed for %s (proceeding with unknown size): %v", dl.objectHash, statErr)
 				}
-			case result := <-resultChan:
+			case result = <-resultChan:
 				// Transfer finished before reaching the threshold.
 				// All data is in the decisionWriter's buffer.
-				if result != nil && result.Error != nil {
-					return result.Error
+				resultReceived = true
+				if err := transferResultErr(result); err != nil {
+					return err
 				}
 				actualSize := int64(dw.BufferLen())
 				log.Debugf("performDownload: Unknown size transfer completed — %d bytes, using inline", actualSize)
 				if err := dw.SetInlineMode(ctx, actualSize); err != nil {
 					return errors.Wrap(err, "failed to set inline mode for deferred decision")
 				}
-				if err := dw.Finalize(dl); err != nil {
-					return errors.Wrap(err, "failed to finalize inline storage")
-				}
-				close(dl.completionDone)
-				return nil
+				return finishInlineDownload(dl, dw, result, -1)
 			case <-ctx.Done():
 				return ctx.Err()
 			case <-pc.downloadCtx.Done():
@@ -2393,16 +2403,11 @@ func (pc *PersistentCache) performDownload(ctx context.Context, dl *persistentDo
 	// and the caller needs metadata to be available immediately after
 	// downloadObject returns.
 	if dw.inlineMode {
-		result := <-resultChan
-		if result != nil && result.Error != nil {
-			return result.Error
+		size := int64(-1)
+		if metadataReceived {
+			size = metadata.ObjectSize
 		}
-		dl.checksums = clientChecksumsToCache(result)
-		if err := dw.Finalize(dl); err != nil {
-			return errors.Wrap(err, "failed to finalize inline storage")
-		}
-		close(dl.completionDone)
-		return nil
+		return finishInlineDownload(dl, dw, awaitResult(), size)
 	}
 
 	// Store the ETag mapping eagerly so that concurrent and subsequent
@@ -2430,59 +2435,97 @@ func (pc *PersistentCache) performDownload(ctx context.Context, dl *persistentDo
 	}
 	dl.fetcher = fetcher
 
+	if resultReceived {
+		// The transfer already reported (before its metadata); hand that
+		// result on rather than leave the fetcher waiting for another.
+		resultChan = make(chan *client.TransferResults, 1)
+		resultChan <- result
+	}
+
 	tcHandedOff = true
 	fetcher.AdoptTransfer(dlCtx, dl.cancelFn, tc, dw, resultChan, pc.egrp, &pc.downloadWg,
-		func(err error) {
-			if sharedState, stateErr := pc.storage.GetSharedBlockState(dl.instanceHash); stateErr == nil {
-				sharedState.ClearDownloading()
-			}
-			if err == nil {
-				close(dl.completionDone)
-				return
-			}
-			if !pc.adoptedTransferDataIsBad(dl.instanceHash, err) {
-				// The transfer stopped early -- cancelled because no reader
-				// remained, cut off by the origin, or the cache shutting
-				// down -- but the writer was aborted, which keeps the whole
-				// blocks already written and drops only the fragment after
-				// them.  They are good data, so the object stays, partly
-				// cached, and later reads fetch the rest by range like any
-				// other partial object.  No error is recorded either: a
-				// reader still attached fetches its missing blocks the same
-				// way, so the failure is not its to report.
-				log.Debugf("Download of %s stopped early (%v); keeping the blocks already written",
-					dl.instanceHash, err)
-				close(dl.completionDone)
-				return
-			}
-			dl.completionErr.Store(err)
-			// The bytes themselves are suspect, or the object can never be
-			// completed: tear it down so it is not served, and so the next
-			// request misses and fetches the object from the origin again.
-			if delErr := pc.storage.Delete(dl.instanceHash); delErr != nil {
-				log.Warnf("Failed to evict instance %s after a failed download: %v",
-					dl.instanceHash, delErr)
-			}
-			if delErr := pc.db.DeleteLatestETag(dl.objectHash); delErr != nil {
-				log.Warnf("Failed to clear latest-ETag for %s after a failed download: %v",
-					dl.objectHash, delErr)
-			}
-			close(dl.completionDone)
-		},
-	)
+		func(err error) { pc.endAdoptedDownload(dl, err) })
 
+	return nil
+}
+
+// endAdoptedDownload finishes a whole-object download that a fetcher adopted,
+// once its transfer has ended in err (nil on success).
+func (pc *PersistentCache) endAdoptedDownload(dl *persistentDownload, err error) {
+	if sharedState, stateErr := pc.storage.GetSharedBlockState(dl.instanceHash); stateErr == nil {
+		sharedState.ClearDownloading()
+	}
+	defer close(dl.completionDone)
+	if err == nil {
+		return
+	}
+	if !pc.adoptedTransferDataIsBad(dl.instanceHash, err) {
+		// The transfer stopped early for a reason that says nothing
+		// against the data -- cancelled because no reader remained, the
+		// connection broke, or the cache is shutting down -- and the
+		// writer kept the whole blocks already written, dropping only the
+		// fragment after them.  They are good data, so the object stays,
+		// partly cached, and later reads fetch the rest by range like any
+		// other partial object.  No error is recorded either: a reader
+		// still attached fetches its missing blocks the same way, so the
+		// failure is not its to report.
+		log.Debugf("Download of %s stopped early (%v); keeping the blocks already written",
+			dl.instanceHash, err)
+		return
+	}
+	dl.completionErr.Store(err)
+	// The bytes themselves are suspect, or the object can never be
+	// completed: tear it down so it is not served, and so the next request
+	// misses and fetches the object from the origin again.  Delete also
+	// drops the latest-ETag mapping -- but only if it still names this
+	// version: a request may meanwhile have found a newer one, whose
+	// mapping must stay.
+	if delErr := pc.storage.Delete(dl.instanceHash); delErr != nil {
+		log.Warnf("Failed to evict instance %s after a failed download: %v",
+			dl.instanceHash, delErr)
+	}
+}
+
+// transferResultErr is the error a transfer's result reports.  A nil result
+// -- the transfer client went away without reporting the job, which
+// performDownload forwards as nil -- is errAdoptedTransferUnreported: it says
+// nothing about whether the body arrived whole, so it is never a success.
+func transferResultErr(result *client.TransferResults) error {
+	if result == nil {
+		return errAdoptedTransferUnreported
+	}
+	return result.Error
+}
+
+// finishInlineDownload stores a small object held in memory once its transfer
+// has reported -- unless the transfer failed, never reported, or delivered
+// other than size bytes (when the size is known; -1 if not).  Storing it
+// otherwise would make the object complete at whatever length its input
+// happened to stop.
+func finishInlineDownload(dl *persistentDownload, dw *decisionWriter, result *client.TransferResults, size int64) error {
+	if err := transferResultErr(result); err != nil {
+		return err
+	}
+	if got := int64(dw.BufferLen()); size >= 0 && got != size {
+		return errors.Errorf("the transfer delivered %d bytes of an object of %d", got, size)
+	}
+	dl.checksums = clientChecksumsToCache(result)
+	if err := dw.Finalize(dl); err != nil {
+		return errors.Wrap(err, "failed to finalize inline storage")
+	}
+	close(dl.completionDone)
 	return nil
 }
 
 // adoptedTransferDataIsBad reports whether a download that ended in err left
 // data that must not be kept, as opposed to stopping early with whole blocks
-// that are good.  It is bad when the bytes failed verification against the
-// origin's checksum, when the origin moved on to another version (the object
-// can then never be completed), or when the object's size is unknown, so the
-// blocks written cannot be placed.
+// that are good.  Only a stop whose cause is known to say nothing against the
+// bytes keeps them (see transferStopKeepsData); every other failure --
+// including a checksum mismatch, a change of version at the origin, and any
+// failure a server reported -- condemns them.  So does an unknown size, since
+// the blocks written then cannot be placed.
 func (pc *PersistentCache) adoptedTransferDataIsBad(instanceHash InstanceHash, err error) bool {
-	var mismatch *client.ChecksumMismatchError
-	if errors.As(err, &mismatch) || errors.Is(err, client.ErrObjectVersionChanged) {
+	if !transferStopKeepsData(err) {
 		return true
 	}
 	meta, metaErr := pc.storage.GetMetadata(instanceHash)
@@ -2613,9 +2656,9 @@ func (w *decisionWriter) Close() error {
 // CloseWithError is how the transfer engine closes a writer when a transfer
 // ends (see the client's WithWriter): with the transfer's error, or nil on
 // success.  A failed transfer stopped at an arbitrary byte, so the disk
-// writer is aborted rather than closed (see BlockWriter.Abort), and a
-// no-store stream's reader is handed the error rather than a clean EOF that
-// would make a truncated body look complete.
+// writer is stopped early or aborted rather than closed, according to why
+// (see endWrite), and a no-store stream's reader is handed the error rather
+// than a clean EOF that would make a truncated body look complete.
 func (w *decisionWriter) CloseWithError(err error) error {
 	if err == nil {
 		return w.Close()
@@ -2624,11 +2667,7 @@ func (w *decisionWriter) CloseWithError(err error) error {
 	defer w.mu.Unlock()
 
 	if w.diskMode && w.blockWriter != nil {
-		if aborter, ok := w.blockWriter.(interface{ Abort() }); ok {
-			aborter.Abort()
-			return nil
-		}
-		return w.blockWriter.Close()
+		return endWrite(w.blockWriter, err)
 	}
 	if w.pipeMode && w.pipeWriter != nil {
 		return w.pipeWriter.CloseWithError(err)

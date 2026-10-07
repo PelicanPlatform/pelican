@@ -2846,7 +2846,14 @@ func (bw *BlockWriter) Close() error {
 	}
 	bw.file.Release() // writer's ref
 
-	// Check if download is complete and call callback
+	bw.completeIfWhole()
+	return nil
+}
+
+// completeIfWhole marks the object complete, and runs the completion
+// callbacks, if every one of its blocks is now present.  The caller holds
+// bw.mu and has flushed the writer.
+func (bw *BlockWriter) completeIfWhole() {
 	downloadedCount, err := bw.sm.db.GetDownloadedBlockCount(bw.instanceHash)
 	if err == nil && uint32(downloadedCount) == bw.totalBlocks {
 		// Mark as completed via merge to avoid overwriting concurrent changes.
@@ -2875,8 +2882,6 @@ func (bw *BlockWriter) Close() error {
 			bw.sm.onObjectComplete(bw.instanceHash)
 		}
 	}
-
-	return nil
 }
 
 // bufferIsFinalBlock reports whether the buffered partial block is the
@@ -2891,12 +2896,47 @@ func (bw *BlockWriter) bufferIsFinalBlock() bool {
 	return int64(len(bw.buffer)) == bw.meta.ContentLength-int64(bw.currentBlock)*BlockDataSize
 }
 
-// Abort closes the writer after a failed or cancelled transfer.  The whole
-// blocks already written are kept -- they are complete and correct, and
-// anything resuming the fill skips them -- but a partial block in the
-// buffer is discarded, and an object of unknown size is not finalized at the
-// point the input happened to stop.  Every error path must use Abort rather
-// than Close.  Safe to call more than once, and after Close.
+// StopEarly closes the writer of a transfer that stopped before the end for a
+// reason that says nothing against the data it delivered (see
+// transferStopKeepsData): the cache cancelled it, or the connection broke.
+// Like Abort, it keeps the whole blocks and discards a partial one -- unless
+// that is the object's final block, complete -- and does not finalize an
+// object of unknown size.  Unlike Abort, it then checks, as Close does,
+// whether every block of the object is now present: the transfer may have
+// filled the object's last hole before it stopped, and the object must then
+// be marked complete, or nothing ever would.  Safe to call more than once,
+// and after Close or Abort.
+func (bw *BlockWriter) StopEarly() {
+	bw.mu.Lock()
+	defer bw.mu.Unlock()
+	if bw.closed {
+		return
+	}
+	bw.closed = true
+	defer bw.file.Release()
+	if len(bw.buffer) > 0 && bw.meta.ContentLength >= 0 && bw.bufferIsFinalBlock() {
+		if err := bw.writeCurrentBlock(); err != nil {
+			log.Warnf("Failed to write the final block of %s while stopping a write: %v", bw.instanceHash, err)
+		}
+	}
+	bw.buffer = bw.buffer[:0]
+	if err := bw.flushWriteBatch(); err != nil {
+		log.Warnf("Failed to flush the whole blocks of %s while stopping a write: %v", bw.instanceHash, err)
+		return
+	}
+	if bw.meta.ContentLength >= 0 {
+		bw.completeIfWhole()
+	}
+}
+
+// Abort closes the writer after a transfer that failed in a way that
+// condemns its data, such as a checksum mismatch.  The whole blocks already
+// written are kept -- the object is deleted next, or else they are complete
+// and correct, and anything resuming the fill skips them -- but a partial
+// block in the buffer is discarded, an object of unknown size is not
+// finalized at the point the input happened to stop, and the object is never
+// marked complete.  Every error path must use Abort or StopEarly rather than
+// Close.  Safe to call more than once, and after Close.
 func (bw *BlockWriter) Abort() {
 	bw.mu.Lock()
 	defer bw.mu.Unlock()
