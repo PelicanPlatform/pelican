@@ -582,9 +582,10 @@ func (cc *ConsistencyChecker) RunMetadataScan(ctx context.Context, progressCh ch
 	// deletion in the scan goes through it, so none can skip its checks:
 	//
 	//   - The decision was made against a metadata snapshot up to a
-	//     transaction-restart old, and an object relocated since then may now
-	//     own exactly this file, so the object's current record is asked
-	//     first.
+	//     transaction-restart old, and the object may since have been evicted
+	//     and fetched again into another directory -- or its record may be
+	//     one the scan passed over as too young -- so that it now owns
+	//     exactly this file; the object's current record is asked first.
 	//   - A file written since the scan started, or younger than the grace
 	//     period, is left alone: whoever creates an object's file re-creates
 	//     it, which moves its mtime on.

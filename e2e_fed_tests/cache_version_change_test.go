@@ -67,8 +67,9 @@ func TestRangeFillRefusesAReplacedObject(t *testing.T) {
 	require.Equal(t, http.StatusPartialContent, r.statusCode)
 	require.Equal(t, original[1536*1024:1792*1024], r.body)
 
-	// A second range of the same version fills in more of it: the origin's
-	// differing stat and GET entity tags must not get in the way.
+	// A second range of the same version fills in more of it: a fill held
+	// to the version being cached must accept the origin's response for
+	// that version.
 	r = doRangeRead(ft.Ctx, cacheURL, "", "", fmt.Sprintf("bytes=%d-%d", 1024*1024, 1280*1024-1))
 	require.NoError(t, r.err)
 	require.Equal(t, http.StatusPartialContent, r.statusCode)

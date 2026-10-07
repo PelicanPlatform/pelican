@@ -23,6 +23,7 @@ package fed_tests
 import (
 	"bytes"
 	"context"
+	"fmt"
 	"io"
 	"net/http"
 	"testing"
@@ -95,14 +96,49 @@ func originBytesRead(t *testing.T) float64 {
 	return total
 }
 
+// originOpens is how many times the origin's POSIXv2 backend has opened a
+// file: one per request the cache sends it.
+func originOpens(t *testing.T) float64 {
+	t.Helper()
+	families, err := prometheus.DefaultGatherer.Gather()
+	require.NoError(t, err)
+	total := 0.0
+	for _, mf := range families {
+		if mf.GetName() != "pelican_storage_opens_total" {
+			continue
+		}
+		for _, m := range mf.GetMetric() {
+			for _, l := range m.GetLabel() {
+				if l.GetName() == "backend" && l.GetValue() == metrics.BackendPOSIXv2 {
+					total += m.GetCounter().GetValue()
+				}
+			}
+		}
+	}
+	return total
+}
+
+// cacheGet starts a GET from the cache that asks, as every Pelican client
+// does, for the transfer's status in the X-Transfer-Status trailer.
 func cacheGet(t *testing.T, ctx context.Context, url string) *http.Response {
 	t.Helper()
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	require.NoError(t, err)
+	req.Header.Set("X-Transfer-Status", "true")
+	req.Header.Set("TE", "trailers")
 	resp, err := (&http.Client{Transport: config.GetTransport()}).Do(req)
 	require.NoError(t, err)
 	require.Equal(t, http.StatusOK, resp.StatusCode)
 	return resp
+}
+
+// requireTransferOK checks the X-Transfer-Status trailer of a response read
+// to the end.  A Pelican client fails the attempt on anything but 200, even
+// when every byte arrived.
+func requireTransferOK(t *testing.T, resp *http.Response) {
+	t.Helper()
+	require.Equal(t, "200: OK", resp.Trailer.Get("X-Transfer-Status"),
+		"the client must be told the transfer succeeded")
 }
 
 // requireCached checks that the object is served without the origin reading
@@ -115,6 +151,7 @@ func requireCached(t *testing.T, ctx context.Context, url string, want []byte) {
 	got, err := io.ReadAll(resp.Body)
 	require.NoError(t, err)
 	require.True(t, bytes.Equal(want, got), "the cached copy must be intact")
+	requireTransferOK(t, resp)
 	assert.Less(t, originBytesRead(t)-before, float64(len(want))/2,
 		"the second read must be served from the cache, not fetched from the origin again")
 }
@@ -134,6 +171,7 @@ func TestCacheMissOutlastingIdleTimeoutIsKept(t *testing.T) {
 	resp.Body.Close()
 	require.NoError(t, err)
 	require.True(t, bytes.Equal(content, got))
+	requireTransferOK(t, resp)
 
 	requireCached(t, ctx, cacheURL, content)
 }
@@ -162,6 +200,7 @@ func TestCacheMissWithStalledClientIsKept(t *testing.T) {
 	rest, err := io.ReadAll(resp.Body)
 	require.NoError(t, err)
 	require.True(t, bytes.Equal(content, append(head, rest...)))
+	requireTransferOK(t, resp)
 
 	requireCached(t, ctx, cacheURL, content)
 }
@@ -197,15 +236,20 @@ func TestAbandonedCacheMissKeepsWholeBlocks(t *testing.T) {
 	require.Less(t, fetchedFirst, float64(abandonedObjectSize), "the download must stop before the end")
 	require.Greater(t, fetchedFirst, 0.0)
 
-	// A later read gets the whole object, fetching only what was not kept.
+	// A later read gets the whole object, fetching only what was not kept --
+	// and in one request, not one per read.
 	before := originBytesRead(t)
+	opens := originOpens(t)
 	resp = cacheGet(t, ctx, cacheURL)
 	got, err := io.ReadAll(resp.Body)
 	resp.Body.Close()
 	require.NoError(t, err)
 	require.True(t, bytes.Equal(content, got))
+	requireTransferOK(t, resp)
 	assert.Less(t, originBytesRead(t)-before, float64(abandonedObjectSize)-fetchedFirst/2,
 		"the blocks the abandoned download wrote must be kept, not fetched again")
+	assert.LessOrEqual(t, originOpens(t)-opens, 2.0,
+		"the rest of the object must be fetched by one background fill, not one request per read")
 }
 
 // TestLaterReaderOfACacheMissKeepsItGoing: a reader that arrives while a miss
@@ -236,6 +280,58 @@ func TestLaterReaderOfACacheMissKeepsItGoing(t *testing.T) {
 	rest, err := io.ReadAll(second.Body)
 	require.NoError(t, err)
 	require.True(t, bytes.Equal(content, append(head, rest...)))
+	requireTransferOK(t, second)
 
 	requireCached(t, ctx, cacheURL, content)
+}
+
+// TestAbandonedFillStops: the background fill that resumes a partly cached
+// object follows the same rule as the download that a miss starts -- once
+// its last reader has gone for the idle timeout, it stops, keeping the whole
+// blocks it wrote.
+func TestAbandonedFillStops(t *testing.T) {
+	ft, token := startSlowClientFed(t)
+	content := writeOriginFile(t, ft, "abandoned_twice.bin", abandonedObjectSize)
+	cacheURL := waitForCacheRedirectURL(t, ft, "/test/abandoned_twice.bin", token)
+	ctx, cancel := context.WithTimeout(ft.Ctx, 2*time.Minute)
+	defer cancel()
+
+	// abandon reads the start of the object and leaves, then waits for the
+	// origin to stop sending; it returns how much the origin sent.
+	abandon := func(offset int64) float64 {
+		start := originBytesRead(t)
+		req, err := http.NewRequestWithContext(ctx, http.MethodGet, cacheURL, nil)
+		require.NoError(t, err)
+		if offset > 0 {
+			req.Header.Set("Range", fmt.Sprintf("bytes=%d-", offset))
+		}
+		resp, err := (&http.Client{Transport: config.GetTransport()}).Do(req)
+		require.NoError(t, err)
+		_, err = io.ReadFull(resp.Body, make([]byte, 64*1024))
+		require.NoError(t, err)
+		resp.Body.Close()
+		last := -1.0
+		require.Eventually(t, func() bool {
+			read := originBytesRead(t) - start
+			stopped := read == last
+			last = read
+			return stopped
+		}, time.Minute, 1500*time.Millisecond, "the abandoned transfer must stop")
+		return last
+	}
+
+	first := abandon(0)
+	require.Less(t, first, float64(abandonedObjectSize))
+	// Read on from where the first download stopped: a fill starts there,
+	// and is abandoned in turn.
+	second := abandon(int64(first))
+	require.Greater(t, second, 0.0)
+	require.Less(t, first+second, float64(abandonedObjectSize), "the fill must stop before the end")
+
+	resp := cacheGet(t, ctx, cacheURL)
+	got, err := io.ReadAll(resp.Body)
+	resp.Body.Close()
+	require.NoError(t, err)
+	require.True(t, bytes.Equal(content, got))
+	requireTransferOK(t, resp)
 }

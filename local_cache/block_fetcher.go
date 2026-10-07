@@ -121,7 +121,8 @@ type fetchOperation struct {
 	// Completion state
 	done      bool
 	err       error
-	doneCh    chan struct{} // Closed when fetch completes
+	doneCh    chan struct{}   // Closed when fetch completes
+	ctx       context.Context // The fetch's own context, cancelled by cancelFn
 	cancelFn  context.CancelFunc
 	mu        sync.Mutex
 	lastChunk int64 // Last completed chunk index
@@ -338,19 +339,38 @@ func (bf *BlockFetcherV2) FetchBlocksAsync(ctx context.Context, startBlock, endB
 		return bf.FetchBlocksAsync(ctx, startBlock, endBlock)
 	}
 
+	op := bf.newFetchOp(ctx, key)
+	bf.activeFetches[key] = op
+	bf.mu.Unlock()
+
+	// Start the fetch in a goroutine
+	go bf.doFetch(op.ctx, op, key)
+
+	// Wait for completion
+	select {
+	case <-op.doneCh:
+		return op, op.err
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	}
+}
+
+// newFetchOp creates the operation for a fetch of the blocks of key, with
+// ETA tracking, running under a context derived from ctx.
+func (bf *BlockFetcherV2) newFetchOp(ctx context.Context, key fetchKey) *fetchOperation {
 	// Calculate total bytes for this fetch
-	startOffset := int64(startBlock) * BlockDataSize
-	endOffset := int64(endBlock+1) * BlockDataSize
+	startOffset := int64(key.startBlock) * BlockDataSize
+	endOffset := int64(key.endBlock+1) * BlockDataSize
 	if endOffset > bf.meta.ContentLength {
 		endOffset = bf.meta.ContentLength
 	}
 	totalBytes := endOffset - startOffset
 
-	// Create new fetch operation with ETA tracking
 	fetchCtx, cancelFn := context.WithCancel(ctx)
 	op := &fetchOperation{
 		chunkComplete: make(map[int64]chan struct{}),
 		doneCh:        make(chan struct{}),
+		ctx:           fetchCtx,
 		cancelFn:      cancelFn,
 		totalBytes:    totalBytes,
 		startByte:     startOffset,
@@ -364,20 +384,7 @@ func (bf *BlockFetcherV2) FetchBlocksAsync(ctx context.Context, startBlock, endB
 	// Initialize ETA based on default rate
 	estimatedDuration := time.Duration(float64(totalBytes) / float64(DefaultInitialRate) * float64(time.Second))
 	op.etaUnixNano.Store(time.Now().Add(estimatedDuration).UnixNano())
-
-	bf.activeFetches[key] = op
-	bf.mu.Unlock()
-
-	// Start the fetch in a goroutine
-	go bf.doFetch(fetchCtx, op, key)
-
-	// Wait for completion
-	select {
-	case <-op.doneCh:
-		return op, op.err
-	case <-ctx.Done():
-		return nil, ctx.Err()
-	}
+	return op
 }
 
 // GetChunkChannel returns a channel that will be closed when the specified chunk is complete.
@@ -513,13 +520,6 @@ func (bf *BlockFetcherV2) doFetch(ctx context.Context, op *fetchOperation, key f
 		close(op.doneCh)
 	}()
 
-	// Calculate byte range
-	startOffset := int64(key.startBlock) * BlockDataSize
-	endOffset := int64(key.endBlock+1)*BlockDataSize - 1
-	if endOffset >= bf.meta.ContentLength {
-		endOffset = bf.meta.ContentLength - 1
-	}
-
 	// Determine whether a client is actively waiting.  If no client
 	// has ever touched this fetcher, this is a prefetch and we limit
 	// concurrency via the shared semaphore.
@@ -536,6 +536,44 @@ func (bf *BlockFetcherV2) doFetch(ctx context.Context, op *fetchOperation, key f
 			op.err = ctx.Err()
 			return
 		}
+	}
+
+	bf.runFetch(ctx, op, key, prefetchMode, prefetchMode)
+}
+
+// Fill fetches blocks [startBlock, endBlock] in the background for the
+// object's readers: it is cancelled once no reader of the object has been
+// open for the prefetch timeout (see idle), and readers wait for its blocks
+// on the shared block state rather than through the fetcher.  Like the
+// download a cache miss starts, and unlike a speculative prefetch, it takes
+// no slot of the prefetch semaphore: it runs because a reader is waiting.
+// Fill returns when the fetch ends, with its error.
+func (bf *BlockFetcherV2) Fill(ctx context.Context, startBlock, endBlock uint32) error {
+	key := fetchKey{startBlock, endBlock}
+	op := bf.newFetchOp(ctx, key)
+	bf.mu.Lock()
+	bf.activeFetches[key] = op
+	bf.mu.Unlock()
+	defer func() {
+		bf.mu.Lock()
+		delete(bf.activeFetches, key)
+		bf.mu.Unlock()
+		close(op.doneCh)
+	}()
+	bf.runFetch(op.ctx, op, key, true, false)
+	return op.err
+}
+
+// runFetch fetches the blocks of key from the origin through op.  With
+// idleCancel, it is cancelled once the object has no reader (a prefetch or a
+// background fill); with holdsSem, it holds a slot of the prefetch semaphore,
+// which it yields now and then to let other prefetches run (a prefetch only).
+func (bf *BlockFetcherV2) runFetch(ctx context.Context, op *fetchOperation, key fetchKey, idleCancel, holdsSem bool) {
+	// Calculate byte range
+	startOffset := int64(key.startBlock) * BlockDataSize
+	endOffset := int64(key.endBlock+1)*BlockDataSize - 1
+	if endOffset >= bf.meta.ContentLength {
+		endOffset = bf.meta.ContentLength - 1
 	}
 
 	// The BlockWriter's writeCurrentBlock checks the live shared block
@@ -560,7 +598,7 @@ func (bf *BlockFetcherV2) doFetch(ctx context.Context, op *fetchOperation, key f
 		currentPos:     startOffset,
 		op:             op,
 		bf:             bf,
-		prefetchMode:   prefetchMode,
+		yieldSem:       holdsSem,
 		lastSemRelease: time.Now(),
 		lastRateUpdate: time.Now(),
 		lastFlush:      time.Now(),
@@ -623,23 +661,46 @@ func (bf *BlockFetcherV2) doFetch(ctx context.Context, op *fetchOperation, key f
 		return
 	}
 
-	bf.awaitTransfer(ctx, op, bf.tc.Results(), tj.ID(), writer, prefetchMode, nil)
-	bf.dropIfVersionChanged(op.err)
+	bf.awaitTransfer(ctx, op, bf.tc.Results(), tj.ID(), writer, idleCancel, nil)
+	bf.dropIfCondemned(op.err, op.bytesDownloaded.Load() > 0)
 }
 
-// dropIfVersionChanged removes the cached instance when a fetch found the
-// origin serving a different version of it (err is the fetch's result).
-// Nothing more of this instance can be fetched, so it can never be
-// completed; dropping it (and the latest-version pointer to it) makes the
-// next request fetch the current version.
-func (bf *BlockFetcherV2) dropIfVersionChanged(err error) {
-	if err == nil || !errors.Is(err, client.ErrObjectVersionChanged) {
+// dropIfCondemned removes the cached instance after a fetch (a background
+// fill or a reader's own range fetch) that ended in err, when err condemns
+// the instance -- the same rule a whole-object download follows (see
+// transferStopKeepsData and PersistentCache.endAdoptedDownload):
+//
+//   - The origin now serves a different version.  Nothing more of this
+//     instance can be fetched, so it can never be completed; dropping it
+//     (and the latest-version pointer to it) makes the next request fetch
+//     the current version.
+//   - The fetch wrote part of a body and then failed in a way that says
+//     something against it -- a failure reported in the X-Transfer-Status
+//     trailer, say, which an upstream cache sends when its own verification
+//     fails.  The whole blocks it wrote are already marked present, and a
+//     later read would complete the object from them and serve it.
+//
+// A fetch that wrote nothing condemns nothing, and one that stopped for a
+// benign reason keeps its blocks.  Readers still holding the instance's block
+// state are told why it was dropped (see ObjectBlockState.condemn).
+func (bf *BlockFetcherV2) dropIfCondemned(err error, wrote bool) {
+	if err == nil || transferStopKeepsData(err) {
 		return
 	}
-	log.Warnf("The origin no longer serves the version of %s being cached (%v); dropping the cached copy so it is fetched again",
-		bf.originURL, err)
+	if errors.Is(err, client.ErrObjectVersionChanged) {
+		log.Warnf("The origin no longer serves the version of %s being cached (%v); dropping the cached copy so it is fetched again",
+			bf.originURL, err)
+	} else if wrote {
+		log.Warnf("A fetch of %s failed after writing part of its body (%v); dropping the cached copy so it is fetched again",
+			bf.originURL, err)
+	} else {
+		return
+	}
+	if bf.blockState != nil {
+		bf.blockState.condemn(err)
+	}
 	if err := bf.storage.Delete(bf.instanceHash); err != nil {
-		log.Warnf("Failed to drop %s after its origin changed: %v", bf.instanceHash, err)
+		log.Warnf("Failed to drop %s: %v", bf.instanceHash, err)
 	}
 }
 
@@ -790,7 +851,7 @@ func (bf *BlockFetcherV2) AdoptTransfer(
 			currentPos:     bytesWritten,
 			op:             op,
 			bf:             bf,
-			prefetchMode:   false, // adopted transfers always have a client
+			yieldSem:       false, // adopted transfers hold no prefetch slot
 			lastSemRelease: time.Now(),
 			lastRateUpdate: time.Now(),
 			lastFlush:      time.Now(),
@@ -952,7 +1013,7 @@ type blockWriter struct {
 	currentPos      int64
 	op              *fetchOperation
 	bf              *BlockFetcherV2
-	prefetchMode    bool
+	yieldSem        bool // holds a prefetch-semaphore slot, to yield now and then
 	lastSemRelease  time.Time
 	lastRateUpdate  time.Time
 	lastFlush       time.Time
@@ -1022,9 +1083,9 @@ func (w *blockWriter) Write(p []byte) (n int, err error) {
 		w.op.mu.Unlock()
 	}
 
-	// In prefetch mode, periodically release and reacquire the semaphore
-	// so other prefetches/downloads can make progress.
-	if w.prefetchMode && time.Since(w.lastSemRelease) > PrefetchSemaphoreReleaseInterval {
+	// A prefetch holding a semaphore slot periodically releases and
+	// reacquires it so other prefetches can make progress.
+	if w.yieldSem && time.Since(w.lastSemRelease) > PrefetchSemaphoreReleaseInterval {
 		// Release semaphore briefly to let others run
 		<-w.bf.prefetchSem
 
