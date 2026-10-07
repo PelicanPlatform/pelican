@@ -225,3 +225,54 @@ func TestAdoptedTransferIdleCancelKeepsTheRealError(t *testing.T) {
 	var m *client.ChecksumMismatchError
 	assert.True(t, errors.As(err, &m), "the download must end in the mismatch, not %v", err)
 }
+
+// TestInlineDownloadNeedsAWholeResult checks that a small download held in
+// memory is stored only once its transfer has reported success and
+// delivered the whole object: a transfer client that went away without
+// reporting, or a body shorter than the object, must not be stored as the
+// complete object.
+func TestInlineDownloadNeedsAWholeResult(t *testing.T) {
+	dw := &decisionWriter{decided: true, inlineMode: true, buffer: []byte("the first part of an object")}
+	dl := &persistentDownload{completionDone: make(chan struct{})}
+	assert.ErrorIs(t, finishInlineDownload(dl, dw, nil, -1), errAdoptedTransferUnreported,
+		"a transfer that never reported is not a success")
+	assert.Error(t, finishInlineDownload(dl, dw, &client.TransferResults{}, 100),
+		"a body shorter than the object is not the object")
+}
+
+// TestRangeFetchWhoseClientClosesIsNotASuccess checks that a range fetch
+// whose transfer client closes without reporting the job fails, rather than
+// reporting success for blocks it may never have written.
+func TestRangeFetchWhoseClientClosesIsNotASuccess(t *testing.T) {
+	env := newTornBlockEnv(t, tornObjectBlocks*BlockDataSize-17)
+	meta, err := env.storage.GetMetadata(env.hash)
+	require.NoError(t, err)
+	bf := &BlockFetcherV2{storage: env.storage, instanceHash: env.hash, meta: meta,
+		prefetchTimeout: time.Minute, activeFetches: make(map[fetchKey]*fetchOperation)}
+	op := newTestFetchOp(int64(len(env.data)))
+	inner, err := env.storage.NewBlockWriter(env.hash, 0, nil, nil)
+	require.NoError(t, err)
+	writer := &blockWriter{inner: inner, op: op, bf: bf,
+		lastSemRelease: time.Now(), lastRateUpdate: time.Now(), lastFlush: time.Now()}
+	results := make(chan client.TransferResults)
+	close(results)
+	bf.awaitTransfer(context.Background(), op, results, "job", writer, false, nil)
+	assert.Error(t, op.err)
+}
+
+// TestAdoptedTransferIdleCancelKeepsACondemningError checks that a result in
+// which one attempt was cancelled is not put down to the idle stop when
+// another attempt's error condemns the data: the writer side, which saw the
+// same result, has already discarded it.
+func TestAdoptedTransferIdleCancelKeepsACondemningError(t *testing.T) {
+	notFound := client.StatusCodeError(404)
+	te := client.NewTransferErrors()
+	te.AddError(&notFound)
+	te.AddError(error_codes.NewTransferError(context.Canceled))
+	h := startAdoptHarness(t, time.Nanosecond, &client.TransferResults{Error: te})
+	err := <-h.exitErr
+	h.wg.Wait()
+	assert.True(t, h.wasCancelled())
+	assert.NotErrorIs(t, err, errAdoptedTransferIdle)
+	assert.False(t, transferStopKeepsData(err), "the download must end in the condemning error, not %v", err)
+}
