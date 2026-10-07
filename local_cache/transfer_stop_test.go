@@ -24,6 +24,7 @@ import (
 	"io"
 	"net"
 	"os"
+	"sync/atomic"
 	"syscall"
 	"testing"
 	"time"
@@ -113,8 +114,14 @@ func TestFailedDownloadLeavesANewerVersionsMapping(t *testing.T) {
 	require.NoError(t, env.db.SetLatestETag(objectHash, `"new"`, time.Now()))
 
 	dl := &persistentDownload{instanceHash: env.hash, objectHash: objectHash, completionDone: make(chan struct{})}
+	// A reader that joined the download as a cache hit: it has no handle on
+	// the download, only on the object's block state.
+	hit, err := NewRangeReader(env.storage, env.hash, 0, -1, nil)
+	require.NoError(t, err)
+	defer hit.Close()
 	mismatch := error_codes.NewTransfer_ChecksumMismatchError(&client.ChecksumMismatchError{})
 	pc.endAdoptedDownload(dl, attempts(mismatch))
+	assert.Error(t, hit.WaitForCompletion(context.Background()), "a reader that joined as a hit must be told too")
 
 	meta, err := env.storage.GetMetadata(env.hash)
 	require.NoError(t, err)
@@ -124,4 +131,48 @@ func TestFailedDownloadLeavesANewerVersionsMapping(t *testing.T) {
 	require.NoError(t, err)
 	assert.True(t, found)
 	assert.Equal(t, `"new"`, etag, "the newer version's mapping must stay")
+}
+
+// TestCondemnedDownloadWakesReadersOnlyOnceMarkedBad checks the order in which
+// a whole-object download whose data is condemned ends: the object is marked
+// bad before the readers waiting for its blocks are woken.  Woken first, a
+// reader waiting for a block the download never wrote found nothing to say
+// so and started a fetch of its own into an instance about to be deleted.
+// The window is small, so the end is repeated.
+func TestCondemnedDownloadWakesReadersOnlyOnceMarkedBad(t *testing.T) {
+	env := newTornBlockEnv(t, tornObjectBlocks*BlockDataSize-17)
+	pc := &PersistentCache{storage: env.storage, db: env.db}
+	meta, err := env.storage.GetMetadata(env.hash)
+	require.NoError(t, err)
+	mismatch := attempts(error_codes.NewTransfer_ChecksumMismatchError(&client.ChecksumMismatchError{}))
+
+	for i := range 200 {
+		if i > 0 {
+			_, err := env.storage.InitDiskStorage(context.Background(), env.hash, tornObjectBlocks*BlockDataSize-17, meta.StorageID, 1)
+			require.NoError(t, err)
+		}
+		state, err := env.storage.GetSharedBlockState(env.hash)
+		require.NoError(t, err)
+		state.SetDownloading()
+
+		var fetched atomic.Bool
+		rr, err := NewRangeReader(env.storage, env.hash, 0, -1, func(context.Context, uint32, uint32) error {
+			fetched.Store(true)
+			return errors.New("no origin here")
+		})
+		require.NoError(t, err)
+		read := make(chan error, 1)
+		go func() {
+			_, err := rr.Read(make([]byte, 10))
+			read <- err
+		}()
+		// Let the reader block waiting for block 0.
+		require.Eventually(t, func() bool { return state.waiters() > 0 }, 5*time.Second, time.Millisecond)
+
+		dl := &persistentDownload{instanceHash: env.hash, completionDone: make(chan struct{})}
+		pc.endAdoptedDownload(dl, mismatch)
+		require.Error(t, <-read)
+		require.NoError(t, rr.Close())
+		require.False(t, fetched.Load(), "run %d: a reader woken by the end of a condemned download started a fetch", i)
+	}
 }

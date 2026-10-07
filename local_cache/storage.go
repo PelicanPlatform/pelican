@@ -2745,6 +2745,15 @@ func (bw *BlockWriter) flushWriteBatch() error {
 	if bw.batchCount == 0 {
 		return nil
 	}
+	// Once the object is condemned and being dropped, no writer may mark
+	// anything of it present: another writer's verdict condemned it, and
+	// the rows written now would outlive the delete and be taken for
+	// blocks of the object when it is next fetched under the same hash.
+	if bw.sharedState != nil && bw.sharedState.Condemned() != nil {
+		bw.writeBatch = bw.writeBatch[:0]
+		bw.batchCount = 0
+		return nil
+	}
 
 	fileOffset := BlockOffset(bw.batchStart)
 	if _, err := bw.file.File().WriteAt(bw.writeBatch, fileOffset); err != nil {
@@ -2854,6 +2863,9 @@ func (bw *BlockWriter) Close() error {
 // callbacks, if every one of its blocks is now present.  The caller holds
 // bw.mu and has flushed the writer.
 func (bw *BlockWriter) completeIfWhole() {
+	if bw.sharedState != nil && bw.sharedState.Condemned() != nil {
+		return // see flushWriteBatch
+	}
 	downloadedCount, err := bw.sm.db.GetDownloadedBlockCount(bw.instanceHash)
 	if err == nil && uint32(downloadedCount) == bw.totalBlocks {
 		// Mark as completed via merge to avoid overwriting concurrent changes.
@@ -2930,13 +2942,16 @@ func (bw *BlockWriter) StopEarly() {
 }
 
 // Abort closes the writer after a transfer that failed in a way that
-// condemns its data, such as a checksum mismatch.  The whole blocks already
-// written are kept -- the object is deleted next, or else they are complete
-// and correct, and anything resuming the fill skips them -- but a partial
-// block in the buffer is discarded, an object of unknown size is not
-// finalized at the point the input happened to stop, and the object is never
-// marked complete.  Every error path must use Abort or StopEarly rather than
-// Close.  Safe to call more than once, and after Close.
+// condemns its data, such as a checksum mismatch, or before it got under way.
+// Nothing more is published: the blocks still waiting in the write batch and
+// a partial block in the buffer are discarded, an object of unknown size is
+// not finalized at the point the input happened to stop, and the object is
+// never marked complete.  The batch must not be flushed, because flushing
+// marks its blocks present and wakes every reader waiting for them -- who
+// would read and serve them before anything had marked the object bad; the
+// caller drops the object next (see BlockFetcherV2.dropIfCondemned and
+// PersistentCache.endAdoptedDownload).  Every error path must use Abort or
+// StopEarly rather than Close.  Safe to call more than once, and after Close.
 func (bw *BlockWriter) Abort() {
 	bw.mu.Lock()
 	defer bw.mu.Unlock()
@@ -2945,9 +2960,8 @@ func (bw *BlockWriter) Abort() {
 	}
 	bw.closed = true
 	bw.buffer = bw.buffer[:0]
-	if err := bw.flushWriteBatch(); err != nil {
-		log.Warnf("Failed to flush the whole blocks of %s while aborting a write: %v", bw.instanceHash, err)
-	}
+	bw.writeBatch = bw.writeBatch[:0]
+	bw.batchCount = 0
 	bw.file.Release()
 }
 

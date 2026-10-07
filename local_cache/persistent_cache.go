@@ -1323,6 +1323,9 @@ func (pc *PersistentCache) newFetchingRangeReader(
 		closeLazy()
 		return nil, err
 	}
+	rr.startFill = func(block, last uint32) (bool, <-chan struct{}) {
+		return pc.startFill(res, rr.blockState, block, last)
+	}
 
 	// If a download is backing this reader, expose its terminal state so
 	// the serving path can fail the response with an X-Transfer-Status
@@ -1350,6 +1353,62 @@ func (pc *PersistentCache) newFetchingRangeReader(
 	}
 
 	return rr, nil
+}
+
+// startFill starts a background fill of a partly cached object, for a reader
+// that needs a block that no download or fill is writing: one transfer from
+// that block to the next block present, or to last (the end of the reader's
+// range), whichever comes first.  It reports whether a fill now covers the
+// block -- this one, or another reader's that got there first -- so the
+// reader should wait for it on the shared block state, and, when this call
+// started one, a channel closed when it ends.
+//
+// A fill is a background download like the one a miss starts, and follows
+// the same rules: like a miss, it takes no slot of the prefetch semaphore --
+// it runs because a reader is waiting for it, and there is one per gap a
+// reader is in, so readers bound fills as they bound misses -- it goes on
+// while any reader of the object is open and is cancelled once none has been
+// for the prefetch timeout, it accepts only the version of the
+// object being filled, and it keeps the whole blocks it wrote if it stops
+// early for a benign reason (see transferStopKeepsData), but drops the object
+// -- telling its readers why -- if it fails in a way that condemns what it
+// wrote (see BlockFetcherV2.dropIfCondemned).
+func (pc *PersistentCache) startFill(res *objectResolution, state *ObjectBlockState, block, last uint32) (covered bool, started <-chan struct{}) {
+	if pc.closed.Load() || res.meta == nil || res.meta.ContentLength <= 0 {
+		return false, nil
+	}
+	fill := state.beginFill(block, last)
+	if fill == nil {
+		// Already written, or something else is writing it.
+		return true, nil
+	}
+	var fedTP client.TokenProvider
+	if pc.getFedToken() != "" {
+		fedTP = pc.fedTokenAsProvider()
+	}
+	bf, err := NewBlockFetcherV2(pc.storage, res.instanceHash, res.pelicanURL, res.token, fedTP, pc.te,
+		BlockFetcherV2Config{PrefetchSem: pc.prefetchSem})
+	if err != nil {
+		state.endFill(fill)
+		log.Debugf("Not filling %s in the background: %v", res.instanceHash, err)
+		return false, nil
+	}
+	log.Debugf("Filling blocks %d-%d of %s in the background", fill.start, fill.end, res.instanceHash)
+	// The fill outlives the reader that started it by up to the prefetch
+	// timeout, so it pins the object itself, as a reader does: eviction
+	// must not delete an object under a writer still filling it.
+	unpin := pc.storage.PinObject(res.instanceHash)
+	pc.downloadWg.Add(1)
+	go func() {
+		defer pc.downloadWg.Done()
+		defer unpin()
+		defer state.endFill(fill)
+		defer bf.Close()
+		if err := bf.Fill(pc.downloadCtx, fill.start, fill.end); err != nil {
+			log.Debugf("Background fill of blocks %d-%d of %s ended early: %v", fill.start, fill.end, res.instanceHash, err)
+		}
+	}()
+	return true, fill.done
 }
 
 // GetSeekableReader returns a seekable reader for the full object with on-demand block fetching.
@@ -1473,13 +1532,16 @@ func (pc *PersistentCache) GetRange(ctx context.Context, objectPath, token, rang
 
 		// Return full object reader.
 		//
-		// When a background download is in progress (res.dl != nil) we
-		// must use a fetching RangeReader so that blocks which haven't
-		// been written yet can be waited-for or fetched on demand.  The
-		// plain ObjectReader calls ReadBlocks directly and would fail
-		// with "block N not yet downloaded" if the download hasn't
-		// reached a particular block.
-		if res.dl != nil && res.meta.ContentLength > 0 {
+		// Unless the object is known to be complete, use a fetching
+		// RangeReader, so that blocks not yet on disk are waited for (a
+		// background download may be writing them) or fetched on demand.
+		// That covers a download in progress (res.dl != nil) and a partly
+		// cached object: one initialized by a range read, or a download
+		// that stopped early and kept its whole blocks.  The plain
+		// ObjectReader calls ReadBlocks directly and would fail with
+		// "block N not yet downloaded" at the first missing block -- for
+		// a prestage, on every attempt until the object was evicted.
+		if res.meta.ContentLength > 0 && res.meta.IsDisk() && (res.dl != nil || res.meta.Completed.IsZero()) {
 			rr, rrErr := pc.newFetchingRangeReader(res, 0, res.meta.ContentLength-1)
 			if rrErr != nil {
 				if attempt < maxAttempts-1 && isEvictedError(rrErr) {
@@ -1535,8 +1597,9 @@ func (pc *PersistentCache) Stat(objectPath, token string) (uint64, error) {
 	return pc.stat(objectPath, token, false)
 }
 
-// StatCachedOnly returns the size of an object only if it's cached.
-// Returns 0, ErrNotCached if the object is not in the cache.
+// StatCachedOnly returns the size of an object only if it's cached, whole.
+// Returns 0, ErrNotCached if the object is not in the cache or only part of
+// it is.
 func (pc *PersistentCache) StatCachedOnly(objectPath, token string) (uint64, error) {
 	return pc.stat(objectPath, token, true)
 }
@@ -1691,7 +1754,13 @@ func (pc *PersistentCache) stat(objectPath, token string, cachedOnly bool) (uint
 		if mErr != nil {
 			return 0, errors.Wrap(mErr, "failed to check cache")
 		}
-		if meta != nil {
+		// For a cached-only stat (Cache-Control: only-if-cached) the object
+		// must be stored whole.  A partly cached one -- initialized by a
+		// range read, a download in progress, or one that stopped early and
+		// kept its whole blocks -- is not a stored response: serving it would
+		// fetch the missing blocks from the origin, which the client asked
+		// not to happen.  And a size not yet known is no size at all.
+		if meta != nil && meta.ContentLength >= 0 && (!cachedOnly || !meta.Completed.IsZero()) {
 			return uint64(meta.ContentLength), nil
 		}
 	}
@@ -2452,14 +2521,28 @@ func (pc *PersistentCache) performDownload(ctx context.Context, dl *persistentDo
 // endAdoptedDownload finishes a whole-object download that a fetcher adopted,
 // once its transfer has ended in err (nil on success).
 func (pc *PersistentCache) endAdoptedDownload(dl *persistentDownload, err error) {
-	if sharedState, stateErr := pc.storage.GetSharedBlockState(dl.instanceHash); stateErr == nil {
+	sharedState, stateErr := pc.storage.GetSharedBlockState(dl.instanceHash)
+	defer close(dl.completionDone)
+	bad := err != nil && pc.adoptedTransferDataIsBad(dl.instanceHash, err)
+	if bad {
+		// Mark the object bad before waking anyone: a reader waiting for a
+		// block the download never wrote wakes on ClearDownloading, and
+		// must find the reason rather than start a fetch of its own into
+		// an instance about to be deleted.  Readers that came through the
+		// download see completionErr; readers that joined it as a cache
+		// hit hold only the block state.
+		dl.completionErr.Store(err)
+		if stateErr == nil {
+			sharedState.condemn(err)
+		}
+	}
+	if stateErr == nil {
 		sharedState.ClearDownloading()
 	}
-	defer close(dl.completionDone)
 	if err == nil {
 		return
 	}
-	if !pc.adoptedTransferDataIsBad(dl.instanceHash, err) {
+	if !bad {
 		// The transfer stopped early for a reason that says nothing
 		// against the data -- cancelled because no reader remained, the
 		// connection broke, or the cache is shutting down -- and the
@@ -2473,7 +2556,6 @@ func (pc *PersistentCache) endAdoptedDownload(dl *persistentDownload, err error)
 			dl.instanceHash, err)
 		return
 	}
-	dl.completionErr.Store(err)
 	// The bytes themselves are suspect, or the object can never be
 	// completed: tear it down so it is not served, and so the next request
 	// misses and fetches the object from the origin again.  Delete also
@@ -2481,8 +2563,8 @@ func (pc *PersistentCache) endAdoptedDownload(dl *persistentDownload, err error)
 	// version: a request may meanwhile have found a newer one, whose
 	// mapping must stay.
 	if delErr := pc.storage.Delete(dl.instanceHash); delErr != nil {
-		log.Warnf("Failed to evict instance %s after a failed download: %v",
-			dl.instanceHash, delErr)
+		log.Warnf("Failed to evict instance %s after a failed download (%v); until it is, every request for it fails: %v",
+			dl.instanceHash, err, delErr)
 	}
 }
 

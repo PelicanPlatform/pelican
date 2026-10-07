@@ -41,20 +41,36 @@ import (
 // clear-fetch-verify cycle.  Subsequent callers acquire repairMu, re-check
 // block availability, and skip the repair if it has already been done.
 type ObjectBlockState struct {
-	mu       sync.RWMutex    // protects bitmap, downloading
+	mu       sync.RWMutex    // protects bitmap, downloading, fills
 	bitmap   *roaring.Bitmap // guarded by mu
 	repairMu sync.Mutex      // serializes repair operations; independent of mu
 
-	// cond is broadcast whenever a block is added (via Add/AddRange)
-	// or downloading transitions to false (via ClearDownloading).
-	// Waiters hold mu.RLock via cond (cond is bound to mu.RLocker()).
+	// cond is broadcast whenever a block is added (via Add/AddRange),
+	// downloading transitions to false (via ClearDownloading), or a fill
+	// ends (via endFill).  Waiters hold mu.RLock via cond (cond is bound
+	// to mu.RLocker()).
 	cond *sync.Cond
 
-	// downloading is true while a background download is writing
-	// blocks into this bitmap.  When true, WaitForBlock will block
-	// until the requested block appears or downloading becomes false.
-	// Guarded by mu (read under RLock, written under Lock).
+	// downloading is true while a background download of the whole
+	// object is writing blocks into this bitmap.  When true, WaitForBlock
+	// will block until the requested block appears or downloading becomes
+	// false.  Guarded by mu (read under RLock, written under Lock).
 	downloading bool
+	// downloadDone is closed when the download that set downloading ends.
+	downloadDone chan struct{}
+
+	// fills are the background fills of part of the object in progress
+	// (see beginFill); WaitForBlock waits on one that covers its block as
+	// it does on a whole-object download.  Guarded by mu.
+	fills map[*blockFill]struct{}
+
+	// condemned, once set, is why this instance's data was found bad and
+	// the instance dropped (see condemn).  Guarded by mu.
+	condemned error
+
+	// waiting counts the goroutines asleep in WaitForBlock; it lets tests
+	// know a reader is waiting.
+	waiting atomic.Int32
 
 	// readers counts the readers of the object that are open (see
 	// AttachReader), and lastReaderChange is when one last attached or
@@ -63,6 +79,16 @@ type ObjectBlockState struct {
 	// timeout.
 	readers          atomic.Int32
 	lastReaderChange atomic.Int64
+
+	// waitHooks, set only by tests, run at the two points of a cancelled
+	// WaitForBlock whose ordering matters.
+	waitHooks *blockWaitHooks
+}
+
+// blockWaitHooks let a test order a cancelled WaitForBlock's two goroutines.
+type blockWaitHooks struct {
+	beforeSleep func() // the waiter, holding the read lock, about to sleep
+	onCancel    func() // the caller, its context done, about to wake it
 }
 
 // NewObjectBlockState wraps an existing bitmap in a thread-safe container.
@@ -220,24 +246,146 @@ func (obs *ObjectBlockState) UnlockRepair() {
 // progress.  WaitForBlock will block while downloading is true.
 func (obs *ObjectBlockState) SetDownloading() {
 	obs.mu.Lock()
+	if !obs.downloading {
+		obs.downloadDone = make(chan struct{})
+	}
 	obs.downloading = true
 	obs.mu.Unlock()
 }
 
 // ClearDownloading marks the background download as finished and wakes
-// any goroutines waiting in WaitForBlock.
+// any goroutines waiting in WaitForBlock.  A download that failed in a way
+// that condemns its data must condemn the state first (see condemn), so that
+// the readers it wakes see why.
 func (obs *ObjectBlockState) ClearDownloading() {
 	obs.mu.Lock()
 	obs.downloading = false
+	if obs.downloadDone != nil {
+		close(obs.downloadDone)
+		obs.downloadDone = nil
+	}
 	obs.mu.Unlock()
+	obs.cond.Broadcast()
+}
+
+// writersOver returns what is still due to write any of the given blocks:
+// the done channel of every fill in progress that overlaps them, and that of
+// the whole-object download, if one is in progress (nil when none).  A
+// reader that served those blocks relies on these writers' verdicts as well
+// as their bytes; see RangeReader.WaitForCompletion.
+func (obs *ObjectBlockState) writersOver(blocks *roaring.Bitmap) (fills []<-chan struct{}, download <-chan struct{}) {
+	obs.mu.RLock()
+	defer obs.mu.RUnlock()
+	for f := range obs.fills {
+		if blocks.IntersectsWithInterval(uint64(f.start), uint64(f.end)+1) {
+			fills = append(fills, f.done)
+		}
+	}
+	if obs.downloading {
+		download = obs.downloadDone
+	}
+	return fills, download
+}
+
+// blockFill is a background fill of blocks [start, end] of an object.
+type blockFill struct {
+	start, end uint32
+	done       chan struct{} // closed by endFill
+}
+
+// condemn records that the instance's data was found bad and the instance
+// is being dropped, so that its readers -- which hold this state, while the
+// next request gets a fresh one -- fail with the reason instead of reading
+// or completing it, and wakes any of them waiting for a block.
+func (obs *ObjectBlockState) condemn(err error) {
+	obs.mu.Lock()
+	if obs.condemned == nil {
+		obs.condemned = err
+	}
+	obs.mu.Unlock()
+	obs.cond.Broadcast()
+}
+
+// waiters returns how many goroutines are asleep in WaitForBlock.
+func (obs *ObjectBlockState) waiters() int32 {
+	return obs.waiting.Load()
+}
+
+// Condemned returns why the instance was dropped as bad, or nil.
+func (obs *ObjectBlockState) Condemned() error {
+	obs.mu.RLock()
+	defer obs.mu.RUnlock()
+	return obs.condemned
+}
+
+// beingFilledLocked reports whether a background download or fill is due to
+// write the block.  The caller holds mu.
+func (obs *ObjectBlockState) beingFilledLocked(block uint32) bool {
+	if obs.condemned != nil {
+		return false
+	}
+	if obs.downloading {
+		return true
+	}
+	for f := range obs.fills {
+		if f.start <= block && block <= f.end {
+			return true
+		}
+	}
+	return false
+}
+
+// beginFill registers a background fill that starts at a missing block and
+// runs up to the next block already present, or to last, whichever comes
+// first.  It returns nil when the block is present, or a download or another
+// fill is already due to write it: the caller should wait for it instead
+// (see WaitForBlock).  It also returns nil once the object is condemned, so
+// that no fill starts into an instance being dropped; the waiting caller then
+// finds the reason.  Every fill begun must be ended with endFill.
+func (obs *ObjectBlockState) beginFill(block, last uint32) *blockFill {
+	obs.mu.Lock()
+	defer obs.mu.Unlock()
+	if block > last || obs.condemned != nil || obs.bitmap.Contains(block) || obs.beingFilledLocked(block) {
+		return nil
+	}
+	end := last
+	it := obs.bitmap.Iterator()
+	it.AdvanceIfNeeded(block)
+	if it.HasNext() {
+		if next := it.Next(); next-1 < end {
+			end = next - 1
+		}
+	}
+	// Stop short of another fill, too, rather than fetch its blocks twice.
+	for f := range obs.fills {
+		if f.start > block && f.start-1 < end {
+			end = f.start - 1
+		}
+	}
+	f := &blockFill{start: block, end: end, done: make(chan struct{})}
+	if obs.fills == nil {
+		obs.fills = make(map[*blockFill]struct{})
+	}
+	obs.fills[f] = struct{}{}
+	return f
+}
+
+// endFill unregisters a fill begun with beginFill and wakes any goroutine
+// waiting in WaitForBlock, which then finds its block written or falls back
+// to fetching it itself.
+func (obs *ObjectBlockState) endFill(f *blockFill) {
+	obs.mu.Lock()
+	delete(obs.fills, f)
+	obs.mu.Unlock()
+	close(f.done)
 	obs.cond.Broadcast()
 }
 
 // WaitForBlock waits until the specified block is available in the bitmap.
 // It returns true if the block is available, false if the context was
-// cancelled or the background download finished without producing the
-// block.  This avoids starting duplicate range downloads when a full
-// download is already in progress.
+// cancelled, or no background download or fill is due to write the block
+// (any more) and it is not there.  This avoids starting duplicate range
+// downloads when a download or fill is already in progress.
 //
 // The implementation spawns a goroutine to wait on the sync.Cond (which
 // cannot be interrupted) and selects between it and ctx.Done().  On
@@ -251,7 +399,7 @@ func (obs *ObjectBlockState) WaitForBlock(ctx context.Context, block uint32) boo
 		obs.mu.RUnlock()
 		return true
 	}
-	if !obs.downloading {
+	if !obs.beingFilledLocked(block) {
 		obs.mu.RUnlock()
 		return false
 	}
@@ -270,14 +418,19 @@ func (obs *ObjectBlockState) WaitForBlock(ctx context.Context, block uint32) boo
 		defer close(exited)
 		obs.mu.RLock()
 		defer obs.mu.RUnlock()
-		for !obs.bitmap.Contains(block) && obs.downloading {
+		for !obs.bitmap.Contains(block) && obs.beingFilledLocked(block) {
 			// Check if the caller has cancelled before sleeping.
 			select {
 			case <-done:
 				return
 			default:
 			}
+			if obs.waitHooks != nil {
+				obs.waitHooks.beforeSleep()
+			}
+			obs.waiting.Add(1)
 			obs.cond.Wait()
+			obs.waiting.Add(-1)
 		}
 		select {
 		case ready <- obs.bitmap.Contains(block):
@@ -289,8 +442,20 @@ func (obs *ObjectBlockState) WaitForBlock(ctx context.Context, block uint32) boo
 	case found := <-ready:
 		return found
 	case <-ctx.Done():
+		if obs.waitHooks != nil {
+			obs.waitHooks.onCancel()
+		}
+		// Close done under the write lock, then wake the goroutine so it
+		// unblocks from cond.Wait and sees done.  The goroutine holds the
+		// read lock from its check of done until cond.Wait has queued it
+		// for a wakeup, so with the write lock it has either not checked
+		// done yet or is queued; without it, the broadcast could land
+		// between the check and the queueing, and be lost -- leaving this
+		// call waiting below until something else broadcasts, which for a
+		// stalled transfer is when the transfer gives up.
+		obs.mu.Lock()
 		close(done)
-		// Wake the goroutine so it unblocks from cond.Wait and sees done.
+		obs.mu.Unlock()
 		obs.cond.Broadcast()
 		// Wait for the goroutine to release the RLock and exit.
 		<-exited
@@ -309,7 +474,8 @@ const blockStateTTL = 5 * time.Minute
 // record of every state still in use.
 //
 // Holders keep their *ObjectBlockState for as long as they work on the
-// object: a RangeReader for its life, a promotion while it fills.  Writers
+// object: a RangeReader for its life, a fetcher for the life of its
+// download or fill.  Writers
 // update whichever state GetSharedBlockState returns at the time.  If the
 // TTL dropped an idle entry while a holder still had it and a later load
 // built a fresh one, the two would diverge for good: blocks written through
