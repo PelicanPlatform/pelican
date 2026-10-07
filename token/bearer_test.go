@@ -38,13 +38,15 @@ func TestCutBearerPrefix(t *testing.T) {
 		// What Go's URL decoding yields for a doubly percent-encoded value,
 		// and the spelling XrdSciTokens tolerates for un-decoded CGI.
 		{"undecoded-percent-20", "Bearer%20abc.def.ghi", "abc.def.ghi", true},
-		{"surrounding-whitespace", "  Bearer abc.def.ghi  ", "abc.def.ghi", true},
 		{"multiple-spaces-after-scheme", "Bearer   abc.def.ghi", "abc.def.ghi", true},
+		{"trailing-space-after-token", "Bearer abc.def.ghi  ", "abc.def.ghi", true},
 		{"scheme-only-is-empty", "Bearer ", "", true},
 		{"scheme-without-separator-is-untouched", "Bearerabc", "Bearerabc", false},
 		{"token-merely-starting-with-bearer-is-untouched", "BearerToken.abc", "BearerToken.abc", false},
 		{"other-scheme-is-untouched", "Basic dXNlcjpwYXNz", "Basic dXNlcjpwYXNz", false},
-		{"bare-token-is-trimmed", "  abc.def.ghi ", "abc.def.ghi", false},
+		// No match means no change at all: leading whitespace is the caller's job.
+		{"leading-whitespace-is-not-skipped", " Bearer abc.def.ghi", " Bearer abc.def.ghi", false},
+		{"bare-token-with-whitespace-is-untouched", "  abc.def.ghi ", "  abc.def.ghi ", false},
 		{"empty", "", "", false},
 	}
 	for _, tc := range cases {

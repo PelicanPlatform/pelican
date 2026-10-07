@@ -287,7 +287,8 @@ func extractTokens(r *http.Request) []string {
 	if authHeader := r.Header.Get("Authorization"); authHeader != "" {
 		// Split by comma to handle multiple tokens
 		for _, part := range strings.Split(authHeader, ",") {
-			if tok, found := token.CutBearerPrefix(part); found && tok != "" {
+			// Only leading space is trimmed here: the scheme check needs the space after "Bearer"
+			if tok, found := token.CutBearerPrefix(strings.TrimLeft(part, " \t")); found && tok != "" {
 				tokens = append(tokens, tok)
 			}
 		}
@@ -297,8 +298,11 @@ func extractTokens(r *http.Request) []string {
 	query := r.URL.Query()
 	for _, key := range []string{"access_token", "authz"} {
 		for _, val := range query[key] {
-			if tok := token.StripBearerPrefix(val); tok != "" {
-				tokens = append(tokens, tok)
+			for _, part := range strings.Split(val, ",") {
+				tok := strings.TrimSpace(token.StripBearerPrefix(strings.TrimLeft(part, " \t")))
+				if tok != "" {
+					tokens = append(tokens, tok)
+				}
 			}
 		}
 	}
