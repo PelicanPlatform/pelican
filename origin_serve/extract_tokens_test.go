@@ -21,9 +21,11 @@ package origin_serve
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"strings"
 	"testing"
 
 	"github.com/gin-gonic/gin"
@@ -136,6 +138,43 @@ func TestExtractTokens(t *testing.T) {
 			want:    []string{"hdr.tok.en", jwt2, jwt1},
 		},
 		{
+			// A comma-joined header as XRootD forwards it: commas survive the
+			// copy into CGI, only the spaces become %20.
+			name:   "authz-query-comma-joined",
+			target: "/data/f?authz=Bearer%20" + jwt1 + ",Bearer%20" + jwt2,
+			want:   []string{jwt1, jwt2},
+		},
+		{
+			name:   "authz-query-comma-joined-with-space",
+			target: "/data/f?authz=Bearer%20" + jwt1 + ",%20Bearer%20" + jwt2,
+			want:   []string{jwt1, jwt2},
+		},
+		{
+			// XrdSciTokens strips the scheme per piece only when present, so a
+			// bare second token is accepted the same way.
+			name:   "authz-query-comma-joined-bare-second",
+			target: "/data/f?authz=Bearer%20" + jwt1 + "," + jwt2,
+			want:   []string{jwt1, jwt2},
+		},
+		{
+			name:   "access-token-query-comma-joined",
+			target: "/data/f?access_token=" + jwt1 + "," + jwt2,
+			want:   []string{jwt1, jwt2},
+		},
+		{
+			name:   "empty-comma-pieces-skipped",
+			target: "/data/f?authz=," + jwt1 + ",,Bearer%20," + jwt2 + ",",
+			want:   []string{jwt1, jwt2},
+		},
+		{
+			// In the header every token needs the scheme; a bare second entry
+			// is not a token. Unchanged from before this fix.
+			name:    "authorization-header-bare-second-entry-ignored",
+			target:  "/data/f",
+			headers: map[string]string{"Authorization": "Bearer " + jwt1 + ", " + jwt2},
+			want:    []string{jwt1},
+		},
+		{
 			name:   "no-token",
 			target: "/data/f?directread",
 			want:   []string{},
@@ -151,6 +190,36 @@ func TestExtractTokens(t *testing.T) {
 			assert.Equal(t, tc.want, extractTokens(req))
 		})
 	}
+}
+
+// TestExtractTokensCap pins the limit on tokens per request: ten are looked
+// at, eleven make the request count as having none, as XrdSciTokens does.
+func TestExtractTokensCap(t *testing.T) {
+	get := func(target string) []string {
+		return extractTokens(httptest.NewRequest(http.MethodGet, target, nil))
+	}
+	repeated := func(n int) (target string, want []string) {
+		q := url.Values{}
+		for i := 0; i < n; i++ {
+			tok := fmt.Sprintf("eyJ%d.eyJ%d.sig%d", i, i, i)
+			want = append(want, tok)
+			q.Add("authz", "Bearer "+tok)
+		}
+		return "/data/f?" + q.Encode(), want
+	}
+
+	target, want := repeated(maxTokensPerRequest)
+	assert.Equal(t, want, get(target), "the limit itself is allowed")
+
+	target, _ = repeated(maxTokensPerRequest + 1)
+	assert.Equal(t, []string{}, get(target), "one past the limit means no token at all")
+
+	// The limit counts tokens, not parameters: one comma-joined value can exceed it.
+	joined := make([]string, 0, maxTokensPerRequest+1)
+	for i := 0; i <= maxTokensPerRequest; i++ {
+		joined = append(joined, fmt.Sprintf("a%d.b.c", i))
+	}
+	assert.Equal(t, []string{}, get("/data/f?authz="+strings.Join(joined, ",")))
 }
 
 // startTestIssuer serves a JWKS and the OpenID discovery document that points
