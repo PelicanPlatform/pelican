@@ -34,6 +34,7 @@ import (
 	"golang.org/x/sync/errgroup"
 
 	"github.com/pelicanplatform/pelican/client"
+	"github.com/pelicanplatform/pelican/error_codes"
 )
 
 // tornBlockEnv is a storage manager holding one empty disk object of
@@ -275,4 +276,72 @@ func TestOriginFetchDropsAnotherVersion(t *testing.T) {
 	gone, err := env.storage.GetMetadata(env.hash)
 	require.NoError(t, err)
 	assert.Nil(t, gone, "an instance the origin no longer serves is dropped")
+}
+
+// fillAllButLast writes every block but the object's (short) last one into
+// env through a fresh writer and returns it, still open; the last block was
+// already fetched by an earlier write, as a tail read would.
+func fillAllButLast(t *testing.T, env *tornBlockEnv, onComplete func()) *BlockWriter {
+	t.Helper()
+	last := uint32(tornObjectBlocks - 1)
+	bw, err := env.storage.NewBlockWriter(env.hash, last, nil, nil)
+	require.NoError(t, err)
+	_, err = bw.Write(env.data[int64(last)*BlockDataSize:])
+	require.NoError(t, err)
+	require.NoError(t, bw.Close())
+
+	bw, err = env.storage.NewBlockWriter(env.hash, 0, nil, onComplete)
+	require.NoError(t, err)
+	_, err = bw.Write(env.data[:int64(last)*BlockDataSize])
+	require.NoError(t, err)
+	return bw
+}
+
+// TestBlockWriterStopEarlyCompletesTheObject checks that a write stopped early
+// for a reason that says nothing against its data -- cancelled, or cut off by
+// the connection -- after filling the object's last hole marks the object
+// complete, as Close would: otherwise nothing ever would.  Abort, which is for
+// condemned data, must not.
+func TestBlockWriterStopEarlyCompletesTheObject(t *testing.T) {
+	env := newTornBlockEnv(t, tornObjectBlocks*BlockDataSize-17)
+	completed := false
+	bw := fillAllButLast(t, env, func() { completed = true })
+	bw.StopEarly()
+	bw.StopEarly() // harmless
+	meta, err := env.storage.GetMetadata(env.hash)
+	require.NoError(t, err)
+	assert.False(t, meta.Completed.IsZero(), "an object with every block present is complete")
+	assert.True(t, completed, "the completion callback must run")
+	env.checkWholeBlocks(t)
+
+	env = newTornBlockEnv(t, tornObjectBlocks*BlockDataSize-17)
+	fillAllButLast(t, env, func() { t.Error("an aborted write must not complete the object") }).Abort()
+	meta, err = env.storage.GetMetadata(env.hash)
+	require.NoError(t, err)
+	assert.True(t, meta.Completed.IsZero())
+}
+
+// TestTransferEndDecidesHowTheWriteEnds checks the writers the transfer engine
+// closes with the transfer's error: a benign stop completes an object whose
+// last hole was filled, and a failure a server reported does not.
+func TestTransferEndDecidesHowTheWriteEnds(t *testing.T) {
+	trailerErr := error_codes.NewTransferError(errors.New("download error after server response started: 500: upstream verification failed"))
+	for _, tc := range []struct {
+		name     string
+		err      error
+		complete bool
+	}{
+		{name: "IdleCancel", err: context.Canceled, complete: true},
+		{name: "ConnectionCut", err: error_codes.NewTransferError(io.ErrUnexpectedEOF), complete: true},
+		{name: "TrailerFailure", err: trailerErr},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			env := newTornBlockEnv(t, tornObjectBlocks*BlockDataSize-17)
+			dw := &decisionWriter{decided: true, diskMode: true, blockWriter: fillAllButLast(t, env, nil)}
+			require.NoError(t, dw.CloseWithError(tc.err))
+			meta, err := env.storage.GetMetadata(env.hash)
+			require.NoError(t, err)
+			assert.Equal(t, tc.complete, !meta.Completed.IsZero())
+		})
+	}
 }

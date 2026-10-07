@@ -660,14 +660,12 @@ func (bf *BlockFetcherV2) awaitTransfer(
 	// Only a transfer that finished cleanly may close the writer; on any
 	// other way out the body stopped somewhere arbitrary, possibly
 	// mid-block, and the writer must discard what it has not completed.
-	succeeded := false
+	// (The transfer engine usually ends the writer first, with the same
+	// error; see blockWriter.CloseWithError.)  Every way out of the loop
+	// below other than a clean result sets op.err.
 	defer func() {
-		if succeeded {
-			if err := writer.Close(); err != nil {
-				log.Warnf("Failed to finish writing blocks of %s: %v", bf.instanceHash, err)
-			}
-		} else {
-			writer.Abort()
+		if err := endWrite(writer, op.err); err != nil {
+			log.Warnf("Failed to finish writing blocks of %s: %v", bf.instanceHash, err)
 		}
 	}()
 
@@ -678,14 +676,16 @@ func (bf *BlockFetcherV2) awaitTransfer(
 		select {
 		case result, ok := <-results:
 			if !ok {
-				// Results channel closed
+				// The transfer client closed without reporting this job.
+				// Nothing says the blocks arrived, so it is not a success.
+				op.err = errAdoptedTransferUnreported
+				bf.notifyAllChunks(op)
 				return
 			}
 			if result.ID() == jobID {
 				if result.Error != nil {
 					op.err = result.Error
 				} else {
-					succeeded = true
 					if onDone != nil {
 						onDone()
 					}
@@ -700,7 +700,7 @@ func (bf *BlockFetcherV2) awaitTransfer(
 			if prefetchMode && bf.idle() {
 				log.Debugf("Prefetch timeout for %s — idle for %v, cancelling", bf.instanceHash, bf.idleSince())
 				op.cancelFn()
-				op.err = errors.New("prefetch cancelled due to idle timeout")
+				op.err = errPrefetchIdle
 				bf.notifyAllChunks(op)
 				return
 			}
@@ -816,11 +816,10 @@ func (bf *BlockFetcherV2) AdoptTransfer(
 			// *BlockWriter → fires onComplete if all blocks are
 			// downloaded.  A transfer that failed, timed out or was
 			// cancelled stopped at an arbitrary byte, so its writer is
-			// aborted instead: see BlockWriter.Abort.
-			if aborter, ok := adapter.(interface{ Abort() }); ok && op.err != nil {
-				aborter.Abort()
-			} else {
-				adapter.Close()
+			// stopped early or aborted instead, according to why: see
+			// endWrite.
+			if err := endWrite(adapter, op.err); err != nil {
+				log.Warnf("Failed to finish writing blocks of %s: %v", bf.instanceHash, err)
 			}
 			if onExit != nil {
 				onExit(op.err)
@@ -830,19 +829,14 @@ func (bf *BlockFetcherV2) AdoptTransfer(
 		// finish records the transfer's result, persisting the checksums of
 		// a clean one, and wakes every waiter.
 		finish := func(result *client.TransferResults) {
-			switch {
-			case result == nil:
-				// The transfer client shut down without reporting this
-				// job -- performDownload forwards that as nil.  Nothing
-				// says the body arrived whole, so it is a failure, not a
-				// success: closing the writer would finalize an object
-				// of unknown size wherever its input stopped.
-				op.err = errAdoptedTransferUnreported
-				log.Warnf("Adopted transfer for %s ended without a result", bf.instanceHash)
-			case result.Error != nil:
-				op.err = result.Error
-				log.Warnf("Adopted transfer failed for %s: %v", bf.instanceHash, result.Error)
-			default:
+			// A transfer client that shut down without reporting the job
+			// (a nil result) is a failure, not a success: closing the
+			// writer would finalize an object of unknown size wherever
+			// its input stopped.  See transferResultErr.
+			if err := transferResultErr(result); err != nil {
+				op.err = err
+				log.Warnf("Adopted transfer failed for %s: %v", bf.instanceHash, err)
+			} else {
 				// Persist checksums from the transfer result into the cache
 				// metadata.  We must do this here -- when the result arrives
 				// -- rather than relying on the BlockWriter's onComplete
@@ -868,12 +862,15 @@ func (bf *BlockFetcherV2) AdoptTransfer(
 		// finishStopped records the result of a transfer the fetcher itself
 		// stopped, for the reason given.  The result still decides: a
 		// transfer that finished before the cancel took effect is a success,
-		// and one that failed for a reason of its own -- say its checksum
-		// did not match the body that had all arrived -- reports that
-		// reason.  Only a transfer that reports nothing, or the cancellation
-		// itself, is put down to the stop.
+		// and one that failed for a reason of its own that condemns its data
+		// -- say its checksum did not match the body that had all arrived,
+		// or one endpoint answered 404 before the cancel reached the next --
+		// reports that reason, as the transfer engine already did when it
+		// closed the writer.  Only a transfer that reports nothing, or whose
+		// failure says nothing against its data (the cancellation itself), is
+		// put down to the stop.
 		finishStopped := func(result *client.TransferResults, stop error) {
-			if result != nil && (result.Error == nil || !errors.Is(result.Error, context.Canceled)) {
+			if result != nil && (result.Error == nil || !transferStopKeepsData(result.Error)) {
 				finish(result)
 				return
 			}
@@ -923,6 +920,10 @@ var errAdoptedTransferUnreported = errors.New("the transfer ended without report
 // errAdoptedTransferIdle is an adopted transfer's error when it was cancelled
 // because no reader was using the object any more.
 var errAdoptedTransferIdle = errors.New("download cancelled: no reader for the idle timeout")
+
+// errPrefetchIdle is a prefetch's error when it was cancelled because no
+// reader was using the object any more.
+var errPrefetchIdle = errors.New("prefetch cancelled due to idle timeout")
 
 // notifyAllChunks closes all chunk notification channels (for both success and error cases)
 // Using close() is safe - multiple closes are handled, and receivers see the close immediately
@@ -1039,21 +1040,23 @@ func (w *blockWriter) Close() error {
 	return w.inner.Close()
 }
 
-// Abort closes the writer after a failed or cancelled transfer; see
+// Abort closes the writer after a transfer whose data is condemned; see
 // BlockWriter.Abort.
 func (w *blockWriter) Abort() {
 	w.inner.Abort()
+}
+
+// StopEarly closes the writer after a transfer that stopped before the end
+// for a reason that says nothing against its data; see BlockWriter.StopEarly.
+func (w *blockWriter) StopEarly() {
+	w.inner.StopEarly()
 }
 
 // CloseWithError is how the transfer engine closes the writer when a
 // transfer ends -- before BlockFetcherV2 sees the result -- with the
 // transfer's error, or nil on success.
 func (w *blockWriter) CloseWithError(err error) error {
-	if err != nil {
-		w.Abort()
-		return nil
-	}
-	return w.Close()
+	return endWrite(w, err)
 }
 
 // CreateFetchCallback returns a callback function for the RangeReader
