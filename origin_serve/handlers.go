@@ -271,15 +271,21 @@ func ResetHandlers() {
 	globusBackends = nil
 }
 
+// Up to this many tokens are looked at per request. XRootD's SciTokens plugin
+// uses the same limit.
+const maxTokensPerRequest = 10
+
 // extractTokens extracts bearer tokens from the request
 // Tokens can come from:
 //  1. Authorization header (may have multiple comma-separated tokens)
 //  2. Query parameter "access_token" (standard)
 //  3. Query parameter "authz" (non-standard)
 //
-// A "Bearer" scheme is required in the header and tolerated in either query
-// parameter: an XRootD cache forwards the client's Authorization header to the
-// origin as "?authz=Bearer%20<jwt>" (see token.CutBearerPrefix).
+// Each source may hold several tokens separated by commas. In the header every
+// token must carry the "Bearer" scheme. In the query parameters the scheme is
+// optional: an XRootD cache forwards the client's Authorization header as
+// "?authz=Bearer%20<jwt>", commas included, so a comma-joined header arrives
+// as one query value (see token.CutBearerPrefix).
 func extractTokens(r *http.Request) []string {
 	tokens := make([]string, 0)
 
@@ -294,7 +300,7 @@ func extractTokens(r *http.Request) []string {
 		}
 	}
 
-	// Check query parameters (may be multi-valued)
+	// Check query parameters; each may repeat, and each value may be comma-joined
 	query := r.URL.Query()
 	for _, key := range []string{"access_token", "authz"} {
 		for _, val := range query[key] {
@@ -305,6 +311,11 @@ func extractTokens(r *http.Request) []string {
 				}
 			}
 		}
+	}
+
+	if len(tokens) > maxTokensPerRequest {
+		log.Warningf("Request for %s carried %d tokens, more than the %d allowed; treating it as having none", r.URL.Path, len(tokens), maxTokensPerRequest)
+		return []string{}
 	}
 
 	return tokens
