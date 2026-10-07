@@ -177,12 +177,21 @@ func newTestFetchOp(totalBytes int64) *fetchOperation {
 // through a transfer that fails, and one whose context is cancelled,
 // part-way through a block.
 func TestOriginFetchFailureLeavesNoTornBlock(t *testing.T) {
+	reset := error_codes.NewContact_ConnectionResetError(&client.NetworkResetError{})
+	condemning := errors.New("download error after server response started: 500: upstream verification failed")
 	for _, tc := range []struct {
 		name   string
+		err    error
 		cancel bool
+		want   []uint32
 	}{
-		{name: "TransferError"},
-		{name: "ContextCancelled", cancel: true},
+		// A benign stop keeps the whole blocks and drops the torn one.
+		{name: "ConnectionReset", err: reset, want: []uint32{0, 1, 2}},
+		{name: "ContextCancelled", err: context.Canceled, cancel: true, want: []uint32{0, 1, 2}},
+		// A condemning failure publishes nothing more: the blocks still
+		// waiting to be written are discarded, not marked present for a
+		// reader to serve before the object is dropped.
+		{name: "CondemningError", err: condemning, want: []uint32{}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			env := newTornBlockEnv(t, tornObjectBlocks*BlockDataSize-17)
@@ -214,23 +223,19 @@ func TestOriginFetchFailureLeavesNoTornBlock(t *testing.T) {
 			// BlockFetcherV2 sees the result.
 			var closer io.Closer = writer
 			if cwe, ok := closer.(interface{ CloseWithError(error) error }); ok {
-				transferErr := errors.New("connection reset by peer")
-				if tc.cancel {
-					transferErr = context.Canceled
-				}
-				require.NoError(t, cwe.CloseWithError(transferErr))
+				require.NoError(t, cwe.CloseWithError(tc.err))
 			} else {
 				require.NoError(t, writer.Close())
 			}
 			if tc.cancel {
 				cancel()
 			} else {
-				results <- client.TransferResults{JobId: jobID, Error: errors.New("connection reset by peer")}
+				results <- client.TransferResults{JobId: jobID, Error: tc.err}
 			}
 			bf.awaitTransfer(ctx, op, results, jobID.String(), writer, false, nil)
 			require.Error(t, op.err)
 
-			assert.Equal(t, []uint32{0, 1, 2}, env.presentBlocks(t), "the torn fourth block must not be marked present")
+			assert.Equal(t, tc.want, env.presentBlocks(t), "the torn fourth block must not be marked present")
 			env.checkWholeBlocks(t)
 		})
 	}
@@ -256,7 +261,7 @@ func TestNoStoreStreamSeesTransferFailure(t *testing.T) {
 // range from a replaced object (the transfer engine's half, refusing the
 // response before writing it, is tested in the client): a fetch that failed
 // because the origin now serves another version drops the cached instance,
-// which can no longer be completed, and any other failure leaves it alone.
+// which can no longer be completed, and a benign failure leaves it alone.
 func TestOriginFetchDropsAnotherVersion(t *testing.T) {
 	env := newTornBlockEnv(t, tornObjectBlocks*BlockDataSize-17)
 	meta, err := env.storage.GetMetadata(env.hash)
@@ -264,18 +269,51 @@ func TestOriginFetchDropsAnotherVersion(t *testing.T) {
 	bf := &BlockFetcherV2{storage: env.storage, instanceHash: env.hash, meta: meta,
 		activeFetches: make(map[fetchKey]*fetchOperation)}
 
-	bf.dropIfVersionChanged(errors.New("connection reset by peer"))
+	bf.dropIfCondemned(error_codes.NewContact_ConnectionResetError(&client.NetworkResetError{}), true)
 	kept, err := env.storage.GetMetadata(env.hash)
 	require.NoError(t, err)
-	require.NotNil(t, kept, "an ordinary failure keeps the instance")
+	require.NotNil(t, kept, "a benign failure keeps the instance")
 
 	// Wrapped the way the transfer engine reports an attempt's error.
 	changed := fmt.Errorf("transfer failed: %w",
 		errors.Wrap(client.ErrObjectVersionChanged, `origin sent entity tag "v2"; expected "v1"`))
-	bf.dropIfVersionChanged(changed)
+	bf.dropIfCondemned(changed, false)
 	gone, err := env.storage.GetMetadata(env.hash)
 	require.NoError(t, err)
 	assert.Nil(t, gone, "an instance the origin no longer serves is dropped")
+}
+
+// TestOriginFetchDropsWhatAFailureCondemns checks that a range fetch or
+// background fill that wrote part of a body and then failed in a way that
+// condemns it -- here, a failure reported in the X-Transfer-Status trailer --
+// drops the instance, rather than leave its blocks marked present for a later
+// read to complete the object from, and that the object's readers are told.
+// A fetch that failed before writing anything condemns nothing.
+func TestOriginFetchDropsWhatAFailureCondemns(t *testing.T) {
+	env := newTornBlockEnv(t, tornObjectBlocks*BlockDataSize-17)
+	meta, err := env.storage.GetMetadata(env.hash)
+	require.NoError(t, err)
+	state, err := env.storage.GetSharedBlockState(env.hash)
+	require.NoError(t, err)
+	bf := &BlockFetcherV2{storage: env.storage, instanceHash: env.hash, meta: meta, blockState: state,
+		activeFetches: make(map[fetchKey]*fetchOperation)}
+	trailer := error_codes.NewTransferError(errors.New("download error after server response started: 500: upstream verification failed"))
+
+	bf.dropIfCondemned(trailer, false)
+	kept, err := env.storage.GetMetadata(env.hash)
+	require.NoError(t, err)
+	require.NotNil(t, kept, "a fetch that wrote nothing condemns nothing")
+
+	rr, err := NewRangeReader(env.storage, env.hash, 0, -1, nil)
+	require.NoError(t, err)
+	defer rr.Close()
+	bf.dropIfCondemned(trailer, true)
+	gone, err := env.storage.GetMetadata(env.hash)
+	require.NoError(t, err)
+	assert.Nil(t, gone, "the blocks a condemned fetch wrote must not be kept")
+	assert.Error(t, rr.WaitForCompletion(context.Background()), "a reader of the dropped copy must be told")
+	_, err = rr.Read(make([]byte, 10))
+	assert.Error(t, err)
 }
 
 // fillAllButLast writes every block but the object's (short) last one into
@@ -344,4 +382,28 @@ func TestTransferEndDecidesHowTheWriteEnds(t *testing.T) {
 			assert.Equal(t, tc.complete, !meta.Completed.IsZero())
 		})
 	}
+}
+
+// TestWriterOfACondemnedObjectMarksNothing checks that once an object has been
+// condemned -- another writer found its data bad, and it is being dropped --
+// a writer still running, such as a fill of another gap, marks none of its
+// blocks present: those rows would outlive the delete, and be taken for
+// blocks of the object when it is next fetched under the same hash.
+func TestWriterOfACondemnedObjectMarksNothing(t *testing.T) {
+	env := newTornBlockEnv(t, tornObjectBlocks*BlockDataSize-17)
+	state, err := env.storage.GetSharedBlockState(env.hash)
+	require.NoError(t, err)
+	bw, err := env.storage.NewBlockWriter(env.hash, 0, nil, nil)
+	require.NoError(t, err)
+	_, err = bw.Write(env.data[:2*BlockDataSize])
+	require.NoError(t, err)
+
+	state.condemn(errors.New("another fill's data failed verification"))
+	_, err = bw.Write(env.data[2*BlockDataSize:])
+	require.NoError(t, err)
+	require.NoError(t, bw.Close())
+	assert.Empty(t, env.presentBlocks(t), "nothing of a condemned object may be marked present")
+	meta, err := env.storage.GetMetadata(env.hash)
+	require.NoError(t, err)
+	assert.True(t, meta.Completed.IsZero(), "nor may it be completed")
 }
