@@ -30,7 +30,7 @@ var (
 		Use:    "serve",
 		Hidden: true,
 		Short:  "Starts pelican with a list of enabled modules",
-		Long: `Starts pelican with a list of enabled modules [registry, director, cache, origin] to enable better
+		Long: `Starts pelican with a list of enabled modules [registry, director, cache, origin, localcache, broker, transfer] to enable better
 		 end-to-end and integration testing.
 
 		 If the director or namespace registry are enabled, then ensure there is a corresponding url in the
