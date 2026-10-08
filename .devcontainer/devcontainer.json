@@ -4,6 +4,7 @@
 	"name": "Pelican",
 	"image": "hub.opensciencegrid.org/pelican_platform/pelican-dev:latest-itb",
 	"workspaceFolder": "/workspaces/${localWorkspaceFolderBasename}",
+	"runArgs": [ "--hostname", "pelican-dev" ],
 	"forwardPorts": [
 		8444,
 		8443,
