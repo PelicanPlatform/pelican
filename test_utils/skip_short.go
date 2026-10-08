@@ -22,13 +22,13 @@ import "testing"
 
 // SkipIfShort skips the calling test when "go test -short" is in effect.
 //
-// Reserve this for tests that take tens of seconds on their own or that need
-// resources (sshd, minio, condor, multi-gigabyte uploads, child pelican
-// processes), so that a -short run covers the quick tier only. Call it as the
-// first statement of the test, before any setup starts.
+// Reserve this for tests that measurement shows are not worth their time on
+// every run, or that need something esoteric (HTCondor, rclone, minio, root).
+// AGENTS.md describes the criteria. Call it as the first statement of the
+// test, before any setup starts.
 func SkipIfShort(t testing.TB, reason string) {
 	t.Helper()
 	if testing.Short() {
-		t.Skipf("skipped under -short (runs nightly): %s", reason)
+		t.Skipf("skipped under -short: %s", reason)
 	}
 }
