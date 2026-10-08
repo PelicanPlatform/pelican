@@ -8,6 +8,4 @@ The `github_scripts` directory contains a similar set of CI tests, but it's easi
 
 ## Keeping the package fast
 
-Starting a federation (`fed_test_utils.NewFedTest`) launches five services plus XRootD and takes several seconds, which is far longer than most of the cases that use it.
-When several cases need the same origin configuration, put them in one parent test that starts the federation once and runs them as `t.Run` subtests with distinct object names, as `TestConditionalRequests` and `TestConcurrentRangeReads` do.
-Cases that need their own configuration, that depend on an empty cache, or that take tens of seconds stay as top-level tests; mark one with `test_utils.SkipIfShort` only when it meets the criteria in AGENTS.md.
+Starting a federation (`fed_test_utils.NewFedTest`) launches five services plus XRootD and takes several seconds, which is far longer than most of the cases that use it. When several cases need the same origin configuration, put them in one parent test that starts the federation once and runs them as `t.Run` subtests with distinct object names, as `TestConditionalRequests` and `TestConcurrentRangeReads` do. Cases that need their own configuration, that depend on an empty cache, or that take tens of seconds stay as top-level tests; mark one with `test_utils.SkipIfShort` only when it meets the criteria in AGENTS.md.
