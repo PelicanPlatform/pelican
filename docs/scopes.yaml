@@ -287,11 +287,18 @@ acceptedBy: ["cache"]
 ############################
 #    Collection Scopes     #
 ############################
+# Collection scopes carry a path suffix, like storage.* and share.access:
+# "collection.read:/" is the blanket capability and "collection.modify:/<id>"
+# names one collection (the ID is the collection's slug). The embedded
+# issuer mints collection.read:/ to every authenticated user,
+# collection.create:/ only to collection admins, and the per-collection
+# forms from the caller's ACL rows. The collections API treats these
+# scopes as authentication only; authorization is decided by the
+# collection's owner / admin-group / ACL rows in the database.
 name: "collection.create"
 description: >-
   For creating a new collection. Minted only to holders of
-  server.collection_admin (or server.admin); the API re-checks that
-  role on every create.
+  server.collection_admin (or server.admin).
 issuedBy: ["origin"]
 acceptedBy: ["origin", "director"]
 ---

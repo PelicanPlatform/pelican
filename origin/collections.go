@@ -122,9 +122,8 @@ func requireCaller(ctx *gin.Context) (user, userId string, groups []string, ok b
 
 // verifyTokenWithCollectionScope verifies a token with standard verification first,
 // and falls back to manual collection scope verification if standard verification fails.
-// The fallback exists because the embedded issuer mints collection scopes with a
-// suffix ("collection.read:/", "collection.read:<id>"), which the exact-match
-// validator behind token.Verify does not recognise.
+// The fallback handles the path-form scopes the issuer mints ("collection.read:/",
+// "collection.modify:/<id>"), which the exact-match validator does not recognise.
 // For read operations on public collections, it also provides a fallback that doesn't require explicit scopes.
 //
 // Note: This accepts tokens with EITHER web_ui.access OR the specific collection scope.
@@ -159,9 +158,10 @@ func verifyTokenWithCollectionScope(ctx *gin.Context, expectedScope token_scopes
 	return status, false, err
 }
 
-// verifyCollectionScope manually verifies a token has a collection scope, handling scopes with collection IDs.
-// This is used as a fallback when standard token.Verify fails due to OA4MP adding collection IDs to scopes.
-// For read operations, it also checks if the collection is public as a final fallback.
+// verifyCollectionScope manually verifies a token has a collection scope in path
+// form ("collection.read:/" or "collection.read:/<id>"); an ID-bearing scope must
+// name collectionID when one is given. For read operations, it also checks if the
+// collection is public as a final fallback.
 func verifyCollectionScope(ctx *gin.Context, expectedScope token_scopes.TokenScope, collectionID string) bool {
 	// Extract token from Authorization header
 	headerToken := ctx.Request.Header["Authorization"]
@@ -238,7 +238,7 @@ func verifyCollectionScope(ctx *gin.Context, expectedScope token_scopes.TokenSco
 		}
 		log.Debugf("verifyCollectionScope: Checking scope '%s' against expected '%s'", scope, expectedScope.String())
 		// Use CheckCollectionScope helper which handles collection IDs
-		if token_scopes.CheckCollectionScope(scope, expectedScope) {
+		if token_scopes.CheckCollectionScope(scope, expectedScope, collectionID) {
 			log.Debugf("verifyCollectionScope: Scope match found! scope='%s', expected='%s'", scope, expectedScope.String())
 			// Extract user identity from the token (subject claim)
 			user := parsed.Subject()

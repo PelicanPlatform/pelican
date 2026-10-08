@@ -466,22 +466,22 @@ func GetUserCollectionScopes(db *gorm.DB, user, userID string, groupsList []stri
 	}
 
 	for collectionID, perm := range collectionPerms {
-		// Management-plane: collection.* scopes are keyed by collection
-		// ID. These are NOT clamped by share semantics — a share
-		// recipient with read ACL on a share gets to read the share's
-		// metadata, regardless of what the share owner can do on the
-		// parent. (Modify / Delete are still rare since the share's
-		// own ACL almost never grants those.)
+		// Management-plane scopes are keyed by collection ID in path form
+		// ("collection.modify:/<id>") so the client filter's blanket
+		// "collection.modify:/" covers them. Not clamped by share
+		// semantics: a share recipient may read the share's metadata
+		// regardless of the owner's access to the parent.
+		idPath := ":/" + collectionID
 		switch perm.role {
 		case database.AclRoleOwner:
-			scopes = append(scopes, token_scopes.Collection_Read.String()+":"+collectionID)
-			scopes = append(scopes, token_scopes.Collection_Modify.String()+":"+collectionID)
-			scopes = append(scopes, token_scopes.Collection_Delete.String()+":"+collectionID)
+			scopes = append(scopes, token_scopes.Collection_Read.String()+idPath)
+			scopes = append(scopes, token_scopes.Collection_Modify.String()+idPath)
+			scopes = append(scopes, token_scopes.Collection_Delete.String()+idPath)
 		case database.AclRoleWrite:
-			scopes = append(scopes, token_scopes.Collection_Read.String()+":"+collectionID)
-			scopes = append(scopes, token_scopes.Collection_Modify.String()+":"+collectionID)
+			scopes = append(scopes, token_scopes.Collection_Read.String()+idPath)
+			scopes = append(scopes, token_scopes.Collection_Modify.String()+idPath)
 		case database.AclRoleRead:
-			scopes = append(scopes, token_scopes.Collection_Read.String()+":"+collectionID)
+			scopes = append(scopes, token_scopes.Collection_Read.String()+idPath)
 		}
 
 		// Data-plane: storage.* scopes keyed by the collection's namespace.

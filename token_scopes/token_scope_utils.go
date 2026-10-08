@@ -162,29 +162,29 @@ func ScopeContains(tokenScopes []string, expectedScopes []TokenScope, all bool) 
 	}
 }
 
-// CheckCollectionScope verifies if a token scope string matches a collection scope.
-// It handles both exact matches ("collection.read") and scopes with collection IDs
-// ("collection.read:test_collection") for collection scopes only.
-func CheckCollectionScope(tokenScopeStr string, expectedScope TokenScope) bool {
-	expectedScopeStr := expectedScope.String()
-	tokenScopeLower := strings.ToLower(tokenScopeStr)
-	expectedScopeLower := strings.ToLower(expectedScopeStr)
-
-	// Exact match (case-insensitive)
-	if tokenScopeLower == expectedScopeLower {
+// CheckCollectionScope reports whether one token scope string satisfies
+// expectedScope, a collection.* scope. Accepted forms are the bare scope,
+// "collection.read:/" (the blanket capability), and "collection.read:/<id>",
+// which must name collectionID when one is given. The action is compared
+// case-insensitively, the ID exactly; a suffix without a leading slash is
+// rejected. This is authentication only: authorization is the database's.
+func CheckCollectionScope(tokenScopeStr string, expectedScope TokenScope, collectionID string) bool {
+	expected := expectedScope.String()
+	if !strings.HasPrefix(strings.ToLower(expected), "collection.") {
+		return false
+	}
+	action, resource, hasResource := strings.Cut(tokenScopeStr, ":")
+	if !strings.EqualFold(action, expected) {
+		return false
+	}
+	if !hasResource || resource == "/" {
 		return true
 	}
-
-	// For collection scopes, check if token scope starts with expected scope + ":"
-	// This handles cases like "collection.read:test_collection" matching "collection.read"
-	if strings.HasPrefix(tokenScopeLower, expectedScopeLower+":") {
-		// Verify it's actually a collection scope (starts with "collection.")
-		if strings.HasPrefix(expectedScopeLower, "collection.") {
-			return true
-		}
+	id, ok := strings.CutPrefix(resource, "/")
+	if !ok || id == "" {
+		return false
 	}
-
-	return false
+	return collectionID == "" || id == collectionID
 }
 
 // Creates a validator that checks if a token's scope matches the expectedScopes.

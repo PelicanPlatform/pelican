@@ -148,9 +148,9 @@ func TestGetUserCollectionScopes_StorageScopeBridge(t *testing.T) {
 			"read ACL must NOT grant storage.create")
 
 		// Management-plane scope is still emitted, keyed by collection ID.
-		assert.Contains(t, scopes, "collection.read:col-read",
+		assert.Contains(t, scopes, "collection.read:/col-read",
 			"read ACL should still grant management-plane collection.read")
-		assert.NotContains(t, scopes, "collection.modify:col-read",
+		assert.NotContains(t, scopes, "collection.modify:/col-read",
 			"read ACL must NOT grant collection.modify")
 
 		assert.Contains(t, matched, "physics", "ACL'd group should be in matchedGroups")
@@ -168,8 +168,8 @@ func TestGetUserCollectionScopes_StorageScopeBridge(t *testing.T) {
 		assert.Contains(t, scopes, "storage.modify:/data/shared")
 		assert.Contains(t, scopes, "storage.create:/data/shared")
 
-		assert.Contains(t, scopes, "collection.read:col-write")
-		assert.Contains(t, scopes, "collection.modify:col-write")
+		assert.Contains(t, scopes, "collection.read:/col-write")
+		assert.Contains(t, scopes, "collection.modify:/col-write")
 	})
 
 	t.Run("owner-acl-emits-full-rwx", func(t *testing.T) {
@@ -188,7 +188,7 @@ func TestGetUserCollectionScopes_StorageScopeBridge(t *testing.T) {
 		assert.Contains(t, scopes, "storage.read:/data/legacy")
 		assert.Contains(t, scopes, "storage.modify:/data/legacy")
 		assert.Contains(t, scopes, "storage.create:/data/legacy")
-		assert.Contains(t, scopes, "collection.delete:col-owner",
+		assert.Contains(t, scopes, "collection.delete:/col-owner",
 			"legacy owner ACL still mints management-plane delete")
 	})
 
@@ -209,7 +209,7 @@ func TestGetUserCollectionScopes_StorageScopeBridge(t *testing.T) {
 		// TestGetUserCollectionScopes_CreateCapabilityIsAdminOnly.)
 		assert.NotContains(t, scopes, "storage.read:/data/private",
 			"non-member must NOT get storage.read on someone else's collection")
-		assert.NotContains(t, scopes, "collection.read:col-read",
+		assert.NotContains(t, scopes, "collection.read:/col-read",
 			"non-member must NOT get collection.read on the specific collection")
 		assert.NotContains(t, matched, "physics",
 			"the unrelated ACL group must not appear in matchedGroups")
@@ -308,7 +308,7 @@ func TestGetUserCollectionScopes_StorageScopeBridge(t *testing.T) {
 		require.NoError(t, err)
 		assert.NotContains(t, scopes, "storage.read:/other/place")
 		assert.NotContains(t, scopes, "storage.modify:/other/place")
-		assert.Contains(t, scopes, "collection.modify:col-outside",
+		assert.Contains(t, scopes, "collection.modify:/col-outside",
 			"out-of-scope collection still gets management-plane scopes")
 	})
 
