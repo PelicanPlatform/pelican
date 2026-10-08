@@ -66,6 +66,9 @@ func makeEvictToken(t *testing.T) string {
 // TestPrestageAndEvict runs each case below against one shared federation. Starting a
 // federation (five services plus XRootD) dominates the run time of these
 // cases, so they share one and keep their object names distinct instead.
+// The cases that talk to the federation's own cache over its socket share
+// that cache's state, so each of them works on its own object rather than
+// the default hello_world.txt.
 func TestPrestageAndEvict(t *testing.T) {
 	t.Cleanup(test_utils.SetupTestLogging(t))
 	server_utils.ResetTestState()
@@ -82,6 +85,7 @@ func TestPrestageAndEvict(t *testing.T) {
 		}
 		httpClient := &http.Client{Transport: transport}
 		socketPath := param.LocalCache_Socket.GetString()
+		require.NoError(t, os.WriteFile(filepath.Join(ft.Exports[0].StoragePrefix, "prestage_api.txt"), []byte("Hello, World!"), 0644))
 
 		t.Run("missing-path-returns-400", func(t *testing.T) {
 			req, err := http.NewRequest("GET", "http://localhost/pelican/api/v1.0/prestage", nil)
@@ -105,7 +109,7 @@ func TestPrestageAndEvict(t *testing.T) {
 		})
 
 		t.Run("prestage-success", func(t *testing.T) {
-			u := "http://localhost/pelican/api/v1.0/prestage?path=/test/hello_world.txt"
+			u := "http://localhost/pelican/api/v1.0/prestage?path=/test/prestage_api.txt"
 			req, err := http.NewRequest("GET", u, nil)
 			require.NoError(t, err)
 			resp, err := httpClient.Do(req)
@@ -123,7 +127,7 @@ func TestPrestageAndEvict(t *testing.T) {
 		t.Run("prestage-already-cached", func(t *testing.T) {
 			// The file was prestaged in the previous subtest; doing it again
 			// should still succeed (fast path, already cached).
-			u := "http://localhost/pelican/api/v1.0/prestage?path=/test/hello_world.txt"
+			u := "http://localhost/pelican/api/v1.0/prestage?path=/test/prestage_api.txt"
 			req, err := http.NewRequest("GET", u, nil)
 			require.NoError(t, err)
 			resp, err := httpClient.Do(req)
@@ -204,6 +208,7 @@ func TestPrestageAndEvict(t *testing.T) {
 		}
 		httpClient := &http.Client{Transport: transport}
 		socketPath := param.LocalCache_Socket.GetString()
+		require.NoError(t, os.WriteFile(filepath.Join(ft.Exports[0].StoragePrefix, "evict_api.txt"), []byte("Hello, World!"), 0644))
 		evictTok := makeEvictToken(t)
 
 		t.Run("missing-path-returns-400", func(t *testing.T) {
@@ -233,7 +238,7 @@ func TestPrestageAndEvict(t *testing.T) {
 
 		t.Run("evict-after-download", func(t *testing.T) {
 			// First, cache the object via the socket (prestage).
-			prestageURL := "http://localhost/pelican/api/v1.0/prestage?path=/test/hello_world.txt"
+			prestageURL := "http://localhost/pelican/api/v1.0/prestage?path=/test/evict_api.txt"
 			req, err := http.NewRequest("GET", prestageURL, nil)
 			require.NoError(t, err)
 			resp, err := httpClient.Do(req)
@@ -244,12 +249,12 @@ func TestPrestageAndEvict(t *testing.T) {
 			assert.Contains(t, string(body), "success: ok")
 
 			// Verify it's cached.
-			exists, checkErr := local_cache.CheckCacheObjectIsCached(ft.Ctx, socketPath, "/test/hello_world.txt")
+			exists, checkErr := local_cache.CheckCacheObjectIsCached(ft.Ctx, socketPath, "/test/evict_api.txt")
 			require.NoError(t, checkErr)
 			require.True(t, exists, "object should be cached after prestage")
 
 			// Evict via API (immediate).
-			u := "http://localhost/pelican/api/v1.0/evict?path=/test/hello_world.txt&immediate=true"
+			u := "http://localhost/pelican/api/v1.0/evict?path=/test/evict_api.txt&immediate=true"
 			req, err = http.NewRequest("POST", u, nil)
 			require.NoError(t, err)
 			req.Header.Set("Authorization", "Bearer "+evictTok)
@@ -261,14 +266,14 @@ func TestPrestageAndEvict(t *testing.T) {
 			assert.Contains(t, string(body), "Evicted 1 objects")
 
 			// Verify the object is no longer cached.
-			exists, checkErr = local_cache.CheckCacheObjectIsCached(ft.Ctx, socketPath, "/test/hello_world.txt")
+			exists, checkErr = local_cache.CheckCacheObjectIsCached(ft.Ctx, socketPath, "/test/evict_api.txt")
 			require.NoError(t, checkErr)
 			assert.False(t, exists, "object should no longer be cached after eviction")
 		})
 
 		t.Run("evict-then-re-prestage", func(t *testing.T) {
 			// After eviction, prestaging the same file should succeed.
-			u := "http://localhost/pelican/api/v1.0/prestage?path=/test/hello_world.txt"
+			u := "http://localhost/pelican/api/v1.0/prestage?path=/test/evict_api.txt"
 			req, err := http.NewRequest("GET", u, nil)
 			require.NoError(t, err)
 			resp, err := httpClient.Do(req)
@@ -279,7 +284,7 @@ func TestPrestageAndEvict(t *testing.T) {
 			assert.Contains(t, string(body), "success: ok")
 
 			// Object should be cached again.
-			exists, checkErr := local_cache.CheckCacheObjectIsCached(ft.Ctx, socketPath, "/test/hello_world.txt")
+			exists, checkErr := local_cache.CheckCacheObjectIsCached(ft.Ctx, socketPath, "/test/evict_api.txt")
 			require.NoError(t, checkErr)
 			assert.True(t, exists, "object should be cached after re-prestage")
 		})
@@ -287,7 +292,7 @@ func TestPrestageAndEvict(t *testing.T) {
 		t.Run("evict-default-marks-purge-first", func(t *testing.T) {
 			// Default eviction (no immediate flag) should mark the object
 			// for priority eviction but leave it in the cache.
-			u := "http://localhost/pelican/api/v1.0/evict?path=/test/hello_world.txt"
+			u := "http://localhost/pelican/api/v1.0/evict?path=/test/evict_api.txt"
 			req, err := http.NewRequest("GET", u, nil)
 			require.NoError(t, err)
 			req.Header.Set("Authorization", "Bearer "+evictTok)
@@ -299,7 +304,7 @@ func TestPrestageAndEvict(t *testing.T) {
 			assert.Contains(t, string(body), "Marked 1 objects for priority eviction")
 
 			// The object should still be in the cache (not immediately deleted).
-			exists, checkErr := local_cache.CheckCacheObjectIsCached(ft.Ctx, socketPath, "/test/hello_world.txt")
+			exists, checkErr := local_cache.CheckCacheObjectIsCached(ft.Ctx, socketPath, "/test/evict_api.txt")
 			require.NoError(t, checkErr)
 			assert.True(t, exists, "object should still be cached after purge-first marking")
 		})
