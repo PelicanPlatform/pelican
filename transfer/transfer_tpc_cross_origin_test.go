@@ -458,7 +458,6 @@ func cliCredentialAdd(t testing.TB, cliPath, serverURL, transferTokenFile, name,
 // TestTransferTPCCrossOriginE2E runs the cross-origin third-party-copy end to end
 // against Pelican's Go-native (posixv2) origin backend.
 func TestTransferTPCCrossOriginE2E(t *testing.T) {
-	test_utils.SkipIfShort(t, "launches a second origin as a child process")
 	runCrossOriginTPCE2E(t, "posixv2")
 }
 
@@ -467,7 +466,6 @@ func TestTransferTPCCrossOriginE2E(t *testing.T) {
 // and this path is otherwise exercised only by the (CI-skipped) benchmark. It is
 // skipped where the xrootd server binary is unavailable (e.g. dev laptops).
 func TestTransferTPCCrossOriginE2EXRootD(t *testing.T) {
-	test_utils.SkipIfShort(t, "launches a second origin as a child process")
 	if _, err := exec.LookPath("xrootd"); err != nil {
 		t.Skip("xrootd binary not found; skipping the XRootD-backend cross-origin TPC test")
 	}
