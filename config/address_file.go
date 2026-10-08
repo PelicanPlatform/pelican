@@ -30,6 +30,7 @@ import (
 
 	"github.com/pelicanplatform/pelican/param"
 	"github.com/pelicanplatform/pelican/server_structs"
+	"github.com/pelicanplatform/pelican/utils"
 )
 
 // getServerRuntimeDir returns the runtime directory for server-wide runtime files using
@@ -71,7 +72,6 @@ func WriteAddressFile(modules server_structs.ServerType) error {
 	}
 
 	addressFilePath := filepath.Join(runtimeDir, "pelican.addresses")
-	tempFilePath := addressFilePath + ".tmp"
 
 	// Build the content
 	var content string
@@ -105,16 +105,8 @@ func WriteAddressFile(modules server_structs.ServerType) error {
 		}
 	}
 
-	// Write to temporary file first
-	if err := os.WriteFile(tempFilePath, []byte(content), 0600); err != nil {
-		return errors.Wrap(err, "failed to write temporary address file")
-	}
-
-	// Atomically rename the temporary file to the final location
-	if err := os.Rename(tempFilePath, addressFilePath); err != nil {
-		// Clean up the temp file if rename fails
-		os.Remove(tempFilePath)
-		return errors.Wrap(err, "failed to rename address file")
+	if err := utils.WriteFileAtomic(addressFilePath, []byte(content), 0600); err != nil {
+		return errors.Wrap(err, "failed to write address file")
 	}
 
 	log.Infof("Address file written to %s", addressFilePath)

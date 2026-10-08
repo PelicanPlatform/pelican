@@ -39,6 +39,7 @@ import (
 
 	"github.com/pelicanplatform/pelican/param"
 	"github.com/pelicanplatform/pelican/server_structs"
+	"github.com/pelicanplatform/pelican/utils"
 )
 
 type (
@@ -87,59 +88,43 @@ func downloadDB(localFile string) error {
 	licenseKey = strings.TrimSpace(string(contents))
 
 	url := fmt.Sprintf(maxMindURL, licenseKey)
-	localDir := filepath.Dir(localFile)
-	fileHandle, err := os.CreateTemp(localDir, filepath.Base(localFile)+".tmp")
-	if err != nil {
-		return err
-	}
-	defer fileHandle.Close()
 	resp, err := http.Get(url)
 	if err != nil {
-		os.Remove(fileHandle.Name())
 		return err
 	}
 	defer resp.Body.Close()
 
-	gz, err := gzip.NewReader(resp.Body)
-	if err != nil {
-		return err
-	}
-	tr := tar.NewReader(gz)
-	foundDB := false
-	for {
-		hdr, err := tr.Next()
-		if err == io.EOF {
-			break
-		} else if err != nil {
-			return err
-		}
-		baseName := path.Base(hdr.Name)
-		if baseName != "GeoLite2-City.mmdb" {
-			continue
-		}
-		// Limit extraction to 512 MB to prevent a malicious or corrupted
-		// archive from exhausting disk space.
-		const maxDBSize = 512 * 1024 * 1024
-		limitedReader := io.LimitReader(tr, maxDBSize+1)
-		n, err := io.Copy(fileHandle, limitedReader)
+	// Extract the database into place atomically: the director may be
+	// reading the previous copy, and a failed download must not replace it.
+	return utils.WriteFileAtomicFrom(localFile, 0600, func(w io.Writer) error {
+		gz, err := gzip.NewReader(resp.Body)
 		if err != nil {
-			os.Remove(fileHandle.Name())
 			return err
 		}
-		if n > maxDBSize {
-			os.Remove(fileHandle.Name())
-			return errors.New("GeoIP database file exceeds maximum allowed size (512 MB)")
+		tr := tar.NewReader(gz)
+		for {
+			hdr, err := tr.Next()
+			if err == io.EOF {
+				return errors.New("GeoIP database not found in downloaded resource")
+			} else if err != nil {
+				return err
+			}
+			if path.Base(hdr.Name) != "GeoLite2-City.mmdb" {
+				continue
+			}
+			// Limit extraction to 512 MB to prevent a malicious or corrupted
+			// archive from exhausting disk space.
+			const maxDBSize = 512 * 1024 * 1024
+			n, err := io.Copy(w, io.LimitReader(tr, maxDBSize+1))
+			if err != nil {
+				return err
+			}
+			if n > maxDBSize {
+				return errors.New("GeoIP database file exceeds maximum allowed size (512 MB)")
+			}
+			return nil
 		}
-		foundDB = true
-		break
-	}
-	if !foundDB {
-		return errors.New("GeoIP database not found in downloaded resource")
-	}
-	if err = os.Rename(fileHandle.Name(), localFile); err != nil {
-		return err
-	}
-	return nil
+	})
 }
 
 func periodicMaxMindReload(ctx context.Context) {

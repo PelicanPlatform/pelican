@@ -21,10 +21,12 @@
 package fed_tests
 
 import (
+	"context"
 	_ "embed"
 	"fmt"
 	"os"
 	"path/filepath"
+	"sync"
 	"syscall"
 	"testing"
 	"time"
@@ -34,8 +36,10 @@ import (
 
 	"github.com/pelicanplatform/pelican/client"
 	"github.com/pelicanplatform/pelican/fed_test_utils"
+	"github.com/pelicanplatform/pelican/launcher_utils"
 	"github.com/pelicanplatform/pelican/metrics"
 	"github.com/pelicanplatform/pelican/param"
+	"github.com/pelicanplatform/pelican/server_structs"
 	"github.com/pelicanplatform/pelican/server_utils"
 	"github.com/pelicanplatform/pelican/test_utils"
 	"github.com/pelicanplatform/pelican/xrootd"
@@ -52,21 +56,23 @@ func waitForComponentStatus(t *testing.T, component metrics.HealthStatusComponen
 	}, timeout, 100*time.Millisecond, "component %s did not reach status %s", component, desired)
 }
 
-func waitForComponentStatusNotOK(t *testing.T, component metrics.HealthStatusComponent, timeout time.Duration) string {
+// hookRestartAdvertise wraps the advertisement RestartXrootd sends before and
+// after it restarts the daemons, calling onAdvertise with the XRootD component
+// status at the moment of each advertisement (before the real one goes out).
+// A restart only lasts a few hundred milliseconds in a test federation, so
+// sampling the status from outside can miss its transitional states entirely;
+// the hook sees exactly what the director is told. ResetTestState restores
+// the default advertisement function.
+func hookRestartAdvertise(t *testing.T, onAdvertise func(status string)) {
 	t.Helper()
-	var observedStatus string
-	require.Eventually(t, func() bool {
-		status, err := metrics.GetComponentStatus(component)
+	xrootd.SetRestartAdvertiseFn(func(ctx context.Context, servers []server_structs.XRootDServer) error {
+		status, err := metrics.GetComponentStatus(metrics.OriginCache_XRootD)
 		if err != nil {
-			return false
+			status = err.Error()
 		}
-		if status != metrics.StatusOK.String() {
-			observedStatus = status
-			return true
-		}
-		return false
-	}, timeout, 50*time.Millisecond, "component %s never left OK state", component)
-	return observedStatus
+		onAdvertise(status)
+		return launcher_utils.Advertise(ctx, servers)
+	})
 }
 
 // TestXRootDRestart tests that XRootD can be restarted and continues to function
@@ -116,23 +122,15 @@ func TestXRootDRestart(t *testing.T) {
 
 	waitForComponentStatus(t, metrics.OriginCache_XRootD, metrics.StatusOK, 10*time.Second)
 
-	restartDone := make(chan struct{})
-	var newPids []int
-	var restartErr error
+	// The director must be told the server is shutting down before the
+	// daemons go away, and that it is healthy again once they are back.
+	var advertisedStatuses []string
+	hookRestartAdvertise(t, func(status string) { advertisedStatuses = append(advertisedStatuses, status) })
 
-	go func() {
-		newPids, restartErr = xrootd.RestartXrootd(ft.Ctx, ft.Ctx, oldPids)
-		close(restartDone)
-	}()
-
-	// Wait for the component to leave OK state, indicating restart has begun.
-	// Capture the observed status to verify it's an expected transitional state.
-	observedStatus := waitForComponentStatusNotOK(t, metrics.OriginCache_XRootD, 5*time.Second)
-	assert.True(t, observedStatus == metrics.StatusShuttingDown.String() || observedStatus == metrics.StatusCritical.String(),
-		"Expected ShuttingDown or Critical status during restart, got %s", observedStatus)
-
-	<-restartDone
+	newPids, restartErr := xrootd.RestartXrootd(ft.Ctx, ft.Ctx, oldPids)
 	require.NoError(t, restartErr)
+	assert.Equal(t, []string{metrics.StatusShuttingDown.String(), metrics.StatusOK.String()}, advertisedStatuses,
+		"statuses advertised to the director before and after the restart")
 	require.NotEmpty(t, newPids)
 	require.NotEqual(t, oldPids, newPids, "PIDs should be different after restart")
 
@@ -188,34 +186,33 @@ func TestXRootDRestartConcurrent(t *testing.T) {
 	oldPids := ft.Pids
 	require.NotEmpty(t, oldPids, "No PIDs found for XRootD processes")
 
-	// Try two concurrent restarts
-	done := make(chan error, 2)
+	// Hold the first restart inside its pre-shutdown advertisement, so the
+	// second attempt is made while the first one is certainly in progress.
+	inProgress := make(chan struct{})
+	release := make(chan struct{})
+	var holdOnce sync.Once
+	hookRestartAdvertise(t, func(string) {
+		holdOnce.Do(func() {
+			close(inProgress)
+			<-release
+		})
+	})
 
+	firstDone := make(chan error, 1)
 	go func() {
 		_, err := xrootd.RestartXrootd(ft.Ctx, ft.Ctx, oldPids)
-		done <- err
+		firstDone <- err
 	}()
-
-	// Small delay to let first restart acquire the lock
-	time.Sleep(10 * time.Millisecond)
-
-	go func() {
-		_, err := xrootd.RestartXrootd(ft.Ctx, ft.Ctx, oldPids)
-		done <- err
-	}()
-
-	// Collect results
-	err1 := <-done
-	err2 := <-done
-
-	// One should succeed, one should fail with "already in progress"
-	if err1 == nil {
-		require.Error(t, err2)
-		assert.Contains(t, err2.Error(), "already in progress")
-	} else if err2 == nil {
-		require.Error(t, err1)
-		assert.Contains(t, err1.Error(), "already in progress")
-	} else {
-		t.Fatal("Both restart attempts failed, at least one should have succeeded")
+	select {
+	case <-inProgress:
+	case err := <-firstDone:
+		t.Fatalf("the first restart ended before advertising its shutdown: %v", err)
 	}
+
+	_, err := xrootd.RestartXrootd(ft.Ctx, ft.Ctx, oldPids)
+	close(release)
+	require.Error(t, err, "a restart attempted while another is in progress must be refused")
+	assert.Contains(t, err.Error(), "already in progress")
+
+	require.NoError(t, <-firstDone, "the restart already in progress must complete")
 }

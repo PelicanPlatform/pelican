@@ -234,11 +234,13 @@ func LaunchBrokerListener(ctx context.Context, egrp *errgroup.Group, engine *gin
 
 	registeredPrefix := server_structs.GetCacheNs(metadata.Name)
 
-	// Startup 5 continuous polling routines
-	// For caches, the registered prefix matches the constructed one (hostname only),
-	// so we pass an empty string to use the default behavior.
+	// Startup 5 continuous polling routines.
+	// The broker queues a reversal request under the address the requester
+	// dialed -- for a cache, the host:port of its web URL, as the director's
+	// broker dialer registers it from the cache's ad -- so poll under that
+	// same host:port; a poller using the bare hostname never receives them.
 	for cnt := 0; cnt < 5; cnt += 1 {
-		err = broker.LaunchRequestMonitor(ctx, egrp, server_structs.CacheType, externalWebUrl.Hostname(), registeredPrefix, listenerChan)
+		err = broker.LaunchRequestMonitor(ctx, egrp, server_structs.CacheType, externalWebUrl.Host, registeredPrefix, listenerChan)
 		if err != nil {
 			return
 		}

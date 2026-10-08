@@ -22,6 +22,7 @@ import (
 	"context"
 	"crypto/x509"
 	"encoding/pem"
+	"io"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -56,25 +57,16 @@ func WriteCABundle(filename string) (int, error) {
 		return 0, nil
 	}
 
-	dir := filepath.Dir(filename)
-	base := filepath.Base(filename)
-	file, err := os.CreateTemp(dir, base)
-	if err != nil {
-		return -1, errors.Wrap(err, "Unable to create CA bundle temporary file")
-	}
-	defer file.Close()
-	if err = os.Chmod(file.Name(), 0644); err != nil {
-		return -1, errors.Wrap(err, "Failed to chmod CA bundle temporary file")
-	}
-
-	for _, root := range roots {
-		if err = pem.Encode(file, &pem.Block{Type: "CERTIFICATE", Bytes: root.Raw}); err != nil {
-			return -1, errors.Wrap(err, "Failed to write CA into bundle")
+	err = WriteFileAtomicFrom(filename, 0644, func(w io.Writer) error {
+		for _, root := range roots {
+			if err := pem.Encode(w, &pem.Block{Type: "CERTIFICATE", Bytes: root.Raw}); err != nil {
+				return errors.Wrap(err, "Failed to write CA into bundle")
+			}
 		}
-	}
-
-	if err := os.Rename(file.Name(), filename); err != nil {
-		return -1, errors.Wrapf(err, "Failed to move temporary CA bundle to final location (%v)", filename)
+		return nil
+	})
+	if err != nil {
+		return -1, errors.Wrapf(err, "Unable to write CA bundle to %v", filename)
 	}
 
 	return len(roots), nil

@@ -21,6 +21,7 @@ package launchers
 import (
 	"context"
 	"fmt"
+	"io"
 	"net"
 	"net/http"
 	"net/url"
@@ -368,74 +369,17 @@ func LaunchModules(ctx context.Context, modules server_structs.ServerType) (serv
 	if modules.IsEnabled(server_structs.CacheType) && modules.IsEnabled(server_structs.OriginType) && !param.Cache_EnableSiteLocalMode.GetBool() {
 		// At this point, the `servers` slice has _only_ the Origin server in it
 		log.Debug("Detected both Origin and Cache modules; performing initial advertisement of Origin to Director before starting Cache")
-		if err = launcher_utils.Advertise(ctx, serversRequireAdvertisement); err != nil {
-			err = errors.Wrap(err, "failed to do initial advertisement to the director")
-			return
-		}
-
-		// We may have arbitrarily many exports, so we should make sure they're all advertised before
-		// starting the cache up. This guarantees that when the cache starts, it is immediately aware
-		// of the namespaces and doesn't have to wait an entire cycle to learn about them from the director
-
-		// To check all of the advertisements, we'll launch a WaitUntilWorking concurrently for each of them.
 		var originExports []server_utils.OriginExport
 		originExports, err = server_utils.GetOriginExports()
 		if err != nil {
 			return
 		}
-		errCh := make(chan error, len(originExports))
-		var wg sync.WaitGroup
-		wg.Add(len(originExports))
-		// NOTE: A previous version of this functionality (in the days of assuming only one export) used
-		// use param.Server_ExternalWebUrl as the endpoint to check. Justin thinks the assumption here
-		// was that it only made sense to serve an origin and a cache at the same time if a local director
-		// was being fired up, but that may be a pigeonhole. The new assumption here is that we're religious
-		// about setting Federation.DirectorUrl.
-		var directorUrl *url.URL
-		directorUrl, err = url.Parse(fedInfo.DirectorEndpoint)
-		if err != nil {
-			err = errors.Wrap(err, "Failed to parse director URL when checking origin advertisements before cache launch")
-			return
-		}
+		prefixes := make([]string, 0, len(originExports))
 		for _, export := range originExports {
-			go func(prefix string) {
-				defer wg.Done()
-				// Use goroutine-local error variables: these run concurrently
-				// and must not share the enclosing function's named-return `err`
-				// (concurrent writes are a data race and let one prefix's result
-				// clobber another's, causing spurious advertisement failures).
-				// Probably no need to incur another err check since we already checked the director URL.
-				urlToCheck, _ := url.Parse(directorUrl.String())
-				joinedPath, joinErr := url.JoinPath("/api/v1.0/director/origin", prefix)
-				if joinErr != nil {
-					errCh <- errors.Wrapf(joinErr, "Failed to join path %s for origin advertisement check", prefix)
-					return
-				}
-				urlToCheck.Path = joinedPath
-				// Skip stat check. Otherwise it will return 404
-				query := urlToCheck.Query()
-				query.Add("skipstat", "")
-				urlToCheck.RawQuery = query.Encode()
-				if waitErr := server_utils.WaitUntilWorking(ctx, "GET", urlToCheck.String(), "director", 307, false); waitErr != nil {
-					errCh <- errors.Wrapf(waitErr, "The prefix %s does not seem to have advertised correctly", prefix)
-				}
-
-			}(export.FederationPrefix)
-
+			prefixes = append(prefixes, export.FederationPrefix)
 		}
-		wg.Wait()
-
-		close(errCh)
-		errFound := false
-		for err := range errCh {
-			if err != nil {
-				log.Errorln("No result from waiting for prefix advertisement:", err)
-				errFound = true
-			}
-
-		}
-		if errFound {
-			err = errors.New("Failed to advertise all origin exports before cache launch")
+		advertise := func(ctx context.Context) error { return launcher_utils.Advertise(ctx, serversRequireAdvertisement) }
+		if err = advertiseOriginBeforeCache(ctx, advertise, fedInfo.DirectorEndpoint, prefixes); err != nil {
 			return
 		}
 	}
@@ -619,5 +563,102 @@ func handleGracefulShutdown(ctx context.Context, modules server_structs.ServerTy
 		}
 		time.Sleep(param.Xrootd_ShutdownTimeout.GetDuration())
 		log.Warn("Shutdown grace period elapsed; proceeding with shutdown and discarding incomplete transfers")
+	}
+}
+
+// advertiseOriginBeforeCache advertises the origin and waits until the director
+// redirects every one of its exports' prefixes to it.  This guarantees that when
+// the cache starts, it is immediately aware of the namespaces and doesn't have
+// to wait an entire cycle to learn about them from the director.
+//
+// The ad is re-sent before every check rather than once up front.  Periodic
+// advertisement only starts after the cache launches, so nothing else refreshes
+// the ad meanwhile, and with a short Server.AdLifetime (used by tests) a single
+// ad can expire before the director is asked about it -- turning a healthy
+// startup into a "no origins found" failure.
+//
+// NOTE: A previous version of this functionality (in the days of assuming only
+// one export) used param.Server_ExternalWebUrl as the endpoint to check, on the
+// assumption that serving an origin and a cache together implied a local
+// director.  The assumption here is instead that Federation.DirectorUrl is set.
+func advertiseOriginBeforeCache(ctx context.Context, advertise func(context.Context) error, directorEndpoint string, prefixes []string) error {
+	directorUrl, err := url.Parse(directorEndpoint)
+	if err != nil {
+		return errors.Wrap(err, "Failed to parse director URL when checking origin advertisements before cache launch")
+	}
+	checkUrls := make([]string, 0, len(prefixes))
+	for _, prefix := range prefixes {
+		checkUrl := *directorUrl
+		if checkUrl.Path, err = url.JoinPath("/api/v1.0/director/origin", prefix); err != nil {
+			return errors.Wrapf(err, "Failed to join path %s for origin advertisement check", prefix)
+		}
+		// Skip the stat check; otherwise the director returns 404 for a prefix
+		// whose namespace root is not an object.
+		checkUrl.RawQuery = url.Values{"skipstat": {""}}.Encode()
+		checkUrls = append(checkUrls, checkUrl.String())
+	}
+
+	ctx, cancel := context.WithTimeout(ctx, param.Server_StartupTimeout.GetDuration())
+	defer cancel()
+	client := &http.Client{
+		Transport: config.GetTransport(),
+		Timeout:   time.Second,
+		CheckRedirect: func(*http.Request, []*http.Request) error {
+			return http.ErrUseLastResponse
+		},
+	}
+	// checkAll returns the first prefix the director does not yet redirect to us.
+	checkAll := func() error {
+		for idx, checkUrl := range checkUrls {
+			req, err := http.NewRequestWithContext(ctx, http.MethodGet, checkUrl, nil)
+			if err != nil {
+				return err
+			}
+			resp, err := client.Do(req)
+			if err != nil {
+				return errors.Wrapf(err, "The prefix %s does not seem to have advertised correctly", prefixes[idx])
+			}
+			body, _ := io.ReadAll(io.LimitReader(resp.Body, 1024))
+			resp.Body.Close()
+			if resp.StatusCode != http.StatusTemporaryRedirect {
+				return errors.Errorf("The prefix %s does not seem to have advertised correctly: received status %d from %s (expected %d), body: %s",
+					prefixes[idx], resp.StatusCode, checkUrl, http.StatusTemporaryRedirect, string(body))
+			}
+		}
+		return nil
+	}
+
+	// lastErr is the director's most recent real answer.  Once the deadline
+	// passes, an advertisement or check it cut short says nothing about the
+	// director, so it must not replace that answer in the error we report.
+	var lastErr error
+	giveUp := func() error {
+		log.Errorln("No result from waiting for prefix advertisement:", lastErr)
+		if errors.Is(ctx.Err(), context.DeadlineExceeded) {
+			return errors.Wrapf(lastErr, "Failed to advertise all origin exports before cache launch within %s (%s)",
+				param.Server_StartupTimeout.GetDuration(), param.Server_StartupTimeout.GetName())
+		}
+		return errors.Wrap(lastErr, "Startup was canceled before all origin exports were advertised")
+	}
+	for {
+		if err := advertise(ctx); err != nil {
+			if ctx.Err() != nil && lastErr != nil {
+				return giveUp()
+			}
+			return errors.Wrap(err, "failed to do initial advertisement to the director")
+		}
+		checkErr := checkAll()
+		if checkErr == nil {
+			return nil
+		}
+		if ctx.Err() == nil || lastErr == nil {
+			lastErr = checkErr
+		}
+		log.Debugln("Origin advertisement not yet visible at the director; re-advertising:", checkErr)
+		select {
+		case <-ctx.Done():
+			return giveUp()
+		case <-time.After(100 * time.Millisecond):
+		}
 	}
 }

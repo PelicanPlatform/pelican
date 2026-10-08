@@ -35,6 +35,8 @@ import (
 	"github.com/pkg/errors"
 	"github.com/spf13/cobra"
 	"golang.org/x/term"
+
+	"github.com/pelicanplatform/pelican/utils"
 )
 
 var (
@@ -212,41 +214,20 @@ func rcloneInstallMain(cmd *cobra.Command, _ []string) error {
 	}
 	defer rc.Close()
 
-	tmpFile, err := os.CreateTemp(prefix, ".rclone-install-*")
+	err = utils.WriteFileAtomicFrom(destPath, 0755, func(w io.Writer) error {
+		if _, err := io.Copy(w, rc); err != nil {
+			return errors.Wrap(err, "failed to write rclone binary")
+		}
+		return nil
+	})
 	if err != nil {
 		if os.IsPermission(err) {
 			return fmt.Errorf("permission denied writing to %s\n\n"+
 				"Try a user-writable prefix:\n\n"+
 				"  pelican rclone install --prefix ~/.local/bin", prefix)
 		}
-		return errors.Wrapf(err, "failed to create temporary file in %s", prefix)
-	}
-	tmpPath := tmpFile.Name()
-
-	// Clean up the temp file on any error path.
-	success := false
-	defer func() {
-		if !success {
-			os.Remove(tmpPath)
-		}
-	}()
-
-	if err := tmpFile.Chmod(0755); err != nil {
-		tmpFile.Close()
-		return errors.Wrap(err, "failed to set permissions on temporary file")
-	}
-	if _, err := io.Copy(tmpFile, rc); err != nil {
-		tmpFile.Close()
-		return errors.Wrapf(err, "failed to write rclone binary to %s", tmpPath)
-	}
-	if err := tmpFile.Close(); err != nil {
-		return errors.Wrapf(err, "failed to finalize temporary file %s", tmpPath)
-	}
-
-	if err := os.Rename(tmpPath, destPath); err != nil {
 		return errors.Wrapf(err, "failed to install rclone binary to %s", destPath)
 	}
-	success = true
 
 	fmt.Fprintf(os.Stderr, "%s%srclone installed to:%s %s\n", colorBold, colorGreen, colorReset, destPath)
 

@@ -38,6 +38,7 @@ import (
 	"golang.org/x/crypto/hkdf"
 
 	"github.com/pelicanplatform/pelican/config"
+	"github.com/pelicanplatform/pelican/utils"
 )
 
 const (
@@ -181,37 +182,9 @@ func (em *EncryptionManager) saveMasterKey() error {
 		return errors.Wrap(err, "failed to marshal master key file")
 	}
 
-	// Write atomically using temp file
 	keyPath := filepath.Join(em.baseDir, masterKeyFileName)
-	tmpPath := keyPath + ".tmp"
-
-	// Write to temp file and sync to disk before rename to avoid corruption
-	tmpFile, err := os.OpenFile(tmpPath, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0600)
-	if err != nil {
-		return errors.Wrap(err, "failed to create temporary master key file")
-	}
-
-	if _, err := tmpFile.Write(data); err != nil {
-		tmpFile.Close()
-		os.Remove(tmpPath)
-		return errors.Wrap(err, "failed to write temporary master key file")
-	}
-
-	// Explicitly sync to ensure data is persisted before rename
-	if err := tmpFile.Sync(); err != nil {
-		tmpFile.Close()
-		os.Remove(tmpPath)
-		return errors.Wrap(err, "failed to sync temporary master key file")
-	}
-
-	if err := tmpFile.Close(); err != nil {
-		os.Remove(tmpPath)
-		return errors.Wrap(err, "failed to close temporary master key file")
-	}
-
-	if err := os.Rename(tmpPath, keyPath); err != nil {
-		os.Remove(tmpPath)
-		return errors.Wrap(err, "failed to rename master key file")
+	if err := utils.WriteFileAtomic(keyPath, data, 0600); err != nil {
+		return errors.Wrap(err, "failed to write master key file")
 	}
 
 	return nil

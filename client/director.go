@@ -115,6 +115,8 @@ func queryDirector(ctx context.Context, verb string, pUrl *pelican_url.PelicanUR
 			log.Errorln("Failed to create an HTTP request:", err)
 			return nil, "", err
 		}
+		// A PROPFIND is safe to resend if its pooled connection was closed.
+		utils.MarkRetryableIfSafe(req)
 
 		// Include the Client's version as a User-Agent header. The Director will decide
 		// if it supports the version, and provide an error message in the case that it

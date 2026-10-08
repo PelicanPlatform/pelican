@@ -754,7 +754,7 @@ func runtimeTLSCertPath(isCache bool) string {
 	return filepath.Join(base, "copied-tls-creds.crt")
 }
 
-func writeX509Credentials(fp *os.File, includeKey bool) error {
+func writeX509Credentials(fp io.Writer, includeKey bool) error {
 	srcFile, err := os.Open(param.Server_TLSCertificateChain.GetString())
 	if err != nil {
 		return errors.Wrap(err, "failure when opening source certificate for xrootd")
@@ -807,25 +807,13 @@ func copyXrootdCertificates(server server_structs.XRootDServer) error {
 	if server.GetServerType().IsEnabled(server_structs.CacheType) {
 		destination = filepath.Join(param.Cache_RunLocation.GetString(), "copied-tls-creds.crt")
 	}
-	tmpName := destination + ".tmp"
-	destFile, err := os.OpenFile(tmpName, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, fs.FileMode(0400))
-	if err != nil {
-		return errors.Wrap(err, "failure when opening temporary certificate key pair file for xrootd")
-	}
-	defer destFile.Close()
-
-	if err = os.Chown(tmpName, user.Uid, user.Gid); err != nil {
-		return errors.Wrap(err, "failure when chown'ing certificate key pair file for xrootd")
-	}
-
 	pkcs11Info := p11proxy.CurrentInfo()
 	pkcs11Active := param.Server_EnablePKCS11.GetBool() && pkcs11Info.Enabled
-	if err = writeX509Credentials(destFile, !pkcs11Active); err != nil {
-		return err
-	}
-
-	if err = os.Rename(tmpName, destination); err != nil {
-		return errors.Wrapf(err, "failure when moving key pair for xrootd")
+	err = utils.WriteFileAtomicFrom(destination, 0400, func(w io.Writer) error {
+		return writeX509Credentials(w, !pkcs11Active)
+	}, utils.WithOwner(user.Uid, user.Gid))
+	if err != nil {
+		return errors.Wrap(err, "failure when writing certificate key pair file for xrootd")
 	}
 
 	return nil

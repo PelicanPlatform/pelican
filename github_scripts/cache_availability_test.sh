@@ -29,6 +29,9 @@
 
 set -e
 
+# shellcheck source=github_scripts/stop_server.sh
+source "$(dirname "${BASH_SOURCE[0]}")/stop_server.sh"
+
 NUM_CACHES=5
 NUM_PRIMED=2          # caches 1..2 will be primed
 STOPPED_CACHE_IDX=5   # cache 5 is killed before the Director query to mock "unknown" availability
@@ -126,9 +129,7 @@ cleanup() {
     echo "============================================"
 
     if [ -n "${FED_PID:-}" ]; then
-        kill -SIGINT "${FED_PID}" 2>/dev/null || true
-        sleep 1
-        kill_tree "${FED_PID}"
+        stop_server "${FED_PID}"
     fi
 
     for pid in "${CACHE_PIDS[@]}"; do

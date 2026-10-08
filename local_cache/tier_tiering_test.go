@@ -1547,11 +1547,12 @@ func TestTierRedirectServing(t *testing.T) {
 	data := bytes.Repeat([]byte("s3-redirect-test-data\n"), 700) // ~15 KiB
 	storeTestObject(t, ctx, pc.storage, instanceHash, data, diskID, NamespaceID(1))
 	require.NoError(t, pc.db.SetLatestETag(objectHash, etag, time.Now()))
-	// Carry the origin's ETag, as a fetched object would.
-	stored, err := pc.storage.GetMetadata(instanceHash)
-	require.NoError(t, err)
-	stored.ETag = etag
-	require.NoError(t, pc.storage.SetMetadata(instanceHash, stored))
+	// Carry the origin's ETag, as a fetched object would.  Merge it in rather
+	// than rewriting the whole record: storing the object already fired the
+	// completion hook, so an upload may be relocating the object right now,
+	// and writing back a copy read before that relocation would point the
+	// metadata at the local copy the upload has just deleted.
+	require.NoError(t, pc.db.MergeMetadata(instanceHash, &CacheMetadata{ETag: etag}))
 
 	// Nudge the queue directly (storeTestObject bypasses some completion
 	// paths) and wait for the relocation to land.

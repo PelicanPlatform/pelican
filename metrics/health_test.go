@@ -59,3 +59,16 @@ func TestParseHealthStatus(t *testing.T) {
 		}
 	}
 }
+
+func TestResetHealthStatus(t *testing.T) {
+	SetComponentHealthStatus(OriginCache_XRootD, StatusShuttingDown, "left behind by an earlier server")
+	SetComponentHealthStatus(OriginCache_Federation, StatusOK, "")
+	require.Equal(t, StatusShuttingDown.String(), GetHealthStatus().OverallStatus)
+
+	ResetHealthStatus()
+
+	_, err := GetComponentStatus(OriginCache_XRootD)
+	assert.Error(t, err, "a reset must forget every component")
+	assert.Empty(t, GetHealthStatus().ComponentStatus)
+	assert.Equal(t, StatusUnknown.String(), GetHealthStatus().OverallStatus)
+}
