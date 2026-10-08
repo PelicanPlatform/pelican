@@ -2766,11 +2766,11 @@ func (bw *BlockWriter) flushWriteBatch() error {
 	}
 
 	// Update the shared in-memory block state so all concurrent readers
-	// see these blocks as available immediately.
+	// see these blocks as available immediately -- in one step, so that
+	// the batch costs one lock and one wakeup of the readers waiting on
+	// the object, not one of each per block.
 	if bw.sharedState != nil {
-		for block := bw.batchStart; block <= endBlock; block++ {
-			bw.sharedState.Add(block)
-		}
+		bw.sharedState.AddRange(bw.batchStart, endBlock)
 	}
 
 	bw.writeBatch = bw.writeBatch[:0]
