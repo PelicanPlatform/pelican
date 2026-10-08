@@ -50,6 +50,7 @@ import (
 	"github.com/pelicanplatform/pelican/server_structs"
 	"github.com/pelicanplatform/pelican/server_utils"
 	"github.com/pelicanplatform/pelican/ssh_posixv2"
+	"github.com/pelicanplatform/pelican/token"
 	"github.com/pelicanplatform/pelican/token_scopes"
 	"github.com/pelicanplatform/pelican/utils"
 )
@@ -271,43 +272,51 @@ func ResetHandlers() {
 	globusBackends = nil
 }
 
+// Up to this many tokens are looked at per request. XRootD's SciTokens plugin
+// uses the same limit.
+const maxTokensPerRequest = 10
+
 // extractTokens extracts bearer tokens from the request
 // Tokens can come from:
-// 1. Authorization header (may have multiple comma-separated tokens)
-// 2. Query parameter "access_token" (standard)
-// 3. Query parameter "authz" (non-standard)
+//  1. Authorization header (may have multiple comma-separated tokens)
+//  2. Query parameter "access_token" (standard)
+//  3. Query parameter "authz" (non-standard)
+//
+// Each source may hold several tokens separated by commas. In the header every
+// token must carry the "Bearer" scheme. In the query parameters the scheme is
+// optional: an XRootD cache forwards the client's Authorization header as
+// "?authz=Bearer%20<jwt>", commas included, so a comma-joined header arrives
+// as one query value (see token.CutBearerPrefix).
 func extractTokens(r *http.Request) []string {
 	tokens := make([]string, 0)
 
-	// Check Authorization header
-	authHeader := r.Header.Get("Authorization")
-	if authHeader != "" {
+	// Check Authorization header; entries with any other scheme are ignored
+	if authHeader := r.Header.Get("Authorization"); authHeader != "" {
 		// Split by comma to handle multiple tokens
 		for _, part := range strings.Split(authHeader, ",") {
-			part = strings.TrimSpace(part)
-			// Case-insensitive bearer token extraction
-			if len(part) > 7 && strings.ToLower(part[:7]) == "bearer " {
-				token := strings.TrimSpace(part[7:])
-				if token != "" {
-					tokens = append(tokens, token)
+			// Only leading space is trimmed here: the scheme check needs the space after "Bearer"
+			if tok, found := token.CutBearerPrefix(strings.TrimLeft(part, " \t")); found && tok != "" {
+				tokens = append(tokens, tok)
+			}
+		}
+	}
+
+	// Check query parameters; each may repeat, and each value may be comma-joined
+	query := r.URL.Query()
+	for _, key := range []string{"access_token", "authz"} {
+		for _, val := range query[key] {
+			for _, part := range strings.Split(val, ",") {
+				tok := strings.TrimSpace(token.StripBearerPrefix(strings.TrimLeft(part, " \t")))
+				if tok != "" {
+					tokens = append(tokens, tok)
 				}
 			}
 		}
 	}
 
-	// Check query parameters (may be multi-valued)
-	query := r.URL.Query()
-	// Handle multi-valued access_token parameters
-	for _, accessToken := range query["access_token"] {
-		if accessToken != "" {
-			tokens = append(tokens, accessToken)
-		}
-	}
-	// Handle multi-valued authz parameters
-	for _, authzToken := range query["authz"] {
-		if authzToken != "" {
-			tokens = append(tokens, authzToken)
-		}
+	if len(tokens) > maxTokensPerRequest {
+		log.Warningf("Request for %s carried %d tokens, more than the %d allowed; treating it as having none", r.URL.Path, len(tokens), maxTokensPerRequest)
+		return []string{}
 	}
 
 	return tokens

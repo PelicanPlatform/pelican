@@ -119,6 +119,9 @@ func TestVerify(t *testing.T) {
 	}
 
 	authChecker = mock
+	// Every case starts from this default mock, so a case that installs a
+	// stricter checker cannot leak it into the case that follows
+	defaultMock := *mock
 
 	// Batch-create test cases, see "name" section for the purpose of each test case
 	tests := []struct {
@@ -153,6 +156,31 @@ func TestVerify(t *testing.T) {
 			expectedResult: true,
 		},
 		{
+			// The scheme name is case-insensitive (RFC 7235). The header source
+			// is the one API endpoints use, so pin that a lowercase scheme is
+			// accepted and that the scheme itself never reaches the checker.
+			name: "valid-token-from-header-source-lowercase-scheme",
+			authOption: AuthOption{
+				Sources: []TokenSource{Header},
+				Issuers: []TokenIssuer{FederationIssuer},
+			},
+			setupMock: func() {
+				mock.FederationCheckFunc = func(ctx *gin.Context, token string, expectedScopes []token_scopes.TokenScope, allScope bool) error {
+					if token == "valid-header-token" {
+						ctx.Set("User", "Federation")
+						return nil
+					}
+					return errors.New(fmt.Sprint("scheme not removed from the header value: ", token))
+				}
+			},
+			tokenSetup: func() *gin.Context {
+				ctx := createContextWithToken("", "", "")
+				ctx.Request.Header.Set("Authorization", "bearer valid-header-token")
+				return ctx
+			},
+			expectedResult: true,
+		},
+		{
 			name: "valid-token-from-authz-query-parameter",
 			authOption: AuthOption{
 				Sources: []TokenSource{Authz},
@@ -160,6 +188,29 @@ func TestVerify(t *testing.T) {
 			},
 			tokenSetup: func() *gin.Context {
 				return createContextWithToken("", "", "valid-query-token")
+			},
+			expectedResult: true,
+		},
+		{
+			// XRootD-based caches forward the client's Authorization header as
+			// "?authz=Bearer%20<token>", so the query value arrives with the HTTP
+			// scheme attached; it must be stripped before reaching a checker.
+			name: "valid-token-from-authz-query-parameter-with-bearer-prefix",
+			authOption: AuthOption{
+				Sources: []TokenSource{Authz},
+				Issuers: []TokenIssuer{FederationIssuer},
+			},
+			setupMock: func() {
+				mock.FederationCheckFunc = func(ctx *gin.Context, token string, expectedScopes []token_scopes.TokenScope, allScope bool) error {
+					if token == "valid-query-token" {
+						ctx.Set("User", "Federation")
+						return nil
+					}
+					return errors.New(fmt.Sprint("Bearer prefix not stripped from authz query value: ", token))
+				}
+			},
+			tokenSetup: func() *gin.Context {
+				return createContextWithToken("", "", "Bearer valid-query-token")
 			},
 			expectedResult: true,
 		},
@@ -368,6 +419,7 @@ func TestVerify(t *testing.T) {
 	// Batch-run the test cases
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
+			*mock = defaultMock
 			if tc.setupMock != nil {
 				// We might have different mocks to the checker function,
 				// so we have this flexibility by calling setupmock if there is such function
@@ -419,8 +471,29 @@ func TestGetAuthzEscaped(t *testing.T) {
 	escapedToken = GetAuthzEscaped(ctx)
 	assert.Equal(t, escapedToken, "tokenstring")
 
-	// Finally, the same test as before, but test with %20 encoded space
+	// The same test as before, but test with %20 encoded space
 	req, err = http.NewRequest(http.MethodPost, "http://fake-server.com/foo?authz=Bearer%20tokenstring", bytes.NewBuffer([]byte("a body")))
+	assert.NoError(t, err)
+	ctx = &gin.Context{Request: req}
+	escapedToken = GetAuthzEscaped(ctx)
+	assert.Equal(t, escapedToken, "tokenstring")
+
+	// The scheme name is case-insensitive, in the header and in the query
+	req, err = http.NewRequest(http.MethodPost, "http://fake-server.com", bytes.NewBuffer([]byte("a body")))
+	assert.NoError(t, err)
+	ctx = &gin.Context{Request: req}
+	req.Header.Set("Authorization", "bearer tokenstring")
+	escapedToken = GetAuthzEscaped(ctx)
+	assert.Equal(t, escapedToken, "tokenstring")
+
+	req, err = http.NewRequest(http.MethodPost, "http://fake-server.com/foo?authz=bearer%20tokenstring", bytes.NewBuffer([]byte("a body")))
+	assert.NoError(t, err)
+	ctx = &gin.Context{Request: req}
+	escapedToken = GetAuthzEscaped(ctx)
+	assert.Equal(t, escapedToken, "tokenstring")
+
+	// A doubly-encoded value decodes to a literal "Bearer%20", which is also stripped
+	req, err = http.NewRequest(http.MethodPost, "http://fake-server.com/foo?authz=Bearer%2520tokenstring", bytes.NewBuffer([]byte("a body")))
 	assert.NoError(t, err)
 	ctx = &gin.Context{Request: req}
 	escapedToken = GetAuthzEscaped(ctx)
