@@ -331,3 +331,43 @@ func TestCancelledWaitIsNeverLeftAsleep(t *testing.T) {
 		t.Fatal("WaitForBlock did not return after its context was cancelled")
 	}
 }
+
+// TestNoBackgroundTransferStartsOnceClosing checks that a background
+// transfer's start and the cache beginning to close exclude each other.  A
+// start registers its goroutine with the wait group Close waits on; one that
+// checked the cache was open, and then registered after Close had begun
+// waiting, would run on after Close returned, with the transfer engine and
+// the database shut down under it.
+func TestNoBackgroundTransferStartsOnceClosing(t *testing.T) {
+	pc := &PersistentCache{}
+	entered, proceed := make(chan struct{}), make(chan struct{})
+	closing := make(chan struct{})
+	started := make(chan bool, 1)
+	go func() {
+		started <- pc.whileOpen(func() {
+			close(entered)
+			<-proceed
+		})
+	}()
+	<-entered
+	go func() {
+		pc.beginClose()
+		close(closing)
+	}()
+	assert.Never(t, func() bool {
+		select {
+		case <-closing:
+			return true
+		default:
+			return false
+		}
+	}, 200*time.Millisecond, 10*time.Millisecond, "the cache must not begin to close while a start is under way")
+	close(proceed)
+	assert.True(t, <-started)
+	<-closing
+
+	ran := false
+	assert.False(t, pc.whileOpen(func() { ran = true }), "nothing may start once the cache is closing")
+	assert.False(t, ran)
+	assert.True(t, pc.beginClose(), "the cache is already closing")
+}
