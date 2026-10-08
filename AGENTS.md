@@ -156,9 +156,7 @@ Tests that run `pelican` or `pelican-server` as a subprocess get them from the h
 
 **Test tiers:** The presumption is that every test runs everywhere, always.
 CI passes `-short` to `go test` on every push and runs the full suite on a schedule. Mark a test with `test_utils.SkipIfShort(t, "reason")` as its first statement only when one of two things holds. First, it exercises something esoteric: a backend, service or privilege the per-push runners should not depend on, such as HTCondor, rclone, minio or root. Second, measurement shows that the time it adds to a CI run is not worth what it checks; a test that is off the critical path, or that takes a second, saves nothing by being skipped. Both are judgement calls, and the second must rest on observed timings (the JUnit artifacts give per-test times), not on reading the code. Core federation behavior (posix/posixv2 origins, caches, the director) must stay in the quick tier; reserve the marker for backend variants, stress tests, and tests with long waits.
->>>>>>> 87ba070f3 (Keep cheap tests on every push and restate the skip criteria)
 To reproduce what a push runs, add `-short`:
-
 ```bash
 go test -short -tags "client,server" ./...
 ```
