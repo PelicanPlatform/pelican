@@ -5311,7 +5311,14 @@ paths:
       tags:
         - collections
       summary: Create a new collection
-      description: "`Authentication Required`"
+      description: >-
+        `Authentication Required` `Admin privilege Required`. The caller
+        must hold `server.collection_admin` (or `server.admin`, which
+        implies it). The role is checked for cookie and bearer callers
+        alike. The namespace must equal, or sit under, one of
+        this origin's exported prefixes. Creation writes no ACL rows: the
+        caller becomes the owner and grants access afterwards via
+        POST /origin_ui/collections/{id}/acl.
       consumes:
         - application/json
       produces:
@@ -5334,6 +5341,10 @@ paths:
             $ref: "#/definitions/ErrorModelV2"
         "401":
           description: Authentication required
+          schema:
+            $ref: "#/definitions/ErrorModelV2"
+        "403":
+          description: Caller does not hold server.collection_admin or server.admin
           schema:
             $ref: "#/definitions/ErrorModelV2"
         "500":

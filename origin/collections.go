@@ -92,33 +92,10 @@ func callerIsCollectionAdmin(ctx *gin.Context) bool {
 		Groups:   groups,
 		Sub:      ctx.GetString("OIDCSub"),
 	}
-	if isAdmin, _ := web_ui.CheckAdmin(identity); isAdmin {
-		return true
-	}
-	if isCollAdmin, _ := web_ui.CheckCollectionAdmin(identity); isCollAdmin {
-		return true
-	}
-	return false
-}
-
-// hasExplicitBearerCollectionScope reports whether the caller presented
-// a bearer (Authorization: Bearer …) token whose verified scope set
-// contains the supplied collection.* scope EXPLICITLY — i.e. not via
-// the web_ui.access fallback that verifyTokenWithCollectionScope also
-// accepts. This is the path OA4MP / CLI clients use to drive a
-// collection action without holding a management role; we keep it
-// open in the management-endpoint authorization step.
-func hasExplicitBearerCollectionScope(ctx *gin.Context, scope token_scopes.TokenScope) bool {
-	auth := ctx.Request.Header.Get("Authorization")
-	if !strings.HasPrefix(auth, "Bearer ") {
-		return false
-	}
-	_, ok, _ := token.Verify(ctx, token.AuthOption{
-		Sources: []token.TokenSource{token.Header},
-		Issuers: []token.TokenIssuer{token.LocalIssuer, token.APITokenIssuer},
-		Scopes:  []token_scopes.TokenScope{scope},
-	})
-	return ok
+	// server.admin implies server.collection_admin in the effective
+	// scope set, so the one check covers both roles.
+	isCollAdmin, _ := web_ui.CheckCollectionAdmin(identity)
+	return isCollAdmin
 }
 
 // requireCaller resolves the authenticated caller. AuthHandler has already
@@ -145,18 +122,19 @@ func requireCaller(ctx *gin.Context) (user, userId string, groups []string, ok b
 
 // verifyTokenWithCollectionScope verifies a token with standard verification first,
 // and falls back to manual collection scope verification if standard verification fails.
-// This handles cases where OA4MP adds collection IDs to scopes (e.g., "collection.read:test_collection").
+// The fallback exists because the embedded issuer mints collection scopes with a
+// suffix ("collection.read:/", "collection.read:<id>"), which the exact-match
+// validator behind token.Verify does not recognise.
 // For read operations on public collections, it also provides a fallback that doesn't require explicit scopes.
 //
 // Note: This accepts tokens with EITHER web_ui.access OR the specific collection scope.
 // This design allows both:
 //   - Web UI users (who have web_ui.access from login cookies) to access collections
-//   - CLI/API clients (who have collection-specific scopes from OAuth2 device flow) to access collections
+//   - CLI/API clients (who have collection-specific scopes from the OAuth2 device flow) to access collections
 //
-// AUTHENTICATION ONLY. The web_ui.access fallback means every logged-in
-// caller (including unprivileged ones) clears this gate. Management
-// endpoints must additionally call callerIsCollectionAdmin (or
-// equivalent) before mutating collection state.
+// AUTHENTICATION ONLY: every logged-in caller clears this gate. Handlers
+// must authorize separately (callerIsCollectionAdmin or the database's
+// ACL checks).
 func verifyTokenWithCollectionScope(ctx *gin.Context, expectedScope token_scopes.TokenScope, collectionID string) (status int, ok bool, err error) {
 	authOption := token.AuthOption{
 		Sources: []token.TokenSource{token.Cookie, token.Header},
@@ -712,15 +690,9 @@ func handleCreateCollection(ctx *gin.Context) {
 		return
 	}
 
-	// AUTHORIZATION: verifyTokenWithCollectionScope only AUTHENTICATES.
-	// Web UI cookies all carry web_ui.access, so without this guard every
-	// logged-in user could create a collection. Per the design contract,
-	// creating a collection is server.collection_admin (or
-	// server.admin, which transitively grants collection_admin); the
-	// bearer-API-token path with an explicit collection.create scope
-	// stays open for OA4MP / device-flow clients.
-	if !hasExplicitBearerCollectionScope(ctx, token_scopes.Collection_Create) &&
-		!callerIsCollectionAdmin(ctx) {
+	// verifyTokenWithCollectionScope only authenticates; creation requires
+	// server.collection_admin (server.admin implies it).
+	if !callerIsCollectionAdmin(ctx) {
 		ctx.JSON(http.StatusForbidden, server_structs.SimpleApiResp{
 			Status: server_structs.RespFailed,
 			Msg:    "you must hold server.collection_admin (or server.admin) to create a collection",
@@ -1419,7 +1391,8 @@ type CreateShareReq struct {
 //     filesystem mode cannot safely do.
 //
 // The new share's owner is the caller — NOT the parent's owner. At
-// token-mint time (oa4mp/proxy.go) the share's effective scope set
+// token-mint time (oa4mp.GetUserCollectionScopes, run by the embedded
+// issuer) the share's effective scope set
 // is intersected with the share owner's CURRENT access to the
 // parent, so revocation propagates: removing the share owner from
 // the parent's ACLs clamps any token they mint via the share.

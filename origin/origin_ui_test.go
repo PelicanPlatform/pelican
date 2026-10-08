@@ -147,9 +147,10 @@ func TestCollectionsAPI(t *testing.T) {
 	// The cookie path on POST /collections / GET /collections (admin
 	// list) now requires server.admin or server.collection_admin
 	// in the caller's effective scope set — without this, every
-	// logged-in user could create or list every collection. Bearer
-	// API tokens with explicit collection.create still pass through
-	// (covered separately below). The two test subjects that drive
+	// logged-in user could create or list every collection. The
+	// role is the ONLY thing that authorizes create; a bearer token's
+	// collection.create scope does not (covered separately below).
+	// The two test subjects that drive
 	// the "cookie create" path become collection admins so the
 	// existing scenarios (lifecycle, ACL flows) keep exercising the
 	// happy path; tests that target the rejection case
@@ -269,35 +270,64 @@ func TestCollectionsAPI(t *testing.T) {
 			"the rejection message should name the missing scope so the admin understands why")
 	})
 
-	t.Run("explicit-bearer-collection-create-bypasses-cookie-gate", func(t *testing.T) {
-		// Pins the dual contract: even though the cookie path
-		// requires server.collection_admin, an API client presenting
-		// a bearer token with EXPLICIT collection.create scope still
-		// works — that's the OA4MP / device-flow path. The bearer
-		// token here carries collection.create directly, with no
-		// web_ui.access fallback, so the new gate's
-		// hasExplicitBearerCollectionScope branch must accept it.
+	t.Run("bearer-collection-create-scope-is-not-a-role", func(t *testing.T) {
+		// Pins the fix for the scope-as-role bypass. A bearer token
+		// carrying collection.create — bare, or in the path form the
+		// embedded issuer actually mints — does NOT authorize a
+		// non-admin to create a collection. Only the role does. The
+		// token clears authentication (so this exercises the real
+		// gate, not a 401), then must be refused with 403.
 		createReq := CreateCollectionReq{
 			Name:        "via-bearer-create",
-			Description: "should be accepted",
+			Description: "should be refused",
 			Namespace:   "/test1",
 			Visibility:  "public",
 		}
 		body, err := json.Marshal(createReq)
 		require.NoError(t, err)
+		for _, scope := range []token_scopes.TokenScope{
+			token_scopes.Collection_Create,
+			token_scopes.TokenScope(token_scopes.Collection_Create.String() + ":/"),
+		} {
+			req, err := http.NewRequest("POST", "/api/v1.0/origin_ui/collections", bytes.NewReader(body))
+			require.NoError(t, err)
+			token := generateToken(t, []token_scopes.TokenScope{scope}, "bearer-create-subject")
+			req.Header.Set("Authorization", "Bearer "+token)
+			req.Header.Set("Content-Type", "application/json")
+			recorder := httptest.NewRecorder()
+			router.ServeHTTP(recorder, req)
+			assert.Equal(t, http.StatusForbidden, recorder.Code,
+				"a non-admin bearer with scope %q must be refused at the create gate (body: %s)",
+				scope, recorder.Body.String())
+			assert.Contains(t, recorder.Body.String(), "server.collection_admin",
+				"the rejection must name the missing role")
+		}
+	})
+
+	t.Run("collection-admin-bearer-can-create", func(t *testing.T) {
+		// The CLI path: a collection admin presents a local-issuer
+		// bearer token (no cookie, no web_ui.access) carrying the
+		// path-form create scope the issuer mints to admins. The
+		// bearer token populates the caller's identity, and the role
+		// check passes on that identity.
+		createReq := CreateCollectionReq{
+			Name:        "via-admin-bearer",
+			Description: "created through the CLI path",
+			Namespace:   "/test1",
+			Visibility:  "private",
+		}
+		body, err := json.Marshal(createReq)
+		require.NoError(t, err)
 		req, err := http.NewRequest("POST", "/api/v1.0/origin_ui/collections", bytes.NewReader(body))
 		require.NoError(t, err)
-		// The subject is a non-admin user — what authorizes the
-		// request is the explicit collection.create scope on the
-		// bearer token, not the user's role.
-		token := generateToken(t, []token_scopes.TokenScope{token_scopes.Collection_Create}, "bearer-create-subject")
+		scope := token_scopes.TokenScope(token_scopes.Collection_Create.String() + ":/")
+		token := generateToken(t, []token_scopes.TokenScope{scope}, "test-user")
 		req.Header.Set("Authorization", "Bearer "+token)
 		req.Header.Set("Content-Type", "application/json")
 		recorder := httptest.NewRecorder()
 		router.ServeHTTP(recorder, req)
-		assert.Equal(t, http.StatusCreated, recorder.Code,
-			"a bearer token with explicit collection.create must still authorize (body: %s)",
-			recorder.Body.String())
+		require.Equal(t, http.StatusCreated, recorder.Code,
+			"a collection admin's bearer token must authorize create (body: %s)", recorder.Body.String())
 	})
 
 	t.Run("admin-group-grants-full-management-authority", func(t *testing.T) {

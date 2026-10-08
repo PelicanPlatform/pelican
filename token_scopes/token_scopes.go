@@ -146,7 +146,7 @@ var scopeDescriptions = map[TokenScope]string{
 	Broker_Retrieve: `Permits retrieval of requests to an origin`,
 	Broker_Callback: `Permits callbacks from the origin to the cache in response to a reversal request`,
 	Localcache_Purge: `Permits invocation of the purge routine in a local cache`,
-	Collection_Create: `For creating a new collection`,
+	Collection_Create: `For creating a new collection. Minted only to holders of server.collection_admin (or server.admin).`,
 	Collection_Read: `For getting/reading the contents of a collection`,
 	Collection_Modify: `For modifying the contents of a collection`,
 	Collection_Delete: `For deleting a collection`,

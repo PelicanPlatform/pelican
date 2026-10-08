@@ -354,10 +354,11 @@ func GetUserCollectionScopes(db *gorm.DB, user, userID string, groupsList []stri
 	scopes = make([]string, 0)
 	matchedGroupSet := make(map[string]struct{})
 
-	// collection.create is a collection-admin capability; the create
-	// endpoint re-checks the role, so this only reflects who holds it.
+	// collection.create is a collection-admin capability. Resolve through
+	// this function's db handle, not the global, so DB-granted admins are
+	// seen too.
 	identity := web_ui.UserIdentity{Username: user, ID: userID, Groups: groupsList}
-	if isCollectionAdmin, _ := web_ui.CheckCollectionAdmin(identity); isCollectionAdmin {
+	if web_ui.HasScopeWithDB(db, identity, token_scopes.Server_CollectionAdmin) {
 		scopes = append(scopes, token_scopes.Collection_Create.String()+":/")
 	}
 
