@@ -1,6 +1,11 @@
 ---
 name: Run Tests (Linux) [on schedule]
 
+# The daily run covers the full test suite, including the tests that
+# every push skips with -short. The race detector runs separately, in
+# test-linux-weekly-race.yml, so that its known failures do not hide
+# regressions here.
+
 # On Linux, we run tests in a custom container image. For a scheduled
 # run, we have no choice but to use the most recent container image that
 # was built.
@@ -19,7 +24,7 @@ jobs:
     uses: ./.github/workflows/test-linux.yml
     with:
       image: hub.opensciencegrid.org/pelican_platform/pelican-test:latest-itb
-      race_detection: true
+      full_suite: true
 
   analyze-runs:
     name: Analyze Runs
