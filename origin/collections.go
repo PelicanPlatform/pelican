@@ -1199,9 +1199,9 @@ func handleDeleteCollection(ctx *gin.Context) {
 // holders of server.collection_admin) who still need to pick a new
 // owner from the people already adjacent to the collection.
 //
-// Authorization: same gate as PATCH on the collection — owner /
-// admin-group / collection_admin pass; everyone else gets the
-// generic 404 to match GetCollection's leak posture.
+// Authorization: GetCollection's read gate — anyone who can see the
+// collection can see its candidate owners; everyone else gets the
+// generic 404 to match the rest of the surface's leak posture.
 func handleListCollectionCandidateOwners(ctx *gin.Context) {
 	collectionID := ctx.Param("id")
 	if collectionID == "" {
