@@ -131,6 +131,8 @@ func ServerTypeFromString(name string) (ServerType, error) {
 		return RegistryType, nil
 	case "broker":
 		return BrokerType, nil
+	case "transfer":
+		return TransferType, nil
 	default:
 		return 0, fmt.Errorf("unrecognized server type %q", name)
 	}
