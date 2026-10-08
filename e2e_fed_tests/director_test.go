@@ -25,6 +25,7 @@ import (
 	"crypto/tls"
 	_ "embed"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"net/url"
@@ -170,15 +171,20 @@ func updateAllowedPrefixesForCache(t *testing.T, dbPath string, cacheHost string
 // using a valid advertise token. For now this only tests Caches because
 // we aren't actively using fed tokens in the Origin yet.
 // fedTokenScopes returns the "scope" claim of a freshly created cache
-// federation token, split into its individual scopes.
-func fedTokenScopes(ctx context.Context, t *testing.T) ([]string, string) {
-	t.Helper()
+// federation token, split into its individual scopes, and the token's issuer.
+func fedTokenScopes(ctx context.Context) ([]string, string, error) {
 	cache := cache.CacheServer{}
 	tokStr, err := server_utils.CreateFedTok(ctx, &cache)
-	require.NoError(t, err, "Failed to get cache's advertisement token")
-	require.NotEmpty(t, tokStr, "Got an empty token")
+	if err != nil {
+		return nil, "", fmt.Errorf("failed to get cache's advertisement token: %w", err)
+	}
+	if tokStr == "" {
+		return nil, "", fmt.Errorf("got an empty token")
+	}
 	tok, err := token.UnsafeParseClaims(tokStr)
-	require.NoError(t, err, "Failed to parse token")
+	if err != nil {
+		return nil, "", fmt.Errorf("failed to parse token: %w", err)
+	}
 
 	var scopes []string
 	if rawScopes, exists := tok.Get("scope"); exists {
@@ -186,21 +192,24 @@ func fedTokenScopes(ctx context.Context, t *testing.T) ([]string, string) {
 			scopes = strings.Split(scopeStr, " ")
 		}
 	}
-	return scopes, tok.Issuer()
+	return scopes, tok.Issuer(), nil
 }
 
 // requireFedTokenScopes waits for the director to pick up the latest
 // AllowedPrefixes from the registry (it re-queries every
 // Director.RegistryQueryInterval) and then checks the token it issues.
+// The poll reports errors back instead of failing inside the condition,
+// which would hang require.Eventually until its timeout.
 func requireFedTokenScopes(ctx context.Context, t *testing.T, want []string) {
 	t.Helper()
 	var scopes []string
 	var issuer string
-	require.Eventually(t, func() bool {
-		scopes, issuer = fedTokenScopes(ctx, t)
-		return assert.ObjectsAreEqual(sortedCopy(want), sortedCopy(scopes))
-	}, 10*time.Second, 250*time.Millisecond,
-		"director never issued a token with scopes %v (last saw %v)", want, scopes)
+	var lastErr error
+	ok := assert.Eventually(t, func() bool {
+		scopes, issuer, lastErr = fedTokenScopes(ctx)
+		return lastErr == nil && assert.ObjectsAreEqual(sortedCopy(want), sortedCopy(scopes))
+	}, 10*time.Second, 250*time.Millisecond)
+	require.True(t, ok, "director never issued a token with scopes %v (last scopes %v, last error: %v)", want, scopes, lastErr)
 
 	// The fed-test utility uses a separate HTTP server for hosting federation metadata,
 	// and sets it as the Discovery endpoint -- tokens need to be issued by that endpoint
