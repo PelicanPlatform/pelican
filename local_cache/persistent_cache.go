@@ -214,9 +214,9 @@ type PersistentCache struct {
 	fedToken      string
 	fedTokenMu    sync.Mutex
 	fedTokenReady chan struct{} // closed on first non-empty SetFedToken
-	// fedTokenWaited records that getFedToken has already spent its one
-	// startup grace period waiting for a token, so later calls never block.
-	fedTokenWaited bool
+	// expectFedToken is PersistentCacheConfig.ExpectFedToken: whether
+	// getFedToken should wait for a token manager at all.
+	expectFedToken bool
 
 	// Configuration
 	wasConfigured bool
@@ -402,6 +402,13 @@ type PersistentCacheConfig struct {
 	// MaxSize / HighWaterMarkPercentage / LowWaterMarkPercentage
 	// as its limits (for backward compatibility).
 	StorageDirs []StorageDirConfig
+
+	// ExpectFedToken says a federation token manager will deliver tokens
+	// through SetFedToken. Only then does a cache miss that arrives before
+	// the first token wait briefly for it; a cache with no manager (a
+	// site-local cache, or one built directly by a test) goes to the
+	// origin without a token right away.
+	ExpectFedToken bool
 
 	// Legacy single-directory fields — used only when StorageDirs is empty.
 	MaxSize                 uint64
@@ -769,6 +776,7 @@ func NewPersistentCache(ctx context.Context, egrp *errgroup.Group, cfg Persisten
 		closeDone:       make(chan struct{}),
 	}
 	pc.fedTokenReady = make(chan struct{})
+	pc.expectFedToken = cfg.ExpectFedToken
 	pc.prestageManager = NewPrestageManager(pc)
 
 	// Restore persisted namespace mappings so that LRU keys and usage
@@ -2893,27 +2901,26 @@ func (pc *PersistentCache) SetFedToken(tok string) {
 	}
 }
 
-// fedTokenStartupWait bounds how long getFedToken blocks, once, for the
-// federation token manager to deliver its first token.
+// fedTokenStartupWait bounds how long getFedToken blocks for the federation
+// token manager to deliver its first token.
 var fedTokenStartupWait = 2 * time.Second
 
-// getFedToken returns the current federation token.  If no token has
-// been set yet, the first call blocks for up to fedTokenStartupWait
-// waiting for SetFedToken (which happens when the federation token
-// manager successfully fetches its first token).  The wait happens only
-// once per cache: a cache with no token manager at all (site-local mode,
-// or an instance created directly in a test) would otherwise pay it on
-// every cache miss.  Returns the empty string if no token is available.
+// getFedToken returns the current federation token.  When the launcher has
+// declared a token manager (PersistentCacheConfig.ExpectFedToken) and no
+// token has arrived yet, it blocks for up to fedTokenStartupWait waiting
+// for SetFedToken, so a transfer that starts moments after launch can still
+// use the manager's first token.  A cache with no manager never waits:
+// there is nothing to wait for, and waiting would cost every cache miss
+// the full timeout.  Returns the empty string if no token is available.
 func (pc *PersistentCache) getFedToken() string {
 	pc.fedTokenMu.Lock()
 	tok := pc.fedToken
-	waited := pc.fedTokenWaited
 	pc.fedTokenMu.Unlock()
 	if tok != "" {
 		log.Tracef("getFedToken: returning cached token (len=%d)", len(tok))
 		return tok
 	}
-	if waited {
+	if !pc.expectFedToken {
 		return ""
 	}
 
@@ -2923,11 +2930,10 @@ func (pc *PersistentCache) getFedToken() string {
 	case <-pc.fedTokenReady:
 		log.Debugf("getFedToken: token became available via channel")
 	case <-time.After(fedTokenStartupWait):
-		log.Debugf("getFedToken: timed out waiting for token; later calls will not wait")
+		log.Debugf("getFedToken: timed out waiting for token")
 	}
 
 	pc.fedTokenMu.Lock()
-	pc.fedTokenWaited = true
 	tok = pc.fedToken
 	pc.fedTokenMu.Unlock()
 	return tok

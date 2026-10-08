@@ -26,37 +26,50 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// TestGetFedTokenWaitsOnlyOnce pins the startup grace period to a single
-// wait per cache: a cache that never receives a federation token (site-local
-// mode, or one built directly in a test) must not block on every miss.
-func TestGetFedTokenWaitsOnlyOnce(t *testing.T) {
-	oldWait := fedTokenStartupWait
-	fedTokenStartupWait = 100 * time.Millisecond
-	t.Cleanup(func() { fedTokenStartupWait = oldWait })
-
+// TestGetFedTokenNoManagerNeverWaits pins the behaviour for a cache with no
+// federation token manager (site-local mode, or an instance built directly
+// in a test): a cache miss must not block waiting for a token that will
+// never come.
+func TestGetFedTokenNoManagerNeverWaits(t *testing.T) {
 	pc := &PersistentCache{fedTokenReady: make(chan struct{})}
 
 	start := time.Now()
 	assert.Empty(t, pc.getFedToken())
-	assert.GreaterOrEqual(t, time.Since(start), fedTokenStartupWait, "the first call waits for a token")
+	assert.Less(t, time.Since(start), fedTokenStartupWait, "no manager: return without waiting")
 
-	start = time.Now()
-	assert.Empty(t, pc.getFedToken())
-	assert.Less(t, time.Since(start), fedTokenStartupWait, "later calls return without waiting")
-
-	// A token that arrives after the grace period is still picked up.
+	// A token handed over anyway is still used.
 	pc.SetFedToken("tok")
 	assert.Equal(t, "tok", pc.getFedToken())
 }
 
-// TestGetFedTokenUnblocksOnSetFedToken verifies that a caller waiting in the
-// grace period returns as soon as the first token is delivered.
+// TestGetFedTokenWaitsForExpectedManager verifies that a cache whose launcher
+// declared a token manager waits for the first token, bounded by
+// fedTokenStartupWait, and uses the token once it arrives.
+func TestGetFedTokenWaitsForExpectedManager(t *testing.T) {
+	oldWait := fedTokenStartupWait
+	fedTokenStartupWait = 100 * time.Millisecond
+	t.Cleanup(func() { fedTokenStartupWait = oldWait })
+
+	pc := &PersistentCache{fedTokenReady: make(chan struct{}), expectFedToken: true}
+
+	start := time.Now()
+	assert.Empty(t, pc.getFedToken())
+	assert.GreaterOrEqual(t, time.Since(start), fedTokenStartupWait, "waits for the manager's first token")
+
+	pc.SetFedToken("tok")
+	start = time.Now()
+	assert.Equal(t, "tok", pc.getFedToken())
+	assert.Less(t, time.Since(start), fedTokenStartupWait, "no wait once a token is set")
+}
+
+// TestGetFedTokenUnblocksOnSetFedToken verifies that a caller waiting for the
+// first token returns as soon as it is delivered.
 func TestGetFedTokenUnblocksOnSetFedToken(t *testing.T) {
 	oldWait := fedTokenStartupWait
 	fedTokenStartupWait = 10 * time.Second
 	t.Cleanup(func() { fedTokenStartupWait = oldWait })
 
-	pc := &PersistentCache{fedTokenReady: make(chan struct{})}
+	pc := &PersistentCache{fedTokenReady: make(chan struct{}), expectFedToken: true}
 	got := make(chan string, 1)
 	go func() { got <- pc.getFedToken() }()
 
