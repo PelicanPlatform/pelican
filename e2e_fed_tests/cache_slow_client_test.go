@@ -335,3 +335,49 @@ func TestAbandonedFillStops(t *testing.T) {
 	require.True(t, bytes.Equal(content, got))
 	requireTransferOK(t, resp)
 }
+
+// TestRangeAheadOfACacheMissIsNotHeldBehindIt: a range request for the end
+// of an object whose miss is still being downloaded, in order, is served by
+// a fill of its own range rather than held until the download reaches it --
+// here about eight seconds, for a slow origin and a large object hours.  The
+// download then goes on and completes the object around the filled range.
+func TestRangeAheadOfACacheMissIsNotHeldBehindIt(t *testing.T) {
+	ft, token := startSlowClientFed(t)
+	content := writeOriginFile(t, ft, "range_ahead.bin", abandonedObjectSize)
+	cacheURL := waitForCacheRedirectURL(t, ft, "/test/range_ahead.bin", token)
+	ctx, cancel := context.WithTimeout(ft.Ctx, 2*time.Minute)
+	defer cancel()
+
+	// Start the miss, and stay with it so it runs to the end.
+	whole := cacheGet(t, ctx, cacheURL)
+	defer whole.Body.Close()
+	head := make([]byte, 64*1024)
+	_, err := io.ReadFull(whole.Body, head)
+	require.NoError(t, err)
+
+	const tailSize = 64 * 1024
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, cacheURL, nil)
+	require.NoError(t, err)
+	req.Header.Set("Range", fmt.Sprintf("bytes=%d-", abandonedObjectSize-tailSize))
+	req.Header.Set("X-Transfer-Status", "true")
+	req.Header.Set("TE", "trailers")
+	started := time.Now()
+	resp, err := (&http.Client{Transport: config.GetTransport()}).Do(req)
+	require.NoError(t, err)
+	tail, err := io.ReadAll(resp.Body)
+	resp.Body.Close()
+	elapsed := time.Since(started)
+	t.Logf("The range ahead of the download was served in %v", elapsed)
+	require.NoError(t, err)
+	require.Equal(t, http.StatusPartialContent, resp.StatusCode)
+	require.True(t, bytes.Equal(content[abandonedObjectSize-tailSize:], tail))
+	requireTransferOK(t, resp)
+	assert.Less(t, elapsed, 4*time.Second,
+		"the range must not wait for the download, which needs about eight seconds to reach it")
+
+	rest, err := io.ReadAll(whole.Body)
+	require.NoError(t, err)
+	require.True(t, bytes.Equal(content, append(head, rest...)))
+	requireTransferOK(t, whole)
+	requireCached(t, ctx, cacheURL, content)
+}

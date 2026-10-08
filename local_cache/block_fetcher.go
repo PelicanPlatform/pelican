@@ -315,10 +315,10 @@ func (bf *BlockFetcherV2) FetchBlocksAsync(ctx context.Context, startBlock, endB
 		startChunkByte := int64(startBlock) * BlockDataSize
 		chunkIdx := startChunkByte / ChunkSize
 
-		if op.IsChunkETAStale(chunkIdx) {
-			// ETA is already stale — the overlapping operation is too slow
-			// to supply our blocks in time.  Skip it and start our own
-			// fetch below.
+		if op.IsChunkETAStale(chunkIdx) || time.Until(op.GetChunkETA(chunkIdx)) > ETAStaleThreshold {
+			// The overlapping operation is too slow to supply our blocks
+			// in time, or will not reach them soon -- a sequential download
+			// far behind them.  Skip it and start our own fetch below.
 			continue
 		}
 
@@ -427,14 +427,13 @@ func (op *fetchOperation) GetETA() time.Time {
 // the returned time is in the past.  The estimate is based on the current
 // download position and the EWMA rate.
 func (op *fetchOperation) GetChunkETA(chunkIndex int64) time.Time {
+	op.mu.Lock()
 	lastDone := op.lastChunk
+	rateValue := op.rate.Value()
+	op.mu.Unlock()
 	if chunkIndex <= lastDone && lastDone > 0 {
 		return time.Time{} // already available
 	}
-
-	op.mu.Lock()
-	rateValue := op.rate.Value()
-	op.mu.Unlock()
 
 	if rateValue <= 0 {
 		return op.GetETA() // fall back to whole-operation ETA
@@ -840,6 +839,14 @@ func (bf *BlockFetcherV2) AdoptTransfer(
 	bf.mu.Lock()
 	bf.activeFetches[key] = op
 	bf.mu.Unlock()
+
+	// Let the object's readers see when this download should reach each
+	// block, so that one far ahead of it fills past it rather than wait.
+	if bf.blockState != nil {
+		bf.blockState.SetDownloadETA(func(block uint32) time.Time {
+			return op.GetChunkETA(int64(block) * BlockDataSize / ChunkSize)
+		})
+	}
 
 	// Wrap the decisionWriter's BlockWriter with a blockWriter adapter
 	// that provides chunk notification and ETA tracking.  The swap is

@@ -48,27 +48,27 @@ func TestBlockFillCoversOneGap(t *testing.T) {
 	present.AddRange(50, 60) // blocks 50-59
 	obs := NewObjectBlockState(present)
 
-	assert.Nil(t, obs.beginFill(5, 99), "a present block needs no fill")
-	f := obs.beginFill(10, 99)
+	assert.Nil(t, obs.beginFill(5, 99, false), "a present block needs no fill")
+	f := obs.beginFill(10, 99, false)
 	require.NotNil(t, f)
 	assert.Equal(t, [2]uint32{10, 49}, [2]uint32{f.start, f.end}, "a fill stops at the next present block")
-	assert.Nil(t, obs.beginFill(30, 99), "a block another fill covers needs no second fill")
+	assert.Nil(t, obs.beginFill(30, 99, false), "a block another fill covers needs no second fill")
 
-	tail := obs.beginFill(60, 99)
+	tail := obs.beginFill(60, 99, false)
 	require.NotNil(t, tail)
 	assert.Equal(t, [2]uint32{60, 99}, [2]uint32{tail.start, tail.end}, "with nothing present after it, a fill runs to the limit")
 
 	obs.endFill(f)
-	g := obs.beginFill(20, 70)
+	g := obs.beginFill(20, 70, false)
 	require.NotNil(t, g)
 	assert.Equal(t, [2]uint32{20, 49}, [2]uint32{g.start, g.end})
 	obs.endFill(g)
 	obs.endFill(tail)
-	assert.Nil(t, obs.beginFill(50, 99), "block 50 is present")
+	assert.Nil(t, obs.beginFill(50, 99, false), "block 50 is present")
 
 	// A reader waiting on a block a fill covers wakes when the fill ends
 	// without writing it, and then fetches it itself.
-	f = obs.beginFill(12, 12)
+	f = obs.beginFill(12, 12, false)
 	require.NotNil(t, f)
 	done := make(chan bool)
 	go func() { done <- obs.WaitForBlock(context.Background(), 12) }()
@@ -77,7 +77,7 @@ func TestBlockFillCoversOneGap(t *testing.T) {
 
 	// No fill starts into an object being dropped as bad.
 	obs.condemn(errors.New("condemned"))
-	assert.Nil(t, obs.beginFill(70, 99), "a condemned object gets no new fill")
+	assert.Nil(t, obs.beginFill(70, 99, false), "a condemned object gets no new fill")
 }
 
 // TestBackgroundFillPinsItsObject checks that a background fill pins the
@@ -115,7 +115,7 @@ func TestBackgroundFillPinsItsObject(t *testing.T) {
 	require.NoError(t, err)
 	res := &objectResolution{instanceHash: env.hash, pelicanURL: "pelican://" + strings.TrimPrefix(hang.URL, "http://") + "/test/object", meta: meta}
 
-	covered, started := pc.startFill(res, state, 0, tornObjectBlocks-1)
+	covered, started := pc.startFill(res, state, 0, tornObjectBlocks-1, false)
 	require.True(t, covered)
 	require.NotNil(t, started)
 	assert.True(t, env.storage.IsObjectPinned(env.hash), "a fill in progress must pin its object")
@@ -138,7 +138,7 @@ func TestCondemnedFillPublishesNothingToItsReaders(t *testing.T) {
 	require.NoError(t, err)
 	state, err := env.storage.GetSharedBlockState(env.hash)
 	require.NoError(t, err)
-	fill := state.beginFill(0, tornObjectBlocks-1)
+	fill := state.beginFill(0, tornObjectBlocks-1, false)
 	require.NotNil(t, fill)
 
 	rr, err := NewRangeReader(env.storage, env.hash, 0, -1, nil)
@@ -183,7 +183,7 @@ func TestRangeReadWaitsForTheFillItReliedOn(t *testing.T) {
 	require.NoError(t, err)
 	state, err := env.storage.GetSharedBlockState(env.hash)
 	require.NoError(t, err)
-	fill := state.beginFill(0, 1)
+	fill := state.beginFill(0, 1, false)
 	require.NotNil(t, fill)
 
 	rr, err := NewRangeReader(env.storage, env.hash, 0, -1, nil)
@@ -240,7 +240,7 @@ func returnsWithin(t *testing.T, fn func() error) error {
 // has reported; a verdict that condemns them must reach the reader.
 func TestReaderWaitsForTheFillThatWroteItsBlocks(t *testing.T) {
 	obs := NewObjectBlockState(nil)
-	fill := obs.beginFill(0, 9)
+	fill := obs.beginFill(0, 9, false)
 	require.NotNil(t, fill)
 	obs.AddRange(0, 9) // the fill has flushed every block, and not yet reported
 	rr := &RangeReader{blockState: obs, end: 10*BlockDataSize - 1}
@@ -292,7 +292,7 @@ func TestWholeReadWaitsForTheDownloadItJoined(t *testing.T) {
 // download: neither wrote what it served.
 func TestReaderDoesNotWaitForOtherFills(t *testing.T) {
 	obs := NewObjectBlockState(nil)
-	elsewhere := obs.beginFill(100, 109)
+	elsewhere := obs.beginFill(100, 109, false)
 	require.NotNil(t, elsewhere)
 	defer obs.endFill(elsewhere)
 	obs.SetDownloading()
@@ -370,4 +370,75 @@ func TestNoBackgroundTransferStartsOnceClosing(t *testing.T) {
 	assert.False(t, pc.whileOpen(func() { ran = true }), "nothing may start once the cache is closing")
 	assert.False(t, ran)
 	assert.True(t, pc.beginClose(), "the cache is already closing")
+}
+
+// fillStub is a RangeReader.startFill that, like PersistentCache.startFill,
+// begins the fill on the block state -- reporting the block covered when it
+// needs none -- writes its blocks at once, and records whether it was asked
+// to fill past the whole-object download.
+func fillStub(overDownloads *[]bool, obs *ObjectBlockState) func(block, last uint32, overDownload bool) (bool, <-chan struct{}) {
+	return func(block, last uint32, overDownload bool) (bool, <-chan struct{}) {
+		*overDownloads = append(*overDownloads, overDownload)
+		fill := obs.beginFill(block, last, overDownload)
+		if fill == nil {
+			return true, nil
+		}
+		go func() {
+			obs.AddRange(fill.start, fill.end)
+			obs.endFill(fill)
+		}()
+		return true, fill.done
+	}
+}
+
+// TestReaderFillsPastADistantDownload checks that a reader of blocks far
+// ahead of a whole-object download in progress fills them rather than wait
+// for the download, which writes in order and may take hours to get there.
+func TestReaderFillsPastADistantDownload(t *testing.T) {
+	obs := NewObjectBlockState(nil)
+	obs.SetDownloading()
+	defer obs.ClearDownloading()
+	obs.SetDownloadETA(func(uint32) time.Time { return time.Now().Add(time.Hour) })
+	var overDownloads []bool
+	rr := &RangeReader{blockState: obs, end: 100*BlockDataSize - 1}
+	rr.startFill = fillStub(&overDownloads, obs)
+
+	ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
+	defer cancel()
+	require.NoError(t, rr.ensureBlocks(ctx, 90, 99), "the reader must not wait for the distant download")
+	assert.Equal(t, []bool{true}, overDownloads, "one fill, past the download")
+}
+
+// TestReaderWaitsForANearDownload checks that a reader does wait for the
+// download when it is about to write the reader's blocks.
+func TestReaderWaitsForANearDownload(t *testing.T) {
+	obs := NewObjectBlockState(nil)
+	obs.SetDownloading()
+	defer obs.ClearDownloading()
+	obs.SetDownloadETA(func(uint32) time.Time { return time.Now() })
+	var overDownloads []bool
+	rr := &RangeReader{blockState: obs, end: 100*BlockDataSize - 1}
+	rr.startFill = fillStub(&overDownloads, obs)
+
+	go obs.AddRange(0, 9)
+	assert.NoError(t, returnsWithin(t, func() error { return rr.ensureBlocks(t.Context(), 0, 9) }))
+	assert.Empty(t, overDownloads, "no fill: the download wrote the blocks")
+}
+
+// TestReaderFillsPastAStalledDownload checks that a reader that waited for a
+// download expected to write its block soon stops waiting once the download
+// is late by the slack, and fills past it.
+func TestReaderFillsPastAStalledDownload(t *testing.T) {
+	defer func(slack time.Duration) { downloadWaitSlack = slack }(downloadWaitSlack)
+	downloadWaitSlack = 50 * time.Millisecond
+	obs := NewObjectBlockState(nil)
+	obs.SetDownloading()
+	defer obs.ClearDownloading()
+	obs.SetDownloadETA(func(uint32) time.Time { return time.Now() })
+	var overDownloads []bool
+	rr := &RangeReader{blockState: obs, end: 100*BlockDataSize - 1}
+	rr.startFill = fillStub(&overDownloads, obs)
+
+	assert.NoError(t, returnsWithin(t, func() error { return rr.ensureBlocks(t.Context(), 0, 9) }))
+	assert.Equal(t, []bool{true}, overDownloads, "one fill, past the stalled download")
 }
