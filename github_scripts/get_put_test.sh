@@ -56,6 +56,8 @@ export PELICAN_OIDC_CLIENTIDFILE="$GET_PUT_CONFIG/oidc-client-id"
 export PELICAN_OIDC_CLIENTSECRETFILE="$GET_PUT_CONFIG/oidc-client-secret"
 export PELICAN_ORIGIN_FEDERATIONPREFIX="/test"
 export PELICAN_ORIGIN_STORAGEPREFIX="$GET_PUT_ORIGIN"
+export PELICAN_REGISTRY_REQUIREORIGINAPPROVAL=false
+export PELICAN_REGISTRY_REQUIRECACHEAPPROVAL=false
 
 # Function to cleanup after test ends
 cleanup() {
@@ -92,6 +94,8 @@ cleanup() {
     unset GET_PUT_PUT_LOG
     unset GET_PUT_GET_LOG
     unset GET_PUT_TOKEN
+    unset PELICAN_REGISTRY_REQUIREORIGINAPPROVAL
+    unset PELICAN_REGISTRY_REQUIRECACHEAPPROVAL
 }
 
 # Make a file to use for testing

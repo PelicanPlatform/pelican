@@ -53,6 +53,9 @@ export PELICAN_ORIGIN_ENABLEPUBLICREADS=true
 export PELICAN_DIRECTOR_STATTIMEOUT=1s
 export PELICAN_LOGGING_LEVEL=debug
 
+export PELICAN_REGISTRY_REQUIREORIGINAPPROVAL=false
+export PELICAN_REGISTRY_REQUIRECACHEAPPROVAL=false
+
 # Report the xrootd found on PATH (do not alter PATH or fallback).
 if command -v xrootd >/dev/null 2>&1; then
     XROOTD_BIN="$(command -v xrootd)"
@@ -92,6 +95,8 @@ cleanup() {
     unset PELICAN_DIRECTOR_STATTIMEOUT
     unset PELICAN_LOGGING_LEVEL
     unset PELICAN_ORIGIN_PORT
+    unset PELICAN_REGISTRY_REQUIREORIGINAPPROVAL
+    unset PELICAN_REGISTRY_REQUIRECACHEAPPROVAL
 }
 
 echo "This is some random content in the random file" > "${TEST_ROOT}/origin/input.txt"

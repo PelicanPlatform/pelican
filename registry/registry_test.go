@@ -87,6 +87,14 @@ func TestHandleWildcard(t *testing.T) {
 
 	t.Run("match-wildcard-metadataHandler", func(t *testing.T) {
 		server_utils.ResetTestState()
+
+		// We need to disable admin approval for Origins because this is an automated test
+		// It is hard to go through admin approval flow in an automated test
+		require.NoError(t, param.Registry_RequireOriginApproval.Set(false))
+
+		// Note: This is not a cache prefix because cache prefix has the form /caches/*
+		// This is a namespace prefix, which only requires admin approval for the Origin
+		// where the namespace is located. So, we only need to disable Origin approval
 		mockPrefix := "/testnamespace/foo"
 
 		setupMockRegistryDB(t)
@@ -107,7 +115,7 @@ func TestHandleWildcard(t *testing.T) {
 
 		r.ServeHTTP(w, req)
 
-		// Return 200 as by default Registry.RequireOriginApproval == false
+		// Expect HTTP 200.
 		assert.Equal(t, http.StatusOK, w.Code)
 		// The response is re-serialized through server_utils.WriteJWKS, so
 		// compare by parsed contents rather than raw bytes.
