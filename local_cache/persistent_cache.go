@@ -77,6 +77,10 @@ var ErrNoStore = errors.New("origin response has Cache-Control: no-store")
 // subsequent callers must retry independently.
 var ErrNoStoreRetry = errors.New("no-store download in progress; retry independently")
 
+// errCacheClosing fails a download that would start a background transfer
+// once the cache has begun to close (see whileOpen).
+var errCacheClosing = errors.New("the cache is closing")
+
 // isEvictedError returns true when err is characteristic of an object that was
 // evicted between resolveObject (which found its metadata) and the subsequent
 // attempt to open a reader.  This lets GetSeekableReader / GetRange retry
@@ -197,7 +201,7 @@ type PersistentCache struct {
 	// Active downloads tracking
 	activeDownloads   map[ObjectHash]*persistentDownload
 	activeDownloadsMu sync.RWMutex
-	downloadWg        sync.WaitGroup     // Tracks in-flight download goroutines (adopted transfers + inline drains)
+	downloadWg        sync.WaitGroup     // Tracks in-flight download goroutines (adopted transfers + inline drains); add to it only through whileOpen
 	downloadCtx       context.Context    // Cancelled during Close() to stop in-flight transfers
 	downloadCancel    context.CancelFunc // Cancels downloadCtx
 
@@ -219,6 +223,9 @@ type PersistentCache struct {
 	wasConfigured bool
 	closed        atomic.Bool
 	closeDone     chan struct{} // closed after Close() finishes its work
+	// openMu orders starting a background transfer against Close: see
+	// whileOpen.  Close sets closed under the write lock.
+	openMu sync.RWMutex
 
 	// Shared prefetch semaphore: limits total concurrent prefetch/background
 	// download operations across all BlockFetcherV2 instances and
@@ -969,7 +976,7 @@ func (pc *PersistentCache) Config(egrp *errgroup.Group) error {
 //  4. Stop the consistency checker.
 //  5. Close the database.
 func (pc *PersistentCache) Close() error {
-	if pc.closed.Swap(true) {
+	if pc.beginClose() {
 		// Another goroutine is already closing; wait for it to finish
 		// so the caller can be sure all resources are released.
 		<-pc.closeDone
@@ -1355,6 +1362,34 @@ func (pc *PersistentCache) newFetchingRangeReader(
 	return rr, nil
 }
 
+// beginClose marks the cache as closing, once every start already under way
+// (see whileOpen) has finished, and reports whether it already was.
+func (pc *PersistentCache) beginClose() (alreadyClosing bool) {
+	pc.openMu.Lock()
+	defer pc.openMu.Unlock()
+	return pc.closed.Swap(true)
+}
+
+// whileOpen runs start, which registers a background goroutine with
+// downloadWg and launches it, unless the cache is closing; it reports
+// whether start ran.  Close waits on downloadWg once it has set closed, and a
+// WaitGroup must not gain its first member while being waited on, so a
+// check of closed followed by downloadWg.Add could, between the two, let
+// Close return -- shutting down the transfer engine and the database -- with
+// the goroutine still to start.  Close sets closed under the write lock,
+// (beginClose), which a start holds the read lock against, so a start either
+// happens wholly before Close sets closed (and is waited for) or sees it set.
+// start must not block.
+func (pc *PersistentCache) whileOpen(start func()) bool {
+	pc.openMu.RLock()
+	defer pc.openMu.RUnlock()
+	if pc.closed.Load() {
+		return false
+	}
+	start()
+	return true
+}
+
 // startFill starts a background fill of a partly cached object, for a reader
 // that needs a block that no download or fill is writing: one transfer from
 // that block to the next block present, or to last (the end of the reader's
@@ -1398,16 +1433,24 @@ func (pc *PersistentCache) startFill(res *objectResolution, state *ObjectBlockSt
 	// timeout, so it pins the object itself, as a reader does: eviction
 	// must not delete an object under a writer still filling it.
 	unpin := pc.storage.PinObject(res.instanceHash)
-	pc.downloadWg.Add(1)
-	go func() {
-		defer pc.downloadWg.Done()
-		defer unpin()
-		defer state.endFill(fill)
-		defer bf.Close()
-		if err := bf.Fill(pc.downloadCtx, fill.start, fill.end); err != nil {
-			log.Debugf("Background fill of blocks %d-%d of %s ended early: %v", fill.start, fill.end, res.instanceHash, err)
-		}
-	}()
+	launched := pc.whileOpen(func() {
+		pc.downloadWg.Add(1)
+		go func() {
+			defer pc.downloadWg.Done()
+			defer unpin()
+			defer state.endFill(fill)
+			defer bf.Close()
+			if err := bf.Fill(pc.downloadCtx, fill.start, fill.end); err != nil {
+				log.Debugf("Background fill of blocks %d-%d of %s ended early: %v", fill.start, fill.end, res.instanceHash, err)
+			}
+		}()
+	})
+	if !launched {
+		bf.Close()
+		state.endFill(fill)
+		unpin()
+		return false, nil
+	}
 	return true, fill.done
 }
 
@@ -2342,19 +2385,24 @@ func (pc *PersistentCache) performDownload(ctx context.Context, dl *persistentDo
 
 			// Spawn a background goroutine to finish receiving the transfer
 			// and close the pipe writer when done.  The caller reads from pr.
+			if !pc.whileOpen(func() {
+				pc.downloadWg.Add(1)
+				pc.egrp.Go(func() error {
+					defer pc.downloadWg.Done()
+					defer tc.Close()
+					defer close(dl.completionDone)
+					if err := transferResultErr(awaitResult()); err != nil {
+						pw.CloseWithError(err)
+					} else {
+						pw.Close()
+					}
+					return nil
+				})
+			}) {
+				pw.CloseWithError(errCacheClosing)
+				return errCacheClosing
+			}
 			tcHandedOff = true
-			pc.downloadWg.Add(1)
-			pc.egrp.Go(func() error {
-				defer pc.downloadWg.Done()
-				defer tc.Close()
-				defer close(dl.completionDone)
-				if err := transferResultErr(awaitResult()); err != nil {
-					pw.CloseWithError(err)
-				} else {
-					pw.Close()
-				}
-				return nil
-			})
 
 			return ErrNoStore
 		}
@@ -2511,9 +2559,19 @@ func (pc *PersistentCache) performDownload(ctx context.Context, dl *persistentDo
 		resultChan <- result
 	}
 
+	if !pc.whileOpen(func() {
+		fetcher.AdoptTransfer(dlCtx, dl.cancelFn, tc, dw, resultChan, pc.egrp, &pc.downloadWg,
+			func(err error) { pc.endAdoptedDownload(dl, err) })
+	}) {
+		fetcher.Close()
+		// Readers may already be waiting on this download (see
+		// SetDownloading above); no fetcher will end it for them.
+		if sharedState, err := pc.storage.GetSharedBlockState(dl.instanceHash); err == nil {
+			sharedState.ClearDownloading()
+		}
+		return errCacheClosing
+	}
 	tcHandedOff = true
-	fetcher.AdoptTransfer(dlCtx, dl.cancelFn, tc, dw, resultChan, pc.egrp, &pc.downloadWg,
-		func(err error) { pc.endAdoptedDownload(dl, err) })
 
 	return nil
 }
