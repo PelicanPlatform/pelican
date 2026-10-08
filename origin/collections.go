@@ -121,6 +121,28 @@ func hasExplicitBearerCollectionScope(ctx *gin.Context, scope token_scopes.Token
 	return ok
 }
 
+// requireCaller resolves the authenticated caller. AuthHandler has already
+// refused unauthenticated requests, so an empty user gets 401 rather than
+// 500. On failure the response is written and ok is false.
+func requireCaller(ctx *gin.Context) (user, userId string, groups []string, ok bool) {
+	user, userId, groups, err := web_ui.GetUserGroups(ctx)
+	if err != nil {
+		ctx.JSON(http.StatusInternalServerError, server_structs.SimpleApiResp{
+			Status: server_structs.RespFailed,
+			Msg:    fmt.Sprintf("Failed to get user from context: %v", err),
+		})
+		return "", "", nil, false
+	}
+	if user == "" {
+		ctx.JSON(http.StatusUnauthorized, server_structs.SimpleApiResp{
+			Status: server_structs.RespFailed,
+			Msg:    "Authentication required to perform this operation",
+		})
+		return "", "", nil, false
+	}
+	return user, userId, groups, true
+}
+
 // verifyTokenWithCollectionScope verifies a token with standard verification first,
 // and falls back to manual collection scope verification if standard verification fails.
 // This handles cases where OA4MP adds collection IDs to scopes (e.g., "collection.read:test_collection").
@@ -581,19 +603,8 @@ func handleListCollections(ctx *gin.Context) {
 		return
 	}
 
-	user, userId, groups, err := web_ui.GetUserGroups(ctx)
-	if err != nil {
-		ctx.JSON(http.StatusInternalServerError, server_structs.SimpleApiResp{
-			Status: server_structs.RespFailed,
-			Msg:    fmt.Sprintf("Failed to get user from context: %v", err),
-		})
-		return
-	}
-	if user == "" {
-		ctx.JSON(http.StatusInternalServerError, server_structs.SimpleApiResp{
-			Status: server_structs.RespFailed,
-			Msg:    "Failed to get user from context",
-		})
+	user, userId, groups, ok := requireCaller(ctx)
+	if !ok {
 		return
 	}
 
@@ -777,18 +788,8 @@ func handleCreateCollection(ctx *gin.Context) {
 		return
 	}
 
-	user, userId, _, err := web_ui.GetUserGroups(ctx)
-	if err != nil {
-		ctx.JSON(http.StatusInternalServerError, server_structs.SimpleApiResp{
-			Status: server_structs.RespFailed,
-			Msg:    fmt.Sprintf("Failed to get user from context: %v", err),
-		})
-	}
-	if user == "" {
-		ctx.JSON(http.StatusInternalServerError, server_structs.SimpleApiResp{
-			Status: server_structs.RespFailed,
-			Msg:    "Failed to get user from context",
-		})
+	_, userId, _, ok := requireCaller(ctx)
+	if !ok {
 		return
 	}
 
@@ -849,18 +850,8 @@ func handleUpdateCollection(ctx *gin.Context) {
 		return
 	}
 
-	user, userId, groups, err := web_ui.GetUserGroups(ctx)
-	if err != nil {
-		ctx.JSON(http.StatusInternalServerError, server_structs.SimpleApiResp{
-			Status: server_structs.RespFailed,
-			Msg:    fmt.Sprintf("Failed to get user from context: %v", err),
-		})
-	}
-	if user == "" {
-		ctx.JSON(http.StatusInternalServerError, server_structs.SimpleApiResp{
-			Status: server_structs.RespFailed,
-			Msg:    "Failed to get user from context",
-		})
+	user, userId, groups, ok := requireCaller(ctx)
+	if !ok {
 		return
 	}
 
@@ -920,18 +911,8 @@ func handleGetCollectionMetadata(ctx *gin.Context) {
 		return
 	}
 
-	user, userId, groups, err := web_ui.GetUserGroups(ctx)
-	if err != nil {
-		ctx.JSON(http.StatusInternalServerError, server_structs.SimpleApiResp{
-			Status: server_structs.RespFailed,
-			Msg:    fmt.Sprintf("Failed to get user from context: %v", err),
-		})
-	}
-	if user == "" {
-		ctx.JSON(http.StatusInternalServerError, server_structs.SimpleApiResp{
-			Status: server_structs.RespFailed,
-			Msg:    "Failed to get user from context",
-		})
+	user, userId, groups, ok := requireCaller(ctx)
+	if !ok {
 		return
 	}
 
@@ -998,18 +979,8 @@ func handlePutCollectionMetadata(ctx *gin.Context) {
 		value = string(bodyBytes)
 	}
 
-	user, userId, groups, err := web_ui.GetUserGroups(ctx)
-	if err != nil {
-		ctx.JSON(http.StatusInternalServerError, server_structs.SimpleApiResp{
-			Status: server_structs.RespFailed,
-			Msg:    fmt.Sprintf("Failed to get user from context: %v", err),
-		})
-	}
-	if user == "" {
-		ctx.JSON(http.StatusInternalServerError, server_structs.SimpleApiResp{
-			Status: server_structs.RespFailed,
-			Msg:    "Failed to get user from context",
-		})
+	user, userId, groups, ok := requireCaller(ctx)
+	if !ok {
 		return
 	}
 
@@ -1060,18 +1031,8 @@ func handleDeleteCollectionMetadata(ctx *gin.Context) {
 		return
 	}
 
-	user, userId, groups, err := web_ui.GetUserGroups(ctx)
-	if err != nil {
-		ctx.JSON(http.StatusInternalServerError, server_structs.SimpleApiResp{
-			Status: server_structs.RespFailed,
-			Msg:    fmt.Sprintf("Failed to get user from context: %v", err),
-		})
-	}
-	if user == "" {
-		ctx.JSON(http.StatusInternalServerError, server_structs.SimpleApiResp{
-			Status: server_structs.RespFailed,
-			Msg:    "Failed to get user from context",
-		})
+	user, userId, groups, ok := requireCaller(ctx)
+	if !ok {
 		return
 	}
 
@@ -1113,18 +1074,8 @@ func handleGetCollection(ctx *gin.Context) {
 		return
 	}
 
-	user, userId, groups, err := web_ui.GetUserGroups(ctx)
-	if err != nil {
-		ctx.JSON(http.StatusInternalServerError, server_structs.SimpleApiResp{
-			Status: server_structs.RespFailed,
-			Msg:    fmt.Sprintf("Failed to get user from context: %v", err),
-		})
-	}
-	if user == "" {
-		ctx.JSON(http.StatusInternalServerError, server_structs.SimpleApiResp{
-			Status: server_structs.RespFailed,
-			Msg:    "Failed to get user from context",
-		})
+	user, userId, groups, ok := requireCaller(ctx)
+	if !ok {
 		return
 	}
 
@@ -1226,20 +1177,8 @@ func handleDeleteCollection(ctx *gin.Context) {
 		return
 	}
 
-	user, userId, groups, err := web_ui.GetUserGroups(ctx)
-	if err != nil {
-		ctx.JSON(http.StatusInternalServerError, server_structs.SimpleApiResp{
-			Status: server_structs.RespFailed,
-			Msg:    fmt.Sprintf("Failed to get user from context: %v", err),
-		})
-		return
-	}
-
-	if user == "" {
-		ctx.JSON(http.StatusInternalServerError, server_structs.SimpleApiResp{
-			Status: server_structs.RespFailed,
-			Msg:    "Failed to get user from context",
-		})
+	user, userId, groups, ok := requireCaller(ctx)
+	if !ok {
 		return
 	}
 
@@ -1310,12 +1249,8 @@ func handleListCollectionCandidateOwners(ctx *gin.Context) {
 		return
 	}
 
-	user, userId, groups, err := web_ui.GetUserGroups(ctx)
-	if err != nil || user == "" {
-		ctx.JSON(http.StatusInternalServerError, server_structs.SimpleApiResp{
-			Status: server_structs.RespFailed,
-			Msg:    "Failed to get user from context",
-		})
+	user, userId, groups, ok := requireCaller(ctx)
+	if !ok {
 		return
 	}
 	identity := web_ui.UserIdentity{
@@ -1384,12 +1319,8 @@ func handleListCollectionShares(ctx *gin.Context) {
 		return
 	}
 
-	user, userId, groups, err := web_ui.GetUserGroups(ctx)
-	if err != nil || user == "" {
-		ctx.JSON(http.StatusInternalServerError, server_structs.SimpleApiResp{
-			Status: server_structs.RespFailed,
-			Msg:    "Failed to get user from context",
-		})
+	user, userId, groups, ok := requireCaller(ctx)
+	if !ok {
 		return
 	}
 	identity := web_ui.UserIdentity{
@@ -1526,12 +1457,8 @@ func handleCreateCollectionShare(ctx *gin.Context) {
 		return
 	}
 
-	user, userId, groups, err := web_ui.GetUserGroups(ctx)
-	if err != nil || user == "" {
-		ctx.JSON(http.StatusInternalServerError, server_structs.SimpleApiResp{
-			Status: server_structs.RespFailed,
-			Msg:    "Failed to get user from context",
-		})
+	user, userId, groups, ok := requireCaller(ctx)
+	if !ok {
 		return
 	}
 	identity := web_ui.UserIdentity{
@@ -1689,12 +1616,8 @@ func handleCreateCollectionOwnershipInvite(ctx *gin.Context) {
 		expiry = d
 	}
 
-	user, userId, groups, err := web_ui.GetUserGroups(ctx)
-	if err != nil || user == "" {
-		ctx.JSON(http.StatusInternalServerError, server_structs.SimpleApiResp{
-			Status: server_structs.RespFailed,
-			Msg:    "Failed to get user from context",
-		})
+	user, userId, groups, ok := requireCaller(ctx)
+	if !ok {
 		return
 	}
 	identity := web_ui.UserIdentity{
@@ -1748,18 +1671,8 @@ func handleGetCollectionAcls(ctx *gin.Context) {
 		return
 	}
 
-	user, userId, groups, err := web_ui.GetUserGroups(ctx)
-	if err != nil {
-		ctx.JSON(http.StatusInternalServerError, server_structs.SimpleApiResp{
-			Status: server_structs.RespFailed,
-			Msg:    fmt.Sprintf("Failed to get user from context: %v", err),
-		})
-	}
-	if user == "" {
-		ctx.JSON(http.StatusInternalServerError, server_structs.SimpleApiResp{
-			Status: server_structs.RespFailed,
-			Msg:    "Failed to get user from context",
-		})
+	user, userId, groups, ok := requireCaller(ctx)
+	if !ok {
 		return
 	}
 
@@ -1847,18 +1760,8 @@ func handleGrantCollectionAcl(ctx *gin.Context) {
 		return
 	}
 
-	user, userId, groups, err := web_ui.GetUserGroups(ctx)
-	if err != nil {
-		ctx.JSON(http.StatusInternalServerError, server_structs.SimpleApiResp{
-			Status: server_structs.RespFailed,
-			Msg:    fmt.Sprintf("Failed to get user from context: %v", err),
-		})
-	}
-	if user == "" {
-		ctx.JSON(http.StatusInternalServerError, server_structs.SimpleApiResp{
-			Status: server_structs.RespFailed,
-			Msg:    "Failed to get user from context",
-		})
+	user, userId, groups, ok := requireCaller(ctx)
+	if !ok {
 		return
 	}
 
@@ -1952,18 +1855,8 @@ func handleRevokeCollectionAcl(ctx *gin.Context) {
 		return
 	}
 
-	user, userId, groups, err := web_ui.GetUserGroups(ctx)
-	if err != nil {
-		ctx.JSON(http.StatusInternalServerError, server_structs.SimpleApiResp{
-			Status: server_structs.RespFailed,
-			Msg:    fmt.Sprintf("Failed to get user from context: %v", err),
-		})
-	}
-	if user == "" {
-		ctx.JSON(http.StatusInternalServerError, server_structs.SimpleApiResp{
-			Status: server_structs.RespFailed,
-			Msg:    "Failed to get user from context",
-		})
+	user, userId, groups, ok := requireCaller(ctx)
+	if !ok {
 		return
 	}
 
