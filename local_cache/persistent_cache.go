@@ -1330,8 +1330,8 @@ func (pc *PersistentCache) newFetchingRangeReader(
 		closeLazy()
 		return nil, err
 	}
-	rr.startFill = func(block, last uint32) (bool, <-chan struct{}) {
-		return pc.startFill(res, rr.blockState, block, last)
+	rr.startFill = func(block, last uint32, overDownload bool) (bool, <-chan struct{}) {
+		return pc.startFill(res, rr.blockState, block, last, overDownload)
 	}
 
 	// If a download is backing this reader, expose its terminal state so
@@ -1408,11 +1408,11 @@ func (pc *PersistentCache) whileOpen(start func()) bool {
 // early for a benign reason (see transferStopKeepsData), but drops the object
 // -- telling its readers why -- if it fails in a way that condemns what it
 // wrote (see BlockFetcherV2.dropIfCondemned).
-func (pc *PersistentCache) startFill(res *objectResolution, state *ObjectBlockState, block, last uint32) (covered bool, started <-chan struct{}) {
+func (pc *PersistentCache) startFill(res *objectResolution, state *ObjectBlockState, block, last uint32, overDownload bool) (covered bool, started <-chan struct{}) {
 	if pc.closed.Load() || res.meta == nil || res.meta.ContentLength <= 0 {
 		return false, nil
 	}
-	fill := state.beginFill(block, last)
+	fill := state.beginFill(block, last, overDownload)
 	if fill == nil {
 		// Already written, or something else is writing it.
 		return true, nil

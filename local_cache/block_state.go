@@ -58,6 +58,10 @@ type ObjectBlockState struct {
 	downloading bool
 	// downloadDone is closed when the download that set downloading ends.
 	downloadDone chan struct{}
+	// downloadETA, once the download's fetcher has adopted it, estimates
+	// when the download will have written a block (the zero time if it
+	// already has); see writerOf.  Guarded by mu.
+	downloadETA func(block uint32) time.Time
 
 	// fills are the background fills of part of the object in progress
 	// (see beginFill); WaitForBlock waits on one that covers its block as
@@ -260,12 +264,85 @@ func (obs *ObjectBlockState) SetDownloading() {
 func (obs *ObjectBlockState) ClearDownloading() {
 	obs.mu.Lock()
 	obs.downloading = false
+	obs.downloadETA = nil
 	if obs.downloadDone != nil {
 		close(obs.downloadDone)
 		obs.downloadDone = nil
 	}
 	obs.mu.Unlock()
 	obs.cond.Broadcast()
+}
+
+// SetDownloadETA records how to estimate when the whole-object download in
+// progress will have written a block.  ClearDownloading forgets it.
+func (obs *ObjectBlockState) SetDownloadETA(eta func(block uint32) time.Time) {
+	obs.mu.Lock()
+	defer obs.mu.Unlock()
+	if obs.downloading {
+		obs.downloadETA = eta
+	}
+}
+
+// downloadWaitSlack is how soon the whole-object download must be expected
+// to write a block for a reader to wait for it, and how much longer than
+// that estimate the reader then waits.  A variable for tests.
+var downloadWaitSlack = ETAStaleThreshold
+
+// pendingWriter is what, if anything, is due to write a missing block, as a
+// reader sees it; see writerOf.
+type pendingWriter int
+
+const (
+	noWriter        pendingWriter = iota // nothing: fetch or fill it
+	alreadyWritten                       // the block is present after all
+	fillWriter                           // a fill covers it: wait for the fill
+	downloadWriter                       // the download will reach it soon: wait, within a bound
+	distantDownload                      // the download will not reach it soon: fill past it
+)
+
+// writerOf says what is due to write a missing block, and for a download
+// due soon how long a reader should wait for it (zero for no bound).
+//
+// The whole-object download writes the object in order, so a block far
+// ahead of it may be hours away from a slow origin; a reader that waited for
+// it -- keeping the download alive as it waited -- would wait that long for
+// what a fill fetches in seconds.  So a reader waits for the download only
+// when it is expected to write the block within downloadWaitSlack, and then
+// for at most that estimate and the slack again: a download slower than its
+// estimate is filled past, too.  A fill is bounded by the range of the
+// reader that started it, so a reader waits for a fill without a bound, as
+// it does for a download whose fetcher has not yet given an estimate.
+func (obs *ObjectBlockState) writerOf(block uint32) (writer pendingWriter, bound time.Duration) {
+	obs.mu.RLock()
+	if obs.bitmap.Contains(block) {
+		obs.mu.RUnlock()
+		return alreadyWritten, 0
+	}
+	if obs.condemned != nil {
+		obs.mu.RUnlock()
+		return noWriter, 0
+	}
+	if obs.coveredByFillLocked(block) {
+		obs.mu.RUnlock()
+		return fillWriter, 0
+	}
+	downloading, eta := obs.downloading, obs.downloadETA
+	obs.mu.RUnlock()
+	if !downloading {
+		return noWriter, 0
+	}
+	if eta == nil {
+		return downloadWriter, 0
+	}
+	// The estimate takes the fetch's own lock; call it outside ours.
+	until := time.Duration(0)
+	if at := eta(block); !at.IsZero() {
+		until = max(time.Until(at), 0)
+	}
+	if until > downloadWaitSlack {
+		return distantDownload, 0
+	}
+	return downloadWriter, until + downloadWaitSlack
 }
 
 // writersOver returns what is still due to write any of the given blocks:
@@ -324,9 +401,12 @@ func (obs *ObjectBlockState) beingFilledLocked(block uint32) bool {
 	if obs.condemned != nil {
 		return false
 	}
-	if obs.downloading {
-		return true
-	}
+	return obs.downloading || obs.coveredByFillLocked(block)
+}
+
+// coveredByFillLocked reports whether a fill in progress covers the block.
+// The caller holds mu.
+func (obs *ObjectBlockState) coveredByFillLocked(block uint32) bool {
 	for f := range obs.fills {
 		if f.start <= block && block <= f.end {
 			return true
@@ -337,15 +417,19 @@ func (obs *ObjectBlockState) beingFilledLocked(block uint32) bool {
 
 // beginFill registers a background fill that starts at a missing block and
 // runs up to the next block already present, or to last, whichever comes
-// first.  It returns nil when the block is present, or a download or another
-// fill is already due to write it: the caller should wait for it instead
-// (see WaitForBlock).  It also returns nil once the object is condemned, so
-// that no fill starts into an instance being dropped; the waiting caller then
-// finds the reason.  Every fill begun must be ended with endFill.
-func (obs *ObjectBlockState) beginFill(block, last uint32) *blockFill {
+// first.  It returns nil when the block is present, or another fill -- or,
+// unless overDownload, the whole-object download -- is already due to write
+// it: the caller should wait for it instead (see WaitForBlock).  A reader
+// passes overDownload when the download will not reach the block soon (see
+// writerOf); the download skips blocks a fill has written.  beginFill also
+// returns nil once the object is condemned, so that no fill starts into an
+// instance being dropped; the waiting caller then finds the reason.  Every
+// fill begun must be ended with endFill.
+func (obs *ObjectBlockState) beginFill(block, last uint32, overDownload bool) *blockFill {
 	obs.mu.Lock()
 	defer obs.mu.Unlock()
-	if block > last || obs.condemned != nil || obs.bitmap.Contains(block) || obs.beingFilledLocked(block) {
+	if block > last || obs.condemned != nil || obs.bitmap.Contains(block) ||
+		obs.coveredByFillLocked(block) || (obs.downloading && !overDownload) {
 		return nil
 	}
 	end := last

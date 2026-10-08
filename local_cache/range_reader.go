@@ -27,6 +27,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/RoaringBitmap/roaring"
 	"github.com/pkg/errors"
@@ -164,7 +165,7 @@ type RangeReader struct {
 	// missing block up to the next block present, or to last, and reports
 	// whether one now covers the block, and if this call started it, a
 	// channel closed when it ends (see PersistentCache.startFill).
-	startFill func(block, last uint32) (covered bool, started <-chan struct{})
+	startFill func(block, last uint32, overDownload bool) (covered bool, started <-chan struct{})
 
 	// fillRanges, when fillLimited, are the byte ranges of the object a
 	// client asked for: a fill started by this reader stays within the one
@@ -404,9 +405,21 @@ func (rr *RangeReader) ensureBlocks(ctx context.Context, startBlock, endBlock ui
 			continue
 		}
 
-		// Try waiting for the background download to produce this block.
-		if rr.blockState.WaitForBlock(ctx, block) {
+		// Wait for a download or fill due to write this block -- unless it
+		// is the whole-object download and it will not reach the block soon,
+		// in which case a fill fetches it sooner (see writerOf).
+		writer, bound := rr.blockState.writerOf(block)
+		if writer == alreadyWritten {
 			continue
+		}
+		overDownload := writer == distantDownload
+		if writer == fillWriter || writer == downloadWriter {
+			if rr.waitForBlock(ctx, block, bound) {
+				continue
+			}
+			// The download did not write the block within its estimate and
+			// the slack: it is slower than it looked, so fill past it.
+			overDownload = writer == downloadWriter
 		}
 
 		// If the context is done, bail out.
@@ -424,7 +437,7 @@ func (rr *RangeReader) ensureBlocks(ctx context.Context, startBlock, endBlock ui
 		// from here to the next block present (or the end of this reader's
 		// range), which this and every other reader then wait on.
 		if last, ok := rr.fillLimit(); ok && block <= last && rr.startFill != nil {
-			if covered, _ := rr.startFill(block, last); covered {
+			if covered, _ := rr.startFill(block, last, overDownload); covered {
 				if rr.blockState.WaitForBlock(ctx, block) {
 					continue
 				}
@@ -461,6 +474,17 @@ func (rr *RangeReader) ensureBlocks(ctx context.Context, startBlock, endBlock ui
 		block = fetchEnd
 	}
 	return nil
+}
+
+// waitForBlock waits for a block as WaitForBlock does, for at most bound
+// when bound is positive.
+func (rr *RangeReader) waitForBlock(ctx context.Context, block uint32, bound time.Duration) bool {
+	if bound > 0 {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(ctx, bound)
+		defer cancel()
+	}
+	return rr.blockState.WaitForBlock(ctx, block)
 }
 
 // LimitFill bounds the background fills this reader may start (see
