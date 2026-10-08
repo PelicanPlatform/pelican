@@ -74,6 +74,13 @@ function Config({ metadata }: { metadata: ParameterMetadataRecord }) {
     return flattenObject(data || {});
   }, [data]);
 
+  // Server.ConfigReadOnly makes the server reject config writes, so render the
+  // page as a view rather than an editor. The value comes from the config we
+  // just fetched; the server enforces it regardless of what the UI does.
+  const readOnly = useMemo(() => {
+    return serverConfig['Server.ConfigReadOnly'] === true;
+  }, [serverConfig]);
+
   const setPatch = useCallback(
     (fieldPatch: any) => {
       _setPatch((p: any) => {
@@ -112,7 +119,7 @@ function Config({ metadata }: { metadata: ParameterMetadataRecord }) {
           <RestartBox />
         </Grid>
       </Grid>
-      <Grid container spacing={2} sx={{ mt: -5 }}>
+      <Grid container spacing={2}>
         <Grid
           size={{
             xs: 12,
@@ -120,9 +127,17 @@ function Config({ metadata }: { metadata: ParameterMetadataRecord }) {
             lg: 6,
           }}
         >
-          <Box>
+          <Box sx={{ mt: error || readOnly ? 2 : 0 }}>
             {error && (
               <Alert severity={'warning'}>{(error as Error).message}</Alert>
+            )}
+            {readOnly && (
+              <Alert severity={'info'}>
+                This configuration is read-only because{' '}
+                <code>Server.ConfigReadOnly</code> is enabled. To edit it, set
+                that parameter to <code>false</code> in a configuration file and
+                restart the server.
+              </Alert>
             )}
           </Box>
           <ConfigDisplay
@@ -130,10 +145,11 @@ function Config({ metadata }: { metadata: ParameterMetadataRecord }) {
             patch={patch}
             metadata={metadata}
             onChange={setPatch}
+            readOnly={readOnly}
           />
           <Snackbar
             anchorOrigin={{ vertical: 'bottom', horizontal: 'center' }}
-            open={updatesPending}
+            open={updatesPending && !readOnly}
             message='Save Changes'
             action={
               <Box>

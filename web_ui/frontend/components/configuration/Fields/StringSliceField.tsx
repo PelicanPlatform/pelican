@@ -13,6 +13,7 @@ export type StringSliceFieldProps = {
   name: string;
   value: string[];
   focused?: boolean;
+  readOnly?: boolean;
   onChange: (value: string[]) => void;
   verify?: (value: string[]) => string | undefined;
 };
@@ -22,6 +23,7 @@ const StringSliceField = ({
   name,
   value,
   focused,
+  readOnly,
   verify,
 }: StringSliceFieldProps) => {
   const id = useMemo(() => createId(name), [name]);
@@ -41,6 +43,7 @@ const StringSliceField = ({
   const handleKeyDown = useCallback(
     (event: KeyboardEvent) => {
       if (
+        !readOnly &&
         event.key == 'Enter' &&
         event.target instanceof HTMLInputElement &&
         event.target.value != ''
@@ -59,7 +62,7 @@ const StringSliceField = ({
         onChange(newValue);
       }
     },
-    [onChange, verify, bufferValue]
+    [onChange, verify, bufferValue, readOnly]
   );
 
   const error = useMemo(
@@ -70,10 +73,10 @@ const StringSliceField = ({
   const helperText = useMemo(() => {
     if (error) {
       return error;
-    } else if (inputValue != '') {
+    } else if (inputValue != '' && !readOnly) {
       return 'Press enter to add';
     }
-  }, [error, inputValue]);
+  }, [error, inputValue, readOnly]);
 
   return (
     <>
@@ -87,7 +90,7 @@ const StringSliceField = ({
         focused={focused}
         helperText={helperText}
         onChange={(e) => setInputValue(e.target.value)}
-        InputProps={{ onKeyDown: handleKeyDown }}
+        InputProps={{ onKeyDown: handleKeyDown, readOnly }}
         error={error !== undefined}
       />
       <Box>
@@ -147,6 +150,7 @@ const StringSliceField = ({
               <StringSliceCard
                 key={val}
                 value={val}
+                readOnly={readOnly}
                 onDelete={() => {
                   const newValue = bufferValue.filter((v) => v != val);
                   onChange(newValue);
@@ -185,6 +189,7 @@ const StringSliceField = ({
 
 interface StringSliceCardProps {
   value: string;
+  readOnly?: boolean;
   onDelete: () => void;
   onMoveUp: () => void;
   onMoveDown: () => void;
@@ -192,6 +197,7 @@ interface StringSliceCardProps {
 
 const StringSliceCard = ({
   value,
+  readOnly,
   onDelete,
   onMoveDown,
   onMoveUp,
@@ -221,21 +227,23 @@ const StringSliceCard = ({
       >
         {value}
       </Box>
-      <Box>
-        <Tooltip title={'Move Up'} onClick={onMoveUp}>
-          <IconButton size={'small'}>
-            <KeyboardArrowUp />
+      {!readOnly && (
+        <Box>
+          <Tooltip title={'Move Up'} onClick={onMoveUp}>
+            <IconButton size={'small'}>
+              <KeyboardArrowUp />
+            </IconButton>
+          </Tooltip>
+          <Tooltip title={'Move Down'}>
+            <IconButton size={'small'} onClick={onMoveDown}>
+              <KeyboardArrowDown />
+            </IconButton>
+          </Tooltip>
+          <IconButton size={'small'} onClick={onDelete}>
+            <Close />
           </IconButton>
-        </Tooltip>
-        <Tooltip title={'Move Down'}>
-          <IconButton size={'small'} onClick={onMoveDown}>
-            <KeyboardArrowDown />
-          </IconButton>
-        </Tooltip>
-        <IconButton size={'small'} onClick={onDelete}>
-          <Close />
-        </IconButton>
-      </Box>
+        </Box>
+      )}
     </Box>
   );
 };
