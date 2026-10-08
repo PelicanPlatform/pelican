@@ -330,6 +330,61 @@ func TestCollectionsAPI(t *testing.T) {
 			"a collection admin's bearer token must authorize create (body: %s)", recorder.Body.String())
 	})
 
+	t.Run("per-collection-bearer-scope-authenticates-but-db-authorizes", func(t *testing.T) {
+		// The CLI path for per-collection operations: the issuer mints
+		// "collection.modify:/<id>" to the collection's owner, and the
+		// API accepts that token for THAT collection only. Whether the
+		// caller may actually modify is still the DB's call — a
+		// matching scope on a non-owner's token still gets the 404.
+		ownerToken := generateToken(t, []token_scopes.TokenScope{token_scopes.WebUi_Access}, "test-user-owner")
+		createReq := CreateCollectionReq{
+			Name:       "bearer-modify-probe",
+			Namespace:  "/test1",
+			Visibility: "private",
+		}
+		body, err := json.Marshal(createReq)
+		require.NoError(t, err)
+		req, err := http.NewRequest("POST", "/api/v1.0/origin_ui/collections", bytes.NewReader(body))
+		require.NoError(t, err)
+		req.AddCookie(&http.Cookie{Name: "login", Value: ownerToken})
+		req.Header.Set("Content-Type", "application/json")
+		recorder := httptest.NewRecorder()
+		router.ServeHTTP(recorder, req)
+		require.Equal(t, http.StatusCreated, recorder.Code, "setup: create (body: %s)", recorder.Body.String())
+		probeID := decodeCollectionID(t, recorder.Body)
+
+		patchAs := func(subject string, scope string) *httptest.ResponseRecorder {
+			newName := "renamed-via-bearer"
+			patch, err := json.Marshal(UpdateCollectionReq{Name: &newName})
+			require.NoError(t, err)
+			req, err := http.NewRequest("PATCH", "/api/v1.0/origin_ui/collections/"+probeID, bytes.NewReader(patch))
+			require.NoError(t, err)
+			tok := generateToken(t, []token_scopes.TokenScope{token_scopes.TokenScope(scope)}, subject)
+			req.Header.Set("Authorization", "Bearer "+tok)
+			req.Header.Set("Content-Type", "application/json")
+			rec := httptest.NewRecorder()
+			router.ServeHTTP(rec, req)
+			return rec
+		}
+		modify := token_scopes.Collection_Modify.String()
+
+		rec := patchAs("test-user-owner", modify+":/"+probeID)
+		assert.Equal(t, http.StatusNoContent, rec.Code,
+			"owner's bearer token scoped to this collection must be able to PATCH it (body: %s)", rec.Body.String())
+
+		rec = patchAs("test-user-owner", modify+":/some-other-id")
+		assert.Equal(t, http.StatusForbidden, rec.Code,
+			"a per-collection scope naming a DIFFERENT collection must not authenticate for this one (body: %s)", rec.Body.String())
+
+		rec = patchAs("test-user-owner", modify+":"+probeID)
+		assert.Equal(t, http.StatusForbidden, rec.Code,
+			"the retired no-slash ID form must be rejected (body: %s)", rec.Body.String())
+
+		rec = patchAs("bearer-interloper", modify+":/"+probeID)
+		assert.Equal(t, http.StatusNotFound, rec.Code,
+			"a matching scope on a non-owner's token authenticates but the DB must still refuse (body: %s)", rec.Body.String())
+	})
+
 	t.Run("admin-group-grants-full-management-authority", func(t *testing.T) {
 		// Pins the new ownership-model contract: setting
 		// Collection.AdminID gives every member of that group

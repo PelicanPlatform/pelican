@@ -539,6 +539,44 @@ func GetUserCollectionScopes(db *gorm.DB, user, userID string, groupsList []stri
 		}
 	}
 
+	// Ownership and admin-group membership live on the collection row, not
+	// in ACL rows, but still confer management authority (owner: all;
+	// admin group: no delete). Data-plane access is not implied.
+	if subjects.UserID != "" || len(subjects.GroupIDs) > 0 {
+		var managed []database.Collection
+		q := db.Model(&database.Collection{}).Select("id", "owner_id", "admin_id")
+		switch {
+		case subjects.UserID != "" && len(subjects.GroupIDs) > 0:
+			q = q.Where("owner_id = ? OR admin_id IN ?", subjects.UserID, subjects.GroupIDs)
+		case subjects.UserID != "":
+			q = q.Where("owner_id = ?", subjects.UserID)
+		default:
+			q = q.Where("admin_id IN ?", subjects.GroupIDs)
+		}
+		if err := q.Find(&managed).Error; err != nil {
+			return nil, nil, err
+		}
+		have := make(map[string]struct{}, len(scopes))
+		for _, s := range scopes {
+			have[s] = struct{}{}
+		}
+		addScope := func(s string) {
+			if _, ok := have[s]; ok {
+				return
+			}
+			have[s] = struct{}{}
+			scopes = append(scopes, s)
+		}
+		for _, c := range managed {
+			idPath := ":/" + c.ID
+			addScope(token_scopes.Collection_Read.String() + idPath)
+			addScope(token_scopes.Collection_Modify.String() + idPath)
+			if subjects.UserID != "" && c.OwnerID == subjects.UserID {
+				addScope(token_scopes.Collection_Delete.String() + idPath)
+			}
+		}
+	}
+
 	// Resolve the matched group IDs back to names for the token's
 	// wlcg.groups claim — the claim is a list of names, and ACL rows
 	// store IDs. Personal and all-authenticated grants never enter this
