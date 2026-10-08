@@ -81,23 +81,6 @@ func getCacheRedirectURL(ctx context.Context, t testing.TB, objectPath string, t
 	return redirectLocation
 }
 
-func TestPersistentCache_StartOK(t *testing.T) {
-	t.Cleanup(test_utils.SetupTestLogging(t))
-	server_utils.ResetTestState()
-	defer server_utils.ResetTestState()
-
-	// Enable persistent cache
-	require.NoError(t, param.Cache_EnableV2.Set(true))
-
-	// Start the federation with persistent cache
-	ft := fed_test_utils.NewFedTest(t, persistentCacheConfig)
-	require.NotNil(t, ft)
-
-	// Check the XRootD health status should be missing
-	_, err := metrics.GetComponentStatus(metrics.OriginCache_XRootD)
-	require.Error(t, err, "V2 Cache should never set XRootD health status.")
-}
-
 // TestPersistentCache runs each case below against one shared federation. Starting a
 // federation (five services plus XRootD) dominates the run time of these
 // cases, so they share one and keep their object names distinct instead.
@@ -108,6 +91,12 @@ func TestPersistentCache(t *testing.T) {
 
 	require.NoError(t, param.Cache_EnableV2.Set(true))
 	ft := fed_test_utils.NewFedTest(t, persistentCacheConfig)
+
+	// StartOK checks that a V2 cache never sets the XRootD health status.
+	t.Run("StartOK", func(t *testing.T) {
+		_, err := metrics.GetComponentStatus(metrics.OriginCache_XRootD)
+		require.Error(t, err, "V2 Cache should never set XRootD health status.")
+	})
 
 	// BasicDownload tests that the persistent cache can serve content.
 	// This verifies:
