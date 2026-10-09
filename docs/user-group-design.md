@@ -155,3 +155,4 @@ Using IDs is what makes renaming safe. A rename changes one row in `users` or `g
   - API key creation is admin-only: the web UI’s API-key endpoints require the server-admin privilege.
   - Actions from API keys must be distinguishable (for creators / deleters, etc) from those done by the web UI. At least the key ID must be recorded if a key was used.
   - Users can lose authorizations after the API key was used. Thus, when an API key is used, its scopes must be intersected with the current scopes for the user.
+  - For that intersection only, a creator who currently holds `server.admin` keeps every user-grantable scope on the key except `pelican.log_read`: anyone with the admin permission should be assumed to have the ability to perform any user-grantable scope, even if they're not otherwise listed explicitly for the account. `pelican.log_read` stays an explicit grant. The general effective-scope computation is not widened.

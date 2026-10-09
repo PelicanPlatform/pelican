@@ -539,7 +539,12 @@ func createApiToken(ctx *gin.Context) {
 	token, err := api_token.CreateApiKey(database.ServerDatabase, req.Name, userID, scopes, expirationTime)
 	if err != nil {
 		log.Warning("Failed to create API key: ", err)
-		ctx.JSON(status, server_structs.SimpleApiResp{
+		var notGrantable *api_token.ScopesNotGrantableError
+		code := http.StatusInternalServerError
+		if errors.As(err, &notGrantable) {
+			code = http.StatusForbidden
+		}
+		ctx.JSON(code, server_structs.SimpleApiResp{
 			Status: server_structs.RespFailed,
 			Msg:    err.Error(),
 		})

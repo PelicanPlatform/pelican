@@ -108,6 +108,10 @@ description: >-
   Full server-administration capability. Holders can manage every
   user/group/collection/setting; equivalent to the historical "system
   admin" role. Implies server.user_admin and server.collection_admin.
+  When an API key is checked against its creator's current scopes, a
+  creator who holds server.admin keeps every user-grantable scope
+  (except log_read) on the key, whether or not each one is granted to
+  the account.
 issuedBy: ["*"]
 acceptedBy: ["*"]
 userGrantable: true
@@ -164,9 +168,14 @@ acceptedBy: ["registry"]
 ############################
 name: monitoring.scrape
 description: >-
-  For server's Prometheus instance to scrape its Prometheus http data exporter at /metrics
+  Scrape the server's Prometheus exporter at /metrics. The server's own
+  Prometheus instance and the director mint this for themselves; it is
+  also user-grantable so that a site which runs its own Prometheus,
+  instead of relying on the director's, can grant scraping to a user or
+  group and mint API keys for it.
 issuedBy: ["*"]
 acceptedBy: ["*"]
+userGrantable: true
 ---
 name: monitoring.query
 description: >-

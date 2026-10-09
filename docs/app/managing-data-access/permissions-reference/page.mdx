@@ -60,10 +60,11 @@ A data-plane scope (`storage.*`, `collection.*`, `share.access`) can never be ha
 | Scope | What it permits | Notes |
 |---|---|---|
 | `web_ui.access` | Sign in to the web interface and the cookie-authenticated APIs. | Granted to new accounts by default. Granting it explicitly also lets API tokens carry web-interface access. |
-| `server.admin` | Every user, group, collection, and server setting. | Implies `server.user_admin` and `server.collection_admin`. |
+| `server.admin` | Every user, group, collection, and server setting. | Implies `server.user_admin` and `server.collection_admin`. An API key keeps every user-grantable scope except `pelican.log_read` while its creator holds `server.admin`, whether or not each scope is granted to the account. |
 | `server.user_admin` | Create and manage non-administrator users, mint password-set and onboarding invites, and see every group. | Does not include scope grants, identity linking, or any action targeting a system administrator. |
 | `server.collection_admin` | Create collections, and see and manage every collection and its ACLs. | Does not include the user or group surfaces. |
 | `pelican.log_read` | Read the server's recent log buffer, through the log viewer or the `/api/v1.0/logs` endpoints. | Separable from `server.admin` rather than implied by it, because it exposes everything the server logs. |
+| `monitoring.scrape` | Scrape the server's Prometheus exporter at `/metrics`. | Minted by the server's own Prometheus and by the director; grantable so a site running its own Prometheus can hand it to a user or group. |
 | `monitoring.query` | Read the server's metrics through its Prometheus-compatible query endpoint. | Login cookies carry this only for system administrators; other holders reach the endpoint with a bearer or API token. |
 | `pelican.transfer` | Submit, view, and cancel transfer jobs through the transfer API. | Not granted by default. |
 

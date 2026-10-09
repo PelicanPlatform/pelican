@@ -3217,6 +3217,16 @@ paths:
           schema:
             type: object
             $ref: "#/definitions/ErrorModelV2"
+        "403":
+          description: The caller's current effective scopes do not cover a requested user-grantable scope
+          schema:
+            type: object
+            $ref: "#/definitions/ErrorModelV2"
+        "500":
+          description: Failed to create the token
+          schema:
+            type: object
+            $ref: "#/definitions/ErrorModelV2"
     get:
       tags:
         - common
