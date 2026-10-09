@@ -30,6 +30,7 @@ import (
 
 	"github.com/pelicanplatform/pelican/database"
 	dbutils "github.com/pelicanplatform/pelican/database/utils"
+	"github.com/pelicanplatform/pelican/param"
 )
 
 // newCollectionTestDB spins up an in-memory sqlite database with just the
@@ -201,11 +202,13 @@ func TestGetUserCollectionScopes_StorageScopeBridge(t *testing.T) {
 		scopes, matched, err := GetUserCollectionScopes(db, "bob", "", []string{"chemistry"}, "")
 		require.NoError(t, err)
 
-		// The capability scopes (collection.create:/, collection.read:/)
-		// are always there for any authenticated caller; that's not
-		// sufficient for storage access.
+		// The read capability (collection.read:/) is always there for any
+		// authenticated caller; that's not sufficient for storage access.
+		// The create capability is never minted here.
 		assert.NotContains(t, scopes, "storage.read:/data/private",
 			"non-member must NOT get storage.read on someone else's collection")
+		assert.NotContains(t, scopes, "collection.create:/",
+			"collection.create must not be minted to an ordinary authenticated caller")
 		assert.NotContains(t, scopes, "collection.read:col-read",
 			"non-member must NOT get collection.read on the specific collection")
 		assert.NotContains(t, matched, "physics",
@@ -322,5 +325,29 @@ func TestGetUserCollectionScopes_StorageScopeBridge(t *testing.T) {
 		require.NoError(t, err)
 		assert.Contains(t, scopes, "storage.read:/",
 			"collection at namespace root should grant storage.read:/")
+	})
+}
+
+// The create capability is a collection-admin scope; only admins receive
+// it. Read/list stays universal — the DB filters by visibility and ACL.
+func TestGetUserCollectionScopes_CreateCapabilityIsAdminOnly(t *testing.T) {
+	db := newCollectionTestDB(t)
+	require.NoError(t, param.Server_CollectionAdminUsers.Set([]string{"alice"}))
+	t.Cleanup(func() { require.NoError(t, param.Server_CollectionAdminUsers.Set([]string{})) })
+
+	t.Run("non-admin-does-not-get-create", func(t *testing.T) {
+		scopes, _, err := GetUserCollectionScopes(db, "bob", "", nil, "")
+		require.NoError(t, err)
+		assert.NotContains(t, scopes, "collection.create:/",
+			"collection.create must not be minted to a caller without server.collection_admin")
+		assert.Contains(t, scopes, "collection.read:/",
+			"the read/list capability stays universal")
+	})
+
+	t.Run("collection-admin-gets-create", func(t *testing.T) {
+		scopes, _, err := GetUserCollectionScopes(db, "alice", "", nil, "")
+		require.NoError(t, err)
+		assert.Contains(t, scopes, "collection.create:/",
+			"a Server.CollectionAdminUsers member must receive collection.create")
 	})
 }
