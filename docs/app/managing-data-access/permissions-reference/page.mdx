@@ -181,7 +181,7 @@ A role on a collection maps to capabilities as follows.
 
 | Action | System / collection admin | Collection owner | Admin-group member | Group with `write` | Group with `read` | Ordinary user |
 |---|---|---|---|---|---|---|
-| Create a collection | yes | — | — | — | — | no (`403`), unless presenting a bearer token whose scope claim carries the bare `collection.create` scope — see below |
+| Create a collection | yes | — | — | — | — | no (`403`) |
 | See a collection in the listing | all | own | yes | yes | yes | public collections only |
 | Read one collection | any | yes | yes | yes | yes | public only |
 | Edit name, description, visibility, sharing | yes | yes | yes | yes | no | no |
@@ -196,13 +196,10 @@ A role on a collection maps to capabilities as follows.
 | List candidate owners | yes | yes | yes | yes | yes | public collections only |
 
 <Callout type="info">
-The bearer-token exception to the `server.collection_admin` requirement is narrower than it looks.
-The scope can appear in two shapes: the bare form `collection.create`, and the path form `collection.create:/`.
-The handler matches the scope string exactly, so only a token whose scope claim carries the bare form qualifies.
-The origin's issuer mints only the path form, and only to collection administrators (a system administrator holds `server.admin`, which implies `server.collection_admin`, so system administrators count); it grants nothing at all when a client asks for the bare form.
-An authorization template can also grant the path form.
+Creating a collection is decided by the caller's role, on the command line as well as in the web interface: the handler checks `server.collection_admin` for every caller, and the origin's issuer mints `collection.create:/` only to collection administrators.
+A system administrator holds `server.admin`, which implies `server.collection_admin`, so system administrators count.
+Collection scopes use a path suffix like `storage.*` does: `collection.read:/` is the blanket capability every signed-in user holds, and `collection.modify:/<id>` names one collection.
 API keys can carry any scope string, but the collections API sits behind the web-UI authentication middleware, which accepts only a login cookie or a JWT signed by this server, so an API key is refused with `401` whichever scopes it carries.
-So in practice creation stays with collection administrators, on the command line as well as in the web interface.
 </Callout>
 
 <Callout type="warning">

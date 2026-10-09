@@ -1663,28 +1663,6 @@ definitions:
           - private
           - public
         example: "public"
-  AddCollectionMembersRequest:
-    type: object
-    required:
-      - members
-    properties:
-      members:
-        type: array
-        items:
-          type: string
-        description: List of pelican:// URLs to add as members
-        example: ["pelican://origin.example.com/research/data/file1.txt"]
-  RemoveCollectionMembersRequest:
-    type: object
-    required:
-      - members
-    properties:
-      members:
-        type: array
-        items:
-          type: string
-        description: List of pelican:// URLs to remove as members
-        example: ["pelican://origin.example.com/research/data/file1.txt"]
   GrantACLRequest:
     type: object
     description: >-
@@ -5333,7 +5311,14 @@ paths:
       tags:
         - collections
       summary: Create a new collection
-      description: "`Authentication Required`"
+      description: >-
+        `Authentication Required` `Admin privilege Required`. The caller
+        must hold `server.collection_admin` (or `server.admin`, which
+        implies it). The role is checked for cookie and bearer callers
+        alike. The namespace must equal, or sit under, one of
+        this origin's exported prefixes. Creation writes no ACL rows: the
+        caller becomes the owner and grants access afterwards via
+        POST /origin_ui/collections/{id}/acl.
       consumes:
         - application/json
       produces:
@@ -5356,6 +5341,10 @@ paths:
             $ref: "#/definitions/ErrorModelV2"
         "401":
           description: Authentication required
+          schema:
+            $ref: "#/definitions/ErrorModelV2"
+        "403":
+          description: Caller does not hold server.collection_admin or server.admin
           schema:
             $ref: "#/definitions/ErrorModelV2"
         "500":
@@ -5455,157 +5444,6 @@ paths:
             $ref: "#/definitions/ErrorModelV2"
         "404":
           description: Collection not found
-          schema:
-            $ref: "#/definitions/ErrorModelV2"
-        "500":
-          description: Internal server error
-          schema:
-            $ref: "#/definitions/ErrorModelV2"
-  /origin_ui/collections/{id}/members:
-    get:
-      tags:
-        - collections
-      summary: List collection members
-      description: "`Authentication Required`"
-      parameters:
-        - name: id
-          in: path
-          description: ID of the collection
-          required: true
-          type: string
-      produces:
-        - application/json
-      responses:
-        "200":
-          description: OK
-          schema:
-            type: array
-            items:
-              $ref: "#/definitions/CollectionMember"
-        "401":
-          description: Authentication required
-          schema:
-            $ref: "#/definitions/ErrorModelV2"
-        "404":
-          description: Collection not found
-          schema:
-            $ref: "#/definitions/ErrorModelV2"
-        "500":
-          description: Internal server error
-          schema:
-            $ref: "#/definitions/ErrorModelV2"
-    post:
-      tags:
-        - collections
-      summary: Add members to a collection
-      description: "`Authentication Required`"
-      consumes:
-        - application/json
-      produces:
-        - application/json
-      parameters:
-        - name: id
-          in: path
-          description: ID of the collection
-          required: true
-          type: string
-        - in: body
-          name: members
-          description: The members to add
-          required: true
-          schema:
-            $ref: "#/definitions/AddCollectionMembersRequest"
-      responses:
-        "204":
-          description: Members added successfully
-        "400":
-          description: Bad request
-          schema:
-            $ref: "#/definitions/ErrorModelV2"
-        "401":
-          description: Authentication required
-          schema:
-            $ref: "#/definitions/ErrorModelV2"
-        "404":
-          description: Collection not found
-          schema:
-            $ref: "#/definitions/ErrorModelV2"
-        "500":
-          description: Internal server error
-          schema:
-            $ref: "#/definitions/ErrorModelV2"
-    delete:
-      tags:
-        - collections
-      summary: Remove members from a collection
-      description: "`Authentication Required`"
-      consumes:
-        - application/json
-      produces:
-        - application/json
-      parameters:
-        - name: id
-          in: path
-          description: ID of the collection
-          required: true
-          type: string
-        - in: body
-          name: members
-          description: The members to remove
-          required: true
-          schema:
-            $ref: "#/definitions/RemoveCollectionMembersRequest"
-      responses:
-        "204":
-          description: Members removed successfully
-        "400":
-          description: Bad request
-          schema:
-            $ref: "#/definitions/ErrorModelV2"
-        "401":
-          description: Authentication required
-          schema:
-            $ref: "#/definitions/ErrorModelV2"
-        "404":
-          description: Collection not found
-          schema:
-            $ref: "#/definitions/ErrorModelV2"
-        "500":
-          description: Internal server error
-          schema:
-            $ref: "#/definitions/ErrorModelV2"
-  /origin_ui/collections/{id}/members/{encoded_object_url}:
-    delete:
-      tags:
-        - collections
-      summary: Remove a specific member from a collection
-      description: "`Authentication Required`"
-      parameters:
-        - name: id
-          in: path
-          description: ID of the collection
-          required: true
-          type: string
-        - name: encoded_object_url
-          in: path
-          description: URL-encoded pelican:// URL of the object to remove
-          required: true
-          type: string
-      produces:
-        - application/json
-      responses:
-        "204":
-          description: Member removed successfully
-        "400":
-          description: Bad request
-          schema:
-            $ref: "#/definitions/ErrorModelV2"
-        "401":
-          description: Authentication required
-          schema:
-            $ref: "#/definitions/ErrorModelV2"
-        "404":
-          description: Collection or member not found
           schema:
             $ref: "#/definitions/ErrorModelV2"
         "500":

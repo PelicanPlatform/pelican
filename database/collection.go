@@ -17,7 +17,6 @@ import (
 	"gorm.io/gorm/clause"
 
 	"github.com/pelicanplatform/pelican/param"
-	"github.com/pelicanplatform/pelican/pelican_url"
 	"github.com/pelicanplatform/pelican/server_structs"
 	"github.com/pelicanplatform/pelican/token_scopes"
 )
@@ -593,6 +592,9 @@ type Collection struct {
 	Metadata           []CollectionMetadata `gorm:"foreignKey:CollectionID" json:"metadata"`
 }
 
+// CollectionMember is unused: nothing writes the table, and a collection's
+// contents are the objects under its namespace. The model and table remain
+// until a migration drops them, so Members is always empty.
 type CollectionMember struct {
 	CollectionID string `gorm:"primaryKey" json:"collectionId"`
 	ObjectURL    string `gorm:"primaryKey" json:"objectUrl"` // full pelican:// URL
@@ -1371,32 +1373,6 @@ func GetCollection(db *gorm.DB, id string, user, userID string, groups []string,
 	return collection, nil
 }
 
-func GetCollectionMembers(db *gorm.DB, id, user, userID string, groups []string, since *time.Time, limit int) ([]CollectionMember, error) {
-	collection := &Collection{}
-	if result := db.Preload("ACLs").Where("id = ?", id).First(collection); result.Error != nil {
-		return nil, result.Error
-	}
-
-	err := validateACL(db, collection, user, userID, groups, token_scopes.Collection_Read)
-	if err != nil {
-		return nil, err
-	}
-
-	members := []CollectionMember{}
-	query := db.Where("collection_id = ?", id)
-	if since != nil {
-		query = query.Where("added_at > ?", *since)
-	}
-	if limit > 0 {
-		query = query.Limit(limit)
-	}
-
-	if result := query.Find(&members); result.Error != nil {
-		return nil, result.Error
-	}
-	return members, nil
-}
-
 func GetCollectionMetadata(db *gorm.DB, id, user, userID string, groups []string) ([]CollectionMetadata, error) {
 	collection := &Collection{}
 	if result := db.Preload("ACLs").Where("id = ?", id).First(collection); result.Error != nil {
@@ -1888,63 +1864,6 @@ func UpdateCollection(db *gorm.DB, id, user, userID string, groups []string, nam
 	}
 
 	return db.Model(&Collection{}).Where("id = ?", id).Updates(updates).Error
-}
-
-func AddCollectionMembers(db *gorm.DB, id string, members []string, addedBy, addedByID string, groups []string, isAdmin bool) error {
-	collection, err := loadCollectionForWrite(db, id, addedBy, addedByID, groups, isAdmin, token_scopes.Collection_Modify)
-	if err != nil {
-		return err
-	}
-
-	// Enforce that each member belongs to the collection's namespace
-	namespace := collection.Namespace
-	for _, memberUrl := range members {
-		purl, err := pelican_url.Parse(memberUrl, []pelican_url.ParseOption{}, []pelican_url.DiscoveryOption{})
-		if err != nil {
-			return fmt.Errorf("failed to parse member URL '%s': %w", memberUrl, err)
-		}
-		path := purl.Path
-		if !strings.HasPrefix(path, namespace) {
-			return fmt.Errorf("object URL '%s' does not belong to collection namespace '%s'", memberUrl, namespace)
-		}
-		// If the namespace prefix matches but is followed by additional characters that don't begin with '/', reject as well (e.g., '/test10')
-		if len(path) > len(namespace) && path[len(namespace)] != '/' {
-			return fmt.Errorf("object URL '%s' does not belong to collection namespace '%s'", memberUrl, namespace)
-		}
-	}
-
-	records := make([]CollectionMember, 0, len(members))
-	for _, member := range members {
-		records = append(records, CollectionMember{
-			CollectionID: id,
-			ObjectURL:    member,
-			AddedBy:      creatorOrUnknown(addedByID),
-		})
-	}
-	err = db.Transaction(func(tx *gorm.DB) error {
-		if result := tx.Create(&records); result.Error != nil {
-			return result.Error
-		}
-		return nil
-	})
-	if err != nil {
-		return err
-	}
-	return nil
-}
-
-func RemoveCollectionMembers(db *gorm.DB, id string, members []string, user, userID string, groups []string, isAdmin bool) error {
-	_, err := loadCollectionForWrite(db, id, user, userID, groups, isAdmin, token_scopes.Collection_Modify)
-	if err != nil {
-		return err
-	}
-
-	return db.Transaction(func(tx *gorm.DB) error {
-		if result := tx.Where("collection_id = ? AND object_url IN ?", id, members).Delete(&CollectionMember{}); result.Error != nil {
-			return result.Error
-		}
-		return nil
-	})
 }
 
 func DeleteCollection(db *gorm.DB, id string, owner, ownerID string, groups []string, isAdmin bool) error {

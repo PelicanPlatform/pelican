@@ -146,6 +146,13 @@ const builtinAdminUsername = "admin"
 // (token_scopes.IsUserGrantable). Returns an empty slice for an
 // empty/anonymous identity.
 func EffectiveScopesForIdentity(identity UserIdentity) []token_scopes.TokenScope {
+	return EffectiveScopesForIdentityWithDB(database.ServerDatabase, identity)
+}
+
+// EffectiveScopesForIdentityWithDB is EffectiveScopesForIdentity against an
+// explicit database handle, for callers that hold one (such as the embedded
+// issuer). A nil db yields the config-derived subset only.
+func EffectiveScopesForIdentityWithDB(db *gorm.DB, identity UserIdentity) []token_scopes.TokenScope {
 	seen := map[token_scopes.TokenScope]struct{}{}
 	out := []token_scopes.TokenScope{}
 
@@ -163,8 +170,8 @@ func EffectiveScopesForIdentity(identity UserIdentity) []token_scopes.TokenScope
 	// 1. DB-stored grants. Any DB error is silently ignored — we'd
 	//    rather return the config-derived subset than fail the auth
 	//    decision because of a transient database hiccup.
-	if database.ServerDatabase != nil {
-		dbScopes, err := database.EffectiveScopes(database.ServerDatabase, identity.ID, identity.Groups)
+	if db != nil {
+		dbScopes, err := database.EffectiveScopes(db, identity.ID, identity.Groups)
 		if err == nil {
 			for _, s := range dbScopes {
 				add(s)
@@ -202,7 +209,7 @@ func EffectiveScopesForIdentity(identity UserIdentity) []token_scopes.TokenScope
 			return
 		}
 		if eligibleGroups == nil {
-			eligibleGroups = database.FilterAuthTemplateEligibleGroups(database.ServerDatabase, identity.Groups)
+			eligibleGroups = database.FilterAuthTemplateEligibleGroups(db, identity.Groups)
 		}
 		for _, configured := range list {
 			for _, userGroup := range eligibleGroups {
@@ -241,7 +248,13 @@ func EffectiveScopesForIdentity(identity UserIdentity) []token_scopes.TokenScope
 // hasScope reports whether `scope` is in the identity's effective set.
 // Used by the Check* wrappers below.
 func hasScope(identity UserIdentity, scope token_scopes.TokenScope) bool {
-	for _, s := range EffectiveScopesForIdentity(identity) {
+	return HasScopeWithDB(database.ServerDatabase, identity, scope)
+}
+
+// HasScopeWithDB reports whether `scope` is in the identity's effective
+// set, resolving DB-granted scopes through the supplied handle.
+func HasScopeWithDB(db *gorm.DB, identity UserIdentity, scope token_scopes.TokenScope) bool {
+	for _, s := range EffectiveScopesForIdentityWithDB(db, identity) {
 		if s == scope {
 			return true
 		}

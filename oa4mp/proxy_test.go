@@ -31,6 +31,7 @@ import (
 	"github.com/pelicanplatform/pelican/database"
 	dbutils "github.com/pelicanplatform/pelican/database/utils"
 	"github.com/pelicanplatform/pelican/param"
+	"github.com/pelicanplatform/pelican/token_scopes"
 )
 
 // newCollectionTestDB spins up an in-memory sqlite database with just the
@@ -147,9 +148,9 @@ func TestGetUserCollectionScopes_StorageScopeBridge(t *testing.T) {
 			"read ACL must NOT grant storage.create")
 
 		// Management-plane scope is still emitted, keyed by collection ID.
-		assert.Contains(t, scopes, "collection.read:col-read",
+		assert.Contains(t, scopes, "collection.read:/col-read",
 			"read ACL should still grant management-plane collection.read")
-		assert.NotContains(t, scopes, "collection.modify:col-read",
+		assert.NotContains(t, scopes, "collection.modify:/col-read",
 			"read ACL must NOT grant collection.modify")
 
 		assert.Contains(t, matched, "physics", "ACL'd group should be in matchedGroups")
@@ -167,8 +168,8 @@ func TestGetUserCollectionScopes_StorageScopeBridge(t *testing.T) {
 		assert.Contains(t, scopes, "storage.modify:/data/shared")
 		assert.Contains(t, scopes, "storage.create:/data/shared")
 
-		assert.Contains(t, scopes, "collection.read:col-write")
-		assert.Contains(t, scopes, "collection.modify:col-write")
+		assert.Contains(t, scopes, "collection.read:/col-write")
+		assert.Contains(t, scopes, "collection.modify:/col-write")
 	})
 
 	t.Run("owner-acl-emits-full-rwx", func(t *testing.T) {
@@ -187,7 +188,7 @@ func TestGetUserCollectionScopes_StorageScopeBridge(t *testing.T) {
 		assert.Contains(t, scopes, "storage.read:/data/legacy")
 		assert.Contains(t, scopes, "storage.modify:/data/legacy")
 		assert.Contains(t, scopes, "storage.create:/data/legacy")
-		assert.Contains(t, scopes, "collection.delete:col-owner",
+		assert.Contains(t, scopes, "collection.delete:/col-owner",
 			"legacy owner ACL still mints management-plane delete")
 	})
 
@@ -202,14 +203,13 @@ func TestGetUserCollectionScopes_StorageScopeBridge(t *testing.T) {
 		scopes, matched, err := GetUserCollectionScopes(db, "bob", "", []string{"chemistry"}, "")
 		require.NoError(t, err)
 
-		// The read capability (collection.read:/) is always there for any
-		// authenticated caller; that's not sufficient for storage access.
-		// The create capability is never minted here.
+		// The read capability scope (collection.read:/) is always there
+		// for any authenticated caller; that's not sufficient for
+		// storage access. (collection.create:/ is admin-only — see
+		// TestGetUserCollectionScopes_CreateCapabilityIsAdminOnly.)
 		assert.NotContains(t, scopes, "storage.read:/data/private",
 			"non-member must NOT get storage.read on someone else's collection")
-		assert.NotContains(t, scopes, "collection.create:/",
-			"collection.create must not be minted to an ordinary authenticated caller")
-		assert.NotContains(t, scopes, "collection.read:col-read",
+		assert.NotContains(t, scopes, "collection.read:/col-read",
 			"non-member must NOT get collection.read on the specific collection")
 		assert.NotContains(t, matched, "physics",
 			"the unrelated ACL group must not appear in matchedGroups")
@@ -308,7 +308,7 @@ func TestGetUserCollectionScopes_StorageScopeBridge(t *testing.T) {
 		require.NoError(t, err)
 		assert.NotContains(t, scopes, "storage.read:/other/place")
 		assert.NotContains(t, scopes, "storage.modify:/other/place")
-		assert.Contains(t, scopes, "collection.modify:col-outside",
+		assert.Contains(t, scopes, "collection.modify:/col-outside",
 			"out-of-scope collection still gets management-plane scopes")
 	})
 
@@ -349,5 +349,88 @@ func TestGetUserCollectionScopes_CreateCapabilityIsAdminOnly(t *testing.T) {
 		require.NoError(t, err)
 		assert.Contains(t, scopes, "collection.create:/",
 			"a Server.CollectionAdminUsers member must receive collection.create")
+		assert.Contains(t, scopes, "collection.read:/")
+	})
+}
+
+// A collection admin whose scope was granted in the database (not via
+// Server.CollectionAdminUsers) must be recognised through the db handle
+// this function was handed. The global database.ServerDatabase is nil in
+// this test, so passing here proves the lookup does not depend on it.
+func TestGetUserCollectionScopes_DBGrantedCollectionAdminGetsCreate(t *testing.T) {
+	db := newCollectionTestDB(t)
+	uid := seedUser(t, db, "dbadmin")
+	require.NoError(t, database.GrantUserScope(db, uid, token_scopes.Server_CollectionAdmin, database.Creator{UserID: uid}))
+
+	scopes, _, err := GetUserCollectionScopes(db, "dbadmin", uid, nil, "")
+	require.NoError(t, err)
+	assert.Contains(t, scopes, "collection.create:/",
+		"a DB-granted server.collection_admin must yield the create capability via the passed db handle")
+}
+
+// Ownership and admin-group membership live on the collection row, not in
+// ACL rows. The issuer must still mint the management-plane scopes for
+// them, or a CLI caller who owns a collection cannot reach its
+// update/delete/acl endpoints at all. Neither implies data-plane access:
+// the owner grants that through ACL rows like anyone else.
+func TestGetUserCollectionScopes_OwnerAndAdminGroupManagementScopes(t *testing.T) {
+	t.Run("owner-gets-read-modify-delete-but-no-storage", func(t *testing.T) {
+		db := newCollectionTestDB(t)
+		seedCollection(t, db, "col-mine", "/data/mine") // OwnerID is owner-user-id
+
+		scopes, _, err := GetUserCollectionScopes(db, "owner-user", "owner-user-id", nil, "")
+		require.NoError(t, err)
+		assert.Contains(t, scopes, "collection.read:/col-mine")
+		assert.Contains(t, scopes, "collection.modify:/col-mine")
+		assert.Contains(t, scopes, "collection.delete:/col-mine",
+			"the owner is the one principal who may delete")
+		assert.NotContains(t, scopes, "storage.read:/data/mine",
+			"ownership does not imply data access")
+		assert.NotContains(t, scopes, "storage.modify:/data/mine")
+	})
+
+	t.Run("admin-group-member-gets-read-modify-not-delete", func(t *testing.T) {
+		db := newCollectionTestDB(t)
+		seedCollection(t, db, "col-team", "/data/team")
+		gid := seedGroup(t, db, "team-admins")
+		require.NoError(t, db.Model(&database.Collection{}).Where("id = ?", "col-team").Update("admin_id", gid).Error)
+
+		scopes, _, err := GetUserCollectionScopes(db, "carol", "", []string{"team-admins"}, "")
+		require.NoError(t, err)
+		assert.Contains(t, scopes, "collection.read:/col-team")
+		assert.Contains(t, scopes, "collection.modify:/col-team")
+		assert.NotContains(t, scopes, "collection.delete:/col-team",
+			"the admin group may manage but not delete or transfer")
+		assert.NotContains(t, scopes, "storage.read:/data/team")
+	})
+
+	t.Run("owner-with-write-acl-row-gets-each-scope-once", func(t *testing.T) {
+		db := newCollectionTestDB(t)
+		seedCollection(t, db, "col-both", "/data/both")
+		seedACL(t, db, "col-both", "user-owner-user", database.AclRoleWrite, nil)
+
+		scopes, _, err := GetUserCollectionScopes(db, "owner-user", "owner-user-id", nil, "")
+		require.NoError(t, err)
+		count := 0
+		for _, s := range scopes {
+			if s == "collection.modify:/col-both" {
+				count++
+			}
+		}
+		assert.Equal(t, 1, count, "ownership and the ACL row must not duplicate the scope")
+		assert.Contains(t, scopes, "collection.delete:/col-both")
+		assert.Contains(t, scopes, "storage.modify:/data/both",
+			"the ACL row, not ownership, is what grants data access")
+	})
+
+	t.Run("unrelated-user-gets-nothing-for-the-collection", func(t *testing.T) {
+		db := newCollectionTestDB(t)
+		seedCollection(t, db, "col-mine", "/data/mine")
+
+		scopes, _, err := GetUserCollectionScopes(db, "bob", "bob-id", nil, "")
+		require.NoError(t, err)
+		for _, s := range scopes {
+			assert.NotContains(t, s, "col-mine", "a non-owner, non-admin-group caller must get no scope for the collection")
+		}
 	})
 }
