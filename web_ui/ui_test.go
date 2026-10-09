@@ -744,6 +744,26 @@ func TestApiToken(t *testing.T) {
 		}
 	})
 
+	// A route that requires monitoring.query on an API key.
+	route.GET("/monitoringRoute", func(ctx *gin.Context) {
+		authOption := token.AuthOption{
+			Sources: []token.TokenSource{token.Header},
+			Issuers: []token.TokenIssuer{token.APITokenIssuer},
+			Scopes:  []token_scopes.TokenScope{token_scopes.Monitoring_Query},
+		}
+		status, ok, err := token.Verify(ctx, authOption)
+		if !ok {
+			msg := "Unable to verify token with the current authorization options"
+			if err != nil {
+				msg = err.Error()
+			}
+			ctx.JSON(status, server_structs.SimpleApiResp{
+				Status: server_structs.RespFailed,
+				Msg:    msg,
+			})
+		}
+	})
+
 	ctx, cancel, egrp := test_utils.TestContext(context.Background(), t)
 	defer func() { require.NoError(t, egrp.Wait()) }()
 	defer cancel()
@@ -982,6 +1002,61 @@ func TestApiToken(t *testing.T) {
 				recorder := httptest.NewRecorder()
 				route.ServeHTTP(recorder, req)
 				assert.Equal(t, http.StatusUnauthorized, recorder.Code, fmt.Sprintf("unexpected status %d on GET, body: %s", recorder.Code, recorder.Body.String()))
+			},
+		},
+		{
+			// An administrator can mint a monitoring.query key and use it.
+			name: "admin-mints-and-uses-monitoring-query-key",
+			run: func(t *testing.T) {
+				req, err := http.NewRequest("POST", "/api/v1.0/tokens", nil)
+				require.NoError(t, err)
+				req.AddCookie(&http.Cookie{Name: "login", Value: cookieValue})
+				createTokenBody, err := json.Marshal(CreateApiTokenReq{
+					Name:       "grafana",
+					Expiration: "never",
+					Scopes:     []string{token_scopes.Monitoring_Query.String()},
+				})
+				require.NoError(t, err)
+				req.Body = io.NopCloser(bytes.NewReader(createTokenBody))
+				recorder := httptest.NewRecorder()
+				route.ServeHTTP(recorder, req)
+				require.Equal(t, http.StatusOK, recorder.Code, "unexpected status %d on POST, body: %s", recorder.Code, recorder.Body.String())
+				var createTokenResp map[string]string
+				require.NoError(t, json.NewDecoder(recorder.Body).Decode(&createTokenResp))
+				apiKey := createTokenResp["token"]
+				require.NotEmpty(t, apiKey)
+
+				req, err = http.NewRequest("GET", "/monitoringRoute", nil)
+				require.NoError(t, err)
+				req.Header.Add("Authorization", "Bearer "+apiKey)
+				recorder = httptest.NewRecorder()
+				route.ServeHTTP(recorder, req)
+				assert.Equal(t, http.StatusOK, recorder.Code, "unexpected status %d on GET, body: %s", recorder.Code, recorder.Body.String())
+			},
+		},
+		{
+			// A refused create is a 403 with an error body, not a 200.
+			// pelican.log_read is not covered by server.admin, so this
+			// administrator cannot put it on a key without an explicit grant.
+			name: "refused-scope-is-a-403-not-a-200",
+			run: func(t *testing.T) {
+				req, err := http.NewRequest("POST", "/api/v1.0/tokens", nil)
+				require.NoError(t, err)
+				req.AddCookie(&http.Cookie{Name: "login", Value: cookieValue})
+				createTokenBody, err := json.Marshal(CreateApiTokenReq{
+					Name:       "logs",
+					Expiration: "never",
+					Scopes:     []string{token_scopes.Pelican_LogRead.String()},
+				})
+				require.NoError(t, err)
+				req.Body = io.NopCloser(bytes.NewReader(createTokenBody))
+				recorder := httptest.NewRecorder()
+				route.ServeHTTP(recorder, req)
+				assert.Equal(t, http.StatusForbidden, recorder.Code, "unexpected status %d on POST, body: %s", recorder.Code, recorder.Body.String())
+				var resp server_structs.SimpleApiResp
+				require.NoError(t, json.NewDecoder(recorder.Body).Decode(&resp))
+				assert.Equal(t, server_structs.RespFailed, resp.Status)
+				assert.Contains(t, resp.Msg, token_scopes.Pelican_LogRead.String())
 			},
 		},
 	}

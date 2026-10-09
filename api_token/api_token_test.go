@@ -19,6 +19,7 @@
 package api_token
 
 import (
+	"errors"
 	"sort"
 	"testing"
 	"time"
@@ -57,7 +58,9 @@ func withMockEffectiveScopes(t *testing.T, fn func(userID string) []token_scopes
 //     wield a revocable management scope, so fail closed,
 //   - drops every user-grantable scope when the hook is unset (a
 //     binary that linked api_token but never wired the hook can't
-//     prove the creator's authority — fail closed).
+//     prove the creator's authority — fail closed),
+//   - keeps every scope when the creator currently holds server.admin
+//     (see TestAdminCreatorKeepsEveryUserGrantableScope).
 func TestIntersectWithUserScopes(t *testing.T) {
 	t.Run("passes through non-user-grantable scopes unchanged", func(t *testing.T) {
 		withMockEffectiveScopes(t, func(string) []token_scopes.TokenScope {
@@ -66,7 +69,6 @@ func TestIntersectWithUserScopes(t *testing.T) {
 			return nil
 		})
 		caps := []string{
-			token_scopes.Monitoring_Scrape.String(),
 			token_scopes.Pelican_Advertise.String(),
 			token_scopes.Wlcg_Storage_Read.String(),
 		}
@@ -86,12 +88,12 @@ func TestIntersectWithUserScopes(t *testing.T) {
 			token_scopes.Server_Admin.String(),           // creator no longer has — drop
 			token_scopes.Server_UserAdmin.String(),       // creator no longer has — drop
 			token_scopes.Server_CollectionAdmin.String(), // still has — keep
-			token_scopes.Monitoring_Scrape.String(),      // not user-grantable — keep
+			token_scopes.Pelican_Advertise.String(),      // not user-grantable — keep
 		}
 		got := intersectWithUserScopes(caps, "u-alice")
 		want := []string{
 			token_scopes.Server_CollectionAdmin.String(),
-			token_scopes.Monitoring_Scrape.String(),
+			token_scopes.Pelican_Advertise.String(),
 		}
 		sort.Strings(got)
 		sort.Strings(want)
@@ -120,10 +122,10 @@ func TestIntersectWithUserScopes(t *testing.T) {
 		})
 		caps := []string{
 			token_scopes.Server_Admin.String(),      // user-grantable — drop (unattributable)
-			token_scopes.Monitoring_Scrape.String(), // not user-grantable — keep
+			token_scopes.Pelican_Advertise.String(), // not user-grantable — keep
 		}
 		got := intersectWithUserScopes(caps, "")
-		assert.Equal(t, []string{token_scopes.Monitoring_Scrape.String()}, got,
+		assert.Equal(t, []string{token_scopes.Pelican_Advertise.String()}, got,
 			"a row with no recorded creator (legacy, pre-CreatedBy) cannot be attributed to any current authority, so its user-grantable scopes are dropped — fail closed — while bearer-authority scopes pass through")
 	})
 
@@ -134,12 +136,12 @@ func TestIntersectWithUserScopes(t *testing.T) {
 		withMockEffectiveScopes(t, nil)
 		caps := []string{
 			token_scopes.Server_Admin.String(),      // user-grantable — must drop
-			token_scopes.Monitoring_Scrape.String(), // not user-grantable — must keep
+			token_scopes.Pelican_Advertise.String(), // not user-grantable — must keep
 			token_scopes.Wlcg_Storage_Read.String(), // data-plane — must keep
 		}
 		got := intersectWithUserScopes(caps, "u-carol")
 		want := []string{
-			token_scopes.Monitoring_Scrape.String(),
+			token_scopes.Pelican_Advertise.String(),
 			token_scopes.Wlcg_Storage_Read.String(),
 		}
 		sort.Strings(got)
@@ -179,7 +181,7 @@ func TestValidateScopesForCreator(t *testing.T) {
 		})
 		err := validateScopesForCreator([]string{
 			token_scopes.Server_UserAdmin.String(),
-			token_scopes.Monitoring_Scrape.String(),
+			token_scopes.Pelican_Advertise.String(),
 		}, "u-alice")
 		assert.NoError(t, err)
 	})
@@ -192,23 +194,26 @@ func TestValidateScopesForCreator(t *testing.T) {
 			token_scopes.Server_UserAdmin.String(), // not held — must error
 			token_scopes.Server_Admin.String(),     // not held — must error
 			token_scopes.Server_CollectionAdmin.String(),
-			token_scopes.Monitoring_Scrape.String(),
+			token_scopes.Pelican_Advertise.String(),
 		}, "u-alice")
 		require.Error(t, err)
+		var notGrantable *ScopesNotGrantableError
+		require.True(t, errors.As(err, &notGrantable),
+			"the create handler maps this error type to a 403; any other error is a 500")
+		assert.Equal(t, []string{token_scopes.Server_UserAdmin.String(), token_scopes.Server_Admin.String()}, notGrantable.Scopes)
 		assert.Contains(t, err.Error(), token_scopes.Server_UserAdmin.String())
 		assert.Contains(t, err.Error(), token_scopes.Server_Admin.String())
 		assert.NotContains(t, err.Error(), token_scopes.Server_CollectionAdmin.String(),
 			"a scope the creator DOES hold must not appear in the rejection list")
-		assert.NotContains(t, err.Error(), token_scopes.Monitoring_Scrape.String(),
+		assert.NotContains(t, err.Error(), token_scopes.Pelican_Advertise.String(),
 			"non-user-grantable bearer-token scopes must never trigger a creator-authority rejection")
 	})
 
 	t.Run("non-user-grantable scopes pass without consulting creator", func(t *testing.T) {
 		withMockEffectiveScopes(t, func(string) []token_scopes.TokenScope { return nil })
 		err := validateScopesForCreator([]string{
-			token_scopes.Monitoring_Scrape.String(),
-			token_scopes.Wlcg_Storage_Read.String(),
 			token_scopes.Pelican_Advertise.String(),
+			token_scopes.Wlcg_Storage_Read.String(),
 		}, "u-alice")
 		assert.NoError(t, err,
 			"data-plane and inter-server scopes are bearer-token authority — granted by an admin, not derived from a user role")
@@ -227,7 +232,7 @@ func TestValidateScopesForCreator(t *testing.T) {
 	t.Run("empty createdBy still allows non-grantable scopes", func(t *testing.T) {
 		withMockEffectiveScopes(t, func(string) []token_scopes.TokenScope { return nil })
 		err := validateScopesForCreator([]string{
-			token_scopes.Monitoring_Scrape.String(),
+			token_scopes.Pelican_Advertise.String(),
 		}, "")
 		assert.NoError(t, err,
 			"data-plane / inter-server scopes are pure bearer authority — they pass through even without an attributable creator")
@@ -246,7 +251,7 @@ func TestValidateScopesForCreator(t *testing.T) {
 	t.Run("nil hook still allows non-grantable scopes", func(t *testing.T) {
 		withMockEffectiveScopes(t, nil)
 		err := validateScopesForCreator([]string{
-			token_scopes.Monitoring_Scrape.String(),
+			token_scopes.Pelican_Advertise.String(),
 		}, "u-alice")
 		assert.NoError(t, err,
 			"the fail-closed posture is per-scope: bearer-token authority isn't derived from any user role, so the hook isn't required to authorize it")
@@ -309,7 +314,7 @@ func withDBHook(t *testing.T, hook func() *gorm.DB) {
 // that appears (or changes) after wiring is picked up, and an
 // unavailable handle produces an error rather than a panic.
 func TestDBHookIsResolvedPerCall(t *testing.T) {
-	scope := token_scopes.Monitoring_Scrape.String()
+	scope := token_scopes.Pelican_Advertise.String()
 
 	t.Run("handle assigned after wiring is seen", func(t *testing.T) {
 		// Mirrors production ordering exactly: the hook is wired while
@@ -395,9 +400,84 @@ func TestDBHookIsResolvedPerCall(t *testing.T) {
 
 		var err error
 		require.NotPanics(t, func() {
-			err = Verify(wellFormedToken, []token_scopes.TokenScope{token_scopes.Monitoring_Scrape}, false)
+			err = Verify(wellFormedToken, []token_scopes.TokenScope{token_scopes.Pelican_Advertise}, false)
 		})
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "not initialized")
+	})
+}
+
+// A creator who currently holds server.admin keeps every user-grantable
+// scope on the key except pelican.log_read; other creators are matched
+// scope by scope.
+func TestAdminCreatorKeepsEveryUserGrantableScope(t *testing.T) {
+	everyGrantable := make([]string, 0, len(token_scopes.UserGrantableScopes))
+	allButLogRead := make([]string, 0, len(token_scopes.UserGrantableScopes))
+	for _, s := range token_scopes.UserGrantableScopes {
+		everyGrantable = append(everyGrantable, s.String())
+		if s != token_scopes.Pelican_LogRead {
+			allButLogRead = append(allButLogRead, s.String())
+		}
+	}
+	require.Contains(t, everyGrantable, token_scopes.Monitoring_Query.String())
+	require.Contains(t, everyGrantable, token_scopes.Monitoring_Scrape.String(),
+		"monitoring.scrape is user-grantable so a site with its own Prometheus can grant it")
+	require.Contains(t, everyGrantable, token_scopes.Pelican_LogRead.String())
+
+	t.Run("creator holding only server.admin keeps all but log_read", func(t *testing.T) {
+		withMockEffectiveScopes(t, func(string) []token_scopes.TokenScope {
+			return []token_scopes.TokenScope{token_scopes.Server_Admin}
+		})
+		assert.Equal(t, allButLogRead, intersectWithUserScopes(everyGrantable, "u-admin"))
+		assert.NoError(t, validateScopesForCreator(allButLogRead, "u-admin"))
+		err := validateScopesForCreator(everyGrantable, "u-admin")
+		var notGrantable *ScopesNotGrantableError
+		require.True(t, errors.As(err, &notGrantable))
+		assert.Equal(t, []string{token_scopes.Pelican_LogRead.String()}, notGrantable.Scopes,
+			"log_read is the one scope an administrator must be granted explicitly")
+	})
+
+	t.Run("admin with an explicit log_read grant keeps it", func(t *testing.T) {
+		withMockEffectiveScopes(t, func(string) []token_scopes.TokenScope {
+			return []token_scopes.TokenScope{token_scopes.Server_Admin, token_scopes.Pelican_LogRead}
+		})
+		assert.Equal(t, everyGrantable, intersectWithUserScopes(everyGrantable, "u-admin"))
+	})
+
+	t.Run("user_admin-only creator is still matched per scope", func(t *testing.T) {
+		withMockEffectiveScopes(t, func(string) []token_scopes.TokenScope {
+			return []token_scopes.TokenScope{token_scopes.Server_UserAdmin}
+		})
+		got := intersectWithUserScopes([]string{
+			token_scopes.Server_UserAdmin.String(),
+			token_scopes.Monitoring_Query.String(),
+			token_scopes.Monitoring_Scrape.String(),
+			token_scopes.Pelican_Advertise.String(),
+		}, "u-useradmin")
+		assert.Equal(t, []string{token_scopes.Server_UserAdmin.String(), token_scopes.Pelican_Advertise.String()}, got,
+			"only server.admin gets the shortcut")
+	})
+
+	t.Run("demoted creator drops back to per-scope matching", func(t *testing.T) {
+		caps := []string{token_scopes.Monitoring_Query.String(), token_scopes.Monitoring_Scrape.String()}
+		withMockEffectiveScopes(t, func(string) []token_scopes.TokenScope {
+			return []token_scopes.TokenScope{token_scopes.Server_Admin}
+		})
+		require.Equal(t, caps, intersectWithUserScopes(caps, "u-former"))
+		withMockEffectiveScopes(t, func(string) []token_scopes.TokenScope { return nil })
+		assert.Empty(t, intersectWithUserScopes(caps, "u-former"),
+			"a creator who lost server.admin is matched scope by scope again")
+	})
+
+	t.Run("key with no recorded creator still fails closed", func(t *testing.T) {
+		withMockEffectiveScopes(t, func(string) []token_scopes.TokenScope {
+			return []token_scopes.TokenScope{token_scopes.Server_Admin}
+		})
+		got := intersectWithUserScopes([]string{
+			token_scopes.Monitoring_Scrape.String(),
+			token_scopes.Pelican_Advertise.String(),
+		}, "")
+		assert.Equal(t, []string{token_scopes.Pelican_Advertise.String()}, got,
+			"no creator, no shortcut: user-grantable scopes are dropped")
 	})
 }

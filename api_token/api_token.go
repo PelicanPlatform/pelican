@@ -76,10 +76,15 @@ var (
 //     derived from the user's role; the token bearer is the
 //     credential, full stop.
 //   - User-grantable scopes (server.admin / user_admin /
-//     collection_admin) are kept ONLY if the creator's current
-//     effective set still contains them. A user who has lost
-//     server.user_admin loses it on every API token they ever
+//     collection_admin / monitoring.* / ...) are kept ONLY if the
+//     creator's current effective set still contains them. A user who
+//     has lost server.user_admin loses it on every API token they ever
 //     minted, on the next call.
+//   - A creator who currently holds server.admin keeps every scope
+//     except pelican.log_read. For this check only, anyone with the
+//     admin permission should be assumed to have the ability to perform
+//     any user-grantable scope, even if they're not otherwise listed
+//     explicitly for the account. log_read stays an explicit grant.
 //
 // userID may be empty (legacy rows minted before CreatedBy was
 // recorded). In that case we cannot attribute the token to any current
@@ -112,6 +117,15 @@ func intersectWithUserScopes(capabilities []string, userID string) []string {
 	for _, s := range effective {
 		hasEffective[s] = struct{}{}
 	}
+	// A creator who currently holds server.admin is treated as holding
+	// every user-grantable scope except pelican.log_read.
+	if _, ok := hasEffective[token_scopes.Server_Admin]; ok {
+		for _, s := range token_scopes.UserGrantableScopes {
+			if s != token_scopes.Pelican_LogRead {
+				hasEffective[s] = struct{}{}
+			}
+		}
+	}
 	out := make([]string, 0, len(capabilities))
 	for _, c := range capabilities {
 		ts := token_scopes.TokenScope(c)
@@ -126,10 +140,20 @@ func intersectWithUserScopes(capabilities []string, userID string) []string {
 	return out
 }
 
-// validateScopesForCreator returns an error if the requested
-// capabilities include any user-grantable scope NOT in the creator's
-// current effective set. Pass-through (non-user-grantable) scopes are
-// always allowed.
+// ScopesNotGrantableError means the creator's current scopes do not
+// cover one or more requested user-grantable scopes. Scopes lists them.
+type ScopesNotGrantableError struct {
+	Scopes []string
+}
+
+func (e *ScopesNotGrantableError) Error() string {
+	return fmt.Sprintf("creator does not have authority to grant scope(s): %s", strings.Join(e.Scopes, ", "))
+}
+
+// validateScopesForCreator returns a *ScopesNotGrantableError if the
+// requested capabilities include any user-grantable scope NOT in the
+// creator's current effective set. Pass-through (non-user-grantable)
+// scopes are always allowed.
 //
 // The verify path catches the same misconfiguration on every request
 // via intersectWithUserScopes, so this is not security-critical — but
@@ -159,7 +183,7 @@ func validateScopesForCreator(capabilities []string, userID string) error {
 			dropped = append(dropped, c)
 		}
 	}
-	return errors.Errorf("creator does not have authority to grant scope(s): %s", strings.Join(dropped, ", "))
+	return &ScopesNotGrantableError{Scopes: dropped}
 }
 
 // init registers the API token verifier with the token package automatically
