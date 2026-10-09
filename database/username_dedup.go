@@ -61,9 +61,10 @@ import (
 //  1. The row whose issuer is the current Server.ExternalWebUrl. It is
 //     the only local-account row password login and the admin bootstrap
 //     can reach.
-//  2. Any row over a placeholder row (sub prefixed with
-//     protectivePlaceholderSubPrefix). No identity provider asserts such
-//     a sub, so nobody can log in as it.
+//  2. A real row over a placeholder row (sub prefixed with
+//     protectivePlaceholderSubPrefix): when a placeholder shares its
+//     username with any other row, the placeholder loses. No identity
+//     provider asserts such a sub, so nobody can log in as it.
 //  3. The most recent last_login_at, with never-logged-in rows last.
 //  4. The oldest created_at, then the ID, so the choice is deterministic.
 //
