@@ -79,6 +79,14 @@ func InitServerDatabase(serverType server_structs.ServerType) error {
 		return err
 	}
 
+	// Resolve usernames shared by several live rows before the universal
+	// migration that makes usernames globally unique; it fails on them
+	// and the server would crash-loop at startup. No-op once applied.
+	// TODO: remove this once the global unique username migration is complete (7.27)
+	if err := prepareForGlobalUniqueUsernames(sqlDB, ServerDatabase); err != nil {
+		return err
+	}
+
 	// Always run universal migrations first
 	if err := utils.MigrateDB(sqlDB, EmbedUniversalMigrations, "universal_migrations"); err != nil {
 		return err
