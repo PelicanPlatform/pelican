@@ -102,6 +102,7 @@ var UserGrantableScopes = []TokenScope{
 	Server_UserAdmin,
 	Server_CollectionAdmin,
 	Pelican_LogRead,
+	Monitoring_Scrape,
 	Monitoring_Query,
 	Pelican_Transfer,
 }
@@ -134,7 +135,7 @@ var scopeDescriptions = map[TokenScope]string{
 	Pelican_DowntimeDelete: `Permits origin and cache to delete downtimes at the registry`,
 	Pelican_Metadata: `Permits an origin to publish object-commit events to a configured external metadata endpoint. This scope must also possess a path to be valid, eg pelican.metadata:/foo, where the path is the federation prefix of the namespace whose object the event describes.`,
 	WebUi_Access: `Sign in to the server's web UI and the cookie-authenticated APIs. Auto-granted to new user accounts; granting it explicitly to a user or group lets API tokens (which intersect against effective scopes) carry web-UI access too.`,
-	Server_Admin: `Full server-administration capability. Holders can manage every user/group/collection/setting; equivalent to the historical "system admin" role. Implies server.user_admin and server.collection_admin.`,
+	Server_Admin: `Full server-administration capability. Holders can manage every user/group/collection/setting; equivalent to the historical "system admin" role. Implies server.user_admin and server.collection_admin. When an API key is checked against its creator's current scopes, a creator who holds server.admin keeps every user-grantable scope on the key, whether or not each one is granted to the account.`,
 	Server_UserAdmin: `Manage non-admin users and unprivileged groups. Holders can create users, mint password-set invites, and run the user-onboarding flows, but cannot modify system-admin accounts.`,
 	Server_CollectionAdmin: `Create, modify, and delete collections and manage their ACLs.`,
 	Pelican_LoggingModify: `Permits modification of server log levels at runtime`,
