@@ -54,9 +54,9 @@ const Page = () => {
       >
         <Typography variant='h1'>403 Forbidden</Typography>
         <Typography variant='body1' sx={{ maxWidth: '80ch' }}>
-          You do not have permission to access this page. Your login details are
-          exposed below. If this is the wrong account, please log out and log in
-          with the correct account.
+          You do not have permission to access this page. Your account details
+          are shown below. If this is the wrong account, log out and sign in
+          with the correct one.
         </Typography>
         <Box my={2}>
           <Box component={'code'} sx={{ overflowWrap: 'anywhere' }}>

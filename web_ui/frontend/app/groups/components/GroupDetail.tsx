@@ -251,15 +251,13 @@ const GroupDetail: React.FC<GroupDetailProps> = ({
                 <Chip size='small' label={group.source} color='info' />
               </Box>
               <Typography variant='caption' color='text.secondary'>
-                This group was recorded automatically the first time the{' '}
+                Membership in this group is managed by the{' '}
                 {group.source === 'unknown'
                   ? 'configured group source'
-                  : `${group.source} group source`}{' '}
-                asserted its name. Membership is decided there and mirrored here
-                as people log in, so the list below may lag the provider, and a
-                member marked <em>via</em> a source can only be removed at that
-                provider. The group&apos;s name cannot be changed — it is what
-                the provider&apos;s assertion is matched against.
+                  : `${group.source} group source`}
+                . Changes there show up here as members sign in. Members marked{' '}
+                <em>via</em> that source can only be removed there, and the
+                group&apos;s name can&apos;t be changed.
               </Typography>
             </Box>
           )}
@@ -552,9 +550,8 @@ const GroupScopesSection: React.FC<{ groupId: string }> = ({ groupId }) => {
         Scopes
       </Typography>
       <Typography variant='body2' color='text.secondary' sx={{ mb: 2 }}>
-        Direct grants on this group. Every member of the group (database row
-        member or OIDC-asserted) inherits these scopes via EffectiveScopes.
-        Revoking removes the grant for all members at once.
+        Permissions granted to this group. Every member receives them, and
+        revoking one removes it from all members.
       </Typography>
       {!grants || grants.length === 0 ? (
         <Typography variant='body2' color='text.secondary' fontStyle='italic'>
@@ -778,8 +775,7 @@ const AddMemberDialog: React.FC<{
       <DialogContent>
         <DialogContentText sx={{ mb: 2 }}>
           Pick any user on this server to add directly to{' '}
-          <strong>{group.name}</strong>. Use this when you need to conscript a
-          user without going through an invite link.
+          <strong>{group.name}</strong>, without sending an invite link.
         </DialogContentText>
         {loadError && users && users.length === 0 && (
           <DialogContentText color='error' sx={{ mb: 2 }}>
@@ -889,10 +885,9 @@ const AuthTemplateEligibleRow: React.FC<{
         </Typography>
       </Box>
       <Typography variant='caption' color='text.secondary'>
-        When eligible, this group&apos;s name is honored by
-        Issuer.AuthorizationTemplates and Server.*AdminGroups config. Off keeps
-        the group usable in collection ACLs and shares without granting it any
-        operator-level authority.
+        When eligible, server configuration can refer to this group by name
+        (Issuer.AuthorizationTemplates and Server.*AdminGroups). Either way, the
+        group can still be used for collection access and shares.
       </Typography>
     </Box>
   );

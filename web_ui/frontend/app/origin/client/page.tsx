@@ -136,9 +136,8 @@ const OriginObjectBrowser = () => {
   if (!originClientConfig.embeddedIssuer) {
     return (
       <Alert severity={'info'}>
-        The object browser requires the origin&apos;s embedded token issuer,
-        which is not enabled on this server (it is configured to use OA4MP, or
-        the issuer is disabled).
+        The object browser isn&apos;t available because this server doesn&apos;t
+        use its built-in token issuer.
       </Alert>
     );
   }

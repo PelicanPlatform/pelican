@@ -868,7 +868,7 @@ const OnboardForm: React.FC = () => {
     if (ownerInfo && ownerInfo.created && ownerInfo.mintPasswordInvite) {
       const link = await alertOnError(
         () => InviteService.createPasswordInvite(ownerInfo!.userId),
-        `Failed to mint password-set invite for "${ownerInfo.username}"`,
+        `Failed to create password-set link for "${ownerInfo.username}"`,
         dispatch
       );
       if (link) {
@@ -1006,7 +1006,7 @@ const OnboardForm: React.FC = () => {
           <Typography variant='body2' color='text.secondary' mb={2}>
             Whoever holds ownership can transfer the collection, change its
             admin group, and delete it. Default is <strong>you</strong>. Pick a
-            different existing user, create a brand-new account, or mint an
+            different existing user, create a brand-new account, or create an
             invite link another user can follow to claim ownership. Ownership
             can also be transferred later from the collection&apos;s edit page.
           </Typography>
@@ -1346,7 +1346,7 @@ const OwnerSection: React.FC<{
               error={!newUserPaired}
               helperText={
                 newUserPaired
-                  ? 'Pre-bind their IdP-issued subject claim. Leave both blank for a local-password account.'
+                  ? 'Leave both blank for a password account.'
                   : 'sub and issuer must be filled together (or both blank).'
               }
             />
@@ -1365,10 +1365,8 @@ const OwnerSection: React.FC<{
             />
           </Stack>
           <Alert severity='info'>
-            For local accounts (sub + issuer left blank) the form mints a
-            password-set invite alongside the rest — the new user follows it
-            once to choose their own password. Admins never see or set the
-            password directly.
+            For password accounts (sub and issuer left blank), this also creates
+            a password-set link so the new user can choose their own password.
           </Alert>
         </Stack>
       </Box>
@@ -1573,7 +1571,7 @@ const ResultPanel: React.FC<{
       {result.partial && (
         <Alert severity='warning' sx={{ mb: 3 }}>
           {result.partialReason ||
-            'A step in the onboarding pipeline failed; the collection and any earlier groups remain in place.'}{' '}
+            "Setup didn't finish. The collection and any groups created so far were kept."}{' '}
           The sections below show what was created. You can navigate to the
           collection or the groups list to clean up partial state, then retry
           from the top.

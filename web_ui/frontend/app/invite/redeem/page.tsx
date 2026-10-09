@@ -133,8 +133,7 @@ const RedeemRouter: React.FC = () => {
               Redeem invite
             </Typography>
             <Typography variant='body2' color='text.secondary'>
-              Paste your invite token below. If you arrived from an invite URL
-              the token is already filled in.
+              Paste your invite token below, if it isn&apos;t already filled in.
             </Typography>
           </Box>
           {probeError && <Alert severity='error'>{probeError}</Alert>}

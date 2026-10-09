@@ -103,8 +103,8 @@ export function Issuer({ metadata }: { metadata: ParameterMetadataRecord }) {
           <Typography variant={'h4'}>Issuer Configuration</Typography>
           <Box my={2}>
             <Typography variant={'body1'}>
-              The origins issuer is responsible for issuing access tokens for
-              the data that it holds.
+              This origin&apos;s issuer creates access tokens for the data it
+              holds.
             </Typography>
           </Box>
           <BooleanToggle

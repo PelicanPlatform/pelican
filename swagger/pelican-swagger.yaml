@@ -7830,8 +7830,8 @@ paths:
         - me
       summary: Update the calling user's own record
       description: >-
-        `Authentication Required`. Only `displayName` is self-editable
-        per the design contract. Username changes go through the
+        `Authentication Required`. Only `displayName` is self-editable.
+        Username changes go through the
         admin endpoint PATCH `/users/{id}`; identity (sub/issuer)
         changes go through `/identities`.
       consumes:
@@ -7872,7 +7872,7 @@ paths:
         the rightful owner out).
 
 
-        Per the user/group design contract this endpoint MUST NOT
+        This endpoint does not
         create a password where none was set: an OIDC-only user who
         could quietly add a local password would keep accessing the
         system after the IdP relationship was severed. So we require

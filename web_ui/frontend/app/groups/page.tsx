@@ -447,10 +447,9 @@ const Page = () => {
                   color='text.secondary'
                   display='block'
                 >
-                  Allow this group&apos;s name to match
-                  Issuer.AuthorizationTemplates and Server.*AdminGroups config.
-                  Off by default — only enable for groups whose name should be
-                  honored by those operator-controlled surfaces.
+                  Let server configuration refer to this group by name
+                  (Issuer.AuthorizationTemplates and Server.*AdminGroups). Leave
+                  this off unless your configuration needs it.
                 </Typography>
               </Box>
             )}
@@ -521,14 +520,12 @@ const EmptyGroupList: React.FC<{
         You&rsquo;re not a member of any groups yet
       </Typography>
       <Typography variant='body2' color='text.secondary' sx={{ mb: 1 }}>
-        Groups bundle users together so the system can grant access by
-        membership rather than per-user. You join one by redeeming an invite
-        link from whoever runs the group — typically a project lead or admin.
+        Groups let you share access with several people at once. To join a
+        group, ask its owner for an invite link.
       </Typography>
       <Typography variant='body2' color='text.secondary' sx={{ mb: 2 }}>
-        If you&rsquo;re expecting to be in a group, ask its owner or
-        administrator to send you an invite link. You can also create your own
-        group to use in collection ACLs and shares.
+        You can also create your own group to give people access to your
+        collections.
       </Typography>
       {canCreate && (
         <Button variant='outlined' onClick={onCreate}>
