@@ -646,17 +646,14 @@ const TransferViaInvite: React.FC<{ collectionID: string }> = ({
         Transfer via invite link
       </Typography>
       <Typography variant='body2' color='text.secondary' mb={2}>
-        Mint a single-use link that, when redeemed by an authenticated user,
-        makes them the new owner. The current owner loses ownership at the same
-        moment. Useful when the recipient doesn&apos;t have an account yet
-        (they&apos;ll self-enroll via OIDC on first login) or to avoid having to
-        type someone&apos;s User.ID into the picker above. Only the owner can
-        mint these.
+        Create a one-time link. Whoever redeems it becomes the owner, and the
+        current owner loses ownership at that moment. Useful when the new owner
+        doesn&apos;t have an account yet. Only the owner can create these.
       </Typography>
       {link ? (
         <Stack spacing={1}>
           <Alert severity='success'>
-            Link minted — copy it now. It is shown <strong>once</strong> and
+            Link created — copy it now. It is shown <strong>once</strong> and
             expires in 7 days.
           </Alert>
           <TextField
@@ -853,7 +850,7 @@ const AclSection: React.FC<{
                   );
                 })()}
                 {legacy && (
-                  <Tooltip title='Legacy owner-role ACL. Ownership now lives on the Collection.OwnerID and AdminID fields; safe to revoke this row once the new fields are populated.'>
+                  <Tooltip title='Left over from an older version, before collections had an owner. Safe to remove once an owner is set above.'>
                     <Chip label='legacy' size='small' variant='outlined' />
                   </Tooltip>
                 )}

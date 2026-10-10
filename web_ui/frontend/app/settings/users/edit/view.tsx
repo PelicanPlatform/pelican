@@ -189,9 +189,8 @@ const AUPSection: React.FC<{
         )}
       </Box>
       <Typography variant='body2' color='text.secondary' sx={{ mb: 2 }}>
-        Clearing this user's acceptance forces them through the AUP workflow on
-        their next page load. Use this when you need to re-prompt a single user
-        without rotating the policy version (which would re-prompt everyone).
+        Ask this user to accept the policy again on their next visit, without
+        asking everyone else.
       </Typography>
       <InlineConfirmButton
         variant='outlined'
@@ -560,8 +559,8 @@ const IdentitiesSection: React.FC<{ userId: string }> = ({ userId }) => {
         Linked identities
       </Typography>
       <Typography variant='body2' color='text.secondary' sx={{ mb: 2 }}>
-        Secondary OIDC identities the user has linked. The primary identity
-        (shown above on the form) is not unlinkable from here.
+        Other sign-in accounts linked to this user. The primary one, shown
+        above, can&apos;t be removed here.
       </Typography>
       {!identities || identities.length === 0 ? (
         <Typography variant='body2' color='text.secondary' fontStyle='italic'>

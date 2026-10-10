@@ -180,9 +180,7 @@ const ScopesCard: React.FC<{
     return (
       <Paper variant='outlined' sx={{ p: 3 }}>
         <Typography variant='body2' color='text.secondary'>
-          You have no management scopes. This is expected for ordinary users —
-          scopes are server-administration capabilities, granted per-user or
-          per-group by an administrator.
+          You have no administrative permissions.
         </Typography>
       </Paper>
     );
@@ -191,9 +189,8 @@ const ScopesCard: React.FC<{
   return (
     <Paper variant='outlined' sx={{ p: 3 }}>
       <Typography variant='body2' color='text.secondary' mb={2}>
-        Capabilities your account currently holds. The set is the union of
-        scopes granted directly to you, scopes inherited from any group you
-        belong to, and any configuration-derived grants.
+        Permissions your account has, whether granted to you directly or through
+        a group.
       </Typography>
       <Stack spacing={1.5}>
         {scopes.map((name) => {
@@ -404,7 +401,7 @@ const PasswordSection: React.FC<{
         payload: {
           onClose: () => dispatch({ type: 'closeAlert' }),
           message:
-            'Password cleared. You can no longer log in with username + password until an administrator issues a new password-set link.',
+            'Password removed. To sign in with a password again, ask an administrator for a new password-set link.',
           alertProps: { severity: 'success' },
           autoHideDuration: 6000,
         },
@@ -428,16 +425,15 @@ const PasswordSection: React.FC<{
       </Box>
       {!me.hasPassword && (
         <Typography variant='body2' color='text.secondary'>
-          No local password is set. To enable username + password login, ask an
-          administrator for a password-set link. (Self-service creation is
-          intentionally not offered — see the user-account design contract.)
+          No local password is set. To sign in with a username and password, ask
+          an administrator for a password-set link.
         </Typography>
       )}
       {me.hasPassword && mode === 'idle' && (
         <>
           <Typography variant='body2' color='text.secondary' mb={1.5}>
-            You can log in with your username and password. Rotate it here, or
-            remove it to disable username+password login on this account.
+            You can sign in with your username and password. Change or remove
+            your password here.
           </Typography>
           <Stack direction='row' spacing={1}>
             <Button
@@ -510,9 +506,9 @@ const PasswordSection: React.FC<{
       {me.hasPassword && mode === 'confirmClear' && (
         <Stack spacing={1.5}>
           <Typography variant='body2'>
-            Remove your local password? You will no longer be able to log in
-            with username + password until an administrator issues a new
-            password-set link. Linked OIDC identities (if any) keep working.
+            Remove your password? To sign in with a password again, you&apos;ll
+            need a new password-set link from an administrator. Your other
+            sign-in methods keep working.
           </Typography>
           <Stack direction='row' spacing={1} justifyContent='flex-end'>
             <Button size='small' onClick={reset} disabled={busy}>
@@ -553,8 +549,7 @@ const IdentitiesCard: React.FC<{
     return (
       <Paper variant='outlined' sx={{ p: 3 }}>
         <Typography variant='body2' color='text.secondary'>
-          No external identities are linked to your account. Sign in via OIDC to
-          link one.
+          No other sign-in accounts are linked.
         </Typography>
       </Paper>
     );

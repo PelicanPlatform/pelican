@@ -86,10 +86,8 @@ pathBearing: true
 ############################
 name: web_ui.access
 description: >-
-  Sign in to the server's web UI and the cookie-authenticated APIs.
-  Auto-granted to new user accounts; granting it explicitly to a user
-  or group lets API tokens (which intersect against effective scopes)
-  carry web-UI access too.
+  Sign in to this server's web interface.
+  New accounts receive this permission automatically.
 issuedBy: ["*"]
 acceptedBy: ["*"]
 userGrantable: true
@@ -105,18 +103,17 @@ userGrantable: true
 # bearer-token authorization on the data plane.
 name: server.admin
 description: >-
-  Full server-administration capability. Holders can manage every
-  user/group/collection/setting; equivalent to the historical "system
-  admin" role. Implies server.user_admin and server.collection_admin.
+  Full administrative access: users, groups, collections, and settings.
+  Includes server.user_admin and server.collection_admin.
 issuedBy: ["*"]
 acceptedBy: ["*"]
 userGrantable: true
 ---
 name: server.user_admin
 description: >-
-  Manage non-admin users and unprivileged groups. Holders can create
-  users, mint password-set invites, and run the user-onboarding flows,
-  but cannot modify system-admin accounts.
+  Manage users and ordinary groups, including creating accounts and
+  sending password-set links.
+  Cannot change administrator accounts.
 issuedBy: ["*"]
 acceptedBy: ["*"]
 userGrantable: true

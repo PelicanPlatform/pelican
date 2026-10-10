@@ -354,10 +354,7 @@ const Editor: React.FC = () => {
                 Version history
               </Typography>
               {history.length === 0 ? (
-                <Typography color='text.secondary'>
-                  No edits yet — the active version above is the current
-                  source-of-truth.
-                </Typography>
+                <Typography color='text.secondary'>No edits yet.</Typography>
               ) : (
                 <Stack spacing={1.5}>
                   {history.map((row) => (

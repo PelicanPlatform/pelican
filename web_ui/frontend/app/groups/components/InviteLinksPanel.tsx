@@ -146,9 +146,8 @@ const InviteLinksPanel: React.FC<InviteLinksPanelProps> = ({ groupId }) => {
             mb={1}
             display='block'
           >
-            Send this URL to whoever should join the group. The page on the
-            other end requires them to be logged in (any identity) and adds them
-            on accept.
+            Send this link to the people who should join. They&apos;ll be asked
+            to sign in, then added to the group.
           </Typography>
           {/*
             We send the *full URL* — not the bare token. The token alone
