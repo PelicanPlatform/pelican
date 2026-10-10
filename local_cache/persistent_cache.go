@@ -209,6 +209,10 @@ type PersistentCache struct {
 	// disk download has marked its object as downloading and before it
 	// hands the transfer to a fetcher.
 	beforeHandOff func(dl *persistentDownload)
+	// afterTierChangeDrop, set only by tests, runs once a proxied read that
+	// found its tiered copy changed has dropped the object, or declined to
+	// (see openTierStream).
+	afterTierChangeDrop func(hash InstanceHash, dropped bool)
 
 	// Active range-on-miss init deduplication (keyed by objectHash)
 	initGroup singleflight.Group
@@ -2241,18 +2245,34 @@ func (pc *PersistentCache) performDownload(ctx context.Context, dl *persistentDo
 		}
 	}()
 
+	// Create a channel to receive early metadata (size, ETag) before body transfer
+	metadataChan := make(chan client.TransferMetadata, 1)
+
+	// Create a decision writer that buffers data until we know the size
+	dw := newDecisionWriter(pc, dl)
+	// A fetcher that adopts the transfer releases the download's write
+	// fence when the transfer ends; otherwise it is released here.
+	defer func() {
+		if !tcHandedOff {
+			dw.releaseFence()
+		}
+	}()
+
 	// Once the object is marked as downloading (markDownloading, below),
 	// readers that find it -- through this download, or as a cache hit
 	// once the latest-ETag mapping is stored -- wait in WaitForBlock for
 	// the download to write their blocks, and only ClearDownloading ends
 	// that wait.  The fetcher that adopts the transfer clears it when the
-	// transfer ends; on every way out that never got that far, it is
-	// cleared here, or those readers would wait until their own contexts
-	// ended.  The state is the one that was marked, which an eviction in
-	// the meantime may have replaced in the cache.
+	// transfer ends (see endAdoptedDownload); on every way out that never
+	// got that far, it is cleared here, or those readers would wait until
+	// their own contexts ended.  The state marked is the download's own --
+	// the one its writer publishes blocks to -- and that state is the one
+	// cleared, never one looked up by hash afterwards: by then the object
+	// may have been deleted and the same version fetched again under the
+	// same hash, and the new instance's mark is its own download's.
 	var downloadingState *ObjectBlockState
 	markDownloading := func() {
-		if state, err := pc.storage.GetSharedBlockState(dl.instanceHash); err == nil {
+		if state := dw.diskState(); state != nil {
 			state.SetDownloading()
 			downloadingState = state
 		}
@@ -2263,12 +2283,6 @@ func (pc *PersistentCache) performDownload(ctx context.Context, dl *persistentDo
 		}
 	}()
 
-	// Create a channel to receive early metadata (size, ETag) before body transfer
-	metadataChan := make(chan client.TransferMetadata, 1)
-
-	// Create a decision writer that buffers data until we know the size
-	dw := newDecisionWriter(pc, dl)
-
 	// Derive a per-download context from the cache-wide downloadCtx.
 	// PersistentCache.Close() cancels downloadCtx which cascades to all
 	// per-download contexts.  The fetcher's idle timeout (in
@@ -2276,6 +2290,14 @@ func (pc *PersistentCache) performDownload(ctx context.Context, dl *persistentDo
 	// clients remain.
 	dlCtx, dlCancel := context.WithCancel(pc.downloadCtx)
 	dl.cancelFn = dlCancel
+	// A transfer that nothing adopts is stopped on the way out: otherwise
+	// one whose hand-off failed runs on -- from a stalled origin, until the
+	// cache closes -- writing into a writer nothing will finish.
+	defer func() {
+		if !tcHandedOff {
+			dlCancel()
+		}
+	}()
 	transferOpts := []client.TransferOption{
 		client.WithToken(userToken),
 		client.WithWriter(dw),
@@ -2487,7 +2509,7 @@ func (pc *PersistentCache) performDownload(ctx context.Context, dl *persistentDo
 					} else {
 						log.Debugf("performDownload: HEAD stat returned size %d for %s", statInfo.Size, dl.objectHash)
 						sizeMeta := &CacheMetadata{ContentLength: statInfo.Size}
-						if mergeErr := pc.storage.MergeMetadata(dl.instanceHash, sizeMeta); mergeErr != nil {
+						if mergeErr := dw.mergeDiskMetadata(sizeMeta); mergeErr != nil {
 							log.Warnf("Failed to update content length from HEAD: %v", mergeErr)
 						} else {
 							// Invalidate the diskCrypto cache so that the
@@ -2588,6 +2610,14 @@ func (pc *PersistentCache) performDownload(ctx context.Context, dl *persistentDo
 	if fetcherErr != nil {
 		return errors.Wrap(fetcherErr, "failed to create block fetcher for handoff")
 	}
+	if fetcher.blockState != downloadingState {
+		// The object was deleted since the download made its writer, and
+		// perhaps fetched again: the fetcher holds another instance's
+		// block state, whose readers it would keep waiting for this
+		// download's blocks, which go nowhere.
+		fetcher.Close()
+		return errors.Wrap(errInstanceDeleted, "failed to create block fetcher for handoff")
+	}
 	dl.fetcher = fetcher
 
 	if resultReceived {
@@ -2597,9 +2627,12 @@ func (pc *PersistentCache) performDownload(ctx context.Context, dl *persistentDo
 		resultChan <- result
 	}
 
+	// The fetcher releases the download's fence only after the exit
+	// function returns, so endAdoptedDownload drops the object through it.
+	fence := dw.diskFence()
 	if !pc.whileOpen(func() {
 		fetcher.AdoptTransfer(dlCtx, dl.cancelFn, tc, dw, resultChan, pc.egrp, &pc.downloadWg,
-			func(err error) { pc.endAdoptedDownload(dl, err) })
+			func(err error) { pc.endAdoptedDownload(dl, fence, downloadingState, err) })
 	}) {
 		fetcher.Close()
 		return errCacheClosing
@@ -2611,8 +2644,15 @@ func (pc *PersistentCache) performDownload(ctx context.Context, dl *persistentDo
 
 // endAdoptedDownload finishes a whole-object download that a fetcher adopted,
 // once its transfer has ended in err (nil on success).
-func (pc *PersistentCache) endAdoptedDownload(dl *persistentDownload, err error) {
-	sharedState, stateErr := pc.storage.GetSharedBlockState(dl.instanceHash)
+//
+// sharedState is the block state the download marked as downloading -- its
+// own instance's -- and fence its membership of the instance's write fence,
+// still held.  The download's verdict touches only its own instance: if
+// that has been deleted while the download ran, and perhaps the same
+// version fetched again under the same hash, the new instance is neither
+// deleted nor condemned, and its downloading mark, which is its own
+// download's, stays.
+func (pc *PersistentCache) endAdoptedDownload(dl *persistentDownload, fence *writeFence, sharedState *ObjectBlockState, err error) {
 	defer close(dl.completionDone)
 	bad := err != nil && pc.adoptedTransferDataIsBad(dl.instanceHash, err)
 	if bad {
@@ -2623,11 +2663,11 @@ func (pc *PersistentCache) endAdoptedDownload(dl *persistentDownload, err error)
 		// download see completionErr; readers that joined it as a cache
 		// hit hold only the block state.
 		dl.completionErr.Store(err)
-		if stateErr == nil {
+		if sharedState != nil {
 			sharedState.condemn(err)
 		}
 	}
-	if stateErr == nil {
+	if sharedState != nil {
 		sharedState.ClearDownloading()
 	}
 	if err == nil {
@@ -2653,9 +2693,12 @@ func (pc *PersistentCache) endAdoptedDownload(dl *persistentDownload, err error)
 	// drops the latest-ETag mapping -- but only if it still names this
 	// version: a request may meanwhile have found a newer one, whose
 	// mapping must stay.
-	if delErr := pc.storage.Delete(dl.instanceHash); delErr != nil {
+	if dropped, delErr := pc.storage.deleteAsWriter(fence); delErr != nil {
 		log.Warnf("Failed to evict instance %s after a failed download (%v); until it is, every request for it fails: %v",
 			dl.instanceHash, err, delErr)
+	} else if !dropped {
+		log.Debugf("Not evicting %s after a failed download (%v): it was deleted while it was being downloaded",
+			dl.instanceHash, err)
 	}
 }
 
@@ -2767,9 +2810,16 @@ type decisionWriter struct {
 
 	// For disk mode
 	blockWriter io.WriteCloser
-	diskMeta    *CacheMetadata
-	ctx         context.Context
-	size        int64
+	// fence is a membership of the instance's write fence at the
+	// BlockWriter's generation, for the download's own metadata writes
+	// that may come after the writer has closed -- the checksums the
+	// transfer's result brings (see instanceFences).  Released, once, by
+	// whoever ends the download: the fetcher that adopted it, or
+	// performDownload if none did.
+	fence    *writeFence
+	diskMeta *CacheMetadata
+	ctx      context.Context
+	size     int64
 
 	// For pipe mode (no-store streaming)
 	pipeWriter *io.PipeWriter
@@ -2887,6 +2937,63 @@ func (w *decisionWriter) BufferLen() int {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 	return len(w.buffer)
+}
+
+// mergeDiskMetadata merges meta into the record of the object being written
+// to disk, through the download's write fence, so that nothing is recorded
+// for it once it has been deleted (see instanceFences).  For a writer in
+// disk mode.
+func (w *decisionWriter) mergeDiskMetadata(meta *CacheMetadata) error {
+	var err error
+	if !w.writeFenced(func() { err = w.pc.storage.MergeMetadata(w.dl.instanceHash, meta) }) {
+		return errInstanceDeleted
+	}
+	return err
+}
+
+// writeFenced runs fn, a database write of the download's, through the
+// download's write fence, and reports whether it ran; see
+// writeFence.write.  A writer that never entered disk mode has no fence,
+// and nothing on disk to fence, and runs fn.
+func (w *decisionWriter) writeFenced(fn func()) bool {
+	w.mu.Lock()
+	fence := w.fence
+	w.mu.Unlock()
+	if fence == nil {
+		fn()
+		return true
+	}
+	return fence.write(fn)
+}
+
+// diskFence returns the download's membership of the write fence, or nil
+// before disk mode; see fence.
+func (w *decisionWriter) diskFence() *writeFence {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	return w.fence
+}
+
+// diskState returns the block state the download's BlockWriter publishes
+// blocks to -- that of the instance the writer joined -- or nil before disk
+// mode or after the writer has been handed off.
+func (w *decisionWriter) diskState() *ObjectBlockState {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	if bw, ok := w.blockWriter.(*BlockWriter); ok {
+		return bw.sharedState
+	}
+	return nil
+}
+
+// releaseFence leaves the download's write fence; see fence.
+func (w *decisionWriter) releaseFence() {
+	w.mu.Lock()
+	fence := w.fence
+	w.mu.Unlock()
+	if fence != nil {
+		fence.leave()
+	}
 }
 
 // HandoffBlockWriter atomically replaces the decisionWriter's internal
@@ -3066,6 +3173,7 @@ func (w *decisionWriter) SetDiskMode(ctx context.Context, size int64) error {
 		return w.setupErr
 	}
 	w.blockWriter = blockWriter
+	w.fence = blockWriter.fence.clone()
 
 	// Flush buffered data to block writer
 	if len(w.buffer) > 0 {

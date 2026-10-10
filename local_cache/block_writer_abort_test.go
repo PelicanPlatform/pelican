@@ -269,7 +269,7 @@ func TestOriginFetchDropsAnotherVersion(t *testing.T) {
 	bf := &BlockFetcherV2{storage: env.storage, instanceHash: env.hash, meta: meta,
 		activeFetches: make(map[fetchKey]*fetchOperation)}
 
-	bf.dropIfCondemned(error_codes.NewContact_ConnectionResetError(&client.NetworkResetError{}), true)
+	bf.dropIfCondemned(testWriterFence(t, env.storage, env.hash), error_codes.NewContact_ConnectionResetError(&client.NetworkResetError{}), true)
 	kept, err := env.storage.GetMetadata(env.hash)
 	require.NoError(t, err)
 	require.NotNil(t, kept, "a benign failure keeps the instance")
@@ -277,7 +277,7 @@ func TestOriginFetchDropsAnotherVersion(t *testing.T) {
 	// Wrapped the way the transfer engine reports an attempt's error.
 	changed := fmt.Errorf("transfer failed: %w",
 		errors.Wrap(client.ErrObjectVersionChanged, `origin sent entity tag "v2"; expected "v1"`))
-	bf.dropIfCondemned(changed, false)
+	bf.dropIfCondemned(testWriterFence(t, env.storage, env.hash), changed, false)
 	gone, err := env.storage.GetMetadata(env.hash)
 	require.NoError(t, err)
 	assert.Nil(t, gone, "an instance the origin no longer serves is dropped")
@@ -299,7 +299,7 @@ func TestOriginFetchDropsWhatAFailureCondemns(t *testing.T) {
 		activeFetches: make(map[fetchKey]*fetchOperation)}
 	trailer := error_codes.NewTransferError(errors.New("download error after server response started: 500: upstream verification failed"))
 
-	bf.dropIfCondemned(trailer, false)
+	bf.dropIfCondemned(testWriterFence(t, env.storage, env.hash), trailer, false)
 	kept, err := env.storage.GetMetadata(env.hash)
 	require.NoError(t, err)
 	require.NotNil(t, kept, "a fetch that wrote nothing condemns nothing")
@@ -307,7 +307,7 @@ func TestOriginFetchDropsWhatAFailureCondemns(t *testing.T) {
 	rr, err := NewRangeReader(env.storage, env.hash, 0, -1, nil)
 	require.NoError(t, err)
 	defer rr.Close()
-	bf.dropIfCondemned(trailer, true)
+	bf.dropIfCondemned(testWriterFence(t, env.storage, env.hash), trailer, true)
 	gone, err := env.storage.GetMetadata(env.hash)
 	require.NoError(t, err)
 	assert.Nil(t, gone, "the blocks a condemned fetch wrote must not be kept")

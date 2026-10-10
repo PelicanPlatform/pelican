@@ -120,7 +120,9 @@ func TestFailedDownloadLeavesANewerVersionsMapping(t *testing.T) {
 	require.NoError(t, err)
 	defer hit.Close()
 	mismatch := error_codes.NewTransfer_ChecksumMismatchError(&client.ChecksumMismatchError{})
-	pc.endAdoptedDownload(dl, attempts(mismatch))
+	state, err := env.storage.GetSharedBlockState(env.hash)
+	require.NoError(t, err)
+	pc.endAdoptedDownload(dl, testWriterFence(t, env.storage, env.hash), state, attempts(mismatch))
 	assert.Error(t, hit.WaitForCompletion(context.Background()), "a reader that joined as a hit must be told too")
 
 	meta, err := env.storage.GetMetadata(env.hash)
@@ -170,7 +172,9 @@ func TestCondemnedDownloadWakesReadersOnlyOnceMarkedBad(t *testing.T) {
 		require.Eventually(t, func() bool { return state.waiters() > 0 }, 5*time.Second, time.Millisecond)
 
 		dl := &persistentDownload{instanceHash: env.hash, completionDone: make(chan struct{})}
-		pc.endAdoptedDownload(dl, mismatch)
+		fence := env.storage.fences.join(env.hash)
+		pc.endAdoptedDownload(dl, fence, state, mismatch)
+		fence.leave()
 		require.Error(t, <-read)
 		require.NoError(t, rr.Close())
 		require.False(t, fetched.Load(), "run %d: a reader woken by the end of a condemned download started a fetch", i)

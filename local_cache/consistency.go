@@ -125,6 +125,10 @@ type ConsistencyChecker struct {
 	db      *CacheDB
 	storage *StorageManager
 
+	// beforeMetadataWrite, set only by tests, runs just before the scan
+	// records what it found about an object.
+	beforeMetadataWrite func(InstanceHash)
+
 	// Rate limiting (using rate.Limiter treating each token as 1ns)
 	metadataScanLimiter *rate.Limiter  // Limits metadata scan active time
 	dataScanBytesPerSec int64          // Max bytes per second for data scanning
@@ -1584,7 +1588,12 @@ func (cc *ConsistencyChecker) markDataVerified(instanceHash InstanceHash) {
 	if !cc.skipVerifiedData {
 		return
 	}
-	if err := cc.db.MergeMetadata(instanceHash, &CacheMetadata{DataVerified: time.Now()}); err != nil {
+	if cc.beforeMetadataWrite != nil {
+		cc.beforeMetadataWrite(instanceHash)
+	}
+	// Only onto an existing record: the object may have been deleted since
+	// it was verified, and a bare record would pass for a cached copy.
+	if _, err := cc.db.MergeExistingMetadata(instanceHash, &CacheMetadata{DataVerified: time.Now()}); err != nil {
 		log.Warnf("Failed to record data-verified timestamp for %s: %v", instanceHash, err)
 	}
 }
@@ -1695,8 +1704,17 @@ func (cc *ConsistencyChecker) calculateAndStoreChecksums(
 	}
 
 	checksumMeta := &CacheMetadata{Checksums: checksums}
-	if err := cc.db.MergeMetadata(instanceHash, checksumMeta); err != nil {
+	if cc.beforeMetadataWrite != nil {
+		cc.beforeMetadataWrite(instanceHash)
+	}
+	// Only onto an existing record, as in markDataVerified.
+	stored, err := cc.db.MergeExistingMetadata(instanceHash, checksumMeta)
+	if err != nil {
 		return errors.Wrap(err, "failed to store checksum")
+	}
+	if !stored {
+		log.Debugf("Not storing the checksum of %s: it was deleted while being checksummed", instanceHash)
+		return nil
 	}
 
 	log.Debugf("Calculated and stored checksum for %s", instanceHash)

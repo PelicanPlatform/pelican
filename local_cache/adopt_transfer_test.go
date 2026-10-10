@@ -85,9 +85,18 @@ func TestAdoptedTransferWithoutResultIsAFailure(t *testing.T) {
 type adoptHarness struct {
 	env       *tornBlockEnv
 	bf        *BlockFetcherV2
+	inner     *BlockWriter // the download's writer, before AdoptTransfer wraps it
 	exitErr   chan error
 	cancelled chan struct{}
 	wg        sync.WaitGroup
+
+	// dw is the download's decisionWriter, and state the block state its
+	// writer publishes to.
+	dw    *decisionWriter
+	state *ObjectBlockState
+	// onExit, when set (by a beforeStart function), runs when the download
+	// ends, before exitErr is sent, as performDownload's exit function does.
+	onExit func(err error)
 }
 
 func startAdoptHarness(t *testing.T, idleAfter time.Duration, onCancel *client.TransferResults, beforeStart ...func(*adoptHarness)) *adoptHarness {
@@ -110,12 +119,16 @@ func startAdoptHarness(t *testing.T, idleAfter time.Duration, onCancel *client.T
 	require.NoError(t, err)
 	_, err = inner.Write(env.data[:tornCut])
 	require.NoError(t, err)
-	dw := &decisionWriter{decided: true, diskMode: true, blockWriter: inner, dl: &persistentDownload{}}
+	// As SetDiskMode makes it, with its own membership of the write fence.
+	dw := &decisionWriter{decided: true, diskMode: true, blockWriter: inner, fence: inner.fence.clone(), dl: &persistentDownload{}}
 	state, err := env.storage.GetSharedBlockState(env.hash)
 	require.NoError(t, err)
 
 	h := &adoptHarness{
 		env:       env,
+		inner:     inner,
+		dw:        dw,
+		state:     state,
 		bf:        &BlockFetcherV2{storage: env.storage, instanceHash: env.hash, meta: meta, blockState: state, prefetchTimeout: idleAfter, activeFetches: make(map[fetchKey]*fetchOperation)},
 		exitErr:   make(chan error, 1),
 		cancelled: make(chan struct{}),
@@ -132,7 +145,12 @@ func startAdoptHarness(t *testing.T, idleAfter time.Duration, onCancel *client.T
 		f(h)
 	}
 	egrp, _ := errgroup.WithContext(ctx)
-	h.bf.AdoptTransfer(ctx, cancelTransfer, tc, dw, resultChan, egrp, &h.wg, func(err error) { h.exitErr <- err })
+	h.bf.AdoptTransfer(ctx, cancelTransfer, tc, dw, resultChan, egrp, &h.wg, func(err error) {
+		if h.onExit != nil {
+			h.onExit(err)
+		}
+		h.exitErr <- err
+	})
 	return h
 }
 
@@ -275,4 +293,118 @@ func TestAdoptedTransferIdleCancelKeepsACondemningError(t *testing.T) {
 	assert.True(t, h.wasCancelled())
 	assert.NotErrorIs(t, err, errAdoptedTransferIdle)
 	assert.False(t, transferStopKeepsData(err), "the download must end in the condemning error, not %v", err)
+}
+
+// checksummedResult is a successful result carrying an origin checksum.
+func checksummedResult() *client.TransferResults {
+	return &client.TransferResults{ServerChecksums: []client.ChecksumInfo{
+		{Algorithm: client.AlgMD5, Value: []byte("0123456789abcdef")},
+	}}
+}
+
+// TestAdoptedTransferRecordsChecksumsAfterItsWriterCloses checks that the
+// checksums a transfer's result brings are recorded even when the
+// download's writer has already closed -- as it has for a small object,
+// whose whole body arrives before the fetcher adopts the transfer.
+func TestAdoptedTransferRecordsChecksumsAfterItsWriterCloses(t *testing.T) {
+	h := startAdoptHarness(t, time.Nanosecond, checksummedResult(), func(h *adoptHarness) {
+		h.inner.StopEarly()
+	})
+	require.NoError(t, <-h.exitErr)
+	h.wg.Wait()
+	meta, err := h.env.db.GetMetadata(h.env.hash)
+	require.NoError(t, err)
+	require.NotNil(t, meta)
+	assert.NotEmpty(t, meta.Checksums, "the result's checksums must be recorded")
+	assert.Zero(t, h.env.storage.fences.size(), "the download's fence must be released")
+}
+
+// TestAdoptedTransferRecordsNoChecksumsForADeletedObject checks that the
+// checksums of a transfer whose object was deleted meanwhile are not
+// recorded: MergeMetadata would make a record of the deleted object afresh.
+func TestAdoptedTransferRecordsNoChecksumsForADeletedObject(t *testing.T) {
+	h := startAdoptHarness(t, time.Nanosecond, checksummedResult(), func(h *adoptHarness) {
+		h.inner.StopEarly()
+		require.NoError(t, h.env.storage.Delete(h.env.hash))
+	})
+	<-h.exitErr
+	h.wg.Wait()
+	meta, err := h.env.db.GetMetadata(h.env.hash)
+	require.NoError(t, err)
+	assert.Nil(t, meta, "a record of the deleted object made from its checksums")
+	assert.Zero(t, h.env.storage.fences.size(), "the download's fence must be released")
+}
+
+// isDownloading reports whether a block state is marked as having a
+// whole-object download in progress.
+func isDownloading(state *ObjectBlockState) bool {
+	state.mu.RLock()
+	defer state.mu.RUnlock()
+	return state.downloading
+}
+
+// endAfterRefetch starts an adopted download, marked as downloading as
+// performDownload marks it, whose transfer reports result when cancelled.
+// When it ends, but before its end is recorded (endAdoptedDownload), its
+// object is deleted and the same version fetched again under the same hash,
+// and that new instance's own download marks it as downloading.  It returns
+// the harness, once the download has ended, and the new instance's block
+// state.
+func endAfterRefetch(t *testing.T, result *client.TransferResults) (*adoptHarness, *ObjectBlockState) {
+	t.Helper()
+	var successor *ObjectBlockState
+	h := startAdoptHarness(t, time.Nanosecond, result, func(h *adoptHarness) {
+		h.state.SetDownloading()
+		pc := &PersistentCache{storage: h.env.storage, db: h.env.db}
+		dl := &persistentDownload{instanceHash: h.env.hash, completionDone: make(chan struct{})}
+		h.onExit = func(err error) {
+			require.NoError(t, h.env.storage.Delete(h.env.hash))
+			h.env.reinit(t)
+			var stateErr error
+			successor, stateErr = h.env.storage.GetSharedBlockState(h.env.hash)
+			require.NoError(t, stateErr)
+			successor.SetDownloading()
+			pc.endAdoptedDownload(dl, h.dw.diskFence(), h.state, err)
+		}
+	})
+	<-h.exitErr
+	h.wg.Wait()
+	require.NotNil(t, successor)
+	return h, successor
+}
+
+// TestCondemnedDownloadOfADeletedInstanceDropsNothingOfItsSuccessor checks
+// that an adopted download whose data is condemned drops only the instance
+// it wrote: if that was deleted, and the same version fetched again under the
+// same hash, before the download's verdict, the new instance keeps its
+// record, its block state is not condemned, and its own download's mark
+// stays, while the download's own state is condemned and its mark cleared.
+func TestCondemnedDownloadOfADeletedInstanceDropsNothingOfItsSuccessor(t *testing.T) {
+	trailer := error_codes.NewTransferError(errors.New("download error after server response started: 500: upstream verification failed"))
+	h, successor := endAfterRefetch(t, &client.TransferResults{Error: trailer})
+
+	meta, err := h.env.db.GetMetadata(h.env.hash)
+	require.NoError(t, err)
+	assert.NotNil(t, meta, "the download dropped the new instance of the object")
+	assert.NotSame(t, h.state, successor)
+	assert.NoError(t, successor.Condemned(), "the download condemned the new instance")
+	assert.True(t, isDownloading(successor), "the download cleared the new instance's downloading mark")
+	assert.Error(t, h.state.Condemned(), "the readers of the download's own instance must learn the verdict")
+	assert.False(t, isDownloading(h.state), "the download must clear its own mark")
+	h.env.requireStartsClean(t)
+	assert.Zero(t, h.env.storage.fences.size(), "the download's fence must be released")
+}
+
+// TestDownloadEndClearsOnlyItsOwnMark checks that the end of an adopted
+// download -- here one stopped early, which keeps its blocks -- clears the
+// downloading mark it set, and not one set on a new instance of the object
+// made under the same hash since its own was deleted: readers of the new
+// instance must go on waiting for the new instance's download.
+func TestDownloadEndClearsOnlyItsOwnMark(t *testing.T) {
+	h, successor := endAfterRefetch(t, &client.TransferResults{Error: context.Canceled})
+
+	assert.True(t, isDownloading(successor), "the download cleared the new instance's downloading mark")
+	assert.False(t, isDownloading(h.state), "the download must clear its own mark")
+	assert.NoError(t, successor.Condemned())
+	h.env.requireStartsClean(t)
 }

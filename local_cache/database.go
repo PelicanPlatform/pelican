@@ -810,18 +810,40 @@ func (cdb *CacheDB) SetMetadata(instanceHash InstanceHash, meta *CacheMetadata) 
 // The method retries on BadgerDB transaction conflicts, which can occur when
 // multiple concurrent callers merge metadata for the same instance (e.g.
 // concurrent range-on-miss initialization via initObjectFromStat).
+//
+// When no record exists, MergeMetadata creates one from incoming; see
+// MergeExistingMetadata for a merge that never does.
 func (cdb *CacheDB) MergeMetadata(instanceHash InstanceHash, incoming *CacheMetadata) error {
+	_, err := cdb.mergeMetadata(instanceHash, incoming, true)
+	return err
+}
+
+// MergeExistingMetadata merges incoming into an object's record as
+// MergeMetadata does, but only if the record exists; it reports whether it
+// did.  It is for a writer that only annotates an object -- the consistency
+// scan recording what it verified -- and must not make a bare record for
+// one deleted meanwhile, which a later miss would take for a cached copy.
+func (cdb *CacheDB) MergeExistingMetadata(instanceHash InstanceHash, incoming *CacheMetadata) (bool, error) {
+	return cdb.mergeMetadata(instanceHash, incoming, false)
+}
+
+func (cdb *CacheDB) mergeMetadata(instanceHash InstanceHash, incoming *CacheMetadata, create bool) (found bool, err error) {
 	if err := cdb.checkWritable(); err != nil {
-		return err
+		return false, err
 	}
 	const maxRetries = 20
 	backoff := 100 * time.Microsecond
 	for attempt := 0; ; attempt++ {
+		found = false
 		err := cdb.db.Update(func(txn *badger.Txn) error {
 			existing, err := getMetadataInTxn(txn, instanceHash)
 			if err != nil {
 				return errors.Wrap(err, "failed to read existing metadata for merge")
 			}
+			if existing == nil && !create {
+				return nil
+			}
+			found = true
 
 			merged := incoming
 			if existing != nil {
@@ -838,7 +860,7 @@ func (cdb *CacheDB) MergeMetadata(instanceHash InstanceHash, incoming *CacheMeta
 			return txn.Set(MetaKey(instanceHash), data)
 		})
 		if err == nil {
-			return nil
+			return found, nil
 		}
 		if errors.Is(err, badger.ErrConflict) && attempt < maxRetries-1 {
 			n, _ := rand.Int(rand.Reader, big.NewInt(int64(backoff)))
@@ -850,7 +872,7 @@ func (cdb *CacheDB) MergeMetadata(instanceHash InstanceHash, incoming *CacheMeta
 			}
 			continue
 		}
-		return err
+		return false, err
 	}
 }
 
@@ -2451,8 +2473,13 @@ const evictionSkipBudget = 1024
 // maxObjects, because skipping frees nothing and counting it would let
 // eviction report a full batch while returning under target.
 //
+// claim, when non-nil, is called with each object, inside the transaction,
+// just before it is deleted; StorageManager.EvictByLRU uses it to shut the
+// object's writers out (see instanceFences).  It may be called for an object
+// whose deletion then fails, or whose transaction does not commit.
+//
 // Returns the evicted objects and the number that were skipped.
-func (cdb *CacheDB) EvictByLRU(storageID StorageID, namespaceID NamespaceID, maxObjects int, maxBytes int64, skip func(InstanceHash) bool) ([]evictedObject, int, error) {
+func (cdb *CacheDB) EvictByLRU(storageID StorageID, namespaceID NamespaceID, maxObjects int, maxBytes int64, skip func(InstanceHash) bool, claim func(InstanceHash)) ([]evictedObject, int, error) {
 	if err := cdb.checkWritable(); err != nil {
 		return nil, 0, err
 	}
@@ -2506,6 +2533,9 @@ func (cdb *CacheDB) EvictByLRU(storageID StorageID, namespaceID NamespaceID, max
 				log.Debugf("Skipping eviction of %s: pre-signed URL issued within hold window", hash)
 				*skipCounter++
 				return
+			}
+			if claim != nil {
+				claim(hash)
 			}
 			var meta *CacheMetadata
 			var err error
