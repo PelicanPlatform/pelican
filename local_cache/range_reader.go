@@ -184,7 +184,7 @@ type RangeReader struct {
 	// noStoreReader is the read end of an io.Pipe for streaming no-store
 	// responses.  When set, Read delegates here and Seek returns an error
 	// because a pipe is forward-only.
-	noStoreReader io.ReadCloser
+	noStoreReader *noStoreBody
 
 	// remoteStream serves objects that reside on a tiering target when
 	// redirect is disabled (proxy mode).  Unlike noStoreReader it is
@@ -217,6 +217,14 @@ type RangeReader struct {
 	// the cached blocks alone would otherwise mask it.
 	completionDone <-chan struct{}
 	completionErr  func() error
+
+	// readCtx is the context Read reads under (see SetReadContext); nil
+	// means context.Background.  Guarded by mu.
+	readCtx context.Context
+	// stopReadCtx stops what SetReadContext tied to readCtx ending -- the
+	// closing of a no-store reader's pipe.  Set by SetReadContext under mu,
+	// and called by Close.
+	stopReadCtx func() bool
 
 	// repairAttempted is set after a repair cycle completes without fixing
 	// every corrupt block (i.e. the 32 MB cap was exhausted).  It prevents
@@ -301,9 +309,49 @@ func NewRangeReader(
 	return rr, nil
 }
 
-// Read implements io.Reader with on-demand block fetching
+// Read implements io.Reader with on-demand block fetching, under the
+// context set with SetReadContext.
 func (rr *RangeReader) Read(p []byte) (n int, err error) {
-	return rr.ReadContext(context.Background(), p)
+	rr.mu.Lock()
+	ctx := rr.readCtx
+	rr.mu.Unlock()
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	return rr.ReadContext(ctx, p)
+}
+
+// SetReadContext sets the context that Read reads under: a read waiting
+// for a block that a download or fill has yet to write, or fetching one,
+// gives up when it ends.  A caller that reads through the io.Reader
+// interface -- http.ServeContent, io.Copy -- has no other way to pass one,
+// and without it a reader whose client has gone stays blocked, and
+// attached to the object, for as long as the transfer it waits on takes:
+// with a stalled origin, until that transfer times out, keeping the
+// transfer from ever going idle in the meantime.
+//
+// The streams a reader may read instead of the cached blocks honour ctx
+// too.  A no-store reader's read blocks on the pipe from the origin's
+// transfer, so when ctx ends the pipe is closed with ctx's cause (see
+// noStoreBody.CloseWithError): the read returns, and the transfer is
+// stopped rather than run on with nothing to read it.  A reader proxying
+// an object from a tiering target passes ctx on to its stream (see
+// tierObjectStream.setReadContext), so a read stalled on the target gives
+// up too.  Call it before reading.
+func (rr *RangeReader) SetReadContext(ctx context.Context) {
+	rr.mu.Lock()
+	defer rr.mu.Unlock()
+	rr.readCtx = ctx
+	if rr.noStoreReader != nil {
+		if rr.stopReadCtx != nil {
+			rr.stopReadCtx()
+		}
+		body := rr.noStoreReader
+		rr.stopReadCtx = context.AfterFunc(ctx, func() { _ = body.CloseWithError(context.Cause(ctx)) })
+	}
+	if rr.remoteStream != nil {
+		rr.remoteStream.setReadContext(ctx)
+	}
 }
 
 // ReadContext reads with context for cancellation
@@ -313,7 +361,13 @@ func (rr *RangeReader) ReadContext(ctx context.Context, p []byte) (n int, err er
 
 	// Streaming no-store mode: forward-only pipe from origin
 	if rr.noStoreReader != nil {
-		return rr.noStoreReader.Read(p)
+		n, err = rr.noStoreReader.Read(p)
+		if err != nil && err != io.EOF && ctx.Err() != nil {
+			// The pipe was closed because the reader's context ended
+			// (see SetReadContext); say why, not that the pipe is closed.
+			err = context.Cause(ctx)
+		}
+		return n, err
 	}
 
 	// Tiering proxy mode: delegate to the remote stream
@@ -718,6 +772,10 @@ func (rr *RangeReader) Close() error {
 		rr.file = nil
 	}
 	var err error
+	if rr.stopReadCtx != nil {
+		rr.stopReadCtx()
+		rr.stopReadCtx = nil
+	}
 	if rr.noStoreReader != nil {
 		err = rr.noStoreReader.Close()
 	}

@@ -641,6 +641,15 @@ func (pc *PersistentCache) serveObject(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer reader.Close()
+	// The reader was made under a context that outlives this request,
+	// because a miss's download must; but http.ServeContent reads it
+	// through io.Reader, so its reads take this request's context from the
+	// reader.  When the client goes, a read waiting for a block from a
+	// stalled download or fill gives up, the reader is closed and detaches
+	// from the object, and the transfer can go idle.
+	if reader.RangeReader != nil {
+		reader.SetReadContext(r.Context())
+	}
 
 	// The reader covers the whole object, and http.ServeContent seeks it to
 	// each range requested; tell it the ranges, so that reading a few bytes

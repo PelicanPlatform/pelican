@@ -27,6 +27,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync/atomic"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -149,16 +150,18 @@ func (e *stubFedCache) blockState(t *testing.T, objectPath string) *ObjectBlockS
 // stallingOrigin serves an object of the given size and entity tag, but
 // only its first stallAt bytes: a request for anything after them gets its
 // headers and whatever part of the range lies before stallAt, and then
-// nothing more until its context ends, as from a stalled origin.  The end
-// of a stalled request is reported on ended (up to its capacity).
+// nothing more until its context ends, as from a stalled origin.
 type stallingOrigin struct {
 	size, stallAt int64
 	etag          string
-	ended         chan struct{}
+	// cacheControl, if set, is sent as the response's Cache-Control.
+	cacheControl string
+	// stalled counts the requests stalled now.
+	stalled atomic.Int32
 }
 
 func newStallingOrigin(size, stallAt int64, etag string) *stallingOrigin {
-	return &stallingOrigin{size: size, stallAt: stallAt, etag: etag, ended: make(chan struct{}, 16)}
+	return &stallingOrigin{size: size, stallAt: stallAt, etag: etag}
 }
 
 // stallingOriginByte is the byte at offset off of a stallingOrigin's object.
@@ -178,6 +181,9 @@ func (o *stallingOrigin) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		end = min(end, o.size-1)
 	}
 	w.Header().Set("ETag", o.etag)
+	if o.cacheControl != "" {
+		w.Header().Set("Cache-Control", o.cacheControl)
+	}
 	w.Header().Set("Accept-Ranges", "bytes")
 	w.Header().Set("Content-Length", fmt.Sprint(end-start+1))
 	status := http.StatusOK
@@ -198,9 +204,7 @@ func (o *stallingOrigin) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.(http.Flusher).Flush()
+	o.stalled.Add(1)
+	defer o.stalled.Add(-1)
 	<-r.Context().Done()
-	select {
-	case o.ended <- struct{}{}:
-	default:
-	}
 }

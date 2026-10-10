@@ -267,7 +267,7 @@ type persistentDownload struct {
 	// noStoreReader is the read end of an io.Pipe that streams the response
 	// body when the origin sends Cache-Control: no-store (or private).
 	// Only the first caller consumes this; waiters receive ErrNoStoreRetry.
-	noStoreReader io.ReadCloser
+	noStoreReader *noStoreBody
 	noStoreMeta   *CacheMetadata
 
 	// forceNoStore streams the response through without persisting it, for
@@ -294,7 +294,7 @@ type persistentDownload struct {
 // revalidation carries no-store streaming data from revalidateObject back
 // to the caller.  Only non-nil when the origin responds with no-store.
 type revalidation struct {
-	noStoreReader io.ReadCloser  // Non-nil if origin now says no-store
+	noStoreReader *noStoreBody   // Non-nil if origin now says no-store
 	noStoreMeta   *CacheMetadata // Metadata for no-store response
 }
 
@@ -303,7 +303,7 @@ type revalidation struct {
 type revalResult struct {
 	instanceHash  InstanceHash
 	meta          *CacheMetadata
-	noStoreReader io.ReadCloser
+	noStoreReader *noStoreBody
 	noStoreMeta   *CacheMetadata
 	stale         bool // true ⇒ revalidation failed, serve stale data
 }
@@ -1066,7 +1066,8 @@ func (pc *PersistentCache) KeyChangeCallback() func(ctx context.Context) error {
 	}
 }
 
-// Get retrieves an object from the cache, downloading if necessary
+// Get retrieves an object from the cache, downloading if necessary.  The
+// reader returned reads under ctx, as GetRange's does.
 func (pc *PersistentCache) Get(ctx context.Context, objectPath, token string) (io.ReadCloser, error) {
 	return pc.GetRange(ctx, objectPath, token, "")
 }
@@ -1096,7 +1097,7 @@ type objectResolution struct {
 	token        string
 	meta         *CacheMetadata
 	dl           *persistentDownload // non-nil when a background download was started
-	noStoreRC    io.ReadCloser       // non-nil when the origin says no-store
+	noStoreRC    *noStoreBody        // non-nil when the origin says no-store
 	noStoreMeta  *CacheMetadata      // metadata for no-store streaming responses
 }
 
@@ -1479,6 +1480,10 @@ func (pc *PersistentCache) startFill(res *objectResolution, state *ObjectBlockSt
 // only the blocks the caller actually reads, avoiding a potentially expensive
 // full transfer.  Callers should set rangeOnly when they know the request is
 // for a sub-range of the object (e.g. an HTTP Range request).
+//
+// The reader reads under ctx; a caller whose ctx must outlive the reader's
+// client -- because it also drives the download -- sets the client's with
+// SetReadContext.
 func (pc *PersistentCache) GetSeekableReader(ctx context.Context, objectPath, bearerToken string, rangeOnly bool) (*SeekableReader, *CacheMetadata, error) {
 	// Retry once if the object is evicted between resolveObject and reader
 	// creation.  The second pass re-resolves the object (triggering a fresh
@@ -1492,10 +1497,7 @@ func (pc *PersistentCache) GetSeekableReader(ctx context.Context, objectPath, be
 
 		// Handle no-store streaming response
 		if res.noStoreRC != nil {
-			return &SeekableReader{RangeReader: &RangeReader{
-				size:          res.noStoreMeta.ContentLength,
-				noStoreReader: res.noStoreRC,
-			}}, res.noStoreMeta, nil
+			return &SeekableReader{RangeReader: newNoStoreReader(ctx, res.noStoreRC, res.noStoreMeta)}, res.noStoreMeta, nil
 		}
 
 		// Zero-byte file: nothing to read, no fetcher needed.
@@ -1524,6 +1526,7 @@ func (pc *PersistentCache) GetSeekableReader(ctx context.Context, objectPath, be
 			}
 			return nil, nil, errors.Wrap(err, "failed to create seekable reader")
 		}
+		rr.SetReadContext(ctx)
 
 		return &SeekableReader{RangeReader: rr}, res.meta, nil
 	}
@@ -1531,7 +1534,18 @@ func (pc *PersistentCache) GetSeekableReader(ctx context.Context, objectPath, be
 	return nil, nil, errors.New("failed to create seekable reader after retry")
 }
 
-// GetRange retrieves a range of an object from the cache
+// newNoStoreReader makes the reader of a no-store response, reading under
+// ctx: once ctx ends, a read blocked on the response's pipe returns, and the
+// transfer writing the pipe fails (see RangeReader.SetReadContext).
+func newNoStoreReader(ctx context.Context, body *noStoreBody, meta *CacheMetadata) *RangeReader {
+	rr := &RangeReader{size: meta.ContentLength, noStoreReader: body}
+	rr.SetReadContext(ctx)
+	return rr
+}
+
+// GetRange retrieves a range of an object from the cache.  A reader that
+// may wait for blocks, or fetch them, reads under ctx: once ctx ends, a Read
+// waiting for a block gives up.
 func (pc *PersistentCache) GetRange(ctx context.Context, objectPath, token, rangeHeader string) (io.ReadCloser, error) {
 	// Retry once if the object is evicted between resolveObject and reader
 	// creation.  See GetSeekableReader for a detailed explanation.
@@ -1544,7 +1558,7 @@ func (pc *PersistentCache) GetRange(ctx context.Context, objectPath, token, rang
 
 		// Handle no-store streaming response
 		if res.noStoreRC != nil {
-			return res.noStoreRC, nil
+			return newNoStoreReader(ctx, res.noStoreRC, res.noStoreMeta), nil
 		}
 
 		// Objects tiered to a tiering target stream directly from the
@@ -1585,6 +1599,7 @@ func (pc *PersistentCache) GetRange(ctx context.Context, objectPath, token, rang
 					}
 					return nil, err
 				}
+				rr.SetReadContext(ctx)
 				return rr, nil
 			}
 		}
@@ -1609,6 +1624,7 @@ func (pc *PersistentCache) GetRange(ctx context.Context, objectPath, token, rang
 				}
 				return nil, rrErr
 			}
+			rr.SetReadContext(ctx)
 			return rr, nil
 		}
 
@@ -2400,17 +2416,7 @@ func (pc *PersistentCache) performDownload(ctx context.Context, dl *persistentDo
 			// Combine any data buffered before the decision with the pipe.
 			// This avoids writing into the pipe before a consumer is reading
 			// (io.Pipe is unbuffered, so that would deadlock).
-			var noStoreReader io.ReadCloser
-			if len(buffered) > 0 {
-				noStoreReader = &multiReadCloser{
-					Reader: io.MultiReader(bytes.NewReader(buffered), pr),
-					close:  pr.Close,
-				}
-			} else {
-				noStoreReader = pr
-			}
-
-			dl.noStoreReader = noStoreReader
+			dl.noStoreReader = newNoStoreBody(buffered, pr, dlCancel)
 			dl.noStoreMeta = &CacheMetadata{
 				ETag:          dl.etag,
 				LastModified:  dl.lastModified,
@@ -2699,16 +2705,41 @@ func (pc *PersistentCache) adoptedTransferDataIsBad(instanceHash InstanceHash, e
 	return metaErr != nil || meta == nil || meta.ContentLength < 0
 }
 
-// multiReadCloser combines an io.Reader (e.g. io.MultiReader) with a
-// close function.  This is used to prepend buffered data before a pipe
-// reader while still allowing Close() to clean up the pipe.
-type multiReadCloser struct {
+// noStoreBody is the body of a no-store response: whatever the decision
+// writer buffered before the decision, then the read end of the pipe the
+// rest of the transfer is written to.
+type noStoreBody struct {
 	io.Reader
-	close func() error
+	pipe *io.PipeReader
+	// stop cancels the transfer writing the pipe.
+	stop context.CancelFunc
 }
 
-func (m *multiReadCloser) Close() error {
-	return m.close()
+// newNoStoreBody prepends buffered to the pipe's read end.  Buffering before
+// the decision avoids writing into the pipe before anything reads it, which
+// would deadlock: io.Pipe is unbuffered.  stop cancels the transfer that
+// writes the pipe.
+func newNoStoreBody(buffered []byte, pr *io.PipeReader, stop context.CancelFunc) *noStoreBody {
+	b := &noStoreBody{Reader: pr, pipe: pr, stop: stop}
+	if len(buffered) > 0 {
+		b.Reader = io.MultiReader(bytes.NewReader(buffered), pr)
+	}
+	return b
+}
+
+// Close closes the pipe's read end, so that a read blocked on it returns,
+// and cancels the transfer writing it: a no-store response has one reader,
+// and once that has gone nothing will read what the transfer brings -- from
+// a stalled origin, perhaps nothing until the transfer times out.
+func (b *noStoreBody) Close() error {
+	return b.CloseWithError(nil)
+}
+
+// CloseWithError is Close, with err as the error the transfer's next write
+// fails with, if it gets that far before it is cancelled.
+func (b *noStoreBody) CloseWithError(err error) error {
+	b.stop()
+	return b.pipe.CloseWithError(err)
 }
 
 // decisionWriter buffers data until a storage decision is made based on response headers.
