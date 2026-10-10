@@ -19,6 +19,7 @@
 package local_cache
 
 import (
+	"bytes"
 	"context"
 	"io"
 	"net"
@@ -48,22 +49,47 @@ import (
 // dropping the entry lets the next request fetch the object from the origin
 // again rather than fail the same way until the integrity scan notices.  The
 // bucket object goes with it, since it is not ours.
+//
+// The entry is dropped only if it still describes the copy the stream read:
+// by then the object may have been deleted and the same version fetched
+// again under the same hash -- kept locally, or tiered again -- and the
+// change seen in the old copy says nothing against the new one.
 func (pc *PersistentCache) openTierStream(ctx context.Context, target *tierTarget, res *objectResolution) *tierObjectStream {
 	stream := newTierObjectStream(ctx, target, res.instanceHash, res.meta.ContentLength)
 	stream.onClose = pc.storage.PinObject(res.instanceHash)
 	stream.expect = res.meta.Remote
-	hash := res.instanceHash
+	hash, seen := res.instanceHash, res.meta
 	tierRequestsTotal.WithLabelValues(target.metricLabel(), tierServedByProxy).Inc()
 	stream.onChanged = func() {
 		tierChangedObjectsTotal.WithLabelValues(target.metricLabel(), tierChangeSeenOnRead).Inc()
 		pc.egrp.Go(func() error {
-			if err := pc.storage.Delete(hash); err != nil {
+			dropped, err := pc.storage.deleteIf(hash, func(meta *CacheMetadata) bool { return sameTierCopy(meta, seen) })
+			if err != nil {
 				log.Warnf("Failed to drop tiered object %s after it changed on its target: %v", hash, err)
+			} else if !dropped {
+				log.Debugf("Tiered object %s changed on its target, but its entry no longer describes that copy; keeping it", hash)
+			}
+			if pc.afterTierChangeDrop != nil {
+				pc.afterTierChangeDrop(hash, dropped)
 			}
 			return nil
 		})
 	}
 	return stream
+}
+
+// sameTierCopy reports whether the record meta describes the same copy on a
+// tiering target as seen: the same life of the instance (its data key; see
+// instanceFences), on the same target, with the same remote copy.
+func sameTierCopy(meta, seen *CacheMetadata) bool {
+	if meta == nil || seen == nil || meta.StorageID != seen.StorageID || !bytes.Equal(meta.DataKey, seen.DataKey) {
+		return false
+	}
+	if meta.Remote == nil || seen.Remote == nil {
+		return meta.Remote == seen.Remote
+	}
+	return meta.Remote.Size == seen.Remote.Size && meta.Remote.ETag == seen.Remote.ETag &&
+		meta.Remote.Version == seen.Remote.Version && meta.Remote.ModTime.Equal(seen.Remote.ModTime)
 }
 
 // newTierSeekableReader builds a SeekableReader that proxies a tiered

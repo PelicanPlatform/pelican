@@ -31,6 +31,7 @@ import (
 	"time"
 
 	"github.com/pkg/errors"
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"golang.org/x/sync/errgroup"
 
@@ -241,6 +242,73 @@ func TestTierProxiedReadOfAGoneClientEndsItsRequest(t *testing.T) {
 	require.Eventually(t, func() bool {
 		return env.backend.stalled.Load() == 0 && !env.pc.storage.IsObjectPinned(hash)
 	}, 10*time.Second, 10*time.Millisecond, "the read of a client that has gone should end")
+}
+
+// TestTierChangedCopyDropsOnlyTheCopyItRead checks that a proxied read that
+// finds its tiered copy changed drops the object only if the object's entry
+// still describes that copy.  If the object was deleted and the same version
+// fetched -- and tiered -- again under the same hash while the read was
+// open, the change seen in the old copy says nothing against the new one,
+// which must be kept; a read of the new copy that finds it changed drops it.
+func TestTierChangedCopyDropsOnlyTheCopyItRead(t *testing.T) {
+	env := newMemTierCache(t)
+	const path = "/test/tiered/changed.bin"
+	data := tierProxyTestData(4 * BlockDataSize)
+	hash, first := env.putObject(t, path, data)
+
+	drops := make(chan bool, 1)
+	env.pc.afterTierChangeDrop = func(_ InstanceHash, dropped bool) { drops <- dropped }
+	readChanged := func() bool {
+		t.Helper()
+		rc, err := env.pc.Get(env.ctx, path, "")
+		require.NoError(t, err)
+		defer rc.Close()
+		return readChangedAfter(t, env, rc, drops, nil)
+	}
+
+	// A read of the first copy is open when the object is deleted and
+	// fetched, and tiered, again; then it finds its copy changed.
+	rc, err := env.pc.Get(env.ctx, path, "")
+	require.NoError(t, err)
+	var second *CacheMetadata
+	dropped := readChangedAfter(t, env, rc, drops, func() {
+		require.NoError(t, env.pc.storage.Delete(hash))
+		_, second = env.putObject(t, path, data)
+	})
+	require.NoError(t, rc.Close())
+	require.NotEqual(t, first.DataKey, second.DataKey, "the object must have been made again")
+	assert.False(t, dropped, "a change seen in a deleted copy must not drop its successor")
+	meta, err := env.pc.storage.GetMetadata(hash)
+	require.NoError(t, err)
+	require.NotNil(t, meta, "the new copy was dropped")
+	assert.Equal(t, second.DataKey, meta.DataKey)
+
+	// A read of the new copy that finds it changed drops it.
+	assert.True(t, readChanged(), "a read that finds its own copy changed must drop it")
+	meta, err = env.pc.storage.GetMetadata(hash)
+	require.NoError(t, err)
+	assert.Nil(t, meta, "the changed copy should be dropped")
+}
+
+// readChangedAfter runs between, if set, then reads rc with the target
+// reporting every copy changed, and returns whether the read dropped the
+// object.
+func readChangedAfter(t *testing.T, env *memTierCache, rc io.Reader, drops <-chan bool, between func()) bool {
+	t.Helper()
+	if between != nil {
+		between()
+	}
+	env.backend.changed.Store(true)
+	defer env.backend.changed.Store(false)
+	_, err := io.ReadAll(rc)
+	require.Error(t, err, "a changed copy must not be served")
+	select {
+	case dropped := <-drops:
+		return dropped
+	case <-time.After(20 * time.Second):
+		t.Fatal("the read's verdict on the changed copy never ran")
+		return false
+	}
 }
 
 // tierProxyTestData is n bytes of test data.

@@ -665,15 +665,16 @@ func (rr *RangeReader) repairAndRetry(ctx context.Context, startBlock, endBlock 
 	log.Warnf("Auto-repair: detected %d corrupt block(s) in %s; re-downloading from origin",
 		len(corrupt), rr.instanceHash)
 
-	// Clear corrupt blocks from the persistent bitmap so the fetcher
-	// treats them as missing
-	if err := rr.storage.db.ClearBlocks(rr.instanceHash, corrupt); err != nil {
+	// Clear corrupt blocks from the persistent bitmap and the shared block
+	// state so the fetcher treats them as missing -- unless the object has
+	// been deleted since this reader opened it, when they may be blocks of
+	// a new instance under the same hash.
+	if cleared, err := rr.storage.clearCorruptBlocks(rr.instanceHash, rr.meta.DataKey, rr.blockState, corrupt); err != nil {
 		log.Warnf("Failed to clear corrupt block state for %s: %v", rr.instanceHash, err)
 		return nil, origErr
+	} else if !cleared {
+		return nil, errors.Wrap(origErr, "the cached copy was deleted")
 	}
-
-	// Update the shared block state (visible to all readers immediately)
-	rr.blockState.RemoveMany(corrupt)
 
 	// Re-fetch the corrupt blocks.  Expand [startBlock, endBlock] to cover
 	// all blocks we just cleared so ensureBlocks can find and fetch them.

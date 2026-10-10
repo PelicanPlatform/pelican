@@ -166,7 +166,7 @@ func TestCondemnedFillPublishesNothingToItsReaders(t *testing.T) {
 
 	bf := &BlockFetcherV2{storage: env.storage, instanceHash: env.hash, meta: meta, blockState: state,
 		activeFetches: make(map[fetchKey]*fetchOperation)}
-	bf.dropIfCondemned(trailer, true)
+	bf.dropIfCondemned(testWriterFence(t, env.storage, env.hash), trailer, true)
 	state.endFill(fill)
 	res := <-read
 	assert.Error(t, res.err, "the reader must not be served the condemned bytes")
@@ -213,7 +213,7 @@ func TestRangeReadWaitsForTheFillItReliedOn(t *testing.T) {
 	require.NoError(t, endWrite(bw, trailer))
 	bf := &BlockFetcherV2{storage: env.storage, instanceHash: env.hash, meta: meta, blockState: state,
 		activeFetches: make(map[fetchKey]*fetchOperation)}
-	bf.dropIfCondemned(trailer, true)
+	bf.dropIfCondemned(testWriterFence(t, env.storage, env.hash), trailer, true)
 	state.endFill(fill)
 	assert.Error(t, <-verdict, "the range read must report that its bytes came from a condemned copy")
 }

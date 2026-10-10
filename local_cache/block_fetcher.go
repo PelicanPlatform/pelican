@@ -19,6 +19,7 @@
 package local_cache
 
 import (
+	"bytes"
 	"context"
 	"io"
 	"net/url"
@@ -96,6 +97,11 @@ type BlockFetcherV2 struct {
 	// is open the fetcher is never idle.  Holding it also keeps it the one
 	// state every reader of the object gets.
 	blockState *ObjectBlockState
+
+	// beforeDrop, set only by tests, runs when a fetch has found that what
+	// it wrote is condemned, before it says so or drops the object (see
+	// dropIfCondemned).
+	beforeDrop func()
 }
 
 // fetchKey uniquely identifies a fetch operation
@@ -180,6 +186,9 @@ func NewBlockFetcherV2(
 		prefetchSem = make(chan struct{}, maxPrefetch)
 	}
 
+	// Read after the record, so that it is the state of the instance the
+	// record names, or of a later one -- which every fetch then refuses
+	// (see runFetch).
 	blockState, err := storage.GetSharedBlockState(instanceHash)
 	if err != nil {
 		return nil, errors.Wrap(err, "failed to get block state")
@@ -567,12 +576,34 @@ func (bf *BlockFetcherV2) Fill(ctx context.Context, startBlock, endBlock uint32)
 // idleCancel, it is cancelled once the object has no reader (a prefetch or a
 // background fill); with holdsSem, it holds a slot of the prefetch semaphore,
 // which it yields now and then to let other prefetches run (a prefetch only).
+//
+// The fetch writes, and drops what it condemns, only through its own
+// membership of the instance's write fence, joined before it reads the
+// record its writes depend on.  It fetches for the instance the fetcher was
+// made for -- the one its readers hold, identified by its data key -- and
+// for no other: if that instance has been deleted since, perhaps with the
+// same version fetched again under the same hash, the fetch writes nothing
+// and deletes nothing, and fails with errInstanceDeleted.
 func (bf *BlockFetcherV2) runFetch(ctx context.Context, op *fetchOperation, key fetchKey, idleCancel, holdsSem bool) {
+	fence := bf.storage.fences.join(bf.instanceHash)
+	defer fence.leave()
+	meta, err := bf.storage.GetMetadata(bf.instanceHash)
+	if err != nil {
+		op.err = errors.Wrap(err, "failed to read the object's record for fetch")
+		bf.notifyAllChunks(op)
+		return
+	}
+	if meta == nil || !bytes.Equal(meta.DataKey, bf.meta.DataKey) {
+		op.err = errInstanceDeleted
+		bf.notifyAllChunks(op)
+		return
+	}
+
 	// Calculate byte range
 	startOffset := int64(key.startBlock) * BlockDataSize
 	endOffset := int64(key.endBlock+1)*BlockDataSize - 1
-	if endOffset >= bf.meta.ContentLength {
-		endOffset = bf.meta.ContentLength - 1
+	if endOffset >= meta.ContentLength {
+		endOffset = meta.ContentLength - 1
 	}
 
 	// The BlockWriter's writeCurrentBlock checks the live shared block
@@ -582,8 +613,10 @@ func (bf *BlockFetcherV2) runFetch(ctx context.Context, op *fetchOperation, key 
 	//
 	// Create a buffered BlockWriter from the storage layer.  It handles
 	// arbitrary write sizes, encrypts at block boundaries, and skips
-	// blocks already present according to the shared state.
-	storageWriter, err := bf.storage.NewBlockWriter(bf.instanceHash, key.startBlock, nil, nil)
+	// blocks already present according to the shared state.  It writes
+	// through a membership of the fetch's own: one joined now could join a
+	// later instance than the one checked above.
+	storageWriter, err := bf.storage.newBlockWriterIn(fence.clone(), bf.instanceHash, key.startBlock, nil, nil)
 	if err != nil {
 		op.err = errors.Wrap(err, "failed to create block writer for fetch")
 		bf.notifyAllChunks(op)
@@ -635,8 +668,8 @@ func (bf *BlockFetcherV2) runFetch(ctx context.Context, op *fetchOperation, key 
 		client.WithWriter(writer),
 		client.WithByteRange(startOffset, endOffset),
 	}
-	if bf.meta.ETag != "" {
-		opts = append(opts, client.WithExpectedETag(bf.meta.ETag))
+	if meta.ETag != "" {
+		opts = append(opts, client.WithExpectedETag(meta.ETag))
 	}
 	if bf.token != "" {
 		opts = append(opts, client.WithToken(bf.token))
@@ -661,7 +694,7 @@ func (bf *BlockFetcherV2) runFetch(ctx context.Context, op *fetchOperation, key 
 	}
 
 	bf.awaitTransfer(ctx, op, bf.tc.Results(), tj.ID(), writer, idleCancel, nil)
-	bf.dropIfCondemned(op.err, op.bytesDownloaded.Load() > 0)
+	bf.dropIfCondemned(fence, op.err, op.bytesDownloaded.Load() > 0)
 }
 
 // dropIfCondemned removes the cached instance after a fetch (a background
@@ -682,7 +715,14 @@ func (bf *BlockFetcherV2) runFetch(ctx context.Context, op *fetchOperation, key 
 // A fetch that wrote nothing condemns nothing, and one that stopped for a
 // benign reason keeps its blocks.  Readers still holding the instance's block
 // state are told why it was dropped (see ObjectBlockState.condemn).
-func (bf *BlockFetcherV2) dropIfCondemned(err error, wrote bool) {
+//
+// fence is the fetch's membership of the instance's write fence, and the
+// instance is dropped through it: if it has been deleted since the fetch
+// joined, the hash may name a new instance -- the same version fetched
+// again -- which owes nothing to this fetch and is left alone.  The
+// fetcher's own block state, which belongs to the instance the fetch wrote,
+// is condemned either way, so that the readers holding it learn the verdict.
+func (bf *BlockFetcherV2) dropIfCondemned(fence *writeFence, err error, wrote bool) {
 	if err == nil || transferStopKeepsData(err) {
 		return
 	}
@@ -695,11 +735,16 @@ func (bf *BlockFetcherV2) dropIfCondemned(err error, wrote bool) {
 	} else {
 		return
 	}
+	if bf.beforeDrop != nil {
+		bf.beforeDrop()
+	}
 	if bf.blockState != nil {
 		bf.blockState.condemn(err)
 	}
-	if err := bf.storage.Delete(bf.instanceHash); err != nil {
+	if dropped, err := bf.storage.deleteAsWriter(fence); err != nil {
 		log.Warnf("Failed to drop %s: %v", bf.instanceHash, err)
+	} else if !dropped {
+		log.Debugf("Not dropping %s: it was deleted while it was being fetched", bf.instanceHash)
 	}
 }
 
@@ -868,6 +913,8 @@ func (bf *BlockFetcherV2) AdoptTransfer(
 	wg.Add(1)
 	egrp.Go(func() error {
 		defer wg.Done()
+		// The fetcher now owns the download's write fence.
+		defer dw.releaseFence()
 		defer func() {
 			bf.mu.Lock()
 			delete(bf.activeFetches, key)
@@ -918,8 +965,16 @@ func (bf *BlockFetcherV2) AdoptTransfer(
 				checksums := clientChecksumsToCache(result)
 				dw.dl.checksums = checksums
 				if len(checksums) > 0 {
-					if err := bf.storage.MergeMetadata(bf.instanceHash,
-						&CacheMetadata{Checksums: checksums}); err != nil {
+					// The result may arrive after the writer has closed,
+					// so the checksums go through the download's own
+					// write fence: if the instance has been deleted since
+					// the writer was made, they are not recorded, as no
+					// block of it would be (see instanceFences).
+					var err error
+					dw.writeFenced(func() {
+						err = bf.storage.MergeMetadata(bf.instanceHash, &CacheMetadata{Checksums: checksums})
+					})
+					if err != nil {
 						log.Warnf("Failed to persist checksums for %s: %v", bf.instanceHash, err)
 					}
 				}

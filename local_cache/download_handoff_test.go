@@ -66,3 +66,36 @@ func TestFailedHandOffReleasesWaitingReaders(t *testing.T) {
 		t.Fatal("a reader waiting for the download was not released when the hand-off failed")
 	}
 }
+
+// TestHandOffOfADeletedInstanceAdoptsNothing checks a download whose object
+// is deleted, and the same version fetched again under the same hash, after
+// the download made its writer and before a fetcher adopts its transfer.  The
+// fetcher would be made for the new instance, and the download -- whose
+// writes are fenced off -- would mark it with an estimate of when blocks it
+// will never write arrive, and keep it busy for its readers.  The hand-off
+// fails instead, and leaves the new instance unmarked.
+func TestHandOffOfADeletedInstanceAdoptsNothing(t *testing.T) {
+	const size = 4 << 20
+	env := newStubFedCache(t, newStallingOrigin(size, 256<<10, `"v1"`))
+
+	var successor *ObjectBlockState
+	env.pc.beforeHandOff = func(dl *persistentDownload) {
+		meta, err := env.pc.storage.GetMetadata(dl.instanceHash)
+		require.NoError(t, err)
+		require.NotNil(t, meta)
+		require.NoError(t, env.pc.storage.Delete(dl.instanceHash))
+		_, err = env.pc.storage.InitDiskStorage(context.Background(), dl.instanceHash, meta.ContentLength, meta.StorageID, meta.NamespaceID)
+		require.NoError(t, err)
+		successor, err = env.pc.storage.GetSharedBlockState(dl.instanceHash)
+		require.NoError(t, err)
+	}
+
+	_, err := env.pc.Get(context.Background(), "/test/obj.bin", "")
+	require.ErrorIs(t, err, errInstanceDeleted)
+	require.NotNil(t, successor)
+	assert.False(t, isDownloading(successor), "the new instance must not be marked as downloading")
+	writer, _ := successor.writerOf(0)
+	assert.Equal(t, noWriter, writer, "nothing must be due to write the new instance's blocks")
+	assert.Eventually(t, func() bool { return env.pc.storage.fences.size() == 0 }, 10*time.Second, time.Millisecond,
+		"the download must leave the fence")
+}
