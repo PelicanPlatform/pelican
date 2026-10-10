@@ -85,10 +85,17 @@ type BlockFetcherV2 struct {
 	activeFetches map[fetchKey]*fetchOperation
 
 	// Client activity tracking: stores the UnixNano timestamp of the last
-	// client-initiated fetch operation.  The prefetch timer cancels only
-	// when this timestamp is older than prefetchTimeout, ensuring a brief
-	// gap between sequential reads doesn't kill the prefetch.
+	// client-initiated fetch operation.  The idle timer cancels only when
+	// this timestamp, and the last time a reader attached to or detached
+	// from blockState, are older than prefetchTimeout, ensuring a brief gap
+	// between sequential reads doesn't kill the transfer.
 	lastClientActivity atomic.Int64
+
+	// blockState is the object's shared block state, which counts the
+	// object's open readers (see ObjectBlockState.AttachReader).  While any
+	// is open the fetcher is never idle.  Holding it also keeps it the one
+	// state every reader of the object gets.
+	blockState *ObjectBlockState
 }
 
 // fetchKey uniquely identifies a fetch operation
@@ -114,7 +121,8 @@ type fetchOperation struct {
 	// Completion state
 	done      bool
 	err       error
-	doneCh    chan struct{} // Closed when fetch completes
+	doneCh    chan struct{}   // Closed when fetch completes
+	ctx       context.Context // The fetch's own context, cancelled by cancelFn
 	cancelFn  context.CancelFunc
 	mu        sync.Mutex
 	lastChunk int64 // Last completed chunk index
@@ -172,6 +180,11 @@ func NewBlockFetcherV2(
 		prefetchSem = make(chan struct{}, maxPrefetch)
 	}
 
+	blockState, err := storage.GetSharedBlockState(instanceHash)
+	if err != nil {
+		return nil, errors.Wrap(err, "failed to get block state")
+	}
+
 	// Create a dedicated TransferClient so this fetcher's doFetch goroutines
 	// have their own Results() channel and cannot steal results intended for
 	// other callers sharing the same TransferEngine.
@@ -182,6 +195,7 @@ func NewBlockFetcherV2(
 
 	return &BlockFetcherV2{
 		storage:         storage,
+		blockState:      blockState,
 		instanceHash:    instanceHash,
 		originURL:       originURL,
 		token:           token,
@@ -201,14 +215,45 @@ func (bf *BlockFetcherV2) touchClientActivity() {
 }
 
 // idleSince returns how long it has been since the last client-initiated
-// fetch activity.  Returns a very large duration if no activity was ever
-// recorded (i.e. pure prefetch with no client interest).
+// fetch through this fetcher or, when no reader of the object is open, since
+// the last one closed.  It returns zero while a reader is open, and a very
+// large duration if there was never any activity (i.e. pure prefetch with no
+// client interest).
 func (bf *BlockFetcherV2) idleSince() time.Duration {
-	last := bf.lastClientActivity.Load()
-	if last == 0 {
+	var last time.Time
+	if ns := bf.lastClientActivity.Load(); ns != 0 {
+		last = time.Unix(0, ns)
+	}
+	if bf.blockState != nil {
+		open, change := bf.blockState.readerActivity()
+		if open {
+			return 0
+		}
+		if change.After(last) {
+			last = change
+		}
+	}
+	if last.IsZero() {
 		return time.Duration(1<<63 - 1) // max duration
 	}
-	return time.Since(time.Unix(0, last))
+	return time.Since(last)
+}
+
+// idleCheckInterval is how often a transfer checks whether it has gone
+// idle: a fraction of the timeout, so the cancel lands soon after the timeout
+// rather than up to a whole check interval later, but no more often than
+// every few milliseconds, nor less often than every two seconds.
+func (bf *BlockFetcherV2) idleCheckInterval() time.Duration {
+	return min(max(bf.prefetchTimeout/4, 10*time.Millisecond), 2*time.Second)
+}
+
+// idle reports whether no reader of the object is open and none has been,
+// nor has any client fetched through this fetcher, for prefetchTimeout.  A
+// reader keeps the object's fill going for as long as it is open, however
+// slowly it reads, so a transfer outruns a slow client instead of being
+// cancelled under it.
+func (bf *BlockFetcherV2) idle() bool {
+	return bf.idleSince() > bf.prefetchTimeout
 }
 
 // Close shuts down the fetcher's dedicated TransferClient.
@@ -270,10 +315,10 @@ func (bf *BlockFetcherV2) FetchBlocksAsync(ctx context.Context, startBlock, endB
 		startChunkByte := int64(startBlock) * BlockDataSize
 		chunkIdx := startChunkByte / ChunkSize
 
-		if op.IsChunkETAStale(chunkIdx) {
-			// ETA is already stale — the overlapping operation is too slow
-			// to supply our blocks in time.  Skip it and start our own
-			// fetch below.
+		if op.IsChunkETAStale(chunkIdx) || time.Until(op.GetChunkETA(chunkIdx)) > ETAStaleThreshold {
+			// The overlapping operation is too slow to supply our blocks
+			// in time, or will not reach them soon -- a sequential download
+			// far behind them.  Skip it and start our own fetch below.
 			continue
 		}
 
@@ -294,19 +339,38 @@ func (bf *BlockFetcherV2) FetchBlocksAsync(ctx context.Context, startBlock, endB
 		return bf.FetchBlocksAsync(ctx, startBlock, endBlock)
 	}
 
+	op := bf.newFetchOp(ctx, key)
+	bf.activeFetches[key] = op
+	bf.mu.Unlock()
+
+	// Start the fetch in a goroutine
+	go bf.doFetch(op.ctx, op, key)
+
+	// Wait for completion
+	select {
+	case <-op.doneCh:
+		return op, op.err
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	}
+}
+
+// newFetchOp creates the operation for a fetch of the blocks of key, with
+// ETA tracking, running under a context derived from ctx.
+func (bf *BlockFetcherV2) newFetchOp(ctx context.Context, key fetchKey) *fetchOperation {
 	// Calculate total bytes for this fetch
-	startOffset := int64(startBlock) * BlockDataSize
-	endOffset := int64(endBlock+1) * BlockDataSize
+	startOffset := int64(key.startBlock) * BlockDataSize
+	endOffset := int64(key.endBlock+1) * BlockDataSize
 	if endOffset > bf.meta.ContentLength {
 		endOffset = bf.meta.ContentLength
 	}
 	totalBytes := endOffset - startOffset
 
-	// Create new fetch operation with ETA tracking
 	fetchCtx, cancelFn := context.WithCancel(ctx)
 	op := &fetchOperation{
 		chunkComplete: make(map[int64]chan struct{}),
 		doneCh:        make(chan struct{}),
+		ctx:           fetchCtx,
 		cancelFn:      cancelFn,
 		totalBytes:    totalBytes,
 		startByte:     startOffset,
@@ -320,20 +384,7 @@ func (bf *BlockFetcherV2) FetchBlocksAsync(ctx context.Context, startBlock, endB
 	// Initialize ETA based on default rate
 	estimatedDuration := time.Duration(float64(totalBytes) / float64(DefaultInitialRate) * float64(time.Second))
 	op.etaUnixNano.Store(time.Now().Add(estimatedDuration).UnixNano())
-
-	bf.activeFetches[key] = op
-	bf.mu.Unlock()
-
-	// Start the fetch in a goroutine
-	go bf.doFetch(fetchCtx, op, key)
-
-	// Wait for completion
-	select {
-	case <-op.doneCh:
-		return op, op.err
-	case <-ctx.Done():
-		return nil, ctx.Err()
-	}
+	return op
 }
 
 // GetChunkChannel returns a channel that will be closed when the specified chunk is complete.
@@ -376,14 +427,13 @@ func (op *fetchOperation) GetETA() time.Time {
 // the returned time is in the past.  The estimate is based on the current
 // download position and the EWMA rate.
 func (op *fetchOperation) GetChunkETA(chunkIndex int64) time.Time {
+	op.mu.Lock()
 	lastDone := op.lastChunk
+	rateValue := op.rate.Value()
+	op.mu.Unlock()
 	if chunkIndex <= lastDone && lastDone > 0 {
 		return time.Time{} // already available
 	}
-
-	op.mu.Lock()
-	rateValue := op.rate.Value()
-	op.mu.Unlock()
 
 	if rateValue <= 0 {
 		return op.GetETA() // fall back to whole-operation ETA
@@ -469,13 +519,6 @@ func (bf *BlockFetcherV2) doFetch(ctx context.Context, op *fetchOperation, key f
 		close(op.doneCh)
 	}()
 
-	// Calculate byte range
-	startOffset := int64(key.startBlock) * BlockDataSize
-	endOffset := int64(key.endBlock+1)*BlockDataSize - 1
-	if endOffset >= bf.meta.ContentLength {
-		endOffset = bf.meta.ContentLength - 1
-	}
-
 	// Determine whether a client is actively waiting.  If no client
 	// has ever touched this fetcher, this is a prefetch and we limit
 	// concurrency via the shared semaphore.
@@ -492,6 +535,44 @@ func (bf *BlockFetcherV2) doFetch(ctx context.Context, op *fetchOperation, key f
 			op.err = ctx.Err()
 			return
 		}
+	}
+
+	bf.runFetch(ctx, op, key, prefetchMode, prefetchMode)
+}
+
+// Fill fetches blocks [startBlock, endBlock] in the background for the
+// object's readers: it is cancelled once no reader of the object has been
+// open for the prefetch timeout (see idle), and readers wait for its blocks
+// on the shared block state rather than through the fetcher.  Like the
+// download a cache miss starts, and unlike a speculative prefetch, it takes
+// no slot of the prefetch semaphore: it runs because a reader is waiting.
+// Fill returns when the fetch ends, with its error.
+func (bf *BlockFetcherV2) Fill(ctx context.Context, startBlock, endBlock uint32) error {
+	key := fetchKey{startBlock, endBlock}
+	op := bf.newFetchOp(ctx, key)
+	bf.mu.Lock()
+	bf.activeFetches[key] = op
+	bf.mu.Unlock()
+	defer func() {
+		bf.mu.Lock()
+		delete(bf.activeFetches, key)
+		bf.mu.Unlock()
+		close(op.doneCh)
+	}()
+	bf.runFetch(op.ctx, op, key, true, false)
+	return op.err
+}
+
+// runFetch fetches the blocks of key from the origin through op.  With
+// idleCancel, it is cancelled once the object has no reader (a prefetch or a
+// background fill); with holdsSem, it holds a slot of the prefetch semaphore,
+// which it yields now and then to let other prefetches run (a prefetch only).
+func (bf *BlockFetcherV2) runFetch(ctx context.Context, op *fetchOperation, key fetchKey, idleCancel, holdsSem bool) {
+	// Calculate byte range
+	startOffset := int64(key.startBlock) * BlockDataSize
+	endOffset := int64(key.endBlock+1)*BlockDataSize - 1
+	if endOffset >= bf.meta.ContentLength {
+		endOffset = bf.meta.ContentLength - 1
 	}
 
 	// The BlockWriter's writeCurrentBlock checks the live shared block
@@ -516,16 +597,18 @@ func (bf *BlockFetcherV2) doFetch(ctx context.Context, op *fetchOperation, key f
 		currentPos:     startOffset,
 		op:             op,
 		bf:             bf,
-		prefetchMode:   prefetchMode,
+		yieldSem:       holdsSem,
 		lastSemRelease: time.Now(),
 		lastRateUpdate: time.Now(),
 		lastFlush:      time.Now(),
 	}
-	// writer.Close is called by awaitTransfer
+	// writer is closed (or aborted) by awaitTransfer once the transfer is
+	// under way; until then every early return aborts it.
 
 	// Parse the origin URL and set up the transfer
 	sourceURL, err := url.Parse(bf.originURL)
 	if err != nil {
+		writer.Abort()
 		op.err = errors.Wrap(err, "invalid source URL")
 		bf.notifyAllChunks(op)
 		return
@@ -539,9 +622,21 @@ func (bf *BlockFetcherV2) doFetch(ctx context.Context, op *fetchOperation, key f
 
 	// Build transfer options with a byte range so we only download the
 	// blocks we actually need instead of the entire object.
+	//
+	// The range has to come from the version of the object being filled.
+	// The origin may have replaced the object since it was first fetched,
+	// and splicing the new version's bytes into the old one's blocks would
+	// serve a mix of the two as one object.  The engine refuses, on every
+	// attempt and before writing any of its body, a response carrying
+	// another entity tag.  This needs an origin that sends entity tags: an
+	// XRootD-backed origin (XrdHttp) sends none, so its objects have no
+	// tag to hold a range to, and a replaced object is spliced as before.
 	opts := []client.TransferOption{
 		client.WithWriter(writer),
 		client.WithByteRange(startOffset, endOffset),
+	}
+	if bf.meta.ETag != "" {
+		opts = append(opts, client.WithExpectedETag(bf.meta.ETag))
 	}
 	if bf.token != "" {
 		opts = append(opts, client.WithToken(bf.token))
@@ -552,18 +647,60 @@ func (bf *BlockFetcherV2) doFetch(ctx context.Context, op *fetchOperation, key f
 
 	tj, err := bf.tc.NewTransferJob(ctx, sourceURL, "", false, false, opts...)
 	if err != nil {
+		writer.Abort()
 		op.err = errors.Wrap(err, "failed to create transfer job")
 		bf.notifyAllChunks(op)
 		return
 	}
 
 	if err := bf.tc.Submit(tj); err != nil {
+		writer.Abort()
 		op.err = errors.Wrap(err, "failed to submit transfer job")
 		bf.notifyAllChunks(op)
 		return
 	}
 
-	bf.awaitTransfer(ctx, op, bf.tc.Results(), tj.ID(), writer, prefetchMode, nil)
+	bf.awaitTransfer(ctx, op, bf.tc.Results(), tj.ID(), writer, idleCancel, nil)
+	bf.dropIfCondemned(op.err, op.bytesDownloaded.Load() > 0)
+}
+
+// dropIfCondemned removes the cached instance after a fetch (a background
+// fill or a reader's own range fetch) that ended in err, when err condemns
+// the instance -- the same rule a whole-object download follows (see
+// transferStopKeepsData and PersistentCache.endAdoptedDownload):
+//
+//   - The origin now serves a different version.  Nothing more of this
+//     instance can be fetched, so it can never be completed; dropping it
+//     (and the latest-version pointer to it) makes the next request fetch
+//     the current version.
+//   - The fetch wrote part of a body and then failed in a way that says
+//     something against it -- a failure reported in the X-Transfer-Status
+//     trailer, say, which an upstream cache sends when its own verification
+//     fails.  The whole blocks it wrote are already marked present, and a
+//     later read would complete the object from them and serve it.
+//
+// A fetch that wrote nothing condemns nothing, and one that stopped for a
+// benign reason keeps its blocks.  Readers still holding the instance's block
+// state are told why it was dropped (see ObjectBlockState.condemn).
+func (bf *BlockFetcherV2) dropIfCondemned(err error, wrote bool) {
+	if err == nil || transferStopKeepsData(err) {
+		return
+	}
+	if errors.Is(err, client.ErrObjectVersionChanged) {
+		log.Warnf("The origin no longer serves the version of %s being cached (%v); dropping the cached copy so it is fetched again",
+			bf.originURL, err)
+	} else if wrote {
+		log.Warnf("A fetch of %s failed after writing part of its body (%v); dropping the cached copy so it is fetched again",
+			bf.originURL, err)
+	} else {
+		return
+	}
+	if bf.blockState != nil {
+		bf.blockState.condemn(err)
+	}
+	if err := bf.storage.Delete(bf.instanceHash); err != nil {
+		log.Warnf("Failed to drop %s: %v", bf.instanceHash, err)
+	}
 }
 
 // awaitTransfer drives an in-flight transfer to completion.
@@ -580,23 +717,38 @@ func (bf *BlockFetcherV2) awaitTransfer(
 	prefetchMode bool,
 	onDone func(),
 ) {
-	defer writer.Close()
+	// Only a transfer that finished cleanly may close the writer; on any
+	// other way out the body stopped somewhere arbitrary, possibly
+	// mid-block, and the writer must discard what it has not completed.
+	// (The transfer engine usually ends the writer first, with the same
+	// error; see blockWriter.CloseWithError.)  Every way out of the loop
+	// below other than a clean result sets op.err.
+	defer func() {
+		if err := endWrite(writer, op.err); err != nil {
+			log.Warnf("Failed to finish writing blocks of %s: %v", bf.instanceHash, err)
+		}
+	}()
 
-	idleTicker := time.NewTicker(2 * time.Second)
+	idleTicker := time.NewTicker(bf.idleCheckInterval())
 	defer idleTicker.Stop()
 
 	for {
 		select {
 		case result, ok := <-results:
 			if !ok {
-				// Results channel closed
+				// The transfer client closed without reporting this job.
+				// Nothing says the blocks arrived, so it is not a success.
+				op.err = errAdoptedTransferUnreported
+				bf.notifyAllChunks(op)
 				return
 			}
 			if result.ID() == jobID {
 				if result.Error != nil {
 					op.err = result.Error
-				} else if onDone != nil {
-					onDone()
+				} else {
+					if onDone != nil {
+						onDone()
+					}
 				}
 				// Notify all remaining waiters (both success and error)
 				bf.notifyAllChunks(op)
@@ -604,11 +756,11 @@ func (bf *BlockFetcherV2) awaitTransfer(
 			}
 
 		case <-idleTicker.C:
-			// In prefetch mode, cancel if no client activity for > prefetchTimeout
-			if prefetchMode && bf.idleSince() > bf.prefetchTimeout {
+			// In prefetch mode, cancel once no client is using the object.
+			if prefetchMode && bf.idle() {
 				log.Debugf("Prefetch timeout for %s — idle for %v, cancelling", bf.instanceHash, bf.idleSince())
 				op.cancelFn()
-				op.err = errors.New("prefetch cancelled due to idle timeout")
+				op.err = errPrefetchIdle
 				bf.notifyAllChunks(op)
 				return
 			}
@@ -633,7 +785,10 @@ func (bf *BlockFetcherV2) awaitTransfer(
 // (the shared bitmap check in writeCurrentBlock handles this).
 //
 // Parameters:
-//   - ctx:         context for the transfer (cancelled on idle or cache close)
+//   - ctx:         the transfer's context (cancelled on cache close)
+//   - cancelTransfer: cancels the transfer itself; called when the object
+//     goes idle -- no reader open (see ObjectBlockState.AttachReader) for
+//     prefetchTimeout
 //   - tc:          the TransferClient that owns the transfer (closed on exit)
 //   - dw:          the decisionWriter whose BlockWriter will be wrapped
 //   - resultChan:  pre-filtered channel delivering the single matching result
@@ -646,6 +801,7 @@ func (bf *BlockFetcherV2) awaitTransfer(
 // fetchOperation for chunk notification and ETA queries.
 func (bf *BlockFetcherV2) AdoptTransfer(
 	ctx context.Context,
+	cancelTransfer context.CancelFunc,
 	tc *client.TransferClient,
 	dw *decisionWriter,
 	resultChan <-chan *client.TransferResults,
@@ -684,6 +840,14 @@ func (bf *BlockFetcherV2) AdoptTransfer(
 	bf.activeFetches[key] = op
 	bf.mu.Unlock()
 
+	// Let the object's readers see when this download should reach each
+	// block, so that one far ahead of it fills past it rather than wait.
+	if bf.blockState != nil {
+		bf.blockState.SetDownloadETA(func(block uint32) time.Time {
+			return op.GetChunkETA(int64(block) * BlockDataSize / ChunkSize)
+		})
+	}
+
 	// Wrap the decisionWriter's BlockWriter with a blockWriter adapter
 	// that provides chunk notification and ETA tracking.  The swap is
 	// atomic with respect to dw.Write.
@@ -694,7 +858,7 @@ func (bf *BlockFetcherV2) AdoptTransfer(
 			currentPos:     bytesWritten,
 			op:             op,
 			bf:             bf,
-			prefetchMode:   false, // adopted transfers always have a client
+			yieldSem:       false, // adopted transfers hold no prefetch slot
 			lastSemRelease: time.Now(),
 			lastRateUpdate: time.Now(),
 			lastFlush:      time.Now(),
@@ -718,23 +882,29 @@ func (bf *BlockFetcherV2) AdoptTransfer(
 			tc.Close()
 			// Now safe to close the adapter → closes the underlying
 			// *BlockWriter → fires onComplete if all blocks are
-			// downloaded.
-			adapter.Close()
+			// downloaded.  A transfer that failed, timed out or was
+			// cancelled stopped at an arbitrary byte, so its writer is
+			// stopped early or aborted instead, according to why: see
+			// endWrite.
+			if err := endWrite(adapter, op.err); err != nil {
+				log.Warnf("Failed to finish writing blocks of %s: %v", bf.instanceHash, err)
+			}
 			if onExit != nil {
 				onExit(op.err)
 			}
 		}()
 
-		idleTicker := time.NewTicker(2 * time.Second)
-		defer idleTicker.Stop()
-
-		for {
-			select {
-			case result := <-resultChan:
-				if result != nil && result.Error != nil {
-					op.err = result.Error
-					log.Warnf("Adopted transfer failed for %s: %v", bf.instanceHash, result.Error)
-				}
+		// finish records the transfer's result, persisting the checksums of
+		// a clean one, and wakes every waiter.
+		finish := func(result *client.TransferResults) {
+			// A transfer client that shut down without reporting the job
+			// (a nil result) is a failure, not a success: closing the
+			// writer would finalize an object of unknown size wherever
+			// its input stopped.  See transferResultErr.
+			if err := transferResultErr(result); err != nil {
+				op.err = err
+				log.Warnf("Adopted transfer failed for %s: %v", bf.instanceHash, err)
+			} else {
 				// Persist checksums from the transfer result into the cache
 				// metadata.  We must do this here -- when the result arrives
 				// -- rather than relying on the BlockWriter's onComplete
@@ -745,43 +915,64 @@ func (bf *BlockFetcherV2) AdoptTransfer(
 				// result is delivered.  Persisting here (via the additive
 				// MergeMetadata) guarantees a subsequent HEAD/GET can relay a
 				// Digest header.
-				//
-				// Skip on transfer error -- those checksums describe a body we
-				// are about to discard (see PersistentCache's AdoptTransfer
-				// onExit, which evicts the failed-verification instance).
-				if result != nil && result.Error == nil {
-					checksums := clientChecksumsToCache(result)
-					dw.dl.checksums = checksums
-					if len(checksums) > 0 {
-						if err := bf.storage.MergeMetadata(bf.instanceHash,
-							&CacheMetadata{Checksums: checksums}); err != nil {
-							log.Warnf("Failed to persist checksums for %s: %v", bf.instanceHash, err)
-						}
+				checksums := clientChecksumsToCache(result)
+				dw.dl.checksums = checksums
+				if len(checksums) > 0 {
+					if err := bf.storage.MergeMetadata(bf.instanceHash,
+						&CacheMetadata{Checksums: checksums}); err != nil {
+						log.Warnf("Failed to persist checksums for %s: %v", bf.instanceHash, err)
 					}
 				}
-				bf.notifyAllChunks(op)
+			}
+			bf.notifyAllChunks(op)
+		}
+
+		// finishStopped records the result of a transfer the fetcher itself
+		// stopped, for the reason given.  The result still decides: a
+		// transfer that finished before the cancel took effect is a success,
+		// and one that failed for a reason of its own that condemns its data
+		// -- say its checksum did not match the body that had all arrived,
+		// or one endpoint answered 404 before the cancel reached the next --
+		// reports that reason, as the transfer engine already did when it
+		// closed the writer.  Only a transfer that reports nothing, or whose
+		// failure says nothing against its data (the cancellation itself), is
+		// put down to the stop.
+		finishStopped := func(result *client.TransferResults, stop error) {
+			if result != nil && (result.Error == nil || !transferStopKeepsData(result.Error)) {
+				finish(result)
+				return
+			}
+			op.err = stop
+			bf.notifyAllChunks(op)
+		}
+
+		idleTicker := time.NewTicker(bf.idleCheckInterval())
+		defer idleTicker.Stop()
+
+		for {
+			select {
+			case result := <-resultChan:
+				finish(result)
 				return nil
 
 			case <-idleTicker.C:
-				if bf.idleSince() > bf.prefetchTimeout {
-					log.Debugf("Adopted transfer idle timeout for %s — idle for %v, cancelling",
-						bf.instanceHash, bf.idleSince())
-					cancelFn()
-					op.err = errors.New("download cancelled: idle timeout")
-					bf.notifyAllChunks(op)
-					// Drain the result channel so the transfer engine
-					// finishes before defer closes the adapter/tc.
-					// Without this, the HTTP body reader may still be
-					// calling Write when the BlockWriter is closed.
-					<-resultChan
-					return nil
+				if !bf.idle() {
+					continue
 				}
+				// Nobody is reading the object any more: stop fetching it.
+				// The cancel takes effect at the transfer engine, so wait for
+				// its result before touching the writer.
+				log.Debugf("Adopted transfer idle for %s (no reader for %v); cancelling",
+					bf.instanceHash, bf.idleSince())
+				cancelTransfer()
+				finishStopped(<-resultChan, errAdoptedTransferIdle)
+				return nil
 
 			case <-innerCtx.Done():
-				op.err = innerCtx.Err()
-				bf.notifyAllChunks(op)
-				// Drain the result channel (see idle-timeout comment).
-				<-resultChan
+				// The cache is shutting down.  Wait for the transfer engine
+				// to give up too, so it is not still writing when the
+				// deferred cleanup closes the adapter and client.
+				finishStopped(<-resultChan, innerCtx.Err())
 				return nil
 			}
 		}
@@ -789,6 +980,18 @@ func (bf *BlockFetcherV2) AdoptTransfer(
 
 	return op
 }
+
+// errAdoptedTransferUnreported is an adopted transfer's error when the
+// transfer client went away without reporting the job's result.
+var errAdoptedTransferUnreported = errors.New("the transfer ended without reporting a result")
+
+// errAdoptedTransferIdle is an adopted transfer's error when it was cancelled
+// because no reader was using the object any more.
+var errAdoptedTransferIdle = errors.New("download cancelled: no reader for the idle timeout")
+
+// errPrefetchIdle is a prefetch's error when it was cancelled because no
+// reader was using the object any more.
+var errPrefetchIdle = errors.New("prefetch cancelled due to idle timeout")
 
 // notifyAllChunks closes all chunk notification channels (for both success and error cases)
 // Using close() is safe - multiple closes are handled, and receivers see the close immediately
@@ -817,7 +1020,7 @@ type blockWriter struct {
 	currentPos      int64
 	op              *fetchOperation
 	bf              *BlockFetcherV2
-	prefetchMode    bool
+	yieldSem        bool // holds a prefetch-semaphore slot, to yield now and then
 	lastSemRelease  time.Time
 	lastRateUpdate  time.Time
 	lastFlush       time.Time
@@ -887,9 +1090,9 @@ func (w *blockWriter) Write(p []byte) (n int, err error) {
 		w.op.mu.Unlock()
 	}
 
-	// In prefetch mode, periodically release and reacquire the semaphore
-	// so other prefetches/downloads can make progress.
-	if w.prefetchMode && time.Since(w.lastSemRelease) > PrefetchSemaphoreReleaseInterval {
+	// A prefetch holding a semaphore slot periodically releases and
+	// reacquires it so other prefetches can make progress.
+	if w.yieldSem && time.Since(w.lastSemRelease) > PrefetchSemaphoreReleaseInterval {
 		// Release semaphore briefly to let others run
 		<-w.bf.prefetchSem
 
@@ -903,6 +1106,25 @@ func (w *blockWriter) Write(p []byte) (n int, err error) {
 
 func (w *blockWriter) Close() error {
 	return w.inner.Close()
+}
+
+// Abort closes the writer after a transfer whose data is condemned; see
+// BlockWriter.Abort.
+func (w *blockWriter) Abort() {
+	w.inner.Abort()
+}
+
+// StopEarly closes the writer after a transfer that stopped before the end
+// for a reason that says nothing against its data; see BlockWriter.StopEarly.
+func (w *blockWriter) StopEarly() {
+	w.inner.StopEarly()
+}
+
+// CloseWithError is how the transfer engine closes the writer when a
+// transfer ends -- before BlockFetcherV2 sees the result -- with the
+// transfer's error, or nil on success.
+func (w *blockWriter) CloseWithError(err error) error {
+	return endWrite(w, err)
 }
 
 // CreateFetchCallback returns a callback function for the RangeReader

@@ -359,6 +359,23 @@ func (pc *PersistentCache) handleError(w http.ResponseWriter, getErr error, obje
 	}
 }
 
+// ifRangeHolds reports whether a request's If-Range precondition, if any,
+// holds for the cached object, as http.ServeContent judges it: a strong
+// entity tag equal to the object's, or a date equal to its modification time
+// (to the second).  When it does not, ServeContent ignores the Range header
+// and sends the whole object.
+func ifRangeHolds(r *http.Request, meta *CacheMetadata) bool {
+	ir := r.Header.Get("If-Range")
+	if ir == "" {
+		return true
+	}
+	if strings.HasPrefix(ir, `"`) || strings.HasPrefix(ir, "W/") {
+		return !strings.HasPrefix(ir, "W/") && !strings.HasPrefix(meta.ETag, "W/") && ir == meta.ETag
+	}
+	t, err := http.ParseTime(ir)
+	return err == nil && !meta.LastModified.IsZero() && meta.LastModified.Truncate(time.Second).Equal(t)
+}
+
 // requestOnlyIfCached returns true when the client indicates it only wants a
 // stored (cached) response.  This is signalled by the standard
 // Cache-Control: only-if-cached directive (RFC 7234 §5.2.1.7) or by the
@@ -624,6 +641,19 @@ func (pc *PersistentCache) serveObject(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer reader.Close()
+
+	// The reader covers the whole object, and http.ServeContent seeks it to
+	// each range requested; tell it the ranges, so that reading a few bytes
+	// of a partly cached object does not start a fill of all the rest.  When
+	// an If-Range precondition fails, ServeContent sends the whole object,
+	// so the whole object is what may be filled.
+	if rangeHeader := r.Header.Get("Range"); rangeHeader != "" && meta != nil && reader.RangeReader != nil && ifRangeHolds(r, meta) {
+		ranges, err := ParseRangeHeader(rangeHeader, meta.ContentLength)
+		if err != nil {
+			ranges = nil // a malformed range starts no fills
+		}
+		reader.LimitFill(ranges)
+	}
 
 	// Set cache-related headers from metadata
 	if meta != nil {

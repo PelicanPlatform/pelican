@@ -27,7 +27,9 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"time"
 
+	"github.com/RoaringBitmap/roaring"
 	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
 )
@@ -159,6 +161,24 @@ type RangeReader struct {
 	// Fetch callback for missing blocks
 	fetchBlocks func(ctx context.Context, startBlock, endBlock uint32) error
 
+	// startFill, when set, starts a background fill of the object from a
+	// missing block up to the next block present, or to last, and reports
+	// whether one now covers the block, and if this call started it, a
+	// channel closed when it ends (see PersistentCache.startFill).
+	startFill func(block, last uint32, overDownload bool) (covered bool, started <-chan struct{})
+
+	// fillRanges, when fillLimited, are the byte ranges of the object a
+	// client asked for: a fill started by this reader stays within the one
+	// the reader is in, and none starts outside them.  Unlimited, fills
+	// reach as far as the reader's own range.  See LimitFill.
+	fillRanges  []RangeRequest
+	fillLimited bool
+
+	// servedBlocks are the blocks this reader has served, or is serving;
+	// WaitForCompletion waits for the verdict of whatever is still writing
+	// any of them.  Guarded by mu.
+	servedBlocks *roaring.Bitmap
+
 	// noStoreReader is the read end of an io.Pipe for streaming no-store
 	// responses.  When set, Read delegates here and Seek returns an error
 	// because a pipe is forward-only.
@@ -174,9 +194,13 @@ type RangeReader struct {
 	// when noStoreReader is set.
 	size int64
 
-	// onClose is called when the reader is closed (e.g., to deregister
-	// from the BlockFetcherV2 client tracking).
+	// onClose is called when the reader is closed (e.g., to close a lazily
+	// created fetcher and release the reader's pin).
 	onClose func()
+
+	// detach records the reader closing with the object's shared block
+	// state (see ObjectBlockState.AttachReader); it is idempotent.
+	detach func()
 
 	// completionDone / completionErr expose the terminal state of the
 	// backing download (if any).  completionDone is closed when the
@@ -269,6 +293,9 @@ func NewRangeReader(
 		}
 	}
 
+	// Every reader of the object, whatever path it came through, keeps any
+	// fill of the object going until it closes.
+	rr.detach = blockState.AttachReader()
 	return rr, nil
 }
 
@@ -369,19 +396,60 @@ func (rr *RangeReader) ReadContext(ctx context.Context, p []byte) (n int, err er
 // ObjectBlockState.downloading), it waits for each block to be written before
 // falling back to an on-demand fetch from the origin.
 func (rr *RangeReader) ensureBlocks(ctx context.Context, startBlock, endBlock uint32) error {
+	if rr.servedBlocks == nil {
+		rr.servedBlocks = roaring.New()
+	}
+	rr.servedBlocks.AddRange(uint64(startBlock), uint64(endBlock)+1)
 	for block := startBlock; block <= endBlock; block++ {
 		if rr.blockState.Contains(block) {
 			continue
 		}
 
-		// Try waiting for the background download to produce this block.
-		if rr.blockState.WaitForBlock(ctx, block) {
+		// Wait for a download or fill due to write this block -- unless it
+		// is the whole-object download and it will not reach the block soon,
+		// in which case a fill fetches it sooner (see writerOf).
+		writer, bound := rr.blockState.writerOf(block)
+		if writer == alreadyWritten {
 			continue
+		}
+		overDownload := writer == distantDownload
+		if writer == fillWriter || writer == downloadWriter {
+			if rr.waitForBlock(ctx, block, bound) {
+				continue
+			}
+			// The download did not write the block within its estimate and
+			// the slack: it is slower than it looked, so fill past it.
+			overDownload = writer == downloadWriter
 		}
 
 		// If the context is done, bail out.
 		if ctx.Err() != nil {
 			return ctx.Err()
+		}
+		if err := rr.blockState.Condemned(); err != nil {
+			return errors.Wrap(err, "the cached copy was dropped")
+		}
+
+		// Nothing is writing the block.  Rather than fetch only the blocks
+		// this read covers -- http.ServeContent reads 32 KB at a time, so a
+		// reader of a partly cached object would fetch the rest of it one
+		// small origin request after another -- start a background fill
+		// from here to the next block present (or the end of this reader's
+		// range), which this and every other reader then wait on.
+		if last, ok := rr.fillLimit(); ok && block <= last && rr.startFill != nil {
+			if covered, _ := rr.startFill(block, last, overDownload); covered {
+				if rr.blockState.WaitForBlock(ctx, block) {
+					continue
+				}
+				if ctx.Err() != nil {
+					return ctx.Err()
+				}
+				if err := rr.blockState.Condemned(); err != nil {
+					return errors.Wrap(err, "the cached copy was dropped")
+				}
+				// The fill ended without writing the block (it failed,
+				// or stopped); fetch it directly.
+			}
 		}
 
 		// Block still not available and no background download in
@@ -406,6 +474,56 @@ func (rr *RangeReader) ensureBlocks(ctx context.Context, startBlock, endBlock ui
 		block = fetchEnd
 	}
 	return nil
+}
+
+// waitForBlock waits for a block as WaitForBlock does, for at most bound
+// when bound is positive.
+func (rr *RangeReader) waitForBlock(ctx context.Context, block uint32, bound time.Duration) bool {
+	if bound > 0 {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(ctx, bound)
+		defer cancel()
+	}
+	return rr.blockState.WaitForBlock(ctx, block)
+}
+
+// LimitFill bounds the background fills this reader may start (see
+// ensureBlocks) to the given byte ranges of the object: a fill stays within
+// the range the reader is reading, and none starts outside every range (so
+// no ranges at all means no fills).  The cache's HTTP handler reads every
+// object through a reader of the whole object and lets http.ServeContent
+// seek it to each requested range in turn, so it states the ranges here: a
+// request for a few bytes of a large, partly cached object must not start a
+// fill of everything after them, and a multi-range request -- a vector read
+// -- fills each of its ranges with one request.
+func (rr *RangeReader) LimitFill(ranges []RangeRequest) {
+	rr.mu.Lock()
+	defer rr.mu.Unlock()
+	rr.fillRanges = ranges
+	rr.fillLimited = true
+}
+
+// fillLimit returns the last block a fill started by this reader, at its
+// current position, may reach, or false if it may start none.  The caller
+// holds rr.mu.
+func (rr *RangeReader) fillLimit() (uint32, bool) {
+	end := rr.end
+	if rr.fillLimited {
+		found := false
+		for _, r := range rr.fillRanges {
+			if r.Start <= rr.position && rr.position <= r.End {
+				end, found = min(end, r.End), true
+				break
+			}
+		}
+		if !found {
+			return 0, false
+		}
+	}
+	if end < 0 {
+		return 0, false
+	}
+	return ContentOffsetToBlock(end), true
 }
 
 // maxRepairBlocks is the maximum number of blocks repaired in a single
@@ -437,6 +555,9 @@ func (rr *RangeReader) repairAndRetry(ctx context.Context, startBlock, endBlock 
 	if rr.fetchBlocks == nil {
 		log.Warnf("Auto-repair: skipping repair for %s — no fetch callback available", rr.instanceHash)
 		return nil, origErr // can't repair without a fetch callback
+	}
+	if err := rr.blockState.Condemned(); err != nil {
+		return nil, errors.Wrap(err, "the cached copy was dropped")
 	}
 
 	// Serialize repair operations for this object.  If another goroutine is
@@ -604,6 +725,9 @@ func (rr *RangeReader) Close() error {
 	if rr.remoteStream != nil {
 		err = rr.remoteStream.Close()
 	}
+	if rr.detach != nil {
+		rr.detach()
+	}
 	if rr.onClose != nil {
 		rr.onClose()
 	}
@@ -634,24 +758,73 @@ func (rr *RangeReader) Close() error {
 // successfully, ctx is cancelled while waiting, or (in the partial-range
 // case) verification hasn't completed yet.
 func (rr *RangeReader) WaitForCompletion(ctx context.Context) error {
-	if rr == nil || rr.completionDone == nil {
+	if rr == nil {
 		return nil
 	}
-	if rr.isFullRead() {
+	if rr.completionDone != nil {
+		if rr.isFullRead() {
+			select {
+			case <-rr.completionDone:
+			case <-ctx.Done():
+				return nil
+			}
+			if err := rr.completionErr(); err != nil {
+				return err
+			}
+		} else {
+			// Partial range: non-blocking peek.
+			select {
+			case <-rr.completionDone:
+				if err := rr.completionErr(); err != nil {
+					return err
+				}
+			default:
+			}
+		}
+	}
+	// The reader's blocks may have come from fills -- its own or another
+	// reader's -- or from a whole-object download it joined as a cache hit.
+	// A block counts as written once it is flushed, before its writer's
+	// transfer has reported, and a writer's verdict, which comes after its
+	// last block, drops the object if it condemns the data.  Whether the
+	// reader had to wait for a block says nothing about whether its writer
+	// had finished, so ask the block state what is still writing any block
+	// the reader served, and wait for the verdict of every such fill: a fill
+	// is bounded by the range its reader asked for, so this is cheap even
+	// for a small range read.  A whole-object read also waits for a
+	// whole-object download in progress; a partial range does not wait for
+	// a whole download, as above.  Then the reader knows whether its bytes
+	// came from a copy found bad, and a whole-object read that succeeds
+	// leaves the object cached.
+	if rr.blockState == nil {
+		return nil
+	}
+	rr.mu.Lock()
+	var served *roaring.Bitmap
+	if rr.servedBlocks != nil {
+		served = rr.servedBlocks.Clone()
+	}
+	full := rr.isFullRead() && !rr.fillLimited
+	rr.mu.Unlock()
+	var writers []<-chan struct{}
+	if served != nil {
+		fills, download := rr.blockState.writersOver(served)
+		writers = fills
+		if full && download != nil {
+			writers = append(writers, download)
+		}
+	}
+	for _, done := range writers {
 		select {
-		case <-rr.completionDone:
-			return rr.completionErr()
+		case <-done:
 		case <-ctx.Done():
 			return nil
 		}
 	}
-	// Partial range: non-blocking peek.
-	select {
-	case <-rr.completionDone:
-		return rr.completionErr()
-	default:
-		return nil
+	if err := rr.blockState.Condemned(); err != nil {
+		return errors.Wrap(err, "the cached copy was dropped")
 	}
+	return nil
 }
 
 // isFullRead reports whether this reader's range covers the entire object,

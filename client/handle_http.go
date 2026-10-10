@@ -85,6 +85,11 @@ var (
 	// ErrObjectNotFound is returned when the requested remote object does not exist.
 	ErrObjectNotFound = errors.New("remote object not found")
 
+	// ErrObjectVersionChanged reports that a server answered a download with
+	// a different version of the object -- a different entity tag -- than the
+	// one expected (see WithExpectedETag), so its body was refused.
+	ErrObjectVersionChanged = errors.New("the server is serving a different version of the object")
+
 	// errStatOnCollectionAtCache is an internal sentinel for the case where a
 	// stat host (typically an XRootD cache) returns 409 for a PROPFIND on what
 	// is actually a directory. Caches do not serve directory listings; statHttp
@@ -241,6 +246,11 @@ type (
 		// Whether or not the cache has been queried
 		CacheQuery bool
 
+		// ExpectedETag, when set, is the entity tag the response must carry
+		// (if it carries one); downloadHTTP refuses another before writing
+		// any of the body.
+		ExpectedETag string
+
 		// Preferred indicates this server came from the user's PreferredCaches
 		// configuration rather than being discovered via the Director.  When true,
 		// the server must not be sorted after any non-preferred (director-provided)
@@ -272,6 +282,7 @@ type (
 		reader             io.ReadCloser           // Optional reader for uploads
 		byteRange          *ByteRange              // Optional byte range for partial downloads
 		metadataChan       chan<- TransferMetadata // Optional channel to receive early transfer metadata
+		expectedETag       string                  // Optional entity tag every attempt's response must carry; see WithExpectedETag
 
 		// TagScheduler hooks: nil unless the engine was constructed with a
 		// scheduler. schedFirstByte fires once (idempotent) as soon as the
@@ -342,6 +353,7 @@ type (
 		forcePrestageAPI   bool                    // If true, force use of prestage API and error if not supported (no fallback)
 		byteRange          *ByteRange              // Optional byte range for partial downloads
 		metadataChan       chan<- TransferMetadata // Optional channel to receive early transfer metadata
+		expectedETag       string                  // Optional entity tag every attempt's response must carry; see WithExpectedETag
 		requestId          string                  // Caller-supplied request ID for end-to-end tracing (X-Pelican-JobId)
 		// objectMetadata is the optional client-supplied
 		// X-Pelican-Object-Metadata field-set propagated to all
@@ -450,6 +462,7 @@ type (
 	identTransferOptionForcePrestageAPI         struct{}
 	identTransferOptionByteRange                struct{}
 	identTransferOptionMetadataChannel          struct{}
+	identTransferOptionExpectedETag             struct{}
 	identTransferOptionFedToken                 struct{}
 	identTransferOptionCacheEmbeddedClientMode  struct{}
 	identTransferOptionRequestId                struct{}
@@ -1498,6 +1511,8 @@ func applyJobOptions(tj *TransferJob, options []TransferOption) {
 			tj.dryRun = opt.Value().(bool)
 		case identTransferOptionMetadataChannel{}:
 			tj.metadataChan = opt.Value().(chan<- TransferMetadata)
+		case identTransferOptionExpectedETag{}:
+			tj.expectedETag = opt.Value().(string)
 		case identTransferOptionCacheEmbeddedClientMode{}:
 			tj.cacheMode = opt.Value().(bool)
 		}
@@ -1600,6 +1615,25 @@ func WithByteRange(start, end int64) TransferOption {
 // The caller should ensure the channel has buffer capacity of at least 1.
 func WithMetadataChannel(ch chan<- TransferMetadata) TransferOption {
 	return option.New(identTransferOptionMetadataChannel{}, ch)
+}
+
+// WithExpectedETag makes a download accept only responses for the version of
+// the object with the given entity tag.  A response carrying a different
+// entity tag is refused before any of its body is written, on every attempt,
+// and the attempt fails with ErrObjectVersionChanged; a response with no
+// entity tag is accepted.  The caller is typically filling in more of an
+// object it already holds part of, where splicing in another version's bytes
+// would corrupt it.
+//
+// Without this option, attempts after the first are still held to the entity
+// tag the first one reported, so a retried download cannot switch versions
+// part-way through.
+//
+// Both checks need entity tags: from a server that sends none -- as an
+// XRootD (XrdHttp) server does not -- every response is accepted, and a
+// version change goes unnoticed.
+func WithExpectedETag(etag string) TransferOption {
+	return option.New(identTransferOptionExpectedETag{}, etag)
 }
 
 // WithCacheEmbeddedClientMode controls whether the client runs in
@@ -2182,6 +2216,8 @@ func (tc *TransferClient) NewTransferJob(ctx context.Context, remoteUrl *url.URL
 			tj.byteRange = &br
 		case identTransferOptionMetadataChannel{}:
 			tj.metadataChan = option.Value().(chan<- TransferMetadata)
+		case identTransferOptionExpectedETag{}:
+			tj.expectedETag = option.Value().(string)
 		case identTransferOptionCacheEmbeddedClientMode{}:
 			tj.cacheMode = option.Value().(bool)
 		case identTransferOptionRequestId{}:
@@ -3160,6 +3196,7 @@ func (te *TransferEngine) createTransferFiles(job *clientTransferJob) (err error
 			reader:             job.job.reader,
 			byteRange:          job.job.byteRange,
 			metadataChan:       job.job.metadataChan,
+			expectedETag:       job.job.expectedETag,
 			objectMetadata:     job.job.objectMetadata,
 			objectMetadataBlob: job.job.objectMetadataBlob,
 		},
@@ -3878,13 +3915,24 @@ func downloadObject(transfer *transferFile) (transferResults TransferResults, er
 		if transfer.fedToken != nil {
 			fedTokenContents, _ = transfer.fedToken.Get()
 		}
+		// The version this attempt must deliver: the caller's, or else the
+		// one an earlier attempt already started writing.  Checked before
+		// any body is written, so a retry cannot splice another version
+		// into what was already received.
+		transferEndpoint.ExpectedETag = transfer.expectedETag
+		if transferEndpoint.ExpectedETag == "" {
+			transferEndpoint.ExpectedETag = transferResults.ETag
+		}
 		// Determine byte range end (-1 means download to end of file)
 		byteRangeEnd := int64(-1)
 		if transfer.byteRange != nil {
 			byteRangeEnd = transfer.byteRange.End
 		}
+		// The caller's early-metadata channel is fed through a relay, so
+		// that what this attempt told the caller is known afterwards.
+		relay := newMetadataRelay(transfer.metadataChan)
 		attemptDownloaded, timeToFirstByte, cacheAge, serverVersion, attemptETag, err := downloadHTTP(
-			ctx, transfer.engine, transfer.callback, transferEndpoint, writeDestination, fileWriter, rangeStart+downloaded, byteRangeEnd, size, tokenContents, transfer.project, transfer.metadataChan, transfer.schedFirstByte,
+			ctx, transfer.engine, transfer.callback, transferEndpoint, writeDestination, fileWriter, rangeStart+downloaded, byteRangeEnd, size, tokenContents, transfer.project, relay.channel(), transfer.schedFirstByte,
 		)
 
 		// If the endpoint returned a 403 with director-style token hints, learn
@@ -3911,29 +3959,36 @@ func downloadObject(transfer *transferFile) (transferResults TransferResults, er
 				// been told this endpoint is responsive; the retry is the
 				// attempt that will prove it.  schedFirstByte is idempotent.
 				attemptDownloaded, timeToFirstByte, cacheAge, serverVersion, attemptETag, err = downloadHTTP(
-					ctx, transfer.engine, transfer.callback, transferEndpoint, writeDestination, fileWriter, rangeStart+downloaded, byteRangeEnd, size, tokenContents, transfer.project, transfer.metadataChan, transfer.schedFirstByte,
+					ctx, transfer.engine, transfer.callback, transferEndpoint, writeDestination, fileWriter, rangeStart+downloaded, byteRangeEnd, size, tokenContents, transfer.project, relay.channel(), transfer.schedFirstByte,
 				)
 			}
 		}
-		// Clear metadata channel after first attempt - we only want to send metadata once
-		transfer.metadataChan = nil
+		// Metadata goes to the caller once: after the first attempt that
+		// actually delivered it, not merely the first attempt -- one that
+		// failed before its response arrived told the caller nothing.
+		sentMetadata, sentETag := relay.finish()
+		if sentMetadata {
+			transfer.metadataChan = nil
+		}
 
-		// Track the ETag for resume validation: if the server provided an
-		// ETag and we already have one from a previous attempt, make sure
-		// they match.  A change means the object was modified between
-		// attempts and the partially-downloaded data is no longer valid.
-		if attemptETag != "" {
-			if transferResults.ETag == "" {
+		// Record the version this download is now committed to; every later
+		// attempt is held to it (see ExpectedETag above).  An attempt commits
+		// the download to its version once it has written part of the body,
+		// or finished (the object may be empty), or handed its headers to the
+		// caller -- a caller such as the cache keys what it stores on that
+		// first metadata, so the bytes must be that version's.  An attempt
+		// that did none of those commits to nothing: a stale cache that
+		// announces an old version and then drops the connection does not
+		// keep the next server from delivering the current one.  Once a tag
+		// is recorded no later attempt can report another, because
+		// downloadHTTP refuses such a response before writing any of it, or
+		// passing on its metadata, and reports no tag.
+		if transferResults.ETag == "" {
+			switch {
+			case sentMetadata && sentETag != "":
+				transferResults.ETag = sentETag
+			case attemptETag != "" && (attemptDownloaded > 0 || err == nil):
 				transferResults.ETag = attemptETag
-			} else if transferResults.ETag != attemptETag {
-				log.WithFields(fields).Errorf("ETag changed between download attempts (was %q, now %q); aborting resume",
-					transferResults.ETag, attemptETag)
-				attempt.Error = newTransferAttemptError(
-					attempt.Endpoint, "", false, false,
-					errors.New("object was modified between download attempts (ETag mismatch); cannot safely resume"),
-				)
-				transferResults.Attempts = append(transferResults.Attempts, attempt)
-				break
 			}
 		}
 
@@ -4353,6 +4408,57 @@ type tokenHintError struct {
 func (e *tokenHintError) Error() string { return e.err.Error() }
 func (e *tokenHintError) Unwrap() error { return e.err }
 
+// metadataRelay passes one download attempt's early metadata on to the
+// caller's channel and remembers whether, and with which entity tag, it did.
+// A nil relay (no caller channel) passes nothing on.
+type metadataRelay struct {
+	out  chan<- TransferMetadata
+	in   chan TransferMetadata
+	done chan struct{}
+	sent bool
+	etag string
+}
+
+func newMetadataRelay(out chan<- TransferMetadata) *metadataRelay {
+	if out == nil {
+		return nil
+	}
+	r := &metadataRelay{out: out, in: make(chan TransferMetadata, 1), done: make(chan struct{})}
+	go func() {
+		defer close(r.done)
+		for m := range r.in {
+			// Never block the transfer on a caller that is not listening;
+			// downloadHTTP's own send is non-blocking for the same reason.
+			select {
+			case r.out <- m:
+				r.sent, r.etag = true, m.ETag
+			default:
+				log.Debugln("Metadata channel full, skipping early metadata send")
+			}
+		}
+	}()
+	return r
+}
+
+// channel is what the attempt sends its metadata on.
+func (r *metadataRelay) channel() chan<- TransferMetadata {
+	if r == nil {
+		return nil
+	}
+	return r.in
+}
+
+// finish ends the relay once the attempt has returned and reports whether it
+// passed metadata on to the caller, and that metadata's entity tag.
+func (r *metadataRelay) finish() (sent bool, etag string) {
+	if r == nil {
+		return false, ""
+	}
+	close(r.in)
+	<-r.done
+	return r.sent, r.etag
+}
+
 // Download a single object from a single HTTP server with no retries.
 //
 // The following information is required:
@@ -4598,6 +4704,13 @@ func downloadHTTP(ctx context.Context, te *TransferEngine, callback TransferCall
 
 	serverVersion = resp.Header.Get("Server")
 	etag = resp.Header.Get("ETag")
+	if transfer.ExpectedETag != "" && etag != "" && etag != transfer.ExpectedETag {
+		// No entity tag is reported for a refused response: nothing of it
+		// was written, so it must not become the version later attempts
+		// are held to.
+		return 0, 0, -1, serverVersion, "", errors.Wrapf(ErrObjectVersionChanged,
+			"%s sent entity tag %s; expected %s", transfer.Url.Host, etag, transfer.ExpectedETag)
+	}
 
 	if ageStr := resp.Header.Get("Age"); ageStr != "" {
 		if ageSec, err := strconv.Atoi(ageStr); err == nil {

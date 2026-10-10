@@ -154,6 +154,12 @@ type ConsistencyChecker struct {
 	lastDataScan     atomic.Int64  // Unix timestamp of last data scan start
 	metaScanCounter  atomic.Uint64 // monotonic ID for metadata scan instances
 	dataScanCounter  atomic.Uint64 // monotonic ID for data scan instances
+
+	// beforeMetadataDeletions, when set, runs after the metadata scan has
+	// chosen what to delete and before it deletes anything.  It exists for
+	// tests to change the store in that window, as a concurrent relocation
+	// would; nothing sets it in production.
+	beforeMetadataDeletions func()
 }
 
 // ConsistencyConfig holds configuration for the consistency checker
@@ -560,7 +566,8 @@ func (cc *ConsistencyChecker) RunMetadataScan(ctx context.Context, progressCh ch
 		isFile       bool
 		path         string
 		size         int64
-		chunkIndex   int // For file deletions: which chunk (0 = base file, 1+ = chunk suffix)
+		chunkIndex   int       // For file deletions: which chunk (0 = base file, 1+ = chunk suffix)
+		storageID    StorageID // For file deletions: the directory holding the file
 	}
 	var deletions []deleteAction
 	const maxDeletionsPerTx = 1000
@@ -570,6 +577,39 @@ func (cc *ConsistencyChecker) RunMetadataScan(ctx context.Context, progressCh ch
 	orphanedBytes := int64(0)
 	dbEntriesScanned := int64(0)
 	filesScanned := int64(0)
+
+	// removeOrphan deletes a file the scan found no use for.  Every file
+	// deletion in the scan goes through it, so none can skip its checks:
+	//
+	//   - The decision was made against a metadata snapshot up to a
+	//     transaction-restart old, and the object may since have been evicted
+	//     and fetched again into another directory -- or its record may be
+	//     one the scan passed over as too young -- so that it now owns
+	//     exactly this file; the object's current record is asked first.
+	//   - A file written since the scan started, or younger than the grace
+	//     period, is left alone: whoever creates an object's file re-creates
+	//     it, which moves its mtime on.
+	//
+	// Each chunk file is judged on its own: the walk reports chunk files
+	// individually, right after their base file (a "-N" suffix sorts before
+	// any hex digit), so deleting a base file never has to go looking for
+	// its chunks -- which would list a whole directory per deletion.
+	removeOrphan := func(hash InstanceHash, storageID StorageID, chunkIndex int, path string, size int64) {
+		if cc.fileStillWanted(hash, storageID, chunkIndex) {
+			return
+		}
+		info, err := os.Stat(path)
+		if err != nil || info.ModTime().After(scanStartTime) ||
+			(cc.minAgeForCleanup > 0 && time.Since(info.ModTime()) < cc.minAgeForCleanup) {
+			return
+		}
+		sl.WithField("path", path).Warn("Orphaned file")
+		orphanedFiles++
+		orphanedBytes += size
+		if err := os.Remove(path); err != nil {
+			sl.WithError(err).WithField("path", path).Warn("Failed to remove orphaned file")
+		}
+	}
 
 	// Read first file from channel
 	var currentFile fileInfo
@@ -628,15 +668,6 @@ func (cc *ConsistencyChecker) RunMetadataScan(ctx context.Context, progressCh ch
 				}
 			}
 
-			// Only process entries old enough to avoid races
-			if cc.minAgeForCleanup > 0 && !meta.Completed.IsZero() && time.Since(meta.Completed) < cc.minAgeForCleanup {
-				lastDBKey = instanceHash
-				return nil
-			}
-
-			dbEntriesScanned++
-			entriesThisTransaction++
-
 			// Process all files that are less than current DB entry (orphaned files)
 			for fileOk && currentFile.instanceHash < instanceHash {
 				if len(deletions) < maxDeletionsPerTx {
@@ -646,12 +677,31 @@ func (cc *ConsistencyChecker) RunMetadataScan(ctx context.Context, progressCh ch
 						path:         currentFile.path,
 						size:         currentFile.size,
 						chunkIndex:   currentFile.chunkIndex,
+						storageID:    currentFile.storageID,
 					})
 				}
 				filesScanned++
 				// Get next file
 				currentFile, fileOk = <-fileChan
 			}
+
+			// Only check entries old enough to avoid races.  A younger
+			// entry's own files are passed over here too: left on the
+			// cursor, they would be compared with the next entry and taken
+			// for orphans.  A file can easily be older than its entry's
+			// Completed -- the first chunk of a large object is written long
+			// before the last, and a repair completes an object again.
+			if cc.minAgeForCleanup > 0 && !meta.Completed.IsZero() && time.Since(meta.Completed) < cc.minAgeForCleanup {
+				for fileOk && currentFile.instanceHash == instanceHash {
+					filesScanned++
+					currentFile, fileOk = <-fileChan
+				}
+				lastDBKey = instanceHash
+				return nil
+			}
+
+			dbEntriesScanned++
+			entriesThisTransaction++
 
 			// Process all files that match current DB entry (could be multiple chunks)
 			for fileOk && currentFile.instanceHash == instanceHash {
@@ -671,6 +721,7 @@ func (cc *ConsistencyChecker) RunMetadataScan(ctx context.Context, progressCh ch
 									path:         currentFile.path,
 									size:         currentFile.size,
 									chunkIndex:   currentFile.chunkIndex,
+									storageID:    currentFile.storageID,
 								})
 							}
 						} else {
@@ -685,6 +736,7 @@ func (cc *ConsistencyChecker) RunMetadataScan(ctx context.Context, progressCh ch
 										path:         currentFile.path,
 										size:         currentFile.size,
 										chunkIndex:   currentFile.chunkIndex,
+										storageID:    currentFile.storageID,
 									})
 								}
 							} else {
@@ -700,6 +752,7 @@ func (cc *ConsistencyChecker) RunMetadataScan(ctx context.Context, progressCh ch
 											path:         currentFile.path,
 											size:         currentFile.size,
 											chunkIndex:   currentFile.chunkIndex,
+											storageID:    currentFile.storageID,
 										})
 									}
 								}
@@ -717,6 +770,7 @@ func (cc *ConsistencyChecker) RunMetadataScan(ctx context.Context, progressCh ch
 									path:         currentFile.path,
 									size:         currentFile.size,
 									chunkIndex:   currentFile.chunkIndex,
+									storageID:    currentFile.storageID,
 								})
 							}
 						} else {
@@ -729,6 +783,7 @@ func (cc *ConsistencyChecker) RunMetadataScan(ctx context.Context, progressCh ch
 										path:         currentFile.path,
 										size:         currentFile.size,
 										chunkIndex:   currentFile.chunkIndex,
+										storageID:    currentFile.storageID,
 									})
 								}
 							}
@@ -744,6 +799,7 @@ func (cc *ConsistencyChecker) RunMetadataScan(ctx context.Context, progressCh ch
 							path:         currentFile.path,
 							size:         currentFile.size,
 							chunkIndex:   currentFile.chunkIndex,
+							storageID:    currentFile.storageID,
 						})
 					}
 				}
@@ -852,24 +908,13 @@ func (cc *ConsistencyChecker) RunMetadataScan(ctx context.Context, progressCh ch
 		// If any walk error occurred, we cannot trust the file listing and
 		// must not delete any entries (files or DB rows) in this scan.
 		if len(deletions) > 0 && !hadWalkError.Load() {
+			if cc.beforeMetadataDeletions != nil {
+				cc.beforeMetadataDeletions()
+			}
 			for _, del := range deletions {
 				// Re-verify before deleting
 				if del.isFile {
-					// Re-check file still exists
-					if _, err := os.Stat(del.path); err == nil {
-						sl.WithField("path", del.path).Warn("Orphaned file")
-						orphanedFiles++
-						orphanedBytes += del.size
-						if err := os.Remove(del.path); err != nil {
-							sl.WithError(err).WithField("path", del.path).Warn("Failed to remove orphaned file")
-						}
-						// For base files (chunk 0), also remove any associated chunk files (chunks 1+)
-						// Chunk suffix files are detected and removed independently, so only
-						// clean up chunk suffix files when we delete a base file.
-						if del.chunkIndex == 0 {
-							cc.removeOrphanedChunkFiles(sl, del.path, &orphanedFiles, &orphanedBytes)
-						}
-					}
+					removeOrphan(del.instanceHash, del.storageID, del.chunkIndex, del.path, del.size)
 				} else {
 					// Re-check DB entry still exists and is inconsistent
 					meta, err := cc.db.GetMetadata(del.instanceHash)
@@ -889,7 +934,7 @@ func (cc *ConsistencyChecker) RunMetadataScan(ctx context.Context, progressCh ch
 							sl.WithField("instanceHash", del.instanceHash).Warn("Orphaned DB entry")
 							orphanedDBEntries++
 							orphanedBytes += del.size
-							if err := cc.db.DeleteObject(del.instanceHash); err != nil {
+							if err := cc.storage.deleteRecord(del.instanceHash, meta.ChunkCount()); err != nil {
 								sl.WithError(err).WithField("instanceHash", del.instanceHash).Warn("Failed to clean up orphaned DB entry")
 							}
 						}
@@ -924,17 +969,7 @@ func (cc *ConsistencyChecker) RunMetadataScan(ctx context.Context, progressCh ch
 	// Like deletions above, skip if a walk error occurred.
 	for fileOk {
 		if !hadWalkError.Load() {
-			// Re-check file (might have been created after scan start)
-			if info, err := os.Stat(currentFile.path); err == nil {
-				if !info.ModTime().After(scanStartTime) {
-					sl.WithField("path", currentFile.path).Warn("Orphaned file")
-					orphanedFiles++
-					orphanedBytes += currentFile.size
-					if err := os.Remove(currentFile.path); err != nil {
-						sl.WithError(err).WithField("path", currentFile.path).Warn("Failed to remove orphaned file")
-					}
-				}
-			}
+			removeOrphan(currentFile.instanceHash, currentFile.storageID, currentFile.chunkIndex, currentFile.path, currentFile.size)
 		}
 		filesScanned++
 		currentFile, fileOk = <-fileChan
@@ -1827,39 +1862,20 @@ func (cc *ConsistencyChecker) allChunkFilesExist(meta *CacheMetadata, instanceHa
 	return true
 }
 
-// removeOrphanedChunkFiles removes chunk files (chunks 1+) associated with a base file.
-// This is called when an orphaned base file (chunk 0) is being deleted.
-// Because chunks may be lazily allocated (non-sequential), we list the parent
-// directory and match by prefix rather than probing sequential indices.
-func (cc *ConsistencyChecker) removeOrphanedChunkFiles(sl *log.Entry, basePath string, orphanedFiles *int64, orphanedBytes *int64) {
-	dir := filepath.Dir(basePath)
-	base := filepath.Base(basePath)
-	prefix := base + "-"
-
-	entries, err := os.ReadDir(dir)
+// fileStillWanted reports whether an object's current metadata expects one of
+// its files -- the given chunk -- in the given storage directory.  A read
+// failure counts as wanted, so the file is left for the next scan.
+func (cc *ConsistencyChecker) fileStillWanted(instanceHash InstanceHash, storageID StorageID, chunkIndex int) bool {
+	meta, err := cc.db.GetMetadata(instanceHash)
 	if err != nil {
-		sl.WithError(err).WithField("dir", dir).Warn("Failed to list directory for orphaned chunk cleanup")
-		return
+		return true
 	}
-	for _, entry := range entries {
-		if entry.IsDir() {
-			continue
-		}
-		name := entry.Name()
-		if !strings.HasPrefix(name, prefix) {
-			continue
-		}
-		chunkPath := filepath.Join(dir, name)
-		info, err := entry.Info()
-		if err != nil {
-			sl.WithError(err).WithField("path", chunkPath).Warn("Error getting info for chunk file")
-			continue
-		}
-		sl.WithField("path", chunkPath).Warn("Orphaned chunk file")
-		(*orphanedFiles)++
-		(*orphanedBytes) += info.Size()
-		if err := os.Remove(chunkPath); err != nil {
-			sl.WithError(err).WithField("path", chunkPath).Warn("Failed to remove orphaned chunk file")
-		}
+	if meta == nil || !meta.IsDisk() {
+		return false
 	}
+	if !meta.IsChunked() {
+		return chunkIndex == 0 && meta.StorageID == storageID
+	}
+	return chunkIndex < meta.ChunkCount() && meta.IsChunkAllocated(chunkIndex) &&
+		meta.GetChunkStorageID(chunkIndex) == storageID
 }

@@ -326,7 +326,7 @@ type StorageManager struct {
 	// removals are immediately visible across goroutines.  Idle entries are
 	// evicted after blockStateTTL and reloaded from the database on next
 	// access.
-	blockStates *ttlcache.Cache[InstanceHash, *ObjectBlockState]
+	blockStates *blockStateCache
 
 	// diskCrypto caches metadata + BlockEncryptor for disk-backed objects
 	// so that ReadBlocks / WriteBlocks / NewBlockWriter skip the DB
@@ -2051,17 +2051,13 @@ func (sm *StorageManager) Delete(instanceHash InstanceHash) error {
 		return errors.Wrap(err, "failed to get metadata")
 	}
 
-	// Delete from database (handles inline data, block state, LRU)
-	if err := sm.db.DeleteObject(instanceHash); err != nil {
-		return errors.Wrap(err, "failed to delete database entries")
-	}
-
-	// Remove all in-memory cached state for this object.
 	chunkCount := 1
 	if meta != nil {
 		chunkCount = meta.ChunkCount()
 	}
-	sm.invalidateObjectCaches(instanceHash, chunkCount)
+	if err := sm.deleteRecord(instanceHash, chunkCount); err != nil {
+		return err
+	}
 
 	// If stored on a tiering target, delete the remote object; otherwise
 	// delete all chunk files on disk.
@@ -2078,6 +2074,21 @@ func (sm *StorageManager) Delete(instanceHash InstanceHash) error {
 		}
 	}
 
+	return nil
+}
+
+// deleteRecord removes an object's database entries (metadata, inline data,
+// block state, LRU) together with every in-memory cache of it -- block state,
+// disk crypto, file descriptors -- but not its files.  The two go together:
+// a cache entry outliving its record would be handed to the object when it
+// is next created under the same hash, with a fresh data key and an empty
+// bitmap, claiming blocks it does not have.  chunkCount is the number of
+// chunk files (1 for a non-chunked object).
+func (sm *StorageManager) deleteRecord(instanceHash InstanceHash, chunkCount int) error {
+	if err := sm.db.DeleteObject(instanceHash); err != nil {
+		return errors.Wrap(err, "failed to delete database entries")
+	}
+	sm.invalidateObjectCaches(instanceHash, chunkCount)
 	return nil
 }
 
@@ -2734,6 +2745,15 @@ func (bw *BlockWriter) flushWriteBatch() error {
 	if bw.batchCount == 0 {
 		return nil
 	}
+	// Once the object is condemned and being dropped, no writer may mark
+	// anything of it present: another writer's verdict condemned it, and
+	// the rows written now would outlive the delete and be taken for
+	// blocks of the object when it is next fetched under the same hash.
+	if bw.sharedState != nil && bw.sharedState.Condemned() != nil {
+		bw.writeBatch = bw.writeBatch[:0]
+		bw.batchCount = 0
+		return nil
+	}
 
 	fileOffset := BlockOffset(bw.batchStart)
 	if _, err := bw.file.File().WriteAt(bw.writeBatch, fileOffset); err != nil {
@@ -2746,11 +2766,11 @@ func (bw *BlockWriter) flushWriteBatch() error {
 	}
 
 	// Update the shared in-memory block state so all concurrent readers
-	// see these blocks as available immediately.
+	// see these blocks as available immediately -- in one step, so that
+	// the batch costs one lock and one wakeup of the readers waiting on
+	// the object, not one of each per block.
 	if bw.sharedState != nil {
-		for block := bw.batchStart; block <= endBlock; block++ {
-			bw.sharedState.Add(block)
-		}
+		bw.sharedState.AddRange(bw.batchStart, endBlock)
 	}
 
 	bw.writeBatch = bw.writeBatch[:0]
@@ -2787,13 +2807,24 @@ func (bw *BlockWriter) Close() error {
 		bw.sm.diskCrypto.Delete(bw.instanceHash)
 	}
 
-	// Write any remaining partial block (last block of file).
-	// For unknown-size transfers the updated ContentLength ensures
-	// MarkBlocksDownloaded adds exactly the right usage for this block.
+	// Write any remaining partial block -- but only if it is the object's
+	// final block, complete.  Anything else means the input stopped
+	// mid-block (a failed or cancelled transfer whose caller closed rather
+	// than aborted), and writing the fragment would mark a short,
+	// mis-encrypted block present: every read of it fails authentication,
+	// and anything resuming the fill skips it as done.  For unknown-size
+	// transfers the updated ContentLength makes the buffer the final block
+	// by definition, and ensures MarkBlocksDownloaded adds exactly the right
+	// usage for it.
 	if len(bw.buffer) > 0 {
-		if err := bw.writeCurrentBlock(); err != nil {
-			bw.file.Release()
-			return errors.Wrap(err, "failed to write final block")
+		if bw.bufferIsFinalBlock() {
+			if err := bw.writeCurrentBlock(); err != nil {
+				bw.file.Release()
+				return errors.Wrap(err, "failed to write final block")
+			}
+		} else {
+			log.Debugf("Discarding a partial block %d of %s: the input ended mid-block", bw.currentBlock, bw.instanceHash)
+			bw.buffer = bw.buffer[:0]
 		}
 	}
 
@@ -2824,7 +2855,17 @@ func (bw *BlockWriter) Close() error {
 	}
 	bw.file.Release() // writer's ref
 
-	// Check if download is complete and call callback
+	bw.completeIfWhole()
+	return nil
+}
+
+// completeIfWhole marks the object complete, and runs the completion
+// callbacks, if every one of its blocks is now present.  The caller holds
+// bw.mu and has flushed the writer.
+func (bw *BlockWriter) completeIfWhole() {
+	if bw.sharedState != nil && bw.sharedState.Condemned() != nil {
+		return // see flushWriteBatch
+	}
 	downloadedCount, err := bw.sm.db.GetDownloadedBlockCount(bw.instanceHash)
 	if err == nil && uint32(downloadedCount) == bw.totalBlocks {
 		// Mark as completed via merge to avoid overwriting concurrent changes.
@@ -2853,8 +2894,75 @@ func (bw *BlockWriter) Close() error {
 			bw.sm.onObjectComplete(bw.instanceHash)
 		}
 	}
+}
 
-	return nil
+// bufferIsFinalBlock reports whether the buffered partial block is the
+// object's last block, exactly as long as that block should be.
+func (bw *BlockWriter) bufferIsFinalBlock() bool {
+	if bw.meta.ContentLength < 0 {
+		return true // unknown size: Close decides where the object ends
+	}
+	if bw.totalBlocks == 0 || bw.currentBlock != bw.totalBlocks-1 {
+		return false
+	}
+	return int64(len(bw.buffer)) == bw.meta.ContentLength-int64(bw.currentBlock)*BlockDataSize
+}
+
+// StopEarly closes the writer of a transfer that stopped before the end for a
+// reason that says nothing against the data it delivered (see
+// transferStopKeepsData): the cache cancelled it, or the connection broke.
+// Like Abort, it keeps the whole blocks and discards a partial one -- unless
+// that is the object's final block, complete -- and does not finalize an
+// object of unknown size.  Unlike Abort, it then checks, as Close does,
+// whether every block of the object is now present: the transfer may have
+// filled the object's last hole before it stopped, and the object must then
+// be marked complete, or nothing ever would.  Safe to call more than once,
+// and after Close or Abort.
+func (bw *BlockWriter) StopEarly() {
+	bw.mu.Lock()
+	defer bw.mu.Unlock()
+	if bw.closed {
+		return
+	}
+	bw.closed = true
+	defer bw.file.Release()
+	if len(bw.buffer) > 0 && bw.meta.ContentLength >= 0 && bw.bufferIsFinalBlock() {
+		if err := bw.writeCurrentBlock(); err != nil {
+			log.Warnf("Failed to write the final block of %s while stopping a write: %v", bw.instanceHash, err)
+		}
+	}
+	bw.buffer = bw.buffer[:0]
+	if err := bw.flushWriteBatch(); err != nil {
+		log.Warnf("Failed to flush the whole blocks of %s while stopping a write: %v", bw.instanceHash, err)
+		return
+	}
+	if bw.meta.ContentLength >= 0 {
+		bw.completeIfWhole()
+	}
+}
+
+// Abort closes the writer after a transfer that failed in a way that
+// condemns its data, such as a checksum mismatch, or before it got under way.
+// Nothing more is published: the blocks still waiting in the write batch and
+// a partial block in the buffer are discarded, an object of unknown size is
+// not finalized at the point the input happened to stop, and the object is
+// never marked complete.  The batch must not be flushed, because flushing
+// marks its blocks present and wakes every reader waiting for them -- who
+// would read and serve them before anything had marked the object bad; the
+// caller drops the object next (see BlockFetcherV2.dropIfCondemned and
+// PersistentCache.endAdoptedDownload).  Every error path must use Abort or
+// StopEarly rather than Close.  Safe to call more than once, and after Close.
+func (bw *BlockWriter) Abort() {
+	bw.mu.Lock()
+	defer bw.mu.Unlock()
+	if bw.closed {
+		return
+	}
+	bw.closed = true
+	bw.buffer = bw.buffer[:0]
+	bw.writeBatch = bw.writeBatch[:0]
+	bw.batchCount = 0
+	bw.file.Release()
 }
 
 // Flush writes any accumulated batch of encrypted blocks to disk and

@@ -131,7 +131,7 @@ func (p *poscFileSystem) SetTouchFS(fs afero.Fs) { p.touchFS = fs }
 // decline to provide one of their own. Valid values:
 //
 //   - ""        (default) — POSC does not stream a hash; the backend
-//     FileInfo's ETag wins (eg POSIXv2's mtime+size synthesis).
+//     FileInfo's ETag wins (eg POSIXv2's computeETag).
 //   - "sha256"  — POSC tee's every Write into a SHA-256 stream and,
 //     on successful commit, wraps the post-rename FileInfo with an
 //     ETag that returns "sha256-<hex-digest>". Adds ~one cycle/byte

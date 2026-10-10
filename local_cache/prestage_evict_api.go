@@ -269,6 +269,17 @@ func (q *prestageQueue) prestage(req *prestageRequest) {
 		}
 	}
 
+	// Reading the last byte is not the end of the download behind it: it
+	// still has to be verified and marked complete.  Report success only
+	// once it has been, so that a prestaged object is cached when the
+	// request says so.
+	if rr, ok := reader.(*RangeReader); ok {
+		if err := rr.WaitForCompletion(context.Background()); err != nil {
+			req.SetDone(500, fmt.Sprintf("Failure when prestaging: %v", err))
+			return
+		}
+	}
+
 	log.Debugf("Prestage request successful for %s (%d bytes)", req.path, off)
 	req.SetDone(200, "Prestage successful")
 }
