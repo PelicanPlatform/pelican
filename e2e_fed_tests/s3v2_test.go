@@ -79,255 +79,236 @@ func getS3v2Token(t *testing.T) string {
 	return tkn
 }
 
-// TestS3v2MemOriginUploadDownload tests the full federation round-trip
-// using the in-memory blob backend (mem://).
-func TestS3v2MemOriginUploadDownload(t *testing.T) {
+// TestS3v2MemOrigin runs each case below against one shared federation. Starting a
+// federation (five services plus XRootD) dominates the run time of these
+// cases, so they share one and keep their object names distinct instead.
+func TestS3v2MemOrigin(t *testing.T) {
 	t.Cleanup(test_utils.SetupTestLogging(t))
 	server_utils.ResetTestState()
-	defer server_utils.ResetTestState()
+	t.Cleanup(server_utils.ResetTestState)
 
 	ft := fed_test_utils.NewFedTest(t, s3v2MemOriginConfig)
-	require.NotNil(t, ft)
-	require.Greater(t, len(ft.Exports), 0, "Federation should have at least one export")
-	assert.Equal(t, "/test", ft.Exports[0].FederationPrefix)
 
-	testContent := "Hello from the S3v2 mem:// federation test!"
-	localTmpDir := t.TempDir()
-	localFile := filepath.Join(localTmpDir, "test_file.txt")
-	require.NoError(t, os.WriteFile(localFile, []byte(testContent), 0644))
+	// UploadDownload tests the full federation round-trip
+	// using the in-memory blob backend (mem://).
+	t.Run("UploadDownload", func(t *testing.T) {
+		require.NotNil(t, ft)
+		require.Greater(t, len(ft.Exports), 0, "Federation should have at least one export")
+		assert.Equal(t, "/test", ft.Exports[0].FederationPrefix)
 
-	uploadURL := fmt.Sprintf("pelican://%s:%d/test/test_file.txt",
-		param.Server_Hostname.GetString(), param.Server_WebPort.GetInt())
+		testContent := "Hello from the S3v2 mem:// federation test!"
+		localTmpDir := t.TempDir()
+		localFile := filepath.Join(localTmpDir, "test_file.txt")
+		require.NoError(t, os.WriteFile(localFile, []byte(testContent), 0644))
 
-	testToken := getS3v2Token(t)
+		uploadURL := fmt.Sprintf("pelican://%s:%d/test/test_file.txt",
+			param.Server_Hostname.GetString(), param.Server_WebPort.GetInt())
 
-	// Upload
-	uploadResults, err := client.DoPut(ft.Ctx, localFile, uploadURL, false, client.WithToken(testToken))
-	require.NoError(t, err)
-	require.NotEmpty(t, uploadResults)
-	assert.Greater(t, uploadResults[0].TransferredBytes, int64(0))
+		testToken := getS3v2Token(t)
 
-	// Download
-	downloadFile := filepath.Join(localTmpDir, "downloaded.txt")
-	downloadResults, err := client.DoGet(ft.Ctx, uploadURL, downloadFile, false, client.WithToken(testToken))
-	require.NoError(t, err)
-	require.NotEmpty(t, downloadResults)
-	assert.Equal(t, uploadResults[0].TransferredBytes, downloadResults[0].TransferredBytes)
+		// Upload
+		uploadResults, err := client.DoPut(ft.Ctx, localFile, uploadURL, false, client.WithToken(testToken))
+		require.NoError(t, err)
+		require.NotEmpty(t, uploadResults)
+		assert.Greater(t, uploadResults[0].TransferredBytes, int64(0))
 
-	// Verify content
-	got, err := os.ReadFile(downloadFile)
-	require.NoError(t, err)
-	assert.Equal(t, testContent, string(got))
-}
+		// Download
+		downloadFile := filepath.Join(localTmpDir, "downloaded.txt")
+		downloadResults, err := client.DoGet(ft.Ctx, uploadURL, downloadFile, false, client.WithToken(testToken))
+		require.NoError(t, err)
+		require.NotEmpty(t, downloadResults)
+		assert.Equal(t, uploadResults[0].TransferredBytes, downloadResults[0].TransferredBytes)
 
-// TestS3v2MemOriginStat tests stat operations against the in-memory backend.
-func TestS3v2MemOriginStat(t *testing.T) {
-	t.Cleanup(test_utils.SetupTestLogging(t))
-	server_utils.ResetTestState()
-	defer server_utils.ResetTestState()
+		// Verify content
+		got, err := os.ReadFile(downloadFile)
+		require.NoError(t, err)
+		assert.Equal(t, testContent, string(got))
+	})
 
-	ft := fed_test_utils.NewFedTest(t, s3v2MemOriginConfig)
-	require.NotNil(t, ft)
+	// Stat tests stat operations against the in-memory backend.
+	t.Run("Stat", func(t *testing.T) {
+		require.NotNil(t, ft)
 
-	// Upload a file first (mem backend starts empty)
-	testContent := []byte("Stat me via the federation")
-	localTmpDir := t.TempDir()
-	localFile := filepath.Join(localTmpDir, "stat_test.txt")
-	require.NoError(t, os.WriteFile(localFile, testContent, 0644))
+		// Upload a file first (mem backend starts empty)
+		testContent := []byte("Stat me via the federation")
+		localTmpDir := t.TempDir()
+		localFile := filepath.Join(localTmpDir, "stat_test.txt")
+		require.NoError(t, os.WriteFile(localFile, testContent, 0644))
 
-	uploadURL := fmt.Sprintf("pelican://%s:%d/test/stat_test.txt",
-		param.Server_Hostname.GetString(), param.Server_WebPort.GetInt())
+		uploadURL := fmt.Sprintf("pelican://%s:%d/test/stat_test.txt",
+			param.Server_Hostname.GetString(), param.Server_WebPort.GetInt())
 
-	testToken := getS3v2Token(t)
+		testToken := getS3v2Token(t)
 
-	_, err := client.DoPut(ft.Ctx, localFile, uploadURL, false, client.WithToken(testToken))
-	require.NoError(t, err)
+		_, err := client.DoPut(ft.Ctx, localFile, uploadURL, false, client.WithToken(testToken))
+		require.NoError(t, err)
 
-	// Stat the file
-	statInfo, err := client.DoStat(ft.Ctx, uploadURL, client.WithToken(testToken))
-	require.NoError(t, err)
-	assert.Equal(t, int64(len(testContent)), statInfo.Size)
-	assert.Equal(t, "/test/stat_test.txt", statInfo.Name)
-}
+		// Stat the file
+		statInfo, err := client.DoStat(ft.Ctx, uploadURL, client.WithToken(testToken))
+		require.NoError(t, err)
+		assert.Equal(t, int64(len(testContent)), statInfo.Size)
+		assert.Equal(t, "/test/stat_test.txt", statInfo.Name)
+	})
 
-// TestS3v2MemOriginMultipleFiles tests uploading and downloading multiple files.
-func TestS3v2MemOriginMultipleFiles(t *testing.T) {
-	t.Cleanup(test_utils.SetupTestLogging(t))
-	server_utils.ResetTestState()
-	defer server_utils.ResetTestState()
+	// MultipleFiles tests uploading and downloading multiple files.
+	t.Run("MultipleFiles", func(t *testing.T) {
+		require.NotNil(t, ft)
 
-	ft := fed_test_utils.NewFedTest(t, s3v2MemOriginConfig)
-	require.NotNil(t, ft)
+		testFiles := map[string]string{
+			"alpha.txt": "Content alpha",
+			"beta.txt":  "Content beta",
+			"gamma.txt": "Content gamma",
+		}
 
-	testFiles := map[string]string{
-		"alpha.txt": "Content alpha",
-		"beta.txt":  "Content beta",
-		"gamma.txt": "Content gamma",
-	}
+		localTmpDir := t.TempDir()
+		testToken := getS3v2Token(t)
 
-	localTmpDir := t.TempDir()
-	testToken := getS3v2Token(t)
+		// Upload all files
+		for name, content := range testFiles {
+			localFile := filepath.Join(localTmpDir, name)
+			require.NoError(t, os.WriteFile(localFile, []byte(content), 0644))
 
-	// Upload all files
-	for name, content := range testFiles {
-		localFile := filepath.Join(localTmpDir, name)
-		require.NoError(t, os.WriteFile(localFile, []byte(content), 0644))
+			uploadURL := fmt.Sprintf("pelican://%s:%d/test/%s",
+				param.Server_Hostname.GetString(), param.Server_WebPort.GetInt(), name)
 
-		uploadURL := fmt.Sprintf("pelican://%s:%d/test/%s",
-			param.Server_Hostname.GetString(), param.Server_WebPort.GetInt(), name)
+			results, err := client.DoPut(ft.Ctx, localFile, uploadURL, false, client.WithToken(testToken))
+			require.NoError(t, err, "Failed to upload %s", name)
+			require.NotEmpty(t, results)
+		}
 
-		results, err := client.DoPut(ft.Ctx, localFile, uploadURL, false, client.WithToken(testToken))
-		require.NoError(t, err, "Failed to upload %s", name)
-		require.NotEmpty(t, results)
-	}
+		// Download and verify all files
+		for name, expected := range testFiles {
+			downloadURL := fmt.Sprintf("pelican://%s:%d/test/%s",
+				param.Server_Hostname.GetString(), param.Server_WebPort.GetInt(), name)
+			downloadFile := filepath.Join(localTmpDir, "dl_"+name)
 
-	// Download and verify all files
-	for name, expected := range testFiles {
-		downloadURL := fmt.Sprintf("pelican://%s:%d/test/%s",
-			param.Server_Hostname.GetString(), param.Server_WebPort.GetInt(), name)
-		downloadFile := filepath.Join(localTmpDir, "dl_"+name)
+			results, err := client.DoGet(ft.Ctx, downloadURL, downloadFile, false, client.WithToken(testToken))
+			require.NoError(t, err, "Failed to download %s", name)
+			require.NotEmpty(t, results)
 
-		results, err := client.DoGet(ft.Ctx, downloadURL, downloadFile, false, client.WithToken(testToken))
-		require.NoError(t, err, "Failed to download %s", name)
-		require.NotEmpty(t, results)
+			got, err := os.ReadFile(downloadFile)
+			require.NoError(t, err)
+			assert.Equal(t, expected, string(got), "Content mismatch for %s", name)
+		}
+	})
+
+	// LargeFile tests transferring a 10 MB file through the federation.
+	t.Run("LargeFile", func(t *testing.T) {
+		require.NotNil(t, ft)
+
+		largeContent := make([]byte, 10*1024*1024)
+		for i := range largeContent {
+			largeContent[i] = byte(i % 256)
+		}
+		originalHash := fmt.Sprintf("%x", md5.Sum(largeContent))
+
+		localTmpDir := t.TempDir()
+		localFile := filepath.Join(localTmpDir, "large.bin")
+		require.NoError(t, os.WriteFile(localFile, largeContent, 0644))
+
+		uploadURL := fmt.Sprintf("pelican://%s:%d/test/large.bin",
+			param.Server_Hostname.GetString(), param.Server_WebPort.GetInt())
+
+		testToken := getS3v2Token(t)
+
+		uploadResults, err := client.DoPut(ft.Ctx, localFile, uploadURL, false, client.WithToken(testToken))
+		require.NoError(t, err)
+		require.NotEmpty(t, uploadResults)
+		assert.Equal(t, int64(len(largeContent)), uploadResults[0].TransferredBytes)
+
+		downloadFile := filepath.Join(localTmpDir, "large_dl.bin")
+		downloadResults, err := client.DoGet(ft.Ctx, uploadURL, downloadFile, false, client.WithToken(testToken))
+		require.NoError(t, err)
+		require.NotEmpty(t, downloadResults)
+		assert.Equal(t, uploadResults[0].TransferredBytes, downloadResults[0].TransferredBytes)
 
 		got, err := os.ReadFile(downloadFile)
 		require.NoError(t, err)
-		assert.Equal(t, expected, string(got), "Content mismatch for %s", name)
-	}
-}
+		gotHash := fmt.Sprintf("%x", md5.Sum(got))
+		assert.Equal(t, originalHash, gotHash, "Downloaded file hash should match original")
+	})
 
-// TestS3v2MemOriginLargeFile tests transferring a 10 MB file through the federation.
-func TestS3v2MemOriginLargeFile(t *testing.T) {
-	t.Cleanup(test_utils.SetupTestLogging(t))
-	server_utils.ResetTestState()
-	defer server_utils.ResetTestState()
+	// Listing tests directory listing through the federation.
+	t.Run("Listing", func(t *testing.T) {
+		require.NotNil(t, ft)
 
-	ft := fed_test_utils.NewFedTest(t, s3v2MemOriginConfig)
-	require.NotNil(t, ft)
+		testToken := getS3v2Token(t)
+		localTmpDir := t.TempDir()
 
-	largeContent := make([]byte, 10*1024*1024)
-	for i := range largeContent {
-		largeContent[i] = byte(i % 256)
-	}
-	originalHash := fmt.Sprintf("%x", md5.Sum(largeContent))
+		// Upload several files to populate the mem backend
+		files := []string{"a.txt", "b.txt", "c.txt"}
+		for _, name := range files {
+			localFile := filepath.Join(localTmpDir, name)
+			require.NoError(t, os.WriteFile(localFile, []byte("content of "+name), 0644))
 
-	localTmpDir := t.TempDir()
-	localFile := filepath.Join(localTmpDir, "large.bin")
-	require.NoError(t, os.WriteFile(localFile, largeContent, 0644))
-
-	uploadURL := fmt.Sprintf("pelican://%s:%d/test/large.bin",
-		param.Server_Hostname.GetString(), param.Server_WebPort.GetInt())
-
-	testToken := getS3v2Token(t)
-
-	uploadResults, err := client.DoPut(ft.Ctx, localFile, uploadURL, false, client.WithToken(testToken))
-	require.NoError(t, err)
-	require.NotEmpty(t, uploadResults)
-	assert.Equal(t, int64(len(largeContent)), uploadResults[0].TransferredBytes)
-
-	downloadFile := filepath.Join(localTmpDir, "large_dl.bin")
-	downloadResults, err := client.DoGet(ft.Ctx, uploadURL, downloadFile, false, client.WithToken(testToken))
-	require.NoError(t, err)
-	require.NotEmpty(t, downloadResults)
-	assert.Equal(t, uploadResults[0].TransferredBytes, downloadResults[0].TransferredBytes)
-
-	got, err := os.ReadFile(downloadFile)
-	require.NoError(t, err)
-	gotHash := fmt.Sprintf("%x", md5.Sum(got))
-	assert.Equal(t, originalHash, gotHash, "Downloaded file hash should match original")
-}
-
-// TestS3v2MemOriginListing tests directory listing through the federation.
-func TestS3v2MemOriginListing(t *testing.T) {
-	t.Cleanup(test_utils.SetupTestLogging(t))
-	server_utils.ResetTestState()
-	defer server_utils.ResetTestState()
-
-	ft := fed_test_utils.NewFedTest(t, s3v2MemOriginConfig)
-	require.NotNil(t, ft)
-
-	testToken := getS3v2Token(t)
-	localTmpDir := t.TempDir()
-
-	// Upload several files to populate the mem backend
-	files := []string{"a.txt", "b.txt", "c.txt"}
-	for _, name := range files {
-		localFile := filepath.Join(localTmpDir, name)
-		require.NoError(t, os.WriteFile(localFile, []byte("content of "+name), 0644))
-
-		uploadURL := fmt.Sprintf("pelican://%s:%d/test/%s",
-			param.Server_Hostname.GetString(), param.Server_WebPort.GetInt(), name)
-		_, err := client.DoPut(ft.Ctx, localFile, uploadURL, false, client.WithToken(testToken))
-		require.NoError(t, err, "Failed to upload %s", name)
-	}
-
-	// List the /test/ directory
-	listURL := fmt.Sprintf("pelican://%s:%d/test/",
-		param.Server_Hostname.GetString(), param.Server_WebPort.GetInt())
-
-	entries, err := client.DoList(ft.Ctx, listURL, client.WithToken(testToken))
-	require.NoError(t, err)
-	require.NotEmpty(t, entries, "Listing should return entries")
-
-	// Check that our uploaded files appear in the listing
-	nameSet := make(map[string]bool)
-	for _, e := range entries {
-		nameSet[e.Name] = true
-	}
-	for _, name := range files {
-		found := false
-		for key := range nameSet {
-			if strings.Contains(key, name) {
-				found = true
-				break
-			}
+			uploadURL := fmt.Sprintf("pelican://%s:%d/test/%s",
+				param.Server_Hostname.GetString(), param.Server_WebPort.GetInt(), name)
+			_, err := client.DoPut(ft.Ctx, localFile, uploadURL, false, client.WithToken(testToken))
+			require.NoError(t, err, "Failed to upload %s", name)
 		}
-		assert.True(t, found, "Listing should contain %s", name)
-	}
-}
 
-// TestS3v2MemOriginOverwrite tests overwriting an existing file.
-func TestS3v2MemOriginOverwrite(t *testing.T) {
-	t.Cleanup(test_utils.SetupTestLogging(t))
-	server_utils.ResetTestState()
-	defer server_utils.ResetTestState()
+		// List the /test/ directory
+		listURL := fmt.Sprintf("pelican://%s:%d/test/",
+			param.Server_Hostname.GetString(), param.Server_WebPort.GetInt())
 
-	ft := fed_test_utils.NewFedTest(t, s3v2MemOriginConfig)
-	require.NotNil(t, ft)
+		entries, err := client.DoList(ft.Ctx, listURL, client.WithToken(testToken))
+		require.NoError(t, err)
+		require.NotEmpty(t, entries, "Listing should return entries")
 
-	testToken := getS3v2Token(t)
-	localTmpDir := t.TempDir()
+		// Check that our uploaded files appear in the listing
+		nameSet := make(map[string]bool)
+		for _, e := range entries {
+			nameSet[e.Name] = true
+		}
+		for _, name := range files {
+			found := false
+			for key := range nameSet {
+				if strings.Contains(key, name) {
+					found = true
+					break
+				}
+			}
+			assert.True(t, found, "Listing should contain %s", name)
+		}
+	})
 
-	// Enable client-side overwrites so the second PUT doesn't fail with FileAlreadyExists
-	require.NoError(t, param.Set(param.Client_EnableOverwrites, true))
-	defer func() {
-		require.NoError(t, param.Set(param.Client_EnableOverwrites, false))
-	}()
+	// Overwrite tests overwriting an existing file.
+	t.Run("Overwrite", func(t *testing.T) {
+		require.NotNil(t, ft)
 
-	uploadURL := fmt.Sprintf("pelican://%s:%d/test/overwrite.txt",
-		param.Server_Hostname.GetString(), param.Server_WebPort.GetInt())
+		testToken := getS3v2Token(t)
+		localTmpDir := t.TempDir()
 
-	// First upload
-	localFile := filepath.Join(localTmpDir, "v1.txt")
-	require.NoError(t, os.WriteFile(localFile, []byte("version 1"), 0644))
-	_, err := client.DoPut(ft.Ctx, localFile, uploadURL, false, client.WithToken(testToken))
-	require.NoError(t, err)
+		// Enable client-side overwrites so the second PUT doesn't fail with FileAlreadyExists
+		require.NoError(t, param.Set(param.Client_EnableOverwrites, true))
+		defer func() {
+			require.NoError(t, param.Set(param.Client_EnableOverwrites, false))
+		}()
 
-	// Overwrite with new content
-	localFile2 := filepath.Join(localTmpDir, "v2.txt")
-	require.NoError(t, os.WriteFile(localFile2, []byte("version 2"), 0644))
-	_, err = client.DoPut(ft.Ctx, localFile2, uploadURL, false, client.WithToken(testToken))
-	require.NoError(t, err)
+		uploadURL := fmt.Sprintf("pelican://%s:%d/test/overwrite.txt",
+			param.Server_Hostname.GetString(), param.Server_WebPort.GetInt())
 
-	// Download and verify we get the latest version
-	downloadFile := filepath.Join(localTmpDir, "downloaded.txt")
-	_, err = client.DoGet(ft.Ctx, uploadURL, downloadFile, false, client.WithToken(testToken))
-	require.NoError(t, err)
+		// First upload
+		localFile := filepath.Join(localTmpDir, "v1.txt")
+		require.NoError(t, os.WriteFile(localFile, []byte("version 1"), 0644))
+		_, err := client.DoPut(ft.Ctx, localFile, uploadURL, false, client.WithToken(testToken))
+		require.NoError(t, err)
 
-	got, err := os.ReadFile(downloadFile)
-	require.NoError(t, err)
-	assert.Equal(t, "version 2", string(got))
+		// Overwrite with new content
+		localFile2 := filepath.Join(localTmpDir, "v2.txt")
+		require.NoError(t, os.WriteFile(localFile2, []byte("version 2"), 0644))
+		_, err = client.DoPut(ft.Ctx, localFile2, uploadURL, false, client.WithToken(testToken))
+		require.NoError(t, err)
+
+		// Download and verify we get the latest version
+		downloadFile := filepath.Join(localTmpDir, "downloaded.txt")
+		_, err = client.DoGet(ft.Ctx, uploadURL, downloadFile, false, client.WithToken(testToken))
+		require.NoError(t, err)
+
+		got, err := os.ReadFile(downloadFile)
+		require.NoError(t, err)
+		assert.Equal(t, "version 2", string(got))
+	})
 }
 
 // ---------------------------------------------------------------------------
@@ -339,6 +320,7 @@ func TestS3v2MemOriginOverwrite(t *testing.T) {
 // redirect → origin HTTP handler → gocloud.dev/blob/s3blob → MinIO. Skipped
 // if minio is not installed.
 func TestS3v2MinioOriginUploadDownload(t *testing.T) {
+	test_utils.SkipIfShort(t, "needs minio; the in-memory s3v2 cases in TestS3v2MemOrigin run on every push")
 	test_utils.SkipIfNoMinio(t)
 	t.Cleanup(test_utils.SetupTestLogging(t))
 	server_utils.ResetTestState()

@@ -46,6 +46,7 @@ import (
 
 	"github.com/pelicanplatform/pelican/config"
 	"github.com/pelicanplatform/pelican/param"
+	"github.com/pelicanplatform/pelican/test_utils"
 )
 
 // sampleServerListeningPrefix must match listeningLinePrefix in
@@ -164,9 +165,7 @@ func launchSampleServer(t *testing.T, args ...string) string {
 // FilesystemForExists existence check. A drained queue means the real token
 // verified AND the object published through the standalone path.
 func TestE2EEventual_RealTokenToSampleServer(t *testing.T) {
-	if testing.Short() {
-		t.Skip("skipping: builds and launches a binary, generates real keys")
-	}
+	test_utils.SkipIfShort(t, "builds and launches a binary and generates real keys")
 
 	issuerURL := setupRealTokenIssuer(t)
 	// No -audience: the origin signs aud == its endpoint, which isn't known
@@ -225,9 +224,7 @@ func TestE2EEventual_RealTokenToSampleServer(t *testing.T) {
 // is rejected (401), the transactional close fails, and POSC rolls the object
 // back — the "publish failed → 5xx → object removed" contract.
 func TestE2ETransactional_RealTokenToSampleServer(t *testing.T) {
-	if testing.Short() {
-		t.Skip("skipping: builds and launches a binary, generates real keys")
-	}
+	test_utils.SkipIfShort(t, "builds and launches a binary and generates real keys")
 
 	t.Run("happy_path_verified_token", func(t *testing.T) {
 		issuerURL := setupRealTokenIssuer(t)

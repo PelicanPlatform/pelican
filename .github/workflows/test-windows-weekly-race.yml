@@ -1,18 +1,13 @@
 ---
-name: Run Tests (Linux) [on schedule]
+name: Run Tests (Windows) [weekly, race detector]
 
-# The daily run covers the full test suite, including the tests that
-# every push skips with -short. The race detector runs separately, in
-# test-linux-weekly-race.yml, so that its known failures do not hide
-# regressions here.
-
-# On Linux, we run tests in a custom container image. For a scheduled
-# run, we have no choice but to use the most recent container image that
-# was built.
+# The full test suite under the race detector. It runs weekly rather than
+# nightly because known data races make it fail until they are addressed;
+# a weekly run keeps the results visible without burying the daily run.
 
 on:
   schedule:
-    - cron: "0 7 * * *"  # at 07:00 every day
+    - cron: "0 9 * * 0"  # at 09:00 every Sunday
   workflow_dispatch:
 
 permissions:
@@ -21,10 +16,10 @@ permissions:
 jobs:
   run-tests:
     name: Test
-    uses: ./.github/workflows/test-linux.yml
+    uses: ./.github/workflows/test-windows.yml
     with:
-      image: hub.opensciencegrid.org/pelican_platform/pelican-test:latest-itb
       full_suite: true
+      race_detection: true
 
   analyze-runs:
     name: Analyze Runs
@@ -44,7 +39,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          bash .github/scripts/analyze-junit-results/download_junit_artifacts.sh "Run Tests (Linux) [on schedule]"
+          bash .github/scripts/analyze-junit-results/download_junit_artifacts.sh "Run Tests (Windows) [weekly, race detector]"
 
       - name: Analyze test results
         run: |

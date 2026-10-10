@@ -59,6 +59,7 @@ TestPOSCOrigin_CancelUpload does the following:
   - Assert that a pelican object stat for the attempted uploaded file fails with a 404 error
 */
 func TestPOSCOrigin_CancelUpload(t *testing.T) {
+	test_utils.SkipIfShort(t, "uploads 1 GiB through a full federation")
 	t.Cleanup(test_utils.SetupTestLogging(t))
 	server_utils.ResetTestState()
 	t.Cleanup(server_utils.ResetTestState)

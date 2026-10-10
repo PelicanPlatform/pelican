@@ -1,6 +1,11 @@
 ---
 name: Run Tests (Windows) [on schedule]
 
+# The daily run covers the full test suite, including the tests that
+# every push skips with -short. The race detector runs separately, in
+# test-windows-weekly-race.yml, so that its known failures do not hide
+# regressions here.
+
 on:
   schedule:
     - cron: "0 7 * * *"  # at 07:00 every day
@@ -14,7 +19,7 @@ jobs:
     name: Test
     uses: ./.github/workflows/test-windows.yml
     with:
-      race_detection: true
+      full_suite: true
 
   analyze-runs:
     name: Analyze Runs

@@ -49,6 +49,8 @@ import (
 	"github.com/lestrrat-go/jwx/v2/jwa"
 	"github.com/lestrrat-go/jwx/v2/jwk"
 	"github.com/lestrrat-go/jwx/v2/jwt"
+
+	"github.com/pelicanplatform/pelican/test_utils"
 )
 
 // TestIntegration_SampleServerVerifiesToken builds and launches the real
@@ -58,9 +60,7 @@ import (
 // is a fixed configured string (independent of the OS-assigned port), so the
 // binary can be launched with -audience before its port is known.
 func TestIntegration_SampleServerVerifiesToken(t *testing.T) {
-	if testing.Short() {
-		t.Skip("skipping: builds and launches a binary")
-	}
+	test_utils.SkipIfShort(t, "builds and launches a binary")
 
 	privKey, pubSet := genES256Keypair(t, "origin-key")
 	untrustedKey, _ := genES256Keypair(t, "attacker-key")

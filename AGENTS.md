@@ -152,6 +152,12 @@ To run the widest possible set of unit tests locally (a superset of both CI pass
 go test -tags "client,server" ./...
 ```
 
+**Test tiers:** The presumption is that every test runs everywhere, always. CI passes `-short` to `go test` on every push and runs the full suite on a schedule. Mark a test with `test_utils.SkipIfShort(t, "reason")` as its first statement only when one of two things holds. First, it exercises something esoteric: a backend, service or privilege the per-push runners should not depend on, such as HTCondor, rclone, minio or root. Second, measurement shows that the time it adds to a CI run is not worth what it checks; a test that is off the critical path, or that takes a second, saves nothing by being skipped. Both are judgement calls, and the second must rest on observed timings (the JUnit artifacts give per-test times), not on reading the code. To reproduce what a push runs, add `-short`:
+
+```bash
+go test -short -tags "client,server" ./...
+```
+
 **Test individual modules (use whichever tags apply to that module):**
 
 ```bash

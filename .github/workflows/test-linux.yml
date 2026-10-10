@@ -20,6 +20,13 @@ on:
         required: false
         type: boolean
         default: false
+      full_suite:
+        # When false, "go test" runs with -short, which skips the tests
+        # marked with test_utils.SkipIfShort. Pushes and pull requests
+        # leave this at the default; the scheduled workflows set it.
+        required: false
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -177,8 +184,9 @@ jobs:
             --junitfile "$JUNIT_FILE" \
             -- \
             -p=4 \
-            -timeout=${{ inputs.race_detection && '30m' || '15m' }} \
+            -timeout=${{ (inputs.race_detection || inputs.full_suite) && '30m' || '15m' }} \
             ${{ inputs.race_detection && '-race' || '' }} \
+            ${{ !inputs.full_suite && '-short' || '' }} \
             ${{ !inputs.race_detection && '-coverpkg=./...' || '' }} \
             ${{ !inputs.race_detection && '-covermode=count' || '' }} \
             ${{ !inputs.race_detection && format('-coverprofile={0}', matrix.coverprofile) || '' }} \
