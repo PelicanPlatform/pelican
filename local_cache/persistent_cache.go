@@ -205,6 +205,11 @@ type PersistentCache struct {
 	downloadCtx       context.Context    // Cancelled during Close() to stop in-flight transfers
 	downloadCancel    context.CancelFunc // Cancels downloadCtx
 
+	// beforeHandOff, set only by tests, runs in performDownload after a
+	// disk download has marked its object as downloading and before it
+	// hands the transfer to a fetcher.
+	beforeHandOff func(dl *persistentDownload)
+
 	// Active range-on-miss init deduplication (keyed by objectHash)
 	initGroup singleflight.Group
 
@@ -2209,6 +2214,28 @@ func (pc *PersistentCache) performDownload(ctx context.Context, dl *persistentDo
 		}
 	}()
 
+	// Once the object is marked as downloading (markDownloading, below),
+	// readers that find it -- through this download, or as a cache hit
+	// once the latest-ETag mapping is stored -- wait in WaitForBlock for
+	// the download to write their blocks, and only ClearDownloading ends
+	// that wait.  The fetcher that adopts the transfer clears it when the
+	// transfer ends; on every way out that never got that far, it is
+	// cleared here, or those readers would wait until their own contexts
+	// ended.  The state is the one that was marked, which an eviction in
+	// the meantime may have replaced in the cache.
+	var downloadingState *ObjectBlockState
+	markDownloading := func() {
+		if state, err := pc.storage.GetSharedBlockState(dl.instanceHash); err == nil {
+			state.SetDownloading()
+			downloadingState = state
+		}
+	}
+	defer func() {
+		if downloadingState != nil && !tcHandedOff {
+			downloadingState.ClearDownloading()
+		}
+	}()
+
 	// Create a channel to receive early metadata (size, ETag) before body transfer
 	metadataChan := make(chan client.TransferMetadata, 1)
 
@@ -2421,10 +2448,7 @@ func (pc *PersistentCache) performDownload(ctx context.Context, dl *persistentDo
 				if err := dw.SetDiskMode(ctx, -1); err != nil {
 					return errors.Wrap(err, "failed to set disk mode for unknown size")
 				}
-				sharedState, err := pc.storage.GetSharedBlockState(dl.instanceHash)
-				if err == nil {
-					sharedState.SetDownloading()
-				}
+				markDownloading()
 
 				// The origin used chunked encoding (no Content-Length header),
 				// so the real size is unknown.  Issue a HEAD (stat) request to
@@ -2489,10 +2513,7 @@ func (pc *PersistentCache) performDownload(ctx context.Context, dl *persistentDo
 			// Mark the shared block state as having an active download so
 			// that concurrent readers wait for blocks instead of starting
 			// duplicate range downloads from the origin.
-			sharedState, err := pc.storage.GetSharedBlockState(dl.instanceHash)
-			if err == nil {
-				sharedState.SetDownloading()
-			}
+			markDownloading()
 		}
 	} else {
 		// No metadata received — the transfer completed before the origin
@@ -2509,10 +2530,7 @@ func (pc *PersistentCache) performDownload(ctx context.Context, dl *persistentDo
 			if err := dw.SetDiskMode(ctx, bufLen); err != nil {
 				return errors.Wrap(err, "failed to set disk mode")
 			}
-			sharedState, err := pc.storage.GetSharedBlockState(dl.instanceHash)
-			if err == nil {
-				sharedState.SetDownloading()
-			}
+			markDownloading()
 		}
 	}
 
@@ -2543,6 +2561,9 @@ func (pc *PersistentCache) performDownload(ctx context.Context, dl *persistentDo
 	// with chunk-notification and ETA tracking, drives the transfer to
 	// completion via its idle-timeout loop, and can serve on-demand range
 	// fetches for blocks ahead of the sequential position.
+	if pc.beforeHandOff != nil {
+		pc.beforeHandOff(dl)
+	}
 	fetcher, fetcherErr := NewBlockFetcherV2(
 		pc.storage, dl.instanceHash, dl.sourceURL, userToken, fedTP, pc.te,
 		BlockFetcherV2Config{PrefetchSem: pc.prefetchSem},
@@ -2564,11 +2585,6 @@ func (pc *PersistentCache) performDownload(ctx context.Context, dl *persistentDo
 			func(err error) { pc.endAdoptedDownload(dl, err) })
 	}) {
 		fetcher.Close()
-		// Readers may already be waiting on this download (see
-		// SetDownloading above); no fetcher will end it for them.
-		if sharedState, err := pc.storage.GetSharedBlockState(dl.instanceHash); err == nil {
-			sharedState.ClearDownloading()
-		}
 		return errCacheClosing
 	}
 	tcHandedOff = true
