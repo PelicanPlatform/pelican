@@ -89,7 +89,8 @@ before:
     - go generate ./...
     - make web-build
 builds:
-  - env:
+  - id: pelican
+    env:
       - CGO_ENABLED=0
     goos:
       - linux
@@ -97,18 +98,13 @@ builds:
     goarch:
       - "amd64"
       - "arm64"
-    id: "pelican"
     dir: ./cmd
     binary: pelican
+    tags:
+      - client
     ldflags:
-      - -s -w -X github.com/pelicanplatform/pelican/version.commit={{.Commit}} -X github.com/pelicanplatform/pelican/version.date={{.Date}} -X github.com/pelicanplatform/pelican/version.builtBy=goreleaser -X github.com/pelicanplatform/pelican/version.version={{.Version}}
-    ignore:
-      - goos: windows
-        goarch: arm64
-      - goos: windows
-        goarch: ppc64le
-      - goos: darwin
-        goarch: ppc64le
+      - -X github.com/pelicanplatform/pelican/version.commit={{.Commit}} -X github.com/pelicanplatform/pelican/version.date={{.Date}} -X github.com/pelicanplatform/pelican/version.builtBy=goreleaser -X github.com/pelicanplatform/pelican/version.version=%VERSION%
+      - -s -w
 ```
 
 ### Build using the dev file
