@@ -36,7 +36,8 @@
 # ARG TARGETARCH
 
 # For selecting OSG-maintained packages.
-ARG ALMALINUX_TAG=9
+# BASE_OS must match the major version of the AlmaLinux base image
+# in the FROM lines below (e.g., "el9" for almalinux:9.x).
 ARG BASE_OS=el9
 ARG OSG_SERIES=25
 ARG OSG_REPO=osg-testing
@@ -109,7 +110,7 @@ ARG XROOTD_MULTIUSER_RELEASE=
 # binaries. The actual build happens in a later stage because it
 # depends on the target we're building for.
 #################################################################
-FROM --platform=${BUILDPLATFORM} almalinux:${ALMALINUX_TAG} AS pelican-build-base
+FROM --platform=${BUILDPLATFORM} almalinux:9.8@sha256:9819dc675b67b595c2b59e42be7763fca1a8bb217fa5944e04daa22e9a64db16 AS pelican-build-base
 ARG BUILDPLATFORM
 ARG BUILDOS
 ARG BUILDARCH
@@ -234,7 +235,7 @@ ENDRUN
 # This stage should contain setup common to all images that we wish
 # to build (director, registry, origin, cache, etc.).
 #################################################################
-FROM almalinux:${ALMALINUX_TAG} AS pelican-software-base
+FROM almalinux:9.8@sha256:9819dc675b67b595c2b59e42be7763fca1a8bb217fa5944e04daa22e9a64db16 AS pelican-software-base
 ARG TARGETPLATFORM
 ARG BASE_OS
 ARG OSG_SERIES
@@ -269,6 +270,10 @@ RUN --mount=type=bind,source=images/pelican.yaml,target=/context/pelican.yaml \
   # is triggered uses relatively up-to-date metadata.
 
   printf '%s\n' "metadata_expire=1800" >> /etc/dnf/dnf.conf
+
+  # Apply security updates released since the pinned base image was built.
+
+  dnf upgrade -y --security
 
   # Install OSG's yum repositories (https://osg-htc.org/docs/common/yum/).
 
@@ -572,7 +577,7 @@ ENDRUN
 #################################################################
 # Pelican Client
 #################################################################
-FROM gcr.io/distroless/static-debian13:nonroot AS client
+FROM gcr.io/distroless/static-debian13:nonroot@sha256:e2e927ec666bae08560abb3c55d0659eceabb657f56b6782ab500a9fc7f555e3 AS client
 ARG TARGETOS TARGETARCH
 COPY --from=pelican-build /pelican-build/dist/pelican_${TARGETOS}_${TARGETARCH}/pelican /bin/pelican
 ENTRYPOINT ["/bin/pelican"]

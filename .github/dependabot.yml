@@ -12,6 +12,22 @@
 version: 2
 
 updates:
+  # Keep the base images in images/Dockerfile from going stale.
+  - package-ecosystem: "docker"
+    directory: "/images"
+    schedule:
+      interval: "weekly"
+    cooldown:
+      default-days: 7
+    groups:
+      docker:
+        applies-to: version-updates
+        patterns: ["*"]
+    ignore:
+      # BASE_OS in images/Dockerfile is tied to the major version.
+      - dependency-name: "almalinux"
+        update-types: ["version-update:semver-major"]
+
   # Keep the SHA-pinned actions in .github/workflows/ from going stale.
   - package-ecosystem: "github-actions"
     directory: "/"
