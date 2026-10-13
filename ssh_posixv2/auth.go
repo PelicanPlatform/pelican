@@ -20,6 +20,7 @@ package ssh_posixv2
 
 import (
 	"bufio"
+	"bytes"
 	"context"
 	"fmt"
 	"io"
@@ -556,9 +557,54 @@ func (c *SSHConnection) buildHostKeyCallback() (ssh.HostKeyCallback, error) {
 	return func(hostname string, remote net.Addr, key ssh.PublicKey) error {
 		sshLog.Debugf("Verifying host key for %s (key type: %s)", hostname, key.Type())
 		err := callback(hostname, remote, key)
+		// Like OpenSSH, if a host certificate fails verification, such as when
+		// known_hosts has no @cert-authority line for its CA, verify its plain key
+		// instead, unless its CA is revoked. Unlike OpenSSH, knownhosts also
+		// compares the plain key with the @cert-authority lines for the host,
+		// so if there are any, a plain key that known_hosts does not list
+		// is rejected as a mismatch, not treated as unknown.
+		var certErr error
+		if cert, ok := key.(*ssh.Certificate); ok && err != nil {
+			var revokedErr *knownhosts.RevokedError
+			if caErr := callback(hostname, remote, cert.SignatureKey); errors.As(caErr, &revokedErr) {
+				sshLog.Errorf("SSH host certificate for %s is signed by a CA revoked by %s:%d. CA fingerprint: %s",
+					hostname, revokedErr.Revoked.Filename, revokedErr.Revoked.Line, ssh.FingerprintSHA256(cert.SignatureKey))
+				return errors.Wrapf(caErr, "SSH host key verification failed for %s: certificate authority is revoked", hostname)
+			}
+			sshLog.Debugf("Host certificate for %s failed verification (%v); verifying its plain key", hostname, err)
+			certErr = err
+			key = cert.Key
+			err = callback(hostname, remote, key)
+			if err != nil {
+				sshLog.Warnf("SSH host certificate for %s failed verification: %v", hostname, certErr)
+				err = fmt.Errorf("%w (host certificate failed verification: %w)", err, certErr)
+			}
+		}
 		if err != nil {
+			// Only a KeyError means that the host key is unknown or has changed.
+			// Any other error, such as for a revoked key, is a verification failure.
+			var keyErr *knownhosts.KeyError
+			if !errors.As(err, &keyErr) {
+				var revokedErr *knownhosts.RevokedError
+				if errors.As(err, &revokedErr) {
+					sshLog.Errorf("SSH host key for %s is revoked by %s:%d. Key fingerprint: %s",
+						hostname, revokedErr.Revoked.Filename, revokedErr.Revoked.Line, ssh.FingerprintSHA256(key))
+					return errors.Wrapf(err, "SSH host key verification failed for %s: host key is revoked", hostname)
+				}
+				sshLog.Errorf("SSH host key verification failed for %s: %v", hostname, err)
+				return errors.Wrapf(err, "SSH host key verification failed for %s", hostname)
+			}
+			// Earlier versions recorded host certificates as plain host keys,
+			// which knownhosts never matches; compare their certified keys instead
+			for _, want := range keyErr.Want {
+				if wantCert, ok := want.Key.(*ssh.Certificate); ok && bytes.Equal(wantCert.Key.Marshal(), key.Marshal()) {
+					sshLog.Warnf("Accepting the host key for %s, which the host certificate at %s:%d certifies; "+
+						"consider replacing that line with the plain host key", hostname, want.Filename, want.Line)
+					return nil
+				}
+			}
 			// Check if it's a key mismatch error vs a new host
-			if keyErr, ok := err.(*knownhosts.KeyError); ok && len(keyErr.Want) > 0 {
+			if len(keyErr.Want) > 0 {
 				// Host key changed - this is a security concern
 				sshLog.Errorf("SSH host key mismatch for %s", hostname)
 				sshLog.Errorf("  Hostname passed to callback: %q", hostname)
@@ -576,6 +622,10 @@ func (c *SSHConnection) buildHostKeyCallback() (ssh.HostKeyCallback, error) {
 						i+1, want.Filename, want.Line, want.Key.Type(), ssh.FingerprintSHA256(want.Key))
 				}
 				sshLog.Errorf("  None of the known_hosts entries match the server's key.")
+				if certErr != nil {
+					sshLog.Errorf("  The server's host certificate failed verification: %v", certErr)
+					sshLog.Errorf("  Any @cert-authority entries above apply only to valid host certificates.")
+				}
 				sshLog.Errorf("  This could mean:")
 				sshLog.Errorf("    - The host key has genuinely changed (security concern)")
 				sshLog.Errorf("    - known_hosts has entries for IP address with different keys")
