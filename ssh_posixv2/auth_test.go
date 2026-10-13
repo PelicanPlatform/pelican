@@ -41,6 +41,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"golang.org/x/crypto/ssh"
+	"golang.org/x/crypto/ssh/agent"
 )
 
 // testSSHServerConfig holds the configuration for a test SSH server
@@ -737,6 +738,73 @@ func TestMultipleAuthMethods(t *testing.T) {
 	defer conn.Close()
 
 	assert.Equal(t, StateConnected, conn.GetState())
+}
+
+// TestAgentAuthClosesAgentConnection tests that Connect closes
+// its connection to the SSH agent once authentication is done.
+func TestAgentAuthClosesAgentConnection(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	_, priv, err := ed25519.GenerateKey(rand.Reader)
+	require.NoError(t, err)
+	signer, err := ssh.NewSignerFromKey(priv)
+	require.NoError(t, err)
+	keyring := agent.NewKeyring()
+	require.NoError(t, keyring.Add(agent.AddedKey{PrivateKey: priv}))
+
+	// Use a short path; t.TempDir() can exceed the Unix socket path limit
+	sockDir, err := os.MkdirTemp("", "agent-")
+	require.NoError(t, err)
+	defer os.RemoveAll(sockDir)
+	listener, err := net.Listen("unix", filepath.Join(sockDir, "agent.sock"))
+	require.NoError(t, err)
+	defer listener.Close()
+	t.Setenv("SSH_AUTH_SOCK", listener.Addr().String())
+
+	// Serve the agent, and report each connection that the client closes
+	agentConnClosed := make(chan struct{}, 1)
+	go func() {
+		for {
+			agentConn, err := listener.Accept()
+			if err != nil {
+				return
+			}
+			go func() {
+				defer agentConn.Close()
+				_ = agent.ServeAgent(keyring, agentConn)
+				agentConnClosed <- struct{}{}
+			}()
+		}
+	}()
+
+	server, err := startTestSSHServerGo(t, &testSSHServerConfig{
+		publicKey: signer.PublicKey(),
+	})
+	require.NoError(t, err)
+	defer server.stop()
+
+	sshConfig := &SSHConfig{
+		Host:           "127.0.0.1",
+		Port:           server.port,
+		User:           "testuser",
+		AuthMethods:    []AuthMethod{AuthMethodAgent},
+		KnownHostsFile: server.knownHosts,
+		ConnectTimeout: 10 * time.Second,
+	}
+
+	conn := NewSSHConnection(sshConfig)
+	err = conn.Connect(ctx)
+	require.NoError(t, err)
+	defer conn.Close()
+
+	assert.Equal(t, StateConnected, conn.GetState())
+
+	select {
+	case <-agentConnClosed:
+	case <-ctx.Done():
+		t.Fatal("Connect did not close its connection to the SSH agent")
+	}
 }
 
 // TestKeyboardInteractiveMultiRound tests multi-round keyboard-interactive
