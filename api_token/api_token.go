@@ -146,8 +146,9 @@ func (e *ScopesNotGrantableError) Error() string {
 
 // validateScopesForCreator returns a *ScopesNotGrantableError if the
 // requested capabilities include any user-grantable scope NOT in the
-// creator's current effective set. Pass-through (non-user-grantable)
-// scopes are always allowed.
+// creator's current effective set. A creator who holds server.admin is
+// never refused. Pass-through (non-user-grantable) scopes are always
+// allowed.
 //
 // The verify path catches the same misconfiguration on every request
 // via intersectWithUserScopes, so this is not security-critical — but
@@ -196,7 +197,8 @@ func init() {
 // hook) before the scope check. This is the design contract from
 // docs/user-group-design.md: a user who loses a management privilege
 // loses it on every API token they ever minted, immediately —
-// without the admin having to rotate keys. Non-user-grantable scopes
+// without the admin having to rotate keys. A creator who currently
+// holds server.admin keeps every scope. Non-user-grantable scopes
 // (data-plane, inter-server) pass through unchanged because those
 // are pure bearer-token authority, not derivative of any user's
 // current state.
@@ -331,12 +333,12 @@ func VerifyApiKey(apiKey string) (bool, []string, string, error) {
 // The scopes can are a comma-separated list of capabilities. i.e "monitoring.query,monitoring.scrape"
 // The scopes are defined in the token_scopes package
 //
-// User-grantable scopes (server.admin / user_admin /
-// collection_admin) must be in the creator's CURRENT effective set;
-// otherwise the call returns an error listing the unauthorized
-// scopes. Use-time intersection (Verify) is the security gate;
-// create-time validation just prevents the persisted row from
-// promising authority the creator never had.
+// User-grantable scopes must be in the creator's CURRENT effective
+// set, unless the creator holds server.admin; otherwise the call
+// returns a *ScopesNotGrantableError listing the unauthorized scopes.
+// Use-time intersection (Verify) is the security gate; create-time
+// validation just prevents the persisted row from promising authority
+// the creator never had.
 func CreateApiKey(db *gorm.DB, name, createdBy, scopes string, expiration time.Time) (string, error) {
 	if err := validateScopesForCreator(strings.Split(scopes, ","), createdBy); err != nil {
 		return "", err
