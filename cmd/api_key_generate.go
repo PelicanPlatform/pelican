@@ -121,22 +121,21 @@ func parseExpiration(raw string) (string, error) {
 	return "", fmt.Errorf("expiration must be 'never', a date (e.g., 2025-12-31), or RFC3339 (e.g., 2025-12-31T23:59:59Z or 2025-12-31T18:59:59-05:00)")
 }
 
-// parseApiKeyResponse reads a 2xx body. It returns the token, nil when
-// the body is not JSON, or an error when the body is an error envelope
-// or has no token.
-func parseApiKeyResponse(body []byte) (*apiTokenResponse, error) {
+// parseApiKeyResponse reads a 2xx body and returns the token, or an
+// error when the body is not JSON, is an error envelope, or has no token.
+func parseApiKeyResponse(body []byte) (string, error) {
 	var tokenResp apiTokenResponse
 	if err := json.Unmarshal(body, &tokenResp); err != nil {
-		return nil, nil
+		return "", errors.Wrapf(err, "server response was not valid JSON (body: %s)", string(body))
 	}
 	if tokenResp.Token != "" {
-		return &tokenResp, nil
+		return tokenResp.Token, nil
 	}
 	var apiErr server_structs.SimpleApiResp
 	if err := json.Unmarshal(body, &apiErr); err == nil && apiErr.Msg != "" {
-		return nil, errors.Errorf("server refused to create the API key: %s", apiErr.Msg)
+		return "", errors.Errorf("server refused to create the API key: %s", apiErr.Msg)
 	}
-	return nil, errors.Errorf("server response did not contain an API key (body: %s)", string(body))
+	return "", errors.Errorf("server response did not contain an API key (body: %s)", string(body))
 }
 
 func generateApiKey(cmd *cobra.Command, args []string) error {
@@ -222,22 +221,16 @@ func generateApiKey(cmd *cobra.Command, args []string) error {
 	}
 
 	// Parse response to extract token
-	tokenResp, err := parseApiKeyResponse(bodyBytes)
+	apiKey, err := parseApiKeyResponse(bodyBytes)
 	if err != nil {
 		return err
-	}
-	if tokenResp == nil {
-		// If parsing fails, just print the raw response
-		fmt.Println("API key generated successfully:")
-		fmt.Println(string(bodyBytes))
-		return nil
 	}
 
 	// Check if JSON output is requested
 	if jsonFlag, _ := cmd.Root().PersistentFlags().GetBool("json"); jsonFlag {
 		// Output in JSON format with metadata
 		output := map[string]interface{}{
-			"key":        tokenResp.Token,
+			"key":        apiKey,
 			"name":       name,
 			"scopes":     scopesList,
 			"expiration": expiration,
@@ -249,7 +242,7 @@ func generateApiKey(cmd *cobra.Command, args []string) error {
 		fmt.Println(string(jsonData))
 	} else {
 		// Output the generated token (plain text)
-		fmt.Println("Key: ", tokenResp.Token)
+		fmt.Println("Key: ", apiKey)
 	}
 	return nil
 }
