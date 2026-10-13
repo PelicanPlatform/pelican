@@ -80,12 +80,11 @@ repos:
       - id: mdformat
         name: Format markdown files
         additional_dependencies:
-          - mdformat-simple-breaks
-          # GFM table support: without it mdformat does not recognize
-          # pipe tables and, with --wrap no, collapses each table into a
-          # single unreadable line. The user/group + collection design
-          # docs are table-heavy, so preserve them as real tables.
-          - mdformat-gfm
+          # GFM table support: without it
+          # mdformat does not recognize pipe tables and, with --wrap no,
+          # collapses each table into a single unreadable line.
+          - mdformat-gfm==1.0.0
+          - mdformat-simple-breaks==0.1.0
         args: [--wrap, "no"]
         files: \.md$
   - repo: https://github.com/crate-ci/typos

@@ -1,16 +1,49 @@
 ---
-# Keep the SHA-pinned actions in .github/workflows/ from going stale.
-# Dependabot rewrites both the SHA and its trailing version comment.
+# Every ecosystem below follows the same core rules:
+#
+# - Security updates, where Dependabot offers them, take priority.
+#   Each one opens its own PR as soon as an advisory is published,
+#   with no cooldown and no grouping.
+# - A version update is withheld until the release has been public
+#   for 7 days, which buys time for a malicious release to be noticed.
+# - Version updates that clear the cooldown are batched
+#   into a single weekly PR per ecosystem.
 
 version: 2
 
 updates:
+  # Keep the SHA-pinned actions in .github/workflows/ from going stale.
   - package-ecosystem: "github-actions"
     directory: "/"
     schedule:
       interval: "weekly"
     cooldown:
-      # Withhold a version update until the release has been on the
-      # registry for this many days, which buys time for a malicious
-      # release to be noticed. Security updates are exempt.
       default-days: 7
+    groups:
+      github-actions:
+        applies-to: version-updates
+        patterns: ["*"]
+
+  # Keep the Go module dependencies in go.mod from going stale.
+  - package-ecosystem: "gomod"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    cooldown:
+      default-days: 7
+    groups:
+      go-modules:
+        applies-to: version-updates
+        patterns: ["*"]
+
+  # Keep the hooks in .pre-commit-config.yaml from going stale.
+  - package-ecosystem: "pre-commit"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    cooldown:
+      default-days: 7
+    groups:
+      pre-commit:
+        applies-to: version-updates
+        patterns: ["*"]
