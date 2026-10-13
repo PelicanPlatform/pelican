@@ -135,7 +135,7 @@ var scopeDescriptions = map[TokenScope]string{
 	Pelican_DowntimeDelete: `Permits origin and cache to delete downtimes at the registry`,
 	Pelican_Metadata: `Permits an origin to publish object-commit events to a configured external metadata endpoint. This scope must also possess a path to be valid, eg pelican.metadata:/foo, where the path is the federation prefix of the namespace whose object the event describes.`,
 	WebUi_Access: `Sign in to this server's web interface. New accounts receive this permission automatically.`,
-	Server_Admin: `Full administrative access: users, groups, collections, and settings. Includes server.user_admin and server.collection_admin. When an API key is checked against its creator's current scopes, a creator who holds server.admin keeps every user-grantable scope on the key, whether or not each one is granted to the account.`,
+	Server_Admin: `Full administrative access: users, groups, collections, and settings. Includes server.user_admin and server.collection_admin.`,
 	Server_UserAdmin: `Manage users and ordinary groups, including creating accounts and sending password-set links. Cannot change administrator accounts.`,
 	Server_CollectionAdmin: `Create, modify, and delete collections and manage their ACLs.`,
 	Pelican_LoggingModify: `Permits modification of server log levels at runtime`,
