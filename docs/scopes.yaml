@@ -105,12 +105,8 @@ userGrantable: true
 # bearer-token authorization on the data plane.
 name: server.admin
 description: >-
-  Full server-administration capability. Holders can manage every
-  user/group/collection/setting; equivalent to the historical "system
-  admin" role. Implies server.user_admin and server.collection_admin.
-  When an API key is checked against its creator's current scopes, a
-  creator who holds server.admin keeps every user-grantable scope on
-  the key, whether or not each one is granted to the account.
+  Full administrative access: users, groups, collections, and settings.
+  Includes server.user_admin and server.collection_admin.
 issuedBy: ["*"]
 acceptedBy: ["*"]
 userGrantable: true
