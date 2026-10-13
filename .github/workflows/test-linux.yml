@@ -22,8 +22,7 @@ on:
         default: false
       full_suite:
         # When false, "go test" runs with -short, which skips the tests
-        # marked with test_utils.SkipIfShort. Pushes and pull requests
-        # leave this at the default; the scheduled workflows set it.
+        # marked with test_utils.SkipIfShort.
         required: false
         type: boolean
         default: false
