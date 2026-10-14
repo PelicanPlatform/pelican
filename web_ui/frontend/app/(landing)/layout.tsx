@@ -1,6 +1,6 @@
 /***************************************************************
  *
- * Copyright (C) 2023, Pelican Project, Morgridge Institute for Research
+ * Copyright (C) 2026, Pelican Project, Morgridge Institute for Research
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you
  * may not use this file except in compliance with the License.  You may
@@ -30,11 +30,11 @@ export default function RootLayout({
   children: React.ReactNode;
 }) {
   return (
-    <>
+    <Box minHeight={'100vh'} display={'flex'} flexDirection={'column'}>
       <Header text={'Pelican Software'} />
-      <Box component={'main'} pt={'75px'} display={'flex'} minHeight={'100vh'}>
+      <Box component={'main'} display={'flex'} flexGrow={1}>
         {children}
       </Box>
-    </>
+    </Box>
   );
 }

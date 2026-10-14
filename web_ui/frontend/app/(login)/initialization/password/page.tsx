@@ -18,12 +18,12 @@
 
 'use client';
 
-import { Box, Typography } from '@mui/material';
+import { Stack } from '@mui/material';
 import { useRouter } from 'next/navigation';
 import { useContext, useState } from 'react';
 
+import AuthPanel from '../../components/AuthPanel';
 import LoadingButton from '../../components/LoadingButton';
-
 import PasswordInput from '../../components/PasswordInput';
 import { alertOnError } from '@/helpers/util';
 import { AlertDispatchContext } from '@/components/AlertProvider';
@@ -71,59 +71,45 @@ export default function Home() {
     }
   }
 
+  const mismatch = confirmPassword !== '' && password !== confirmPassword;
+
   return (
-    <>
-      <Box m={'auto'} mt={12} display={'flex'} flexDirection={'column'}>
-        <Box>
-          <Typography textAlign={'center'} variant={'h3'} component={'h3'}>
-            Set Password
-          </Typography>
-          <Typography textAlign={'center'} variant={'h6'} component={'p'}>
-            This will become the admin password for this Pelican endpoint
-          </Typography>
-        </Box>
-        <Box pt={2} mx={'auto'}>
-          <form onSubmit={onSubmit} action='#'>
-            <Box>
-              <PasswordInput
-                TextFieldProps={{
-                  InputProps: {
-                    onChange: (e) => {
-                      _setPassword(e.target.value);
-                    },
-                  },
-                }}
-              />
-            </Box>
-            <Box>
-              <PasswordInput
-                TextFieldProps={{
-                  label: 'Confirm Password',
-                  InputProps: {
-                    onChange: (e) => {
-                      _setConfirmPassword(e.target.value);
-                    },
-                  },
-                  error: password != confirmPassword,
-                  helperText:
-                    password != confirmPassword ? 'Passwords do not match' : '',
-                }}
-              />
-            </Box>
-            <Box mt={2} display={'flex'} flexDirection={'column'}>
-              <LoadingButton
-                variant='outlined'
-                sx={{ margin: 'auto' }}
-                color={'primary'}
-                type={'submit'}
-                loading={loading}
-              >
-                <span>Confirm</span>
-              </LoadingButton>
-            </Box>
-          </form>
-        </Box>
-      </Box>
-    </>
+    <AuthPanel
+      title={'Set Password'}
+      description={
+        'This will become the admin password for this Pelican endpoint'
+      }
+    >
+      <form onSubmit={onSubmit} action='#'>
+        <Stack spacing={2}>
+          <PasswordInput
+            TextFieldProps={{
+              autoComplete: 'new-password',
+              onChange: (e) => _setPassword(e.target.value),
+            }}
+          />
+          <PasswordInput
+            TextFieldProps={{
+              label: 'Confirm Password',
+              autoComplete: 'new-password',
+              onChange: (e) => _setConfirmPassword(e.target.value),
+              // Only complain once something has been typed in the second
+              // field; an empty confirmation is not yet a mismatch.
+              error: mismatch,
+              helperText: mismatch ? 'Passwords do not match' : ' ',
+            }}
+          />
+          <LoadingButton
+            variant='contained'
+            size='large'
+            fullWidth
+            type={'submit'}
+            loading={loading}
+          >
+            <span>Confirm</span>
+          </LoadingButton>
+        </Stack>
+      </form>
+    </AuthPanel>
   );
 }

@@ -1,6 +1,6 @@
 /***************************************************************
  *
- * Copyright (C) 2023, Pelican Project, Morgridge Institute for Research
+ * Copyright (C) 2026, Pelican Project, Morgridge Institute for Research
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you
  * may not use this file except in compliance with the License.  You may
@@ -19,47 +19,69 @@
 'use client';
 
 import Image from 'next/image';
-import { useEffect, useState } from 'react';
-import styles from '../../app/page.module.css';
+import Link from 'next/link';
+import { Box, IconButton, Typography } from '@mui/material';
 
-import PelicanLogo from '../../public/static/images/PelicanPlatformLogo_Icon.png';
-import GithubIcon from '../../public/static/images/github-mark.png';
-import { Typography } from '@mui/material';
+import PelicanLogo from '@/public/static/images/PelicanPlatformLogo_Icon.png';
+import GithubIcon from '@/public/static/images/github-mark.png';
 
-export const Header = ({ text }: { text: string }) => {
-  let [scrolledTop, setScrolledTop] = useState(true);
+/** Height of the bar in pixels, for anything that needs to sit below it. */
+export const HEADER_HEIGHT = 64;
 
-  useEffect(() => {
-    setScrolledTop(window.scrollY < 50);
-    addEventListener('scroll', (event) => {
-      setScrolledTop(window.scrollY < 50);
-    });
-  }, []);
-
-  return (
-    <div
-      className={`${styles.header} ${scrolledTop ? styles.headerScrolled : ''}`}
-      style={{
+/**
+ * The slim top bar on pages that have no navigation rail: login and the
+ * initialization flow, the landing page, and invite redemption.
+ *
+ * It sits in the document flow and sticks to the top, so the pages beneath
+ * it no longer have to reserve a hand-measured gap for a fixed element. The
+ * previous version was the Next.js starter template's blurred conic-gradient
+ * banner with a scroll listener it never removed; a paper surface with a
+ * hairline rule matches the rail the rest of the UI now uses.
+ */
+export const Header = ({ text }: { text: string }) => (
+  <Box
+    component={'header'}
+    sx={{
+      position: 'sticky',
+      top: 0,
+      zIndex: 'appBar',
+      height: HEADER_HEIGHT,
+      display: 'flex',
+      alignItems: 'center',
+      justifyContent: 'space-between',
+      px: { xs: 2, md: 3 },
+      bgcolor: 'background.paper',
+      borderBottom: 1,
+      borderColor: 'divider',
+    }}
+  >
+    <Box
+      component={Link}
+      href={'/'}
+      sx={{
         display: 'flex',
-        justifyContent: 'space-between',
-        padding: '1rem',
-        position: 'fixed',
-        zIndex: '1',
-        width: '100%',
-        overflow: 'hidden',
+        alignItems: 'center',
+        gap: 1.5,
+        color: 'text.primary',
       }}
     >
-      <div style={{ display: 'flex' }}>
-        <Image src={PelicanLogo} alt={'Pelican Logo'} width={32} height={32} />
-        <Typography variant={'h5'} my={'auto'} ml={'.5rem'}>
-          {text}
-        </Typography>
-      </div>
-      <div>
-        <a href={'https://github.com/PelicanPlatform'}>
-          <Image src={GithubIcon} alt={'Github Mark'} width={32} height={32} />
-        </a>
-      </div>
-    </div>
-  );
-};
+      <Image src={PelicanLogo} alt={''} width={32} height={32} priority />
+      <Typography
+        variant={'h6'}
+        component={'span'}
+        sx={{ fontWeight: 600, lineHeight: 1 }}
+      >
+        {text}
+      </Typography>
+    </Box>
+    <IconButton
+      component={'a'}
+      href={'https://github.com/PelicanPlatform'}
+      target={'_blank'}
+      rel={'noopener noreferrer'}
+      aria-label={'Pelican Platform on GitHub'}
+    >
+      <Image src={GithubIcon} alt={''} width={24} height={24} />
+    </IconButton>
+  </Box>
+);
