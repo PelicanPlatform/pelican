@@ -2,20 +2,20 @@
 
 import React, { ReactNode, useMemo, useRef, useState } from 'react';
 import {
-  IconButton,
   Link,
   ListItemIcon,
   ListItemText,
   Menu,
   MenuItem,
 } from '@mui/material';
+import RailItemButton from '@/components/layout/Navigation/Sidebar/RailItemButton';
 import {
   Api,
   BugReport,
   Description,
   Email,
   GitHub,
-  HelpOutline,
+  Help,
   Link as LinkIcon,
 } from '@mui/icons-material';
 import useSWR from 'swr';
@@ -38,16 +38,19 @@ const AboutMenu = () => {
 
   return (
     <>
-      <IconButton
-        id={'user-menu-button'}
+      <RailItemButton
+        id={'about-menu-button'}
         ref={menuRef}
+        label={'Help'}
+        icon={<Help />}
         onClick={() => setOpen(!open)}
-      >
-        <HelpOutline />
-      </IconButton>
+        aria-haspopup={'menu'}
+        aria-expanded={open}
+        aria-controls={open ? 'about-menu' : undefined}
+      />
       <Menu
-        id={'user-menu'}
-        aria-labelledby={'user-menu-button'}
+        id={'about-menu'}
+        aria-labelledby={'about-menu-button'}
         sx={{ ml: 4 }}
         anchorEl={menuRef.current}
         open={open}

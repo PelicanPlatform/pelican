@@ -1,88 +1,186 @@
 'use client';
 
-import React, { useRef, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import {
-  IconButton,
+  Collapse,
+  List,
   ListItemIcon,
   ListItemText,
   Menu,
   MenuItem,
 } from '@mui/material';
+import { ChevronRight, ExpandLess, ExpandMore } from '@mui/icons-material';
+import Link from 'next/link';
+import { usePathname } from 'next/navigation';
 
 import {
+  NavigationViewer,
   StaticNavigationItemProps,
   StaticNavigationParentItemProps,
+  isActive,
+  isVisible,
+  useRailCollapsed,
 } from '@/components/layout/Navigation';
-import Link from 'next/link';
+import { NavigationChildItem } from '@/components/layout/Navigation/Sidebar/NavigationChildItem';
+import RailItemButton from '@/components/layout/Navigation/Sidebar/RailItemButton';
 import { evaluateOrReturn } from '@/helpers/util';
 
-const NavigationMenu = ({
-  config,
-}: {
+/** True when any destination inside this section matches the current route. */
+const containsActive = (
+  items: StaticNavigationItemProps[],
+  pathname: string
+): boolean =>
+  items.some((item) =>
+    'children' in item
+      ? containsActive(item.children, pathname)
+      : isActive(evaluateOrReturn(item.href), pathname, item.exactMatch)
+  );
+
+type NavigationMenuProps = {
   config: StaticNavigationParentItemProps;
-}) => {
-  const [open, setOpen] = useState(false);
+  // Children are judged against the same viewer as their parent. Before this
+  // they were rendered unconditionally, so a role-gated child under an open
+  // parent was shown to everyone.
+  viewer: NavigationViewer;
+};
+
+const NavigationMenu = ({ config, viewer }: NavigationMenuProps) => {
+  const pathname = usePathname();
+  const railCollapsed = useRailCollapsed();
   const menuRef = useRef(null);
 
-  const buttonId = `${config.title}-menu-button`;
-  const menuId = `${config.title}-menu`;
+  const label = evaluateOrReturn(config.title);
+  const childActive = containsActive(config.children, pathname);
+
+  // Open when you are already somewhere inside the section, so the rail shows
+  // where you are without having to be told.
+  const [open, setOpen] = useState(childActive);
+  useEffect(() => {
+    if (childActive) setOpen(true);
+  }, [childActive]);
+
+  const buttonId = `${label}-menu-button`;
+  const menuId = `${label}-menu`;
+
+  const children = config.children.filter((child) => isVisible(child, viewer));
+
+  // A rail showing only icons has nowhere to inset labelled children, so the
+  // section opens beside it as a flyout rather than expanding in place. This is
+  // also why a submenu can't simply be a nested list at every width.
+  if (railCollapsed) {
+    return (
+      <>
+        <RailItemButton
+          id={buttonId}
+          ref={menuRef}
+          label={label}
+          icon={config.icon}
+          onClick={() => setOpen(!open)}
+          // Nothing previously distinguished a submenu from a destination:
+          // both rendered as a bare icon button, and you found out which you
+          // had by clicking it.
+          aria-haspopup={'menu'}
+          aria-expanded={open}
+          aria-controls={open ? menuId : undefined}
+          active={childActive}
+          trailing={<ChevronRight fontSize={'small'} />}
+        />
+        <Menu
+          id={menuId}
+          aria-labelledby={buttonId}
+          sx={{ ml: 1 }}
+          anchorEl={menuRef.current}
+          open={open}
+          onClose={() => setOpen(false)}
+          onClick={() => setOpen(false)}
+          anchorOrigin={{ vertical: 'center', horizontal: 'right' }}
+          transformOrigin={{ vertical: 'center', horizontal: 'left' }}
+        >
+          {children.map((child) => (
+            <FlyoutItem
+              key={evaluateOrReturn(child.title)}
+              config={child}
+              viewer={viewer}
+              pathname={pathname}
+            />
+          ))}
+        </Menu>
+      </>
+    );
+  }
 
   return (
     <>
-      <IconButton
+      <RailItemButton
         id={buttonId}
-        ref={menuRef}
+        label={label}
+        icon={config.icon}
         onClick={() => setOpen(!open)}
-        sx={{ mt: 1 }}
-      >
-        {config.icon}
-      </IconButton>
-      <Menu
-        id={menuId}
-        aria-labelledby={buttonId}
-        sx={{ ml: 4 }}
-        anchorEl={menuRef.current}
-        open={open}
-        onClose={() => setOpen(false)}
-        onClick={() => setOpen(false)}
-        anchorOrigin={{
-          vertical: 'center',
-          horizontal: 'right',
-        }}
-        transformOrigin={{
-          vertical: 'center',
-          horizontal: 'left',
-        }}
-      >
-        {config.children.map((config) => (
-          <NavigationMenuItem
-            key={evaluateOrReturn(config.title)}
-            config={config}
-          />
-        ))}
-      </Menu>
+        aria-expanded={open}
+        aria-controls={open ? menuId : undefined}
+        // The parent carries the indicator only while the active child is out
+        // of sight. Lighting both at once just doubles the highlight.
+        active={childActive && !open}
+        trailing={
+          open ? (
+            <ExpandLess fontSize={'small'} />
+          ) : (
+            <ExpandMore fontSize={'small'} />
+          )
+        }
+      />
+      <Collapse in={open} timeout='auto' unmountOnExit>
+        <List id={menuId} disablePadding aria-label={label} sx={{ pl: 2 }}>
+          {children.map((child) => (
+            <NestedItem
+              key={evaluateOrReturn(child.title)}
+              config={child}
+              viewer={viewer}
+            />
+          ))}
+        </List>
+      </Collapse>
     </>
   );
 };
 
-const NavigationMenuItem = ({
-  config,
-}: {
+type ChildProps = {
   config: StaticNavigationItemProps;
-}) => {
-  // If this item has children, render a menu
+  viewer: NavigationViewer;
+};
+
+/** A child of an expanded-in-place section: an ordinary rail row, inset. */
+const NestedItem = ({ config, viewer }: ChildProps) => {
   if ('children' in config) {
-    return <NavigationMenu config={config} />;
+    return <NavigationMenu config={config} viewer={viewer} />;
   }
 
-  // Otherwise, render the navigation item
+  return <NavigationChildItem {...config} />;
+};
+
+/** A child inside the flyout used while the rail is icon-only. */
+const FlyoutItem = ({
+  config,
+  viewer,
+  pathname,
+}: ChildProps & { pathname: string }) => {
+  if ('children' in config) {
+    return <NavigationMenu config={config} viewer={viewer} />;
+  }
+
+  const path = evaluateOrReturn(config.href);
+  const active = isActive(path, pathname, config.exactMatch);
+
   return (
-    <Link href={evaluateOrReturn(config.href)}>
-      <MenuItem>
-        <ListItemIcon>{config.icon}</ListItemIcon>
-        <ListItemText primary={evaluateOrReturn(config.title)} />
-      </MenuItem>
-    </Link>
+    <MenuItem
+      component={Link}
+      href={path}
+      selected={active}
+      aria-current={active ? 'page' : undefined}
+    >
+      <ListItemIcon>{config.icon}</ListItemIcon>
+      <ListItemText primary={evaluateOrReturn(config.title)} />
+    </MenuItem>
   );
 };
 
