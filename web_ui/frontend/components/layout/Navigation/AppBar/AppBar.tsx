@@ -13,15 +13,13 @@ import UserMenu from '@/components/layout/Navigation/Sidebar/UserMenu';
 import { Collapse } from '@mui/material';
 import BurgerMenu from '@/components/layout/Navigation/AppBar/BurgerMenu';
 
-const pages = ['Products', 'Pricing', 'Blog'];
-const settings = ['Profile', 'Account', 'Dashboard', 'Logout'];
-
 function ResponsiveAppBar({
   config,
+  authenticated,
   exportType,
   role,
   scopes,
-  topOffset = 0,
+  pending,
 }: NavigationProps) {
   const [navOpen, setNavOpen] = React.useState(false);
 
@@ -39,9 +37,11 @@ function ResponsiveAppBar({
             <Box sx={{ flexGrow: 1, display: { xs: 'flex', md: 'none' } }}>
               <IconButton
                 size='large'
-                aria-label='account of current user'
-                aria-controls='menu-appbar'
-                aria-haspopup='true'
+                // Was labelled "account of current user" -- copied from the
+                // user menu below and read out on the wrong control.
+                aria-label='Open navigation menu'
+                aria-controls='primary-navigation'
+                aria-expanded={navOpen}
                 onClick={() => setNavOpen(!navOpen)}
               >
                 <MenuIcon />
@@ -59,7 +59,7 @@ function ResponsiveAppBar({
               variant='h6'
               noWrap
               component='a'
-              href='#app-bar-with-responsive-menu'
+              href='/'
               sx={{
                 m: 2,
                 display: { xs: 'flex', md: 'none' },
@@ -92,11 +92,10 @@ function ResponsiveAppBar({
         </Container>
       </AppBar>
       <Box
+        id={'primary-navigation'}
         sx={{
           position: 'fixed',
-          // Yield to any out-of-flow banner above us (admin session
-          // strip) so the burger drawer doesn't slide in over it.
-          top: `${topOffset}px`,
+          top: 0,
           width: '100vw',
           backgroundColor: 'white',
           zIndex: 1000,
@@ -105,9 +104,11 @@ function ResponsiveAppBar({
         <Collapse in={navOpen}>
           <BurgerMenu
             config={config}
+            authenticated={authenticated}
             exportType={exportType}
             role={role}
             scopes={scopes}
+            pending={pending}
             onClose={() => setNavOpen(false)}
           />
         </Collapse>

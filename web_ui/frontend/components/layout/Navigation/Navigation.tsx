@@ -1,30 +1,48 @@
 'use client';
 
-import { StaticNavigationItemProps } from '@/components/layout/Navigation/index';
+import {
+  NavigationEntry,
+  NavigationShellProvider,
+  StaticNavigationItemProps,
+  isNavigationGroup,
+} from '@/components/layout/Navigation/index';
 import useSWR from 'swr';
 import { getExportData } from '@/components/DataExportTable';
 import { getUser } from '@/helpers/login';
 import { Sidebar } from '@/components/layout/Navigation/Sidebar';
 import NavigationConfig from '@/app/navigation';
 import { getServerInfo } from '@/helpers/util';
-import { Box, Typography } from '@mui/material';
+import { Box } from '@mui/material';
 import { AppBar } from '@/components/layout/Navigation/AppBar';
 import { ReactNode } from 'react';
 
-/** Recursively removes federationOnly items (and prunes emptied parents). */
+/**
+ * Recursively removes federationOnly items, pruning any parent or group left
+ * standing over nothing.
+ */
 const filterFederationOnly = (
-  items?: StaticNavigationItemProps[]
-): StaticNavigationItemProps[] | undefined => {
-  return items
-    ?.filter((item) => !item.federationOnly)
-    .map((item) => {
-      if (!('children' in item)) {
-        return item;
-      }
-      return { ...item, children: filterFederationOnly(item.children) ?? [] };
-    })
+  entries?: NavigationEntry[]
+): NavigationEntry[] | undefined =>
+  entries?.flatMap<NavigationEntry>((entry) => {
+    if (isNavigationGroup(entry)) {
+      const items = filterItems(entry.items);
+      return items.length > 0 ? [{ ...entry, items }] : [];
+    }
+    return filterItems([entry]);
+  });
+
+/** Item-level variant. Groups never nest, so below the top level everything is an item. */
+const filterItems = (
+  items: StaticNavigationItemProps[]
+): StaticNavigationItemProps[] =>
+  items
+    .filter((item) => !item.federationOnly)
+    .map((item) =>
+      'children' in item
+        ? { ...item, children: filterItems(item.children) }
+        : item
+    )
     .filter((item) => !('children' in item) || item.children.length > 0);
-};
 
 const Navigation = ({
   children,
@@ -32,7 +50,7 @@ const Navigation = ({
   sharedPage,
 }: {
   children: ReactNode;
-  config?: StaticNavigationItemProps[];
+  config?: NavigationEntry[];
   sharedPage?: boolean;
 }) => {
   // Check either config or sharedPage is defined but not both
@@ -40,20 +58,43 @@ const Navigation = ({
     throw new Error('Either config xor sharedPage must be defined');
   }
 
-  const { data: user } = useSWR('getUser', getUser);
+  const { data: user, error: userError } = useSWR('getUser', getUser);
   // /origin_ui/exports is admin-gated server-side (it returns storage
   // credentials and registry edit-URL tokens), so non-admins would
   // 403 every time the navigation mounts. Skip the fetch entirely for
   // them. The only nav item that branches on the response is Globus
   // Configurations, which is admin-only anyway (see allowedRoles in
   // app/navigation.tsx).
-  const { data: exports } = useSWR(
+  const { data: exports, error: exportsError } = useSWR(
     user?.role === 'admin' ? 'getDataExport' : null,
     getExportData,
     { errorRetryCount: 0 }
   );
-  const { data: serverInfo } = useSWR('getServerInfo', getServerInfo);
+  const { data: serverInfo, error: serverInfoError } = useSWR(
+    'getServerInfo',
+    getServerInfo
+  );
   const servers = serverInfo?.servers;
+
+  // Everything the visibility rules consult arrives over the network, so until
+  // all of it has landed the navigation cannot know which destinations belong
+  // to this caller. It holds a placeholder for that window rather than
+  // guessing and correcting itself a beat later: a rail that renders eagerly
+  // and then drops the rows this caller may not have moves the remaining
+  // targets out from under the pointer just as they looked settled.
+  //
+  // Resolved, not merely finished loading -- an errored fetch has still
+  // answered the question, and the rules read an unknown as "not admitted".
+  // The exports request is the reason this can't be a single isLoading flag:
+  // its key only becomes non-null once /whoami has named an admin, so a
+  // fetch-state reading of it is momentarily "idle" before it is "loading",
+  // and the rail would flash its full list in between.
+  const resolved =
+    (user !== undefined || userError !== undefined) &&
+    (user?.role !== 'admin' ||
+      exports !== undefined ||
+      exportsError !== undefined) &&
+    (serverInfo !== undefined || serverInfoError !== undefined);
 
   // Handle navigation for shared pages
   // Best we can do is sending them to root if there are many running servers
@@ -74,100 +115,48 @@ const Navigation = ({
     config = filterFederationOnly(config);
   }
 
-  // Per the operator demo feedback: when running multiple browser
-  // tabs as different users, it's easy to forget which one is the
-  // privileged session and click "delete user" in the wrong window.
-  // A high-contrast top strip makes the admin context unmistakable
-  // — different color, different message, fixed at the top so it
-  // doesn't scroll away. Non-admins see nothing.
-  const isAdmin = user?.authenticated && user?.role === 'admin';
-
-  // Banner height is a fixed pixel value rather than `auto` so
-  // everything below can compute its own offset. The strip is one
-  // line of small caps text with tight padding — enough to register
-  // peripherally without eating real estate from the navigation.
-  const ADMIN_BANNER_HEIGHT_PX = 22;
-  const topOffset = isAdmin ? ADMIN_BANNER_HEIGHT_PX : 0;
-
   return (
-    <Box id={'navigation'}>
-      {isAdmin && (
+    <NavigationShellProvider>
+      <Box id={'navigation'}>
         <Box
+          id={'header'}
           sx={{
-            position: 'fixed',
-            top: 0,
-            left: 0,
-            right: 0,
-            // Below the MUI modal layer (1300) so dialogs still cover
-            // the banner when open, but above the sidebar (z-index 2)
-            // and burger drawer (1000) so it always wins against the
-            // navigation chrome.
-            zIndex: 1100,
-            height: `${ADMIN_BANNER_HEIGHT_PX}px`,
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            backgroundColor: '#b71c1c', // deep red — distinct from the brand blue
-            color: '#fff',
-            boxShadow: '0 1px 4px rgba(0,0,0,0.3)',
-            pointerEvents: 'none', // pure indicator; never intercepts clicks
+            flexDirection: { xs: 'column', md: 'row' },
+            width: '100%',
           }}
         >
-          <Typography
-            variant='caption'
+          <Box
             sx={{
-              fontWeight: 700,
-              letterSpacing: '0.1em',
-              textTransform: 'uppercase',
-              fontSize: '0.7rem',
-              lineHeight: 1,
+              display: { xs: 'none', md: 'block' },
             }}
           >
-            Administrator session
-          </Typography>
+            <Sidebar
+              authenticated={user?.authenticated}
+              exportType={exports?.type}
+              role={user?.role}
+              scopes={user?.scopes}
+              config={config as NavigationEntry[]}
+              pending={!resolved}
+            />
+          </Box>
+          <Box
+            sx={{
+              display: { xs: 'block', md: 'none' },
+            }}
+          >
+            <AppBar
+              authenticated={user?.authenticated}
+              exportType={exports?.type}
+              role={user?.role}
+              scopes={user?.scopes}
+              config={config as NavigationEntry[]}
+              pending={!resolved}
+            />
+          </Box>
+          {children}
         </Box>
-      )}
-      <Box
-        id={'header'}
-        sx={{
-          flexDirection: { xs: 'column', md: 'row' },
-          // Push *non-fixed* descendants below the banner. The
-          // sidebar and burger drawer manage their own offset via
-          // the topOffset prop because they're position: fixed and
-          // don't honor parent padding.
-          pt: `${topOffset}px`,
-          width: '100%',
-        }}
-      >
-        <Box
-          sx={{
-            display: { xs: 'none', md: 'block' },
-          }}
-        >
-          <Sidebar
-            exportType={exports?.type}
-            role={user?.role}
-            scopes={user?.scopes}
-            config={config as StaticNavigationItemProps[]}
-            topOffset={topOffset}
-          />
-        </Box>
-        <Box
-          sx={{
-            display: { xs: 'block', md: 'none' },
-          }}
-        >
-          <AppBar
-            exportType={exports?.type}
-            role={user?.role}
-            scopes={user?.scopes}
-            config={config as StaticNavigationItemProps[]}
-            topOffset={topOffset}
-          />
-        </Box>
-        {children}
       </Box>
-    </Box>
+    </NavigationShellProvider>
   );
 };
 
