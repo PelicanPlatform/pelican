@@ -42,7 +42,7 @@ import { isEqual, merge } from 'lodash';
 import StatusSnackBar, {
   StatusSnackBarProps,
 } from '@/components/StatusSnackBar';
-import { ConfigDisplay } from '@/app/config/components';
+import { ConfigDisplay } from '@/app/settings/config/components';
 
 export function Issuer({ metadata }: { metadata: ParameterMetadataRecord }) {
   const [status, setStatus] = useState<StatusSnackBarProps | undefined>(
