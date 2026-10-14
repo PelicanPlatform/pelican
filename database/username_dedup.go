@@ -34,8 +34,9 @@ import (
 	"github.com/pelicanplatform/pelican/param"
 )
 
-// Pre-migration cleanup for the universal migration that makes usernames
-// globally unique (*_global_unique_username.sql, v7.27).
+// Startup cleanup for the universal migration that makes usernames
+// globally unique (*_global_unique_username.sql, v7.27), plus the rule
+// that keeps the built-in admin bound to this server afterwards.
 //
 // Before that migration a username only had to be unique per issuer, so a
 // database could legitimately hold two live rows with the same username.
@@ -54,13 +55,33 @@ import (
 // means, so it fails with "UNIQUE constraint failed: users.username" and
 // the server crash-loops at startup. This file resolves the duplicates in
 // Go, where Server.ExternalWebUrl is known, immediately before that
-// migration runs.
+// migration runs (prepareForGlobalUniqueUsernames).
+//
+// # The built-in admin
+//
+// The username "admin" alone grants server.admin (see
+// EffectiveScopesForIdentity in web_ui), and BootstrapAdminAndBackfillOwners
+// exists so that the only live "admin" row is the one keyed on this
+// server's Server.ExternalWebUrl. So "admin" is not deduplicated by
+// ranking at all: every live "admin" row whose issuer is not the current
+// ExternalWebUrl is soft-deleted, duplicate or not, and the bootstrap
+// mints the local row afterwards when none is left. No existing row is
+// ever adopted or re-keyed, so no heuristic about what a row "looks like"
+// is involved. The same rule runs after the migrations at every startup
+// (retireNonLocalAdminRowsAtStartup), so a later ExternalWebUrl change
+// heals itself the same way instead of locking password login out.
+//
+// Nothing that referenced a retired "admin" row is moved: server.admin
+// does not depend on ownership, and an API key's scopes are recomputed
+// from its creator row on every use, so keys minted by a retired admin
+// row fail closed and have to be re-minted. The retirement logs them.
+//
+// # Other usernames
 //
 // Survivor selection, per username, in order:
 //
 //  1. The row whose issuer is the current Server.ExternalWebUrl. It is
-//     the only local-account row password login and the admin bootstrap
-//     can reach.
+//     the only local-account row password login can reach.
 //  2. A real row over a placeholder row (sub prefixed with
 //     protectivePlaceholderSubPrefix): when a placeholder shares its
 //     username with any other row, the placeholder loses. No identity
@@ -72,21 +93,36 @@ import (
 //     reach. Rows that still tie keep the query order (a stable sort), so
 //     the choice is deterministic.
 //
-// Every other row is soft-deleted rather than renamed. For both producers
-// above nothing can log in as it: password login reaches only (username,
+// Every other row is soft-deleted rather than renamed, and its group
+// memberships are removed as DeleteUser would. For both producers above
+// nothing can log in as it: password login reaches only (username,
 // ExternalWebUrl), and no identity provider asserts a placeholder sub. A
 // real OIDC row that loses re-enrolls under a suffixed username on its
 // next login.
 //
-// Two v7.26 username references are moved to the survivor, because the
+// Two v7.26 username references are then re-homed, because the
 // migrations that turn them into user IDs would bind them wrongly:
-// collections.owner_id (20260429000000 fills it while the duplicates are
-// still live) and api_keys.created_by (20260917110000 binds it only to a
-// row created before the key, and the survivor is often newer).
+//
+//   - collections.owner_id: 20260429000000 fills it while the duplicates
+//     are still live, so it may point at a losing row. Collections owned
+//     by a loser move to the survivor.
+//   - api_keys.created_by: 20260917110000 binds a key to the live row of
+//     that username created before the key. A key's scopes are recomputed
+//     from its creator on every use, so a key minted by a loser must not
+//     end up on the survivor. Only keys the survivor alone could have
+//     minted (created after the survivor's row and before the earliest
+//     losing row that could have had a session) are bound to it; every
+//     other key under that username is set to created_by = '' so it fails
+//     closed, and is logged so its owner can re-mint it. Placeholder rows
+//     never had a session, so they do not count as such a losing row.
 
 // protectivePlaceholderSubPrefix marks user rows written by the
 // GHSA-rpfr-x88x-xwcw mitigation script (mitigate-user-escalation.sh).
 const protectivePlaceholderSubPrefix = "__PROTECTIVE_PLACEHOLDER__"
+
+// builtinAdminUsername is the literal the admin bootstrap keys on; see
+// BootstrapAdminAndBackfillOwners.
+const builtinAdminUsername = "admin"
 
 // globalUniqueUsernameMigrationSuffix is the file-name suffix of the
 // universal migration this cleanup must precede. Its version is read from
@@ -213,14 +249,180 @@ func rankLiveUserRows(rows []liveUserRow, localIssuer string) {
 	})
 }
 
-// dedupLiveUsernames soft-deletes every live users row that shares its
-// username with another live row, keeping one survivor per username as
-// chosen by rankLiveUserRows. localIssuer is the current
-// Server.ExternalWebUrl (empty when unset). It returns the number of rows
-// soft-deleted. All changes happen in one transaction.
+// sqliteTimestamp formats a time the way SQLite's date functions and the
+// migrations' text comparisons read it: UTC, second precision, no zone.
+func sqliteTimestamp(t time.Time) string {
+	return t.UTC().Format("2006-01-02 15:04:05")
+}
+
+// tombstoneUsers soft-deletes the given rows and removes their group
+// memberships, as DeleteUser does on the migrated schema. Group
+// memberships have been keyed by user ID since v7.26, so they would
+// otherwise linger and render as nameless members.
+func tombstoneUsers(tx *gorm.DB, ids []string, now time.Time) error {
+	if len(ids) == 0 {
+		return nil
+	}
+	if err := tx.Exec("DELETE FROM group_members WHERE user_id IN ?", ids).Error; err != nil {
+		return errors.Wrap(err, "failed to remove group memberships of retired users")
+	}
+	res := tx.Exec("UPDATE users SET deleted_at = ?, updated_at = ? WHERE id IN ? AND deleted_at IS NULL", now, now, ids)
+	if res.Error != nil {
+		return errors.Wrap(res.Error, "failed to soft-delete retired users")
+	}
+	if res.RowsAffected != int64(len(ids)) {
+		return errors.Errorf("expected to soft-delete %d user rows, affected %d", len(ids), res.RowsAffected)
+	}
+	return nil
+}
+
+// retireNonLocalAdminRows soft-deletes every live "admin" row whose
+// issuer is not localIssuer, so that the only "admin" row left is the one
+// this server bootstraps under its own ExternalWebUrl (or none, in which
+// case BootstrapAdminAndBackfillOwners creates it after the migrations).
+// It runs on the pre-migration schema inside the dedup transaction and
+// returns the number of rows retired.
+func retireNonLocalAdminRows(tx *gorm.DB, localIssuer string, now time.Time) (int, error) {
+	var rows []liveUserRow
+	if err := tx.Raw(`
+		SELECT id, username, sub, issuer, last_login_at, created_at
+		FROM users
+		WHERE username = ? AND deleted_at IS NULL AND issuer <> ?
+		ORDER BY id`, builtinAdminUsername, localIssuer).Scan(&rows).Error; err != nil {
+		return 0, errors.Wrap(err, "failed to list built-in admin rows under other issuers")
+	}
+	if len(rows) == 0 {
+		return 0, nil
+	}
+	ids := make([]string, 0, len(rows))
+	for _, r := range rows {
+		ids = append(ids, r.ID)
+		log.Warnf("Retiring %q row %s (sub %q, issuer %q, placeholder=%t): its issuer is not Server.ExternalWebUrl (%q), "+
+			"and the built-in admin is bootstrapped under that URL",
+			builtinAdminUsername, r.ID, r.Sub, r.Issuer, r.isPlaceholder(), localIssuer)
+	}
+	if err := warnAdminKeysLeftUnattributed(tx, localIssuer); err != nil {
+		return 0, err
+	}
+	if err := tombstoneUsers(tx, ids, now); err != nil {
+		return 0, err
+	}
+	return len(ids), nil
+}
+
+// warnAdminKeysLeftUnattributed names the API keys created under the
+// username "admin" that 20260917110000 will not be able to attribute to
+// the local admin row, because that row does not exist yet or was created
+// after the key. Those keys fail closed from then on. The comparison is
+// the migration's own text comparison, so the prediction matches it.
+func warnAdminKeysLeftUnattributed(tx *gorm.DB, localIssuer string) error {
+	var local []struct {
+		ID        string
+		CreatedAt string
+	}
+	if err := tx.Raw("SELECT id, created_at FROM users WHERE username = ? AND issuer = ? AND deleted_at IS NULL",
+		builtinAdminUsername, localIssuer).Scan(&local).Error; err != nil {
+		return errors.Wrap(err, "failed to look up the local built-in admin row")
+	}
+	query := "SELECT id, name FROM api_keys WHERE created_by = ?"
+	args := []interface{}{builtinAdminUsername}
+	if len(local) > 0 {
+		query += " AND created_at < ?"
+		args = append(args, local[0].CreatedAt)
+	}
+	var keys []struct {
+		ID   string
+		Name string
+	}
+	if err := tx.Raw(query, args...).Scan(&keys).Error; err != nil {
+		return errors.Wrap(err, "failed to list API keys created by the built-in admin")
+	}
+	for _, k := range keys {
+		log.Warnf("API key %s (%q) was created under username %q before this server's own %q row existed; "+
+			"it cannot be attributed to that row and will carry no user scopes after the upgrade. Re-mint it.",
+			k.ID, k.Name, builtinAdminUsername, builtinAdminUsername)
+	}
+	return nil
+}
+
+// bindAPIKeysToSurvivor re-homes the API keys created under username
+// (a v7.26 created_by value) onto the survivor when the survivor alone
+// could have minted them, and clears the rest so they fail closed. See
+// the file comment.
+func bindAPIKeysToSurvivor(tx *gorm.DB, username string, survivor liveUserRow, losers []liveUserRow) error {
+	var cutoff *time.Time
+	for _, l := range losers {
+		if l.isPlaceholder() {
+			continue
+		}
+		if cutoff == nil || l.CreatedAt.Before(*cutoff) {
+			c := l.CreatedAt
+			cutoff = &c
+		}
+	}
+
+	var bound *gorm.DB
+	if cutoff == nil {
+		// Only placeholders lost, and a placeholder never had a session,
+		// so every key under this username is the survivor's.
+		bound = tx.Exec("UPDATE api_keys SET created_by = ? WHERE created_by = ?", survivor.ID, username)
+	} else {
+		bound = tx.Exec(`UPDATE api_keys SET created_by = ?
+			WHERE created_by = ?
+			  AND julianday(created_at) >= julianday(?)
+			  AND julianday(created_at) < julianday(?)`,
+			survivor.ID, username, sqliteTimestamp(survivor.CreatedAt), sqliteTimestamp(*cutoff))
+	}
+	if bound.Error != nil {
+		return errors.Wrapf(bound.Error, "failed to bind API keys created by %q to user %s", username, survivor.ID)
+	}
+	if bound.RowsAffected > 0 {
+		log.Infof("Bound %d API key(s) created under username %q to user %s", bound.RowsAffected, username, survivor.ID)
+	}
+
+	var ambiguous []struct {
+		ID   string
+		Name string
+	}
+	if err := tx.Raw("SELECT id, name FROM api_keys WHERE created_by = ?", username).Scan(&ambiguous).Error; err != nil {
+		return errors.Wrapf(err, "failed to list unattributable API keys created by %q", username)
+	}
+	if len(ambiguous) == 0 {
+		return nil
+	}
+	for _, k := range ambiguous {
+		log.Warnf("API key %s (%q) was created under username %q while more than one account could use that name; "+
+			"it cannot be attributed to the surviving account and will carry no user scopes. Re-mint it.",
+			k.ID, k.Name, username)
+	}
+	if err := tx.Exec("UPDATE api_keys SET created_by = '' WHERE created_by = ?", username).Error; err != nil {
+		return errors.Wrapf(err, "failed to clear unattributable API keys created by %q", username)
+	}
+	return nil
+}
+
+// dedupLiveUsernames applies the admin rule, then soft-deletes every
+// other live users row that shares its username with another live row,
+// keeping one survivor per username as chosen by rankLiveUserRows.
+// localIssuer is the current Server.ExternalWebUrl (empty when unset, in
+// which case "admin" is resolved like any other username). It returns
+// the number of rows soft-deleted. All changes happen in one transaction.
 func dedupLiveUsernames(db *gorm.DB, localIssuer string) (int, error) {
 	deleted := 0
 	err := db.Transaction(func(tx *gorm.DB) error {
+		now := time.Now().UTC()
+
+		if localIssuer == "" {
+			log.Warnf("Server.ExternalWebUrl is not set, so the %q row belonging to this server cannot be told apart; "+
+				"%q is resolved like any other duplicate username", builtinAdminUsername, builtinAdminUsername)
+		} else {
+			retired, err := retireNonLocalAdminRows(tx, localIssuer, now)
+			if err != nil {
+				return err
+			}
+			deleted += retired
+		}
+
 		var rows []liveUserRow
 		if err := tx.Raw(`
 			SELECT id, username, sub, issuer, last_login_at, created_at
@@ -247,25 +449,17 @@ func dedupLiveUsernames(db *gorm.DB, localIssuer string) (int, error) {
 			byUsername[r.Username] = append(byUsername[r.Username], r)
 		}
 
-		now := time.Now().UTC()
 		for _, username := range usernames {
 			candidates := byUsername[username]
 			rankLiveUserRows(candidates, localIssuer)
 			survivor := candidates[0]
-			loserIDs := make([]string, 0, len(candidates)-1)
-			for _, loser := range candidates[1:] {
+			losers := candidates[1:]
+			loserIDs := make([]string, 0, len(losers))
+			for _, loser := range losers {
 				loserIDs = append(loserIDs, loser.ID)
 				log.Warnf("Resolving duplicate username %q ahead of the global-unique-username migration: "+
 					"keeping user %s (sub %q, issuer %q) and soft-deleting user %s (sub %q, issuer %q, placeholder=%t)",
 					username, survivor.ID, survivor.Sub, survivor.Issuer, loser.ID, loser.Sub, loser.Issuer, loser.isPlaceholder())
-			}
-			// "admin" is the literal the admin bootstrap keys on; see
-			// BootstrapAdminAndBackfillOwners.
-			if username == "admin" && localIssuer != "" && survivor.Issuer != localIssuer {
-				log.Warnf("The surviving %q row %s (sub %q, issuer %q) does not match Server.ExternalWebUrl (%q); "+
-					"the built-in admin bootstrap cannot create its own row while that username is taken, "+
-					"so password login as %q will fail until the live %q row has sub %q and issuer %q",
-					username, survivor.ID, survivor.Sub, survivor.Issuer, localIssuer, username, username, username, localIssuer)
 			}
 
 			// Skip a collection whose name the survivor already owns;
@@ -277,32 +471,16 @@ func dedupLiveUsernames(db *gorm.DB, localIssuer string) (int, error) {
 			if owned.Error != nil {
 				return errors.Wrapf(owned.Error, "failed to move collections owned by %q to user %s", username, survivor.ID)
 			}
-			// The created_at guard of 20260917110000, widened to every row
-			// of the same account (same sub); julianday() orders mixed UTC
-			// offsets correctly.
-			candidateIDs := append([]string{survivor.ID}, loserIDs...)
-			keys := tx.Exec(`UPDATE api_keys SET created_by = ?
-				WHERE created_by = ?
-				  AND EXISTS (SELECT 1 FROM users u
-				      WHERE u.id IN ? AND u.sub = ?
-				        AND julianday(u.created_at) <= julianday(api_keys.created_at))`,
-				survivor.ID, username, candidateIDs, survivor.Sub)
-			if keys.Error != nil {
-				return errors.Wrapf(keys.Error, "failed to bind API keys created by %q to user %s", username, survivor.ID)
-			}
-			if owned.RowsAffected > 0 || keys.RowsAffected > 0 {
-				log.Infof("Moved %d collection(s) and %d API key(s) of username %q to user %s",
-					owned.RowsAffected, keys.RowsAffected, username, survivor.ID)
+			if owned.RowsAffected > 0 {
+				log.Infof("Moved %d collection(s) of username %q to user %s", owned.RowsAffected, username, survivor.ID)
 			}
 
-			res := tx.Exec("UPDATE users SET deleted_at = ?, updated_at = ? WHERE id IN ? AND deleted_at IS NULL",
-				now, now, loserIDs)
-			if res.Error != nil {
-				return errors.Wrapf(res.Error, "failed to soft-delete duplicate rows for username %q", username)
+			if err := bindAPIKeysToSurvivor(tx, username, survivor, losers); err != nil {
+				return err
 			}
-			if res.RowsAffected != int64(len(loserIDs)) {
-				return errors.Errorf("expected to soft-delete %d duplicate rows for username %q, affected %d",
-					len(loserIDs), username, res.RowsAffected)
+
+			if err := tombstoneUsers(tx, loserIDs, now); err != nil {
+				return errors.Wrapf(err, "failed to retire duplicate rows for username %q", username)
 			}
 			deleted += len(loserIDs)
 		}
@@ -312,8 +490,49 @@ func dedupLiveUsernames(db *gorm.DB, localIssuer string) (int, error) {
 		return 0, err
 	}
 	if deleted > 0 {
-		log.Warnf("Soft-deleted %d user row(s) that shared a username with another live row; "+
-			"usernames are globally unique from this version on", deleted)
+		log.Warnf("Soft-deleted %d user row(s) that shared a username with another live row or held %q under another issuer; "+
+			"usernames are globally unique from this version on", deleted, builtinAdminUsername)
 	}
 	return deleted, nil
+}
+
+// retireNonLocalAdminRowsAtStartup applies the admin rule from the file
+// comment on the migrated schema, at every startup: any live "admin" row
+// whose issuer is not the current Server.ExternalWebUrl is deleted the way
+// DeleteUser deletes an account, so that BootstrapAdminAndBackfillOwners
+// can mint this server's own row. This is what makes a later
+// ExternalWebUrl change recover on its own instead of leaving password
+// login with a 500. API keys minted by the retired row keep pointing at
+// it and therefore carry no user scopes from now on; they are logged so
+// they can be re-minted. A no-op when ExternalWebUrl is unset, as the
+// bootstrap itself is.
+func retireNonLocalAdminRowsAtStartup(db *gorm.DB) error {
+	externalURL := param.Server_ExternalWebUrl.GetString()
+	if externalURL == "" {
+		return nil
+	}
+	var stale []User
+	if err := db.Where("username = ? AND issuer <> ?", builtinAdminUsername, externalURL).Find(&stale).Error; err != nil {
+		return errors.Wrap(err, "failed to list built-in admin rows under other issuers")
+	}
+	for _, u := range stale {
+		log.Warnf("Retiring %q row %s (sub %q, issuer %q): its issuer is not Server.ExternalWebUrl (%q), "+
+			"and the built-in admin is bootstrapped under that URL",
+			builtinAdminUsername, u.ID, u.Sub, u.Issuer, externalURL)
+		var keys []struct {
+			ID   string
+			Name string
+		}
+		if err := db.Raw("SELECT id, name FROM api_keys WHERE created_by = ?", u.ID).Scan(&keys).Error; err != nil {
+			return errors.Wrapf(err, "failed to list API keys created by %q row %s", builtinAdminUsername, u.ID)
+		}
+		for _, k := range keys {
+			log.Warnf("API key %s (%q) was created by the retired %q row %s and will carry no user scopes from now on. Re-mint it.",
+				k.ID, k.Name, builtinAdminUsername, u.ID)
+		}
+		if err := DeleteUser(db, u.ID, "", true); err != nil {
+			return errors.Wrapf(err, "failed to retire %q row %s", builtinAdminUsername, u.ID)
+		}
+	}
+	return nil
 }

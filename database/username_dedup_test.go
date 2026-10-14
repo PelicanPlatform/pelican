@@ -18,8 +18,9 @@
 
 package database
 
-// Coverage for the pre-migration cleanup that resolves usernames shared
-// by several live rows before *_global_unique_username.sql runs (issue
+// Coverage for the startup cleanup that resolves usernames shared by
+// several live rows before *_global_unique_username.sql runs, and for the
+// rule that keeps the built-in admin bound to this server's URL (issue
 // #3824). Each test runs the real goose migrations up to the version
 // before that migration, seeds rows in the shapes seen in production,
 // runs the cleanup, then finishes the migrations to prove the unique
@@ -44,10 +45,9 @@ const (
 	dedupOIDCIssuer  = "https://cilogon.org"
 
 	// The base users table from 20250929190630: no last_login_at and no
-	// deleted_at yet. v7.26 databases still have this users table.
+	// deleted_at yet, the shape of a database that skipped v7.26.
 	versionWithBaseUsersTable = 20250929190630
-
-	// The last universal migration in v7.26.x.
+	// The last universal migration v7.26 ships.
 	versionV726 = 20260220120000
 )
 
@@ -111,6 +111,43 @@ func setExternalWebURL(t *testing.T, url string) {
 	prev := param.Server_ExternalWebUrl.GetString()
 	t.Cleanup(func() { require.NoError(t, param.Server_ExternalWebUrl.Set(prev)) })
 	require.NoError(t, param.Server_ExternalWebUrl.Set(url))
+}
+
+// readColumnByID returns id -> column for every row of table.
+func readColumnByID(t *testing.T, db *gorm.DB, table, column string) map[string]string {
+	t.Helper()
+	rows, err := db.Raw(fmt.Sprintf("SELECT id, %s FROM %s", column, table)).Rows()
+	require.NoError(t, err)
+	defer rows.Close()
+	out := map[string]string{}
+	for rows.Next() {
+		var id, value string
+		require.NoError(t, rows.Scan(&id, &value))
+		out[id] = value
+	}
+	return out
+}
+
+func insertGroupWithMembers(t *testing.T, db *gorm.DB, groupID string, userIDs ...string) {
+	t.Helper()
+	require.NoError(t, db.Exec("INSERT INTO groups (id, name, created_by) VALUES (?, ?, 'unknown')", groupID, groupID).Error)
+	for _, id := range userIDs {
+		require.NoError(t, db.Exec("INSERT INTO group_members (group_id, user_id, added_by) VALUES (?, ?, 'unknown')", groupID, id).Error)
+	}
+}
+
+func groupMemberIDs(t *testing.T, db *gorm.DB, groupID string) []string {
+	t.Helper()
+	var ids []string
+	require.NoError(t, db.Raw("SELECT user_id FROM group_members WHERE group_id = ? ORDER BY user_id", groupID).Scan(&ids).Error)
+	return ids
+}
+
+func insertLegacyAPIKey(t *testing.T, db *gorm.DB, id, createdBy, createdAt string) {
+	t.Helper()
+	require.NoError(t, db.Exec(
+		"INSERT INTO api_keys (id, name, hashed_value, created_at, created_by) VALUES (?, ?, 'x', ?, ?)",
+		id, id, createdAt, createdBy).Error)
 }
 
 func TestGlobalUniqueUsernameMigrationVersion(t *testing.T) {
@@ -187,32 +224,31 @@ func TestDedupLiveUsernamesDropsProtectivePlaceholder(t *testing.T) {
 }
 
 // With no row on the local issuer, the most recent login wins; with no
-// logins at all, the newest row wins. The survivors are neither first by
-// id nor, for carol, the newest row, so each rule has to do the picking.
+// logins at all, the newest row wins.
 func TestDedupLiveUsernamesFallsBackToRecencyThenAge(t *testing.T) {
 	db, sqlDB := migrateToVersion(t, versionBeforeGlobalUniqueUsername(t))
 	insertLegacyUser(t, db, legacyUser{id: "carol-a", username: "carol", sub: "sub-carol", issuer: dedupOIDCIssuer,
-		createdAt: "2026-03-01 00:00:00", lastLoginAt: strPtr("2026-04-01 00:00:00")})
+		createdAt: "2026-01-01 00:00:00", lastLoginAt: strPtr("2026-02-01 00:00:00")})
 	insertLegacyUser(t, db, legacyUser{id: "carol-b", username: "carol", sub: "sub-carol", issuer: dedupOIDCIssuer + "/",
-		createdAt: "2026-01-01 00:00:00", lastLoginAt: strPtr("2026-08-01 00:00:00")})
+		createdAt: "2026-03-01 00:00:00", lastLoginAt: strPtr("2026-08-01 00:00:00")})
 	insertLegacyUser(t, db, legacyUser{id: "carol-c", username: "carol", sub: "sub-carol", issuer: dedupOldIssuer,
+		createdAt: "2025-12-01 00:00:00"})
+	insertLegacyUser(t, db, legacyUser{id: "dave-new", username: "dave", sub: "sub-dave", issuer: dedupOIDCIssuer,
 		createdAt: "2026-06-01 00:00:00"})
-	insertLegacyUser(t, db, legacyUser{id: "dave-a", username: "dave", sub: "sub-dave", issuer: dedupOIDCIssuer + "/",
+	insertLegacyUser(t, db, legacyUser{id: "dave-old", username: "dave", sub: "sub-dave", issuer: dedupOIDCIssuer + "/",
 		createdAt: "2026-02-01 00:00:00"})
-	insertLegacyUser(t, db, legacyUser{id: "dave-b", username: "dave", sub: "sub-dave", issuer: dedupOIDCIssuer,
-		createdAt: "2026-06-01 00:00:00"})
 
 	deleted, err := dedupLiveUsernames(db, dedupLocalIssuer)
 	require.NoError(t, err)
 	assert.Equal(t, 3, deleted)
-	assert.Equal(t, []string{"carol-b"}, liveUserIDs(t, db, "carol"), "latest login beats newer rows and never-logged-in rows")
-	assert.Equal(t, []string{"dave-b"}, liveUserIDs(t, db, "dave"), "with no logins the newest row survives")
+	assert.Equal(t, []string{"carol-b"}, liveUserIDs(t, db, "carol"), "latest login beats older rows and never-logged-in rows")
+	assert.Equal(t, []string{"dave-new"}, liveUserIDs(t, db, "dave"), "with no logins the newest row survives")
 
 	finishMigrations(t, sqlDB)
 }
 
-// An unset Server.ExternalWebUrl disables the local-issuer preference
-// without breaking the rest of the ordering.
+// An unset Server.ExternalWebUrl disables the admin rule and the
+// local-issuer preference; "admin" then follows the ordinary ranking.
 func TestDedupLiveUsernamesWithoutExternalWebUrl(t *testing.T) {
 	db, sqlDB := migrateToVersion(t, versionBeforeGlobalUniqueUsername(t))
 	insertLegacyUser(t, db, legacyUser{id: "adm-local", username: "admin", sub: "admin", issuer: dedupLocalIssuer,
@@ -245,9 +281,130 @@ func TestDedupLiveUsernamesIgnoresTombstones(t *testing.T) {
 	finishMigrations(t, sqlDB)
 }
 
-// Once the global index exists the startup wrapper must not touch goose
-// or rows. Forgetting an early migration makes any goose call fail with
-// "found 1 missing migrations", so success shows none was made.
+// The admin rule does not need a duplicate: a lone "admin" row under an
+// old ExternalWebUrl is retired, its memberships go with it, and the
+// bootstrap then mints this server's own row with a new ID.
+func TestDedupLiveUsernamesRetiresLoneStaleAdmin(t *testing.T) {
+	db, sqlDB := migrateToVersion(t, versionBeforeGlobalUniqueUsername(t))
+	insertLegacyUser(t, db, legacyUser{id: "oldadmin", username: "admin", sub: "admin", issuer: dedupOldIssuer,
+		createdAt: "2026-01-01 00:00:00", lastLoginAt: strPtr("2026-09-01 00:00:00")})
+	insertGroupWithMembers(t, db, "ops", "oldadmin")
+
+	deleted, err := dedupLiveUsernames(db, dedupLocalIssuer)
+	require.NoError(t, err)
+	assert.Equal(t, 1, deleted)
+	assert.Equal(t, []userState{{"oldadmin", true}}, readUserStates(t, db, "admin"))
+	assert.Empty(t, groupMemberIDs(t, db, "ops"))
+
+	finishMigrations(t, sqlDB)
+	setExternalWebURL(t, dedupLocalIssuer)
+	require.NoError(t, BootstrapAdminAndBackfillOwners(db))
+	admin, err := BuiltinAdminUser(db)
+	require.NoError(t, err)
+	require.NotNil(t, admin)
+	assert.NotEqual(t, "oldadmin", admin.ID)
+	assert.Equal(t, dedupLocalIssuer, admin.Issuer)
+}
+
+// With no local "admin" row at all, every "admin" row is retired rather
+// than one being promoted, and the bootstrap creates the local one.
+func TestDedupLiveUsernamesRetiresEveryNonLocalAdmin(t *testing.T) {
+	db, sqlDB := migrateToVersion(t, versionBeforeGlobalUniqueUsername(t))
+	insertLegacyUser(t, db, legacyUser{id: "oldadmin", username: "admin", sub: "admin", issuer: dedupOldIssuer,
+		createdAt: "2026-01-01 00:00:00", lastLoginAt: strPtr("2026-09-01 00:00:00")})
+	insertLegacyUser(t, db, legacyUser{id: "phadmin", username: "admin",
+		sub: protectivePlaceholderSubPrefix + "admin__e6227487", issuer: dedupOIDCIssuer,
+		createdAt: "2026-04-23 17:40:27"})
+
+	deleted, err := dedupLiveUsernames(db, dedupLocalIssuer)
+	require.NoError(t, err)
+	assert.Equal(t, 2, deleted)
+	assert.Empty(t, liveUserIDs(t, db, "admin"))
+
+	finishMigrations(t, sqlDB)
+	setExternalWebURL(t, dedupLocalIssuer)
+	require.NoError(t, BootstrapAdminAndBackfillOwners(db))
+	admin, err := BuiltinAdminUser(db)
+	require.NoError(t, err)
+	require.NotNil(t, admin)
+	assert.Equal(t, dedupLocalIssuer, admin.Issuer)
+}
+
+// A losing row's group memberships are removed with it, as DeleteUser
+// does; the survivor's are kept and nothing is moved between them.
+func TestDedupLiveUsernamesRemovesLoserMemberships(t *testing.T) {
+	db, sqlDB := migrateToVersion(t, versionBeforeGlobalUniqueUsername(t))
+	insertLegacyUser(t, db, legacyUser{id: "s", username: "alice", sub: "sub-s", issuer: dedupOIDCIssuer,
+		createdAt: "2026-03-01 00:00:00"})
+	insertLegacyUser(t, db, legacyUser{id: "l", username: "alice", sub: "sub-l", issuer: dedupOIDCIssuer + "/",
+		createdAt: "2026-01-01 00:00:00"})
+	insertGroupWithMembers(t, db, "shared", "s", "l")
+	insertGroupWithMembers(t, db, "losers-only", "l")
+
+	_, err := dedupLiveUsernames(db, dedupLocalIssuer)
+	require.NoError(t, err)
+	assert.Equal(t, []string{"s"}, liveUserIDs(t, db, "alice"))
+	assert.Equal(t, []string{"s"}, groupMemberIDs(t, db, "shared"))
+	assert.Empty(t, groupMemberIDs(t, db, "losers-only"))
+
+	finishMigrations(t, sqlDB)
+}
+
+// v7.26 keys record only the username, so a key can only be given to the
+// survivor when no losing account could have minted it: created after
+// the survivor's row and before the earliest losing row that could have
+// held a session. The rest fail closed.
+func TestDedupLiveUsernamesBindsOnlyUnambiguousAPIKeys(t *testing.T) {
+	db, sqlDB := migrateToVersion(t, versionBeforeGlobalUniqueUsername(t))
+	insertLegacyUser(t, db, legacyUser{id: "s", username: "alice", sub: "sub-s", issuer: dedupLocalIssuer,
+		createdAt: "2026-01-01 00:00:00"})
+	insertLegacyUser(t, db, legacyUser{id: "l", username: "alice", sub: "sub-l", issuer: dedupOIDCIssuer,
+		createdAt: "2026-03-01 12:00:00+02:00"})
+	insertLegacyUser(t, db, legacyUser{id: "p", username: "alice",
+		sub: protectivePlaceholderSubPrefix + "alice__e6227487", issuer: dedupOIDCIssuer + "/",
+		createdAt: "2026-02-01 00:00:00"})
+	insertLegacyAPIKey(t, db, "k-before-survivor", "alice", "2025-12-01 00:00:00")
+	insertLegacyAPIKey(t, db, "k-survivor-only", "alice", "2026-02-15 00:00:00")
+	// 30 minutes before the real loser in UTC, though later as text.
+	insertLegacyAPIKey(t, db, "k-just-before-loser", "alice", "2026-03-01 09:30:00+00:00")
+	insertLegacyAPIKey(t, db, "k-ambiguous", "alice", "2026-05-01 00:00:00")
+	insertLegacyAPIKey(t, db, "k-other-user", "bob", "2026-05-01 00:00:00")
+
+	_, err := dedupLiveUsernames(db, dedupLocalIssuer)
+	require.NoError(t, err)
+	assert.Equal(t, []string{"s"}, liveUserIDs(t, db, "alice"))
+	assert.Equal(t, map[string]string{
+		"k-before-survivor":   "",
+		"k-survivor-only":     "s",
+		"k-just-before-loser": "s",
+		"k-ambiguous":         "",
+		"k-other-user":        "bob",
+	}, readColumnByID(t, db, "api_keys", "created_by"))
+
+	finishMigrations(t, sqlDB)
+	assert.Equal(t, "", readColumnByID(t, db, "api_keys", "created_by")["k-ambiguous"],
+		"20260917110000 must not re-attribute a cleared key")
+}
+
+// A placeholder never had a session, so when the only losers are
+// placeholders every key under the username is the survivor's.
+func TestDedupLiveUsernamesBindsAllAPIKeysWhenOnlyPlaceholdersLose(t *testing.T) {
+	db, sqlDB := migrateToVersion(t, versionBeforeGlobalUniqueUsername(t))
+	insertLegacyUser(t, db, legacyUser{id: "s", username: "alice", sub: "sub-s", issuer: dedupOIDCIssuer + "/",
+		createdAt: "2026-03-01 00:00:00"})
+	insertLegacyUser(t, db, legacyUser{id: "p", username: "alice",
+		sub: protectivePlaceholderSubPrefix + "alice__e6227487", issuer: dedupOIDCIssuer,
+		createdAt: "2026-01-01 00:00:00"})
+	insertLegacyAPIKey(t, db, "k-old", "alice", "2026-02-01 00:00:00")
+	insertLegacyAPIKey(t, db, "k-new", "alice", "2026-06-01 00:00:00")
+
+	_, err := dedupLiveUsernames(db, dedupLocalIssuer)
+	require.NoError(t, err)
+	assert.Equal(t, map[string]string{"k-old": "s", "k-new": "s"}, readColumnByID(t, db, "api_keys", "created_by"))
+
+	finishMigrations(t, sqlDB)
+}
+
 func TestPrepareForGlobalUniqueUsernamesIsNoopOnceApplied(t *testing.T) {
 	db, sqlDB := migrateToVersion(t, versionBeforeGlobalUniqueUsername(t))
 	insertLegacyUser(t, db, legacyUser{id: "only", username: "admin", sub: "admin", issuer: dedupLocalIssuer,
@@ -277,28 +434,14 @@ func TestPrepareForGlobalUniqueUsernamesSkipsPastMigration(t *testing.T) {
 	assert.Equal(t, []string{"alice-1", "alice-2"}, liveUserIDs(t, db, "alice"))
 }
 
-// readColumnByID returns id -> column for every row of table.
-func readColumnByID(t *testing.T, db *gorm.DB, table, column string) map[string]string {
-	t.Helper()
-	rows, err := db.Raw(fmt.Sprintf("SELECT id, %s FROM %s", column, table)).Rows()
-	require.NoError(t, err)
-	defer rows.Close()
-	out := map[string]string{}
-	for rows.Next() {
-		var id, value string
-		require.NoError(t, rows.Scan(&id, &value))
-		out[id] = value
-	}
-	return out
-}
-
-// v7.26 kept collection ownership and API-key creators by username. The
-// migrations that turn them into user IDs run with the duplicates live
-// (20260429000000) or bind only to a row older than the key
-// (20260917110000), so without the cleanup's help both end on the wrong
-// row. The placeholder sorts first in idx_user_issuer, so it is the row
-// 20260429000000 picks, as on the origins in issue #3824.
-func TestPrepareForGlobalUniqueUsernamesMovesUsernameReferences(t *testing.T) {
+// Nothing a retired "admin" row referenced is moved. 20260429000000 had
+// already put the collection on the row it found first (the placeholder,
+// as on the origins in issue #3824), and that is where it stays; the
+// local admin manages it through server.admin regardless. "admin" keys
+// keep their username until 20260917110000, which attributes the ones
+// the local row predates and clears the rest, so a key minted before the
+// ExternalWebUrl change fails closed.
+func TestPrepareForGlobalUniqueUsernamesLeavesAdminReferencesToMigrations(t *testing.T) {
 	db, sqlDB := migrateToVersion(t, versionV726)
 	require.NoError(t, db.Exec("INSERT INTO users (id, username, sub, issuer, created_at) VALUES "+
 		"('oldadmin', 'admin', 'admin', ?, '2026-03-01 12:00:00+02:00'), "+
@@ -307,27 +450,20 @@ func TestPrepareForGlobalUniqueUsernamesMovesUsernameReferences(t *testing.T) {
 		dedupOldIssuer, dedupLocalIssuer, protectivePlaceholderSubPrefix+"admin__e6227487", dedupOIDCIssuer).Error)
 	require.NoError(t, db.Exec(
 		"INSERT INTO collections (id, name, owner, namespace) VALUES ('c1', 'stuff', 'admin', '/ns')").Error)
-	for _, k := range []struct{ id, createdAt string }{
-		// Only the placeholder, a different account, existed.
-		{"k-before", "2025-12-01 00:00:00"},
-		// 30 minutes after the old-URL row in UTC, though earlier as text.
-		{"k-between", "2026-03-01 10:30:00+00:00"},
-		{"k-after", "2026-07-01 00:00:00"},
-	} {
-		require.NoError(t, db.Exec(
-			"INSERT INTO api_keys (id, name, hashed_value, created_at, created_by) VALUES (?, ?, 'x', ?, 'admin')",
-			k.id, k.id, k.createdAt).Error)
-	}
+	insertLegacyAPIKey(t, db, "k-before", "admin", "2025-12-01 00:00:00")
+	insertLegacyAPIKey(t, db, "k-between", "admin", "2026-03-01 10:30:00+00:00")
+	insertLegacyAPIKey(t, db, "k-after", "admin", "2026-07-01 00:00:00")
 
 	setExternalWebURL(t, dedupLocalIssuer)
 	require.NoError(t, prepareForGlobalUniqueUsernames(sqlDB, db))
 	assert.Equal(t, []string{"newadmin"}, liveUserIDs(t, db, "admin"))
+	assert.Equal(t, map[string]string{"k-before": "admin", "k-between": "admin", "k-after": "admin"},
+		readColumnByID(t, db, "api_keys", "created_by"), "the step does not touch admin keys")
 	finishMigrations(t, sqlDB)
 
-	assert.Equal(t, map[string]string{"c1": "newadmin"}, readColumnByID(t, db, "collections", "owner_id"))
-	assert.Equal(t, map[string]string{"k-after": "newadmin", "k-before": "", "k-between": "newadmin"},
-		readColumnByID(t, db, "api_keys", "created_by"),
-		"a key older than every row of the admin account stays unattributed")
+	assert.Equal(t, map[string]string{"c1": "phadmin"}, readColumnByID(t, db, "collections", "owner_id"))
+	assert.Equal(t, map[string]string{"k-after": "newadmin", "k-before": "", "k-between": ""},
+		readColumnByID(t, db, "api_keys", "created_by"))
 }
 
 // A collection whose name the survivor already owns stays with the
@@ -388,4 +524,45 @@ func TestPrepareForGlobalUniqueUsernamesFromPreSoftDeleteSchema(t *testing.T) {
 		require.NoError(t, prepareForGlobalUniqueUsernames(sqlDB, db))
 		assert.Equal(t, []userState{{"a1", true}, {"a2", false}, {"a3", true}}, readUserStates(t, db, "admin"))
 	})
+}
+
+// After the migrations, the admin rule runs at every startup: an "admin"
+// row left under an old ExternalWebUrl is deleted like any account
+// (memberships included), its keys keep pointing at it and so carry no
+// scopes, and the bootstrap mints the row for the current URL. A second
+// run finds nothing to do.
+func TestRetireNonLocalAdminRowsAtStartup(t *testing.T) {
+	db, sqlDB := migrateToVersion(t, versionBeforeGlobalUniqueUsername(t))
+	finishMigrations(t, sqlDB)
+
+	setExternalWebURL(t, dedupOldIssuer)
+	require.NoError(t, BootstrapAdminAndBackfillOwners(db))
+	old, err := BuiltinAdminUser(db)
+	require.NoError(t, err)
+	require.NotNil(t, old)
+	insertGroupWithMembers(t, db, "ops", old.ID)
+	insertLegacyAPIKey(t, db, "k-old", old.ID, "2026-02-01 00:00:00")
+
+	// The server moves to a new URL.
+	setExternalWebURL(t, dedupLocalIssuer)
+	require.NoError(t, retireNonLocalAdminRowsAtStartup(db))
+	assert.Equal(t, []userState{{old.ID, true}}, readUserStates(t, db, "admin"))
+	assert.Empty(t, groupMemberIDs(t, db, "ops"))
+	assert.Equal(t, old.ID, readColumnByID(t, db, "api_keys", "created_by")["k-old"],
+		"the key is not re-attributed; its creator is gone, so it carries no scopes")
+
+	require.NoError(t, BootstrapAdminAndBackfillOwners(db))
+	fresh, err := BuiltinAdminUser(db)
+	require.NoError(t, err)
+	require.NotNil(t, fresh)
+	assert.NotEqual(t, old.ID, fresh.ID)
+	assert.Equal(t, dedupLocalIssuer, fresh.Issuer)
+
+	require.NoError(t, retireNonLocalAdminRowsAtStartup(db))
+	assert.ElementsMatch(t, []userState{{old.ID, true}, {fresh.ID, false}}, readUserStates(t, db, "admin"))
+
+	// Unset URL: nothing happens, as with the bootstrap itself.
+	setExternalWebURL(t, "")
+	require.NoError(t, retireNonLocalAdminRowsAtStartup(db))
+	assert.Equal(t, []string{fresh.ID}, liveUserIDs(t, db, "admin"))
 }
