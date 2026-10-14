@@ -33,11 +33,11 @@ export default function InviteLayout({
   children: React.ReactNode;
 }) {
   return (
-    <>
-      <Header text='Pelican Platform' />
-      <Box component='main' pt='75px' display='flex' minHeight='100vh'>
+    <Box minHeight={'100vh'} display={'flex'} flexDirection={'column'}>
+      <Header text={'Pelican Platform'} />
+      <Box component={'main'} display={'flex'} flexGrow={1}>
         {children}
       </Box>
-    </>
+    </Box>
   );
 }

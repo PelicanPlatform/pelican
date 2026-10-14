@@ -1,6 +1,6 @@
 /***************************************************************
  *
- * Copyright (C) 2023, Pelican Project, Morgridge Institute for Research
+ * Copyright (C) 2026, Pelican Project, Morgridge Institute for Research
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you
  * may not use this file except in compliance with the License.  You may
@@ -19,58 +19,54 @@
 import * as React from 'react';
 import IconButton from '@mui/material/IconButton';
 import InputAdornment from '@mui/material/InputAdornment';
-import FormControl from '@mui/material/FormControl';
 import TextField from '@mui/material/TextField';
 import Visibility from '@mui/icons-material/Visibility';
 import VisibilityOff from '@mui/icons-material/VisibilityOff';
 
 interface PasswordInputProps {
-  FormControlProps?: React.ComponentProps<typeof FormControl>;
   TextFieldProps?: React.ComponentProps<typeof TextField>;
-  onChange?: React.ChangeEventHandler<HTMLInputElement | HTMLTextAreaElement>;
 }
 
-export default function PasswordInput({
-  FormControlProps,
-  TextFieldProps,
-}: PasswordInputProps) {
+/**
+ * A full-width password field with a show / hide toggle.
+ *
+ * Fills whatever the caller puts it in and carries no margin of its own, so
+ * the form decides the spacing. It also no longer hard-codes an element id:
+ * the password-setup page renders two of these, and two elements sharing an
+ * id is invalid markup that confuses assistive technology.
+ */
+export default function PasswordInput({ TextFieldProps }: PasswordInputProps) {
   const [showPassword, setShowPassword] = React.useState(false);
 
-  const handleClickShowPassword = () => setShowPassword((show) => !show);
-
-  const handleMouseDownPassword = (
-    event: React.MouseEvent<HTMLButtonElement>
-  ) => {
-    event.preventDefault();
-  };
+  const toggle = () => setShowPassword((show) => !show);
 
   return (
-    <FormControl sx={{ mt: 1 }} variant='outlined' {...FormControlProps}>
-      <TextField
-        label='Admin Password'
-        id='outlined-start-adornment'
-        size={'small'}
-        sx={{ m: 1 }}
-        autoComplete={'current-password'}
-        name={'password'}
-        type={showPassword ? 'text' : 'password'}
-        {...TextFieldProps}
-        InputProps={{
+    <TextField
+      label={'Admin Password'}
+      autoComplete={'current-password'}
+      name={'password'}
+      fullWidth
+      type={showPassword ? 'text' : 'password'}
+      {...TextFieldProps}
+      slotProps={{
+        ...TextFieldProps?.slotProps,
+        input: {
           endAdornment: (
-            <InputAdornment position='end'>
+            <InputAdornment position={'end'}>
               <IconButton
-                aria-label='toggle password visibility'
-                onClick={handleClickShowPassword}
-                onMouseDown={handleMouseDownPassword}
-                edge='end'
+                aria-label={showPassword ? 'Hide password' : 'Show password'}
+                onClick={toggle}
+                // Keeps focus in the field so toggling never drops the caret.
+                onMouseDown={(e) => e.preventDefault()}
+                edge={'end'}
               >
                 {showPassword ? <VisibilityOff /> : <Visibility />}
               </IconButton>
             </InputAdornment>
           ),
-          ...TextFieldProps?.InputProps,
-        }}
-      />
-    </FormControl>
+          ...TextFieldProps?.slotProps?.input,
+        },
+      }}
+    />
   );
 }
