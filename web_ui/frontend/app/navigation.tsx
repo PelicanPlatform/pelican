@@ -174,7 +174,12 @@ const NavigationConfig: NavigationConfiguration = {
     {
       title: 'Add',
       icon: <Add />,
-      allowedRoles: ['admin'],
+      // Registration is open to any signed-in caller, not just admins:
+      // POST /registry_ui/namespaces carries AuthHandler alone (admin is
+      // required only to approve, deny or delete), and the three forms below
+      // admit any logged-in user. Gating this to admins hid the only link to
+      // them from the people they exist for.
+      requiresLogin: true,
       children: [
         {
           // A namespace is a hierarchy, not a directory -- and `FolderOpen`
@@ -230,9 +235,14 @@ const NavigationConfig: NavigationConfiguration = {
       group: 'Data',
       items: [
         {
+          // Admin-only, matching the page: /origin/client/ wraps its whole
+          // body in AuthenticatedContent allowedRoles={['admin']}. Without
+          // this the rail offered every signed-in caller a link to a
+          // privileges wall.
           title: 'Object Browser',
           href: '/origin/client/',
           icon: <FolderOpen />,
+          allowedRoles: ['admin'],
         },
         {
           // The two collection views are the same list under different
@@ -274,11 +284,19 @@ const NavigationConfig: NavigationConfiguration = {
         {
           // Listed twice before this cleanup -- once ungated and once
           // admin-only -- so admins saw the same destination rendered as two
-          // identical icons four slots apart. Deduplicated to the ungated
-          // entry, which is the one that decided who actually saw the link.
+          // identical icons four slots apart. Deduplicated, then gated to
+          // match the server rather than either original entry.
+          //
+          // The page itself carries no gate; what it needs is the
+          // monitoring.query scope, which is what /prometheus/query (its only
+          // data source) demands once Monitoring.PromQLAuthorization is on --
+          // the default. Ungated, the rail offered every signed-in caller a
+          // page that renders and then fails every query.
           title: 'Metrics',
           href: '/origin/metrics/',
           icon: <Insights />,
+          allowedRoles: ['admin'],
+          anyScopes: ['monitoring.query'],
         },
         {
           // Origin downtime exists so the Director can route around this
@@ -324,6 +342,11 @@ const NavigationConfig: NavigationConfiguration = {
       exactMatch: true,
     },
     {
+      // Admin-only, unlike the origin and cache Metrics entries, which also
+      // admit monitoring.query holders. Not an oversight: this page wraps
+      // itself in AuthenticatedContent allowedRoles={['admin']}, so a scope
+      // holder shown the link would meet a wall. Widen the page first, then
+      // this.
       title: 'Metrics',
       href: '/director/metrics/',
       icon: <Insights />,
@@ -345,24 +368,47 @@ const NavigationConfig: NavigationConfiguration = {
       exactMatch: true,
     },
     {
+      // Same rule as the origin's Metrics: the page carries no gate of its
+      // own, and its only data source is /prometheus/query, so the scope is
+      // what actually decides. Admin-only before this, which hid it from a
+      // user deliberately granted monitoring.query.
       title: 'Metrics',
       href: '/cache/metrics/',
       icon: <Insights />,
       allowedRoles: ['admin'],
+      anyScopes: ['monitoring.query'],
     },
     { title: 'Downtime', href: '/cache/downtime/', icon: <EventBusy /> },
     Access,
     Server,
   ],
+  // Every destination here is admin-only, and none of them said so. All three
+  // pages wrap their whole body in AuthenticatedContent
+  // allowedRoles={['admin']}, so a signed-in non-admin was shown a rail of
+  // three items and met a privileges wall on each -- the entire module was a
+  // dead end. Unlike the other modules, there is nothing left for them to see
+  // here afterwards; if Transfer should have a non-admin view, that belongs in
+  // the pages (see /origin/'s NonAdminHome), not in a looser rail.
   transfer: [
     {
       title: 'Dashboard',
       href: '/transfer/',
       icon: <Dashboard />,
       exactMatch: true,
+      allowedRoles: ['admin'],
     },
-    { title: 'Jobs', href: '/transfer/jobs/', icon: <SwapHoriz /> },
-    { title: 'Credentials', href: '/transfer/credentials/', icon: <Key /> },
+    {
+      title: 'Jobs',
+      href: '/transfer/jobs/',
+      icon: <SwapHoriz />,
+      allowedRoles: ['admin'],
+    },
+    {
+      title: 'Credentials',
+      href: '/transfer/credentials/',
+      icon: <Key />,
+      allowedRoles: ['admin'],
+    },
     // Transfer's Config and Settings entries carried no role gate, unlike
     // every other module's. The Settings shell redirects non-admins away, so
     // the ungated links only ever offered a door that closes on you; the
