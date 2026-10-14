@@ -1,21 +1,29 @@
-import { merge } from 'lodash';
+'use client';
 
-import Config from './Config';
-import _metadata from '@/public/data/parameters.json';
-import { ParameterMetadataList } from '@/components/configuration';
+// The configuration editor used to live at /config; it's been moved under
+// /settings/config (it is an administration page, and the Settings shell is
+// where the administration menu lives). This page exists only to redirect
+// anyone with a stale bookmark.
 
-const getMetadata = async () => {
-  const metadataList = _metadata as unknown as ParameterMetadataList;
-  const visibleMetadataList = metadataList.filter(
-    (metadata) => !Object.values(metadata)[0].hidden
+import React, { useEffect } from 'react';
+import { useRouter } from 'next/navigation';
+import { Box, CircularProgress, Stack, Typography } from '@mui/material';
+
+const Page = () => {
+  const router = useRouter();
+  useEffect(() => {
+    router.replace('/settings/config/');
+  }, [router]);
+  return (
+    <Box display='flex' justifyContent='center' p={6}>
+      <Stack spacing={2} alignItems='center'>
+        <CircularProgress size={24} />
+        <Typography variant='body2' color='text.secondary'>
+          Configuration has moved. Redirecting to /settings/config/…
+        </Typography>
+      </Stack>
+    </Box>
   );
-  // @ts-ignore
-  return merge(...visibleMetadataList);
-};
-
-const Page = async () => {
-  const metadata = await getMetadata();
-  return <Config metadata={metadata} />;
 };
 
 export default Page;

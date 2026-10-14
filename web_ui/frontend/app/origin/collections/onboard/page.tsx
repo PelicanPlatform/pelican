@@ -245,7 +245,7 @@ const Page = () => (
   // Admit on EITHER role==='admin' OR the explicit scope so a system
   // admin always lands on the form regardless of how their effective
   // scope set was computed, and a non-admin holding only the targeted
-  // scope still gets in. Same pattern used by /settings/users.
+  // scope still gets in. Same pattern used by /users.
   <AuthenticatedContent
     redirect={true}
     allowedRoles={['admin']}
@@ -1605,7 +1605,7 @@ const ResultPanel: React.FC<{
             {result.owner.userId && (
               <Box ml='auto'>
                 <Link
-                  href={`/settings/users/edit/?id=${encodeURIComponent(result.owner.userId)}`}
+                  href={`/users/edit/?id=${encodeURIComponent(result.owner.userId)}`}
                 >
                   <Button size='small'>Manage user</Button>
                 </Link>

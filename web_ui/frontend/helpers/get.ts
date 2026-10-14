@@ -11,7 +11,7 @@ import {
   getDirectorServers as getDirectorServersResponse,
   getNamespaces,
 } from '@/helpers/api';
-import { flattenObject } from '@/app/config/util';
+import { flattenObject } from '@/app/settings/config/util';
 import {
   DirectorNamespace,
   WellKnownConfiguration,
