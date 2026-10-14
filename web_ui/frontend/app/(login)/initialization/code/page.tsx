@@ -18,10 +18,11 @@
 
 'use client';
 
-import { Box, Typography } from '@mui/material';
+import { Stack } from '@mui/material';
 import { useRouter } from 'next/navigation';
 import { useContext, useState } from 'react';
 
+import AuthPanel from '../../components/AuthPanel';
 import CodeInput, { Code } from '../../components/CodeInput';
 import LoadingButton from '../../components/LoadingButton';
 import { initLogin } from '@/helpers/api';
@@ -74,33 +75,24 @@ export default function Home() {
   }
 
   return (
-    <>
-      <Box m={'auto'} mt={12} display={'flex'} flexDirection={'column'}>
-        <Box>
-          <Typography textAlign={'center'} variant={'h3'} component={'h3'}>
-            Activate Website
-          </Typography>
-          <Typography textAlign={'center'} variant={'h6'} component={'p'}>
-            Enter the activation code displayed on the command line
-          </Typography>
-        </Box>
-        <Box pt={3} mx={'auto'}>
-          <form onSubmit={onSubmit} action='#'>
-            <CodeInput setCode={setCode} length={6} />
-            <Box mt={2} display={'flex'} flexDirection={'column'}>
-              <LoadingButton
-                variant='outlined'
-                sx={{ margin: 'auto' }}
-                color={'primary'}
-                type={'submit'}
-                loading={loading}
-              >
-                <span>Activate</span>
-              </LoadingButton>
-            </Box>
-          </form>
-        </Box>
-      </Box>
-    </>
+    <AuthPanel
+      title={'Activate Website'}
+      description={'Enter the activation code displayed on the command line'}
+    >
+      <form onSubmit={onSubmit} action='#'>
+        <Stack spacing={3}>
+          <CodeInput setCode={setCode} length={6} />
+          <LoadingButton
+            variant='contained'
+            size='large'
+            fullWidth
+            type={'submit'}
+            loading={loading}
+          >
+            <span>Activate</span>
+          </LoadingButton>
+        </Stack>
+      </form>
+    </AuthPanel>
   );
 }
