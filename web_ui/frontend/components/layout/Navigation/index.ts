@@ -1,62 +1,41 @@
-import { ServerType, User } from '@/index';
-import { ReactNode } from 'react';
-import { ExportRes } from '@/components/DataExportTable';
-
 export { Navigation } from './Navigation';
 
-export type NavigationConfiguration = {
-  [key in ServerType | 'shared' | 'settings']: StaticNavigationItemProps[];
-};
+export { isActive } from './isActive';
 
-export type StaticNavigationItemProps =
-  | StaticNavigationParentItemProps
-  | StaticNavigationChildItemProps;
+export { useRailCollapsed } from './useRailCollapsed';
 
-export type StaticNavigationBaseItemProps = {
-  title: string | (() => string);
-  icon: ReactNode;
-  showTitle?: boolean;
-  allowedRoles?: User['role'][];
-  // anyScopes lets a nav item show for callers holding any of these
-  // effective scopes, in addition to allowedRoles. Either matching
-  // makes the item visible (logical OR with allowedRoles).
-  anyScopes?: string[];
-  allowedExportTypes?: ExportRes['type'][];
-  // federationOnly hides the item on a server that belongs to no federation
-  // (see ServerInfo.standaloneOrigin). Use it for pages whose only consumer is
-  // a Director or Registry -- rendering them standalone would offer the admin
-  // a control that can never take effect.
-  federationOnly?: boolean;
-};
+export { SubNavigation } from './SubNavigation';
 
-export type StaticNavigationChildItemProps = StaticNavigationBaseItemProps & {
-  href: string | (() => string);
-};
+export {
+  NavigationShellProvider,
+  useNavigationShell,
+  useRailMetrics,
+} from './NavigationShellProvider';
 
-export type StaticNavigationParentItemProps = StaticNavigationBaseItemProps & {
-  children: StaticNavigationItemProps[];
-};
+export {
+  RAIL_WIDTH,
+  RAIL_WIDTH_COLLAPSED,
+  RAIL_WIDTH_EXPANDED,
+  RAIL_LABEL_DISPLAY,
+} from './constants';
 
-export type NavigationItemProps = {
-  exportType?: ExportRes['type'];
-  role?: User['role'];
-  // scopes carries the caller's effective scope set so nav items marked
-  // with anyScopes can override an otherwise role-based rejection. Empty /
-  // undefined means "no scope-based override is possible for this caller".
-  scopes?: string[];
-  config: StaticNavigationItemProps;
-};
+export {
+  hasVisibleItem,
+  isNavigationGroup,
+  isNavigationItem,
+  isVisible,
+} from './navigationVisibility';
 
-export type NavigationProps = {
-  exportType?: ExportRes['type'];
-  role?: User['role'];
-  scopes?: string[];
-  config: StaticNavigationItemProps[];
-  // topOffset (px) is the vertical space reserved above the navigation
-  // by an out-of-flow banner sitting at the top of the viewport (e.g.
-  // the admin-session banner). The sidebar's fixed positioning ignores
-  // its parent's padding, so the offset has to be threaded down to the
-  // sidebar/appbar themselves and applied to their own `top` /
-  // `height: calc(100vh - <offset>)` rules.
-  topOffset?: number;
-};
+export type { NavigationViewer } from './navigationVisibility';
+
+export type {
+  NavigationConfiguration,
+  NavigationEntry,
+  NavigationGroupProps,
+  NavigationItemProps,
+  NavigationProps,
+  StaticNavigationBaseItemProps,
+  StaticNavigationChildItemProps,
+  StaticNavigationItemProps,
+  StaticNavigationParentItemProps,
+} from './Navigation.types';

@@ -20,7 +20,7 @@ import { Box, Grid } from '@mui/material';
 import { Main } from '@/components/layout/Main';
 import { PaddedContent } from '@/components/layout';
 import { Navigation } from '@/components/layout/Navigation';
-import SubNavigation from '@/app/settings/components/SubNavigation';
+import { SubNavigation } from '@/components/layout/Navigation';
 import AuthenticatedContent from '@/components/layout/AuthenticatedContent';
 import { SettingsShellScopes } from '@/app/navigation';
 
@@ -56,7 +56,12 @@ export default function RootLayout({
         >
           <PaddedContent>
             <Grid container spacing={2}>
-              <Grid size={'auto'}>
+              {/*
+                Full width below lg, where the sub-navigation renders as a
+                horizontal tab strip above the content; shrink-to-fit once
+                the content column below leaves room for it alongside.
+              */}
+              <Grid size={{ xs: 12, lg: 'auto' }}>
                 <SubNavigation />
               </Grid>
               <Grid
