@@ -35,8 +35,6 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"gorm.io/gorm"
-
-	"github.com/pelicanplatform/pelican/param"
 )
 
 const (
@@ -104,13 +102,6 @@ func liveUserIDs(t *testing.T, db *gorm.DB, username string) []string {
 		}
 	}
 	return ids
-}
-
-func setExternalWebURL(t *testing.T, url string) {
-	t.Helper()
-	prev := param.Server_ExternalWebUrl.GetString()
-	t.Cleanup(func() { require.NoError(t, param.Server_ExternalWebUrl.Set(prev)) })
-	require.NoError(t, param.Server_ExternalWebUrl.Set(url))
 }
 
 // readColumnByID returns id -> column for every row of table.
@@ -524,45 +515,4 @@ func TestPrepareForGlobalUniqueUsernamesFromPreSoftDeleteSchema(t *testing.T) {
 		require.NoError(t, prepareForGlobalUniqueUsernames(sqlDB, db))
 		assert.Equal(t, []userState{{"a1", true}, {"a2", false}, {"a3", true}}, readUserStates(t, db, "admin"))
 	})
-}
-
-// After the migrations, the admin rule runs at every startup: an "admin"
-// row left under an old ExternalWebUrl is deleted like any account
-// (memberships included), its keys keep pointing at it and so carry no
-// scopes, and the bootstrap mints the row for the current URL. A second
-// run finds nothing to do.
-func TestRetireNonLocalAdminRowsAtStartup(t *testing.T) {
-	db, sqlDB := migrateToVersion(t, versionBeforeGlobalUniqueUsername(t))
-	finishMigrations(t, sqlDB)
-
-	setExternalWebURL(t, dedupOldIssuer)
-	require.NoError(t, BootstrapAdminAndBackfillOwners(db))
-	old, err := BuiltinAdminUser(db)
-	require.NoError(t, err)
-	require.NotNil(t, old)
-	insertGroupWithMembers(t, db, "ops", old.ID)
-	insertLegacyAPIKey(t, db, "k-old", old.ID, "2026-02-01 00:00:00")
-
-	// The server moves to a new URL.
-	setExternalWebURL(t, dedupLocalIssuer)
-	require.NoError(t, retireNonLocalAdminRowsAtStartup(db))
-	assert.Equal(t, []userState{{old.ID, true}}, readUserStates(t, db, "admin"))
-	assert.Empty(t, groupMemberIDs(t, db, "ops"))
-	assert.Equal(t, old.ID, readColumnByID(t, db, "api_keys", "created_by")["k-old"],
-		"the key is not re-attributed; its creator is gone, so it carries no scopes")
-
-	require.NoError(t, BootstrapAdminAndBackfillOwners(db))
-	fresh, err := BuiltinAdminUser(db)
-	require.NoError(t, err)
-	require.NotNil(t, fresh)
-	assert.NotEqual(t, old.ID, fresh.ID)
-	assert.Equal(t, dedupLocalIssuer, fresh.Issuer)
-
-	require.NoError(t, retireNonLocalAdminRowsAtStartup(db))
-	assert.ElementsMatch(t, []userState{{old.ID, true}, {fresh.ID, false}}, readUserStates(t, db, "admin"))
-
-	// Unset URL: nothing happens, as with the bootstrap itself.
-	setExternalWebURL(t, "")
-	require.NoError(t, retireNonLocalAdminRowsAtStartup(db))
-	assert.Equal(t, []string{fresh.ID}, liveUserIDs(t, db, "admin"))
 }

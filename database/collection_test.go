@@ -27,6 +27,8 @@ import (
 	"github.com/stretchr/testify/require"
 	"golang.org/x/crypto/bcrypt"
 	"gorm.io/gorm"
+
+	"github.com/pelicanplatform/pelican/param"
 )
 
 func setupCollectionTestDB(t *testing.T) *gorm.DB {
@@ -387,4 +389,83 @@ func TestRedeemCollectionOwnershipInviteLink_GroupCascade(t *testing.T) {
 		assert.Equal(t, "third-party", afterGrp.OwnerID,
 			"a group already re-homed to a third party must NOT be yanked back by a downstream collection transfer")
 	})
+}
+
+// setExternalWebURL points Server.ExternalWebUrl at url for the rest of
+// the test.
+func setExternalWebURL(t *testing.T, url string) {
+	t.Helper()
+	prev := param.Server_ExternalWebUrl.GetString()
+	t.Cleanup(func() { require.NoError(t, param.Server_ExternalWebUrl.Set(prev)) })
+	require.NoError(t, param.Server_ExternalWebUrl.Set(url))
+}
+
+// adminRows returns the IDs of every "admin" row, live and tombstoned.
+func adminRows(t *testing.T, db *gorm.DB) (live, tombstoned []string) {
+	t.Helper()
+	var users []User
+	require.NoError(t, db.Unscoped().Where("username = ?", builtinAdminUsername).Order("id").Find(&users).Error)
+	for _, u := range users {
+		if u.DeletedAt.Valid {
+			tombstoned = append(tombstoned, u.ID)
+		} else {
+			live = append(live, u.ID)
+		}
+	}
+	return live, tombstoned
+}
+
+// The admin rule at every startup: an "admin" row left under an old
+// ExternalWebUrl is deleted like any account (memberships included), its
+// API keys keep pointing at it and so carry no scopes, and the bootstrap
+// mints the row for the current URL. A second run finds nothing to do,
+// and an unset URL disables the rule as it disables the bootstrap.
+func TestRetireNonLocalAdminRowsAtStartup(t *testing.T) {
+	const oldURL = "https://old-origin.example.test"
+	const newURL = "https://origin.example.test"
+	version, err := globalUniqueUsernameMigrationVersion()
+	require.NoError(t, err)
+	db, sqlDB := migrateToVersion(t, version)
+	finishMigrations(t, sqlDB)
+
+	setExternalWebURL(t, oldURL)
+	require.NoError(t, BootstrapAdminAndBackfillOwners(db))
+	old, err := BuiltinAdminUser(db)
+	require.NoError(t, err)
+	require.NotNil(t, old)
+	require.NoError(t, db.Create(&Group{ID: "ops", Name: "ops", CreatedBy: CreatorUnknown}).Error)
+	require.NoError(t, db.Create(&GroupMember{GroupID: "ops", UserID: old.ID, AddedBy: CreatorUnknown}).Error)
+	require.NoError(t, db.Exec(
+		"INSERT INTO api_keys (id, name, hashed_value, created_at, created_by) VALUES ('k-old', 'k-old', 'x', '2026-02-01 00:00:00', ?)",
+		old.ID).Error)
+
+	// The server moves to a new URL.
+	setExternalWebURL(t, newURL)
+	require.NoError(t, retireNonLocalAdminRowsAtStartup(db))
+	live, tombstoned := adminRows(t, db)
+	assert.Empty(t, live)
+	assert.Equal(t, []string{old.ID}, tombstoned)
+	var members []GroupMember
+	require.NoError(t, db.Where("group_id = ?", "ops").Find(&members).Error)
+	assert.Empty(t, members)
+	var createdBy string
+	require.NoError(t, db.Raw("SELECT created_by FROM api_keys WHERE id = 'k-old'").Scan(&createdBy).Error)
+	assert.Equal(t, old.ID, createdBy, "the API key is not re-attributed; its creator is gone, so it carries no scopes")
+
+	require.NoError(t, BootstrapAdminAndBackfillOwners(db))
+	fresh, err := BuiltinAdminUser(db)
+	require.NoError(t, err)
+	require.NotNil(t, fresh)
+	assert.NotEqual(t, old.ID, fresh.ID)
+	assert.Equal(t, newURL, fresh.Issuer)
+
+	require.NoError(t, retireNonLocalAdminRowsAtStartup(db))
+	live, tombstoned = adminRows(t, db)
+	assert.Equal(t, []string{fresh.ID}, live)
+	assert.Equal(t, []string{old.ID}, tombstoned)
+
+	setExternalWebURL(t, "")
+	require.NoError(t, retireNonLocalAdminRowsAtStartup(db))
+	live, _ = adminRows(t, db)
+	assert.Equal(t, []string{fresh.ID}, live)
 }
