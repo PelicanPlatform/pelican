@@ -28,6 +28,7 @@ import type {
   StaticNavigationItemProps,
   StaticNavigationParentItemProps,
 } from '../Navigation.types';
+import { NAV_SELECTED_SX } from '../constants';
 import { isActive } from '../isActive';
 import { isNavigationItem, isVisible } from '../navigationVisibility';
 import { useNavigationShell, useRailMetrics } from '../NavigationShellProvider';
@@ -281,11 +282,7 @@ const NavigationChildItem = ({
           borderRadius: 1,
           py: 0.75,
           color: 'text.secondary',
-          '&.Mui-selected': {
-            bgcolor: 'primary.light',
-            color: 'primary.dark',
-            '&:hover': { bgcolor: 'primary.light' },
-          },
+          ...NAV_SELECTED_SX,
         }}
       >
         <ListItemIcon sx={{ minWidth: 34, color: 'inherit' }}>

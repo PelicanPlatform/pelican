@@ -13,6 +13,8 @@ export {
 } from './NavigationShellProvider';
 
 export {
+  NAV_GROUP_SUBHEADER_SX,
+  NAV_SELECTED_SX,
   RAIL_WIDTH,
   RAIL_WIDTH_COLLAPSED,
   RAIL_WIDTH_EXPANDED,

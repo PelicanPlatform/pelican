@@ -24,6 +24,8 @@ import {
   NavigationGroupProps,
   NavigationItemProps,
   NavigationViewer,
+  NAV_GROUP_SUBHEADER_SX,
+  NAV_SELECTED_SX,
   StaticNavigationChildItemProps,
   StaticNavigationItemProps,
   StaticNavigationParentItemProps,
@@ -68,14 +70,7 @@ export const NavigationGroup = ({
       <ListSubheader
         component={'div'}
         disableSticky
-        sx={{
-          bgcolor: 'transparent',
-          color: 'text.secondary',
-          fontSize: '0.7rem',
-          fontWeight: 600,
-          letterSpacing: '0.08em',
-          textTransform: 'uppercase',
-        }}
+        sx={NAV_GROUP_SUBHEADER_SX}
       >
         {group.group}
       </ListSubheader>
@@ -137,13 +132,7 @@ const NavigationChildItem = ({
         onClick={onClose}
         selected={active}
         aria-current={active ? 'page' : undefined}
-        sx={{
-          '&.Mui-selected': {
-            bgcolor: 'primary.light',
-            color: 'primary.dark',
-            '&:hover': { bgcolor: 'primary.light' },
-          },
-        }}
+        sx={NAV_SELECTED_SX}
       >
         <ListItemIcon sx={{ color: 'inherit' }}>{icon}</ListItemIcon>
         <ListItemText

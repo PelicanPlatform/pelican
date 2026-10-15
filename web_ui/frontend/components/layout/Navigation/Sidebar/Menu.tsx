@@ -53,11 +53,20 @@ const NavigationMenu = ({ config, viewer }: NavigationMenuProps) => {
   const childActive = containsActive(config.children, pathname);
 
   // Open when you are already somewhere inside the section, so the rail shows
-  // where you are without having to be told.
+  // where you are without having to be told. Only the in-place expansion does
+  // this: the flyout used while the rail is icon-only is modal, so opening it
+  // uninvited would drop a backdrop over the page just navigated to -- and on
+  // the first collapsed render its anchor ref is not yet attached, which
+  // would leave the menu unanchored at the viewport corner. The flyout opens
+  // by click alone, and closes whenever the rail collapses under it.
   const [open, setOpen] = useState(childActive);
   useEffect(() => {
-    if (childActive) setOpen(true);
-  }, [childActive]);
+    if (railCollapsed) {
+      setOpen(false);
+    } else if (childActive) {
+      setOpen(true);
+    }
+  }, [childActive, railCollapsed]);
 
   const buttonId = `${label}-menu-button`;
   const menuId = `${label}-menu`;
