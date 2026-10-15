@@ -12,6 +12,7 @@ import {
 import Link from 'next/link';
 
 import {
+  NAV_SELECTED_SX,
   useRailMetrics,
   useRailCollapsed,
 } from '@/components/layout/Navigation';
@@ -102,11 +103,7 @@ export const RailItemButton = forwardRef<HTMLDivElement, RailItemButtonProps>(
         // Material's navigation rail.
         borderRadius: 100,
         color: 'text.secondary',
-        '&.Mui-selected': {
-          bgcolor: 'primary.light',
-          color: 'primary.dark',
-          '&:hover': { bgcolor: 'primary.light' },
-        },
+        ...NAV_SELECTED_SX,
       },
       ...props,
     };

@@ -59,22 +59,26 @@ const Navigation = ({
   }
 
   const { data: user, error: userError } = useSWR('getUser', getUser);
-  // /origin_ui/exports is admin-gated server-side (it returns storage
-  // credentials and registry edit-URL tokens), so non-admins would
-  // 403 every time the navigation mounts. Skip the fetch entirely for
-  // them. The only nav item that branches on the response is Globus
-  // Configurations, which is admin-only anyway (see allowedRoles in
-  // app/navigation.tsx).
-  const { data: exports, error: exportsError } = useSWR(
-    user?.role === 'admin' ? 'getDataExport' : null,
-    getExportData,
-    { errorRetryCount: 0 }
-  );
   const { data: serverInfo, error: serverInfoError } = useSWR(
     'getServerInfo',
     getServerInfo
   );
   const servers = serverInfo?.servers;
+  const runsOrigin = !!servers?.includes('origin');
+
+  // /origin_ui/exports is admin-gated server-side (it returns storage
+  // credentials and registry edit-URL tokens), so non-admins would
+  // 403 every time the navigation mounts. Skip the fetch entirely for
+  // them. It is also origin-only: the sole nav item that branches on the
+  // response is the origin rail's Globus Configurations (admin-only too;
+  // see allowedRoles in app/navigation.tsx), so on a director, registry,
+  // cache, or transfer server the request could only ever fail -- and
+  // `resolved` below would hold the whole rail in skeleton while it did.
+  const { data: exports, error: exportsError } = useSWR(
+    user?.role === 'admin' && runsOrigin ? 'getDataExport' : null,
+    getExportData,
+    { errorRetryCount: 0 }
+  );
 
   // Everything the visibility rules consult arrives over the network, so until
   // all of it has landed the navigation cannot know which destinations belong
@@ -86,15 +90,18 @@ const Navigation = ({
   // Resolved, not merely finished loading -- an errored fetch has still
   // answered the question, and the rules read an unknown as "not admitted".
   // The exports request is the reason this can't be a single isLoading flag:
-  // its key only becomes non-null once /whoami has named an admin, so a
-  // fetch-state reading of it is momentarily "idle" before it is "loading",
-  // and the rail would flash its full list in between.
+  // its key only becomes non-null once /whoami has named an admin and
+  // /servers has named an origin, so a fetch-state reading of it is
+  // momentarily "idle" before it is "loading", and the rail would flash its
+  // full list in between. The wait applies only where the fetch does: an
+  // admin on a server with no origin module has nothing to wait for.
   const resolved =
     (user !== undefined || userError !== undefined) &&
+    (serverInfo !== undefined || serverInfoError !== undefined) &&
     (user?.role !== 'admin' ||
+      !runsOrigin ||
       exports !== undefined ||
-      exportsError !== undefined) &&
-    (serverInfo !== undefined || serverInfoError !== undefined);
+      exportsError !== undefined);
 
   // Handle navigation for shared pages
   // Best we can do is sending them to root if there are many running servers

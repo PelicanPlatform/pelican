@@ -28,3 +28,31 @@ export const RAIL_WIDTH = {
  * than the primary way a destination is named.
  */
 export const RAIL_LABEL_DISPLAY = { md: 'none', lg: 'block' };
+
+/**
+ * Material's active treatment for a navigation row. Every surface that marks
+ * the current destination -- the rail, the settings sub-navigation, and the
+ * phone drawer -- spreads this block into its row's sx, so a theme tweak to
+ * the selected look lands on all of them at once instead of having to be
+ * found three times.
+ */
+export const NAV_SELECTED_SX = {
+  '&.Mui-selected': {
+    bgcolor: 'primary.light',
+    color: 'primary.dark',
+    '&:hover': { bgcolor: 'primary.light' },
+  },
+} as const;
+
+/**
+ * The heading above a named cluster of destinations, shared by the rail and
+ * the phone drawer for the same reason as NAV_SELECTED_SX.
+ */
+export const NAV_GROUP_SUBHEADER_SX = {
+  bgcolor: 'transparent',
+  color: 'text.secondary',
+  fontSize: '0.7rem',
+  fontWeight: 600,
+  letterSpacing: '0.08em',
+  textTransform: 'uppercase',
+} as const;
