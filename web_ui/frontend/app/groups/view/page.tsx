@@ -23,7 +23,7 @@
 // project ships a static export (next.config.js: `output: 'export'`); Next 15
 // requires every dynamic segment to enumerate its params at build time, and
 // group IDs are user data that doesn't exist at build time. The rest of the
-// admin pages in this project (e.g. /settings/users/edit/) use the same
+// admin pages in this project (e.g. /users/edit/) use the same
 // query-string pattern for the same reason.
 
 import React, { Suspense } from 'react';

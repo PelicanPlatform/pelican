@@ -36,6 +36,7 @@ import {
   NavigationGroupProps,
   NavigationProps,
   NavigationViewer,
+  NAV_GROUP_SUBHEADER_SX,
   hasVisibleItem,
   isNavigationGroup,
   useNavigationShell,
@@ -188,12 +189,7 @@ const NavigationGroup = ({
         component={'div'}
         sx={{
           display: labelDisplay,
-          bgcolor: 'transparent',
-          color: 'text.secondary',
-          fontSize: '0.7rem',
-          fontWeight: 600,
-          letterSpacing: '0.08em',
-          textTransform: 'uppercase',
+          ...NAV_GROUP_SUBHEADER_SX,
           lineHeight: 1.8,
           px: 1.5,
           pt: 1.25,

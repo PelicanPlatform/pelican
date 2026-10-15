@@ -1,10 +1,6 @@
 import SettingHeader from '@/app/settings/components/SettingHeader';
 import View from '@/app/users/view';
 
-export const metadata = {
-  title: 'Users',
-};
-
 const Page = () => {
   return (
     <>
