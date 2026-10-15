@@ -146,7 +146,7 @@ jobs:
 
       - name: Upload the JUnit report for shared and client-specific code
         if: ${{ always() && hashFiles('junit-client.xml') != '' }}
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9  # v7.0.2
         with:
           name: junit-pelican-${{ runner.os }}
           path: junit-client.xml
@@ -154,7 +154,7 @@ jobs:
 
       - name: Upload the JUnit report for server-specific code
         if: ${{ always() && hashFiles('junit-server.xml') != '' }}
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9  # v7.0.2
         with:
           name: junit-pelican-server-${{ runner.os }}
           path: junit-server.xml
