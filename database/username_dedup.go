@@ -68,8 +68,9 @@ import (
 // mints the local row afterwards when none is left. No existing row is
 // ever adopted or re-keyed, so no heuristic about what a row "looks like"
 // is involved. The same rule runs after the migrations at every startup
-// (retireNonLocalAdminRowsAtStartup), so a later ExternalWebUrl change
-// heals itself the same way instead of locking password login out.
+// (retireNonLocalAdminRowsAtStartup, next to the bootstrap in
+// collection.go), so a later ExternalWebUrl change heals itself the same
+// way instead of locking password login out.
 //
 // Nothing that referenced a retired "admin" row is moved: server.admin
 // does not depend on ownership, and an API key's scopes are recomputed
@@ -119,10 +120,6 @@ import (
 // protectivePlaceholderSubPrefix marks user rows written by the
 // GHSA-rpfr-x88x-xwcw mitigation script (mitigate-user-escalation.sh).
 const protectivePlaceholderSubPrefix = "__PROTECTIVE_PLACEHOLDER__"
-
-// builtinAdminUsername is the literal the admin bootstrap keys on; see
-// BootstrapAdminAndBackfillOwners.
-const builtinAdminUsername = "admin"
 
 // globalUniqueUsernameMigrationSuffix is the file-name suffix of the
 // universal migration this cleanup must precede. Its version is read from
@@ -494,45 +491,4 @@ func dedupLiveUsernames(db *gorm.DB, localIssuer string) (int, error) {
 			"usernames are globally unique from this version on", deleted, builtinAdminUsername)
 	}
 	return deleted, nil
-}
-
-// retireNonLocalAdminRowsAtStartup applies the admin rule from the file
-// comment on the migrated schema, at every startup: any live "admin" row
-// whose issuer is not the current Server.ExternalWebUrl is deleted the way
-// DeleteUser deletes an account, so that BootstrapAdminAndBackfillOwners
-// can mint this server's own row. This is what makes a later
-// ExternalWebUrl change recover on its own instead of leaving password
-// login with a 500. API keys minted by the retired row keep pointing at
-// it and therefore carry no user scopes from now on; they are logged so
-// they can be re-minted. A no-op when ExternalWebUrl is unset, as the
-// bootstrap itself is.
-func retireNonLocalAdminRowsAtStartup(db *gorm.DB) error {
-	externalURL := param.Server_ExternalWebUrl.GetString()
-	if externalURL == "" {
-		return nil
-	}
-	var stale []User
-	if err := db.Where("username = ? AND issuer <> ?", builtinAdminUsername, externalURL).Find(&stale).Error; err != nil {
-		return errors.Wrap(err, "failed to list built-in admin rows under other issuers")
-	}
-	for _, u := range stale {
-		log.Warnf("Retiring %q row %s (sub %q, issuer %q): its issuer is not Server.ExternalWebUrl (%q), "+
-			"and the built-in admin is bootstrapped under that URL",
-			builtinAdminUsername, u.ID, u.Sub, u.Issuer, externalURL)
-		var keys []struct {
-			ID   string
-			Name string
-		}
-		if err := db.Raw("SELECT id, name FROM api_keys WHERE created_by = ?", u.ID).Scan(&keys).Error; err != nil {
-			return errors.Wrapf(err, "failed to list API keys created by %q row %s", builtinAdminUsername, u.ID)
-		}
-		for _, k := range keys {
-			log.Warnf("API key %s (%q) was created by the retired %q row %s and will carry no user scopes from now on. Re-mint it.",
-				k.ID, k.Name, builtinAdminUsername, u.ID)
-		}
-		if err := DeleteUser(db, u.ID, "", true); err != nil {
-			return errors.Wrapf(err, "failed to retire %q row %s", builtinAdminUsername, u.ID)
-		}
-	}
-	return nil
 }

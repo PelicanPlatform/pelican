@@ -2348,6 +2348,45 @@ func UpdateUser(db *gorm.DB, id string, username, sub, issuer *string) error {
 	return nil
 }
 
+// builtinAdminUsername is the username of the built-in admin account
+const builtinAdminUsername = "admin"
+
+// retireNonLocalAdminRowsAtStartup keeps the only live built-in "admin" row
+// up-to-date on this server's current issuer. At every startup: any live "admin" row
+// whose issuer is not the current Server.ExternalWebUrl is soft-deleted, then
+// BootstrapAdminAndBackfillOwners is called to create the new built-in admin row
+// on the current issuer.
+func retireNonLocalAdminRowsAtStartup(db *gorm.DB) error {
+	externalURL := param.Server_ExternalWebUrl.GetString()
+	if externalURL == "" {
+		return nil
+	}
+	var stale []User
+	if err := db.Where("username = ? AND issuer <> ?", builtinAdminUsername, externalURL).Find(&stale).Error; err != nil {
+		return fmt.Errorf("failed to list built-in admin rows under other issuers: %w", err)
+	}
+	for _, u := range stale {
+		log.Warnf("Retiring %q row %s (sub %q, issuer %q): its issuer is not Server.ExternalWebUrl (%q), "+
+			"and the built-in admin is bootstrapped under that URL",
+			builtinAdminUsername, u.ID, u.Sub, u.Issuer, externalURL)
+		var keys []struct {
+			ID   string
+			Name string
+		}
+		if err := db.Raw("SELECT id, name FROM api_keys WHERE created_by = ?", u.ID).Scan(&keys).Error; err != nil {
+			return fmt.Errorf("failed to list API keys created by %q row %s: %w", builtinAdminUsername, u.ID, err)
+		}
+		for _, k := range keys {
+			log.Warnf("API key %s (%q) was created by the retired %q row %s and will carry no user scopes from now on. Please re-create it.",
+				k.ID, k.Name, builtinAdminUsername, u.ID)
+		}
+		if err := DeleteUser(db, u.ID, "", true); err != nil {
+			return fmt.Errorf("failed to retire %q row %s: %w", builtinAdminUsername, u.ID, err)
+		}
+	}
+	return nil
+}
+
 // BootstrapAdminAndBackfillOwners ensures the built-in "admin" user
 // record exists and that every group has a real owner_id. Both are
 // runtime concerns (the admin's primary identity is keyed off
@@ -2371,7 +2410,7 @@ func BootstrapAdminAndBackfillOwners(db *gorm.DB) error {
 	//    historically created the row with sub == username == "admin"
 	//    and issuer == externalURL — so we follow the same shape.
 	var admin User
-	err := db.Where("username = ? AND issuer = ?", "admin", externalURL).First(&admin).Error
+	err := db.Where("username = ? AND issuer = ?", builtinAdminUsername, externalURL).First(&admin).Error
 	if errors.Is(err, gorm.ErrRecordNotFound) {
 		slug, slugErr := generateSlug()
 		if slugErr != nil {
@@ -2379,8 +2418,8 @@ func BootstrapAdminAndBackfillOwners(db *gorm.DB) error {
 		}
 		admin = User{
 			ID:        slug,
-			Username:  "admin",
-			Sub:       "admin",
+			Username:  builtinAdminUsername,
+			Sub:       builtinAdminUsername,
 			Issuer:    externalURL,
 			CreatedBy: CreatorSelfEnrolled,
 		}
@@ -2390,7 +2429,7 @@ func BootstrapAdminAndBackfillOwners(db *gorm.DB) error {
 			if !strings.Contains(createErr.Error(), "UNIQUE constraint failed") {
 				return createErr
 			}
-			if reErr := db.Where("username = ? AND issuer = ?", "admin", externalURL).First(&admin).Error; reErr != nil {
+			if reErr := db.Where("username = ? AND issuer = ?", builtinAdminUsername, externalURL).First(&admin).Error; reErr != nil {
 				return reErr
 			}
 		}
@@ -2686,7 +2725,7 @@ func BuiltinAdminUser(db *gorm.DB) (*User, error) {
 		return nil, nil
 	}
 	var admin User
-	err := db.Where("username = ? AND issuer = ?", "admin", externalURL).First(&admin).Error
+	err := db.Where("username = ? AND issuer = ?", builtinAdminUsername, externalURL).First(&admin).Error
 	if errors.Is(err, gorm.ErrRecordNotFound) {
 		return nil, nil
 	}
