@@ -133,6 +133,103 @@ jobs:
           echo "$HOME/minio-bin" >> "$GITHUB_PATH"
           echo "TEST_REQUIRE_MINIO=1" >> "$GITHUB_ENV"
 
+      - name: Run "go test"
+        env:
+          JUNIT_FILE: junit-${{ matrix.binary_name }}.xml
+        run: |
+          echo "::group::Building web UI"
+          make web-build
+          echo "::endgroup::"
+          # e2e_fed_tests and local_cache take longest, so start them first.
+          gotestsum \
+            --format pkgname-and-test-fails \
+            --hide-summary=output \
+            --junitfile "$JUNIT_FILE" \
+            -- \
+            -p=4 \
+            -timeout=${{ inputs.race_detection && '30m' || '15m' }} \
+            ${{ inputs.race_detection && '-race' || '' }} \
+            ${{ !inputs.race_detection && '-short' || '' }} \
+            ${{ !inputs.race_detection && '-coverpkg=./...' || '' }} \
+            ${{ !inputs.race_detection && '-covermode=count' || '' }} \
+            ${{ !inputs.race_detection && format('-coverprofile={0}', matrix.coverprofile) || '' }} \
+            -tags=${{ matrix.tags }} \
+            ./e2e_fed_tests \
+            ./local_cache \
+            ./...
+
+      - name: Upload JUnit report
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7.0.1
+        with:
+          name: junit-${{ matrix.binary_name }}-${{ runner.os }}
+          path: junit-${{ matrix.binary_name }}.xml
+          overwrite: true  # allow the workflow to be re-run, e.g., for flakey tests
+
+      - name: Publish JUnit summary
+        if: always()
+        uses: test-summary/action@37b508cfee6d4d080eedd00b5bb240a6a784a6a5  # v2.6
+        with:
+          paths: junit-${{ matrix.binary_name }}.xml
+
+      - name: Get total code coverage
+        if: github.event_name == 'pull_request'
+        id: cc
+        run: |
+          set -x
+          # Anchored to the summary line: an unanchored "total" also matches
+          # any function whose name contains it, which makes $GITHUB_OUTPUT
+          # multi-line and fails the step.
+          cc_total=`go tool cover -func=${{ matrix.coverprofile }} | grep -E '^total:' | grep -Eo '[0-9]+\.[0-9]+'`
+          echo "cc_total=$cc_total" >> $GITHUB_OUTPUT
+
+      - name: Add coverage information to action summary
+        if: github.event_name == 'pull_request'
+        run: echo 'Code coverage ${{ steps.cc.outputs.cc_total }}%' >> $GITHUB_STEP_SUMMARY
+
+  goreleaser:
+    name: Linux (GoReleaser, end-to-end)
+    runs-on: ubuntu-latest
+    container:
+      image: ${{ inputs.image }}
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          fetch-depth: 0  # GoReleaser needs history to look up the previous tag, and so on
+
+      - name: Mark the checkout as safe
+        # Because we're using a custom container image to run this workflow,
+        # we trigger Git's "dubious ownership" warning when trying to interact
+        # with the checkout, unless we mark it as "safe".
+        run: |
+          # NOTE: Refer to '${{ github.repository }}' in workflow step
+          # definitions, but '$GITHUB_WORKSPACE' in scripts.
+          git config --global --add safe.directory "$GITHUB_WORKSPACE"
+
+      - name: Set Go version
+        # Determine the string to use in setup-go's "go-version" input.
+        id: go-version
+        run: |
+          version=$(grep -E '^go[[:space:]]*[0-9]+\.[0-9]+' go.mod | grep -oE '[0-9]+\.[0-9]+')
+          echo "version=${version}.x" >> $GITHUB_OUTPUT
+
+      - name: Set up Go
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e  # v7.0.0
+        with:
+          go-version: "${{ steps.go-version.outputs.version }}"
+          check-latest: true
+
+      - name: Stub out the web UI
+        # The binaries embed web_ui/frontend/out, so it must exist,
+        # but nothing in this job needs the real web UI.
+        run: |
+          mkdir -p web_ui/frontend/out
+          touch web_ui/frontend/out/index.html
+
       - name: Generate GoReleaser config
         run: |
           ./scripts/generate_goreleaser.sh .goreleaser.in.yml .goreleaser.generated.yml
