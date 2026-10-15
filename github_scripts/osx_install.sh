@@ -23,6 +23,20 @@ set -ex
 
 brew install coreutils
 
+# Build every dependency below against OpenSSL 3. Newer macOS runner images
+# ship Homebrew's OpenSSL 4, where X509_NAME_get_entry() and
+# X509_NAME_ENTRY_get_data() return const pointers, and the XRootD we build
+# does not compile against that (XrdTls/XrdTlsNotaryUtils.icc). Left alone,
+# CMake's FindOpenSSL and pkg-config pick whichever OpenSSL the runner image
+# happens to have, so the job passed or failed depending on the image.
+# FindOpenSSL searches only OPENSSL_ROOT_DIR when it is set.
+brew install openssl@3
+OPENSSL_ROOT_DIR="$(brew --prefix openssl@3)"
+export OPENSSL_ROOT_DIR
+export PKG_CONFIG_PATH="$OPENSSL_ROOT_DIR/lib/pkgconfig${PKG_CONFIG_PATH:+:$PKG_CONFIG_PATH}"
+brew list --versions | grep -i openssl || true
+echo "Building dependencies against $("$OPENSSL_ROOT_DIR/bin/openssl" version) from $OPENSSL_ROOT_DIR"
+
 # Attempted fix to install xrootd-s3-http, which relies on a dependency (nlohmann-json)
 # that requires cmake 3.5...4.0. The version pointed at here is the highest 3.X at the time
 # of writing (2025-09-22).
