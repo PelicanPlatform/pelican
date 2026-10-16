@@ -72,10 +72,11 @@ import (
 // collection.go), so a later ExternalWebUrl change heals itself the same
 // way instead of locking password login out.
 //
-// Nothing that referenced a retired "admin" row is moved: server.admin
-// does not depend on ownership, and an API key's scopes are recomputed
-// from its creator row on every use, so keys minted by a retired admin
-// row fail closed and have to be re-minted. The retirement logs them.
+// Nothing else that referenced a retired "admin" row is moved, since
+// server.admin does not depend on ownership. API keys recorded under the
+// username "admin" are settled by the same rule as every other duplicated
+// username (below), with the local "admin" row, if there is one, as the
+// kept row.
 //
 // # Other usernames
 //
@@ -107,15 +108,12 @@ import (
 //   - collections.owner_id: 20260429000000 fills it while the duplicates
 //     are still live, so it may point at a losing row. Collections owned
 //     by a loser move to the survivor.
-//   - api_keys.created_by: 20260917110000 binds a key to the live row of
-//     that username created before the key. A key's scopes are recomputed
-//     from its creator on every use, so a key minted by a loser must not
-//     end up on the survivor. Only keys the survivor alone could have
-//     minted (created after the survivor's row and before the earliest
-//     losing row that could have had a session) are bound to it; every
-//     other key under that username is set to created_by = '' so it fails
-//     closed, and is logged so its owner can re-mint it. Placeholder rows
-//     never had a session, so they do not count as such a losing row.
+//   - api_keys.created_by: v7.26 recorded only the creator's username,
+//     and a key's scopes are recomputed from its creator on every use, so
+//     a key must reach the kept row only when no other holder of the name
+//     could have minted it. See bindOrClearAPIKeys. Every key under a
+//     duplicated username is bound or cleared here, so 20260917110000
+//     never has to interpret those keys.
 
 // protectivePlaceholderSubPrefix marks user rows written by the
 // GHSA-rpfr-x88x-xwcw mitigation script (mitigate-user-escalation.sh).
@@ -246,12 +244,6 @@ func rankLiveUserRows(rows []liveUserRow, localIssuer string) {
 	})
 }
 
-// sqliteTimestamp formats a time the way SQLite's date functions and the
-// migrations' text comparisons read it: UTC, second precision, no zone.
-func sqliteTimestamp(t time.Time) string {
-	return t.UTC().Format("2006-01-02 15:04:05")
-}
-
 // tombstoneUsers soft-deletes the given rows and removes their group
 // memberships, as DeleteUser does on the migrated schema. Group
 // memberships have been keyed by user ID since v7.26, so they would
@@ -298,7 +290,18 @@ func retireNonLocalAdminRows(tx *gorm.DB, localIssuer string, now time.Time) (in
 			"and the built-in admin is bootstrapped under that URL",
 			builtinAdminUsername, r.ID, r.Sub, r.Issuer, r.isPlaceholder(), localIssuer)
 	}
-	if err := warnAdminKeysLeftUnattributed(tx, localIssuer); err != nil {
+	var local []liveUserRow
+	if err := tx.Raw(`
+		SELECT id, username, sub, issuer, last_login_at, created_at
+		FROM users
+		WHERE username = ? AND deleted_at IS NULL AND issuer = ?`, builtinAdminUsername, localIssuer).Scan(&local).Error; err != nil {
+		return 0, errors.Wrap(err, "failed to look up the local built-in admin row")
+	}
+	var kept *liveUserRow
+	if len(local) > 0 {
+		kept = &local[0]
+	}
+	if err := bindOrClearAPIKeys(tx, builtinAdminUsername, kept, rows); err != nil {
 		return 0, err
 	}
 	if err := tombstoneUsers(tx, ids, now); err != nil {
@@ -307,89 +310,73 @@ func retireNonLocalAdminRows(tx *gorm.DB, localIssuer string, now time.Time) (in
 	return len(ids), nil
 }
 
-// warnAdminKeysLeftUnattributed names the API keys created under the
-// username "admin" that 20260917110000 will not be able to attribute to
-// the local admin row, because that row does not exist yet or was created
-// after the key. Those keys fail closed from then on. The comparison is
-// the migration's own text comparison, so the prediction matches it.
-func warnAdminKeysLeftUnattributed(tx *gorm.DB, localIssuer string) error {
-	var local []struct {
-		ID        string
-		CreatedAt string
-	}
-	if err := tx.Raw("SELECT id, created_at FROM users WHERE username = ? AND issuer = ? AND deleted_at IS NULL",
-		builtinAdminUsername, localIssuer).Scan(&local).Error; err != nil {
-		return errors.Wrap(err, "failed to look up the local built-in admin row")
-	}
-	query := "SELECT id, name FROM api_keys WHERE created_by = ?"
-	args := []interface{}{builtinAdminUsername}
-	if len(local) > 0 {
-		query += " AND created_at < ?"
-		args = append(args, local[0].CreatedAt)
-	}
-	var keys []struct {
+// bindOrClearAPIKeys settles the API keys recorded under username, which
+// in v7.26 is all api_keys.created_by held, when that username was shared
+// by several rows: kept is the row that stays (nil when none does) and
+// retired are the rows being soft-deleted.
+//
+// A key is bound to kept only if it was created at or after kept's row
+// and before the earliest retired row, placeholders included:
+//
+//   - v7.26 hard-deleted users but left their keys under the username, so
+//     a key older than kept's row came from an earlier holder of the name.
+//   - Any retired row that existed when a key was minted could have minted
+//     it. That includes placeholders: the placeholder test reads only the
+//     sub, which Issuer.OIDCSubjectClaim can take from a claim users
+//     control, and v7.26 records nothing else that proves a row never had
+//     a session.
+//
+// Every other key under the username gets an empty created_by, so it
+// fails closed. Each bound and cleared key is logged by ID and name. Both
+// bounds are read from users.created_at and compared with julianday() in
+// SQL, so mixed time zones in the stored text compare correctly, and a
+// timestamp SQLite cannot parse binds nothing.
+func bindOrClearAPIKeys(tx *gorm.DB, username string, kept *liveUserRow, retired []liveUserRow) error {
+	type apiKeyRef struct {
 		ID   string
 		Name string
 	}
-	if err := tx.Raw(query, args...).Scan(&keys).Error; err != nil {
-		return errors.Wrap(err, "failed to list API keys created by the built-in admin")
-	}
-	for _, k := range keys {
-		log.Warnf("API key %s (%q) was created under username %q before this server's own %q row existed; "+
-			"it cannot be attributed to that row and will carry no user scopes after the upgrade. Re-mint it.",
-			k.ID, k.Name, builtinAdminUsername, builtinAdminUsername)
-	}
-	return nil
-}
-
-// bindAPIKeysToSurvivor re-homes the API keys created under username
-// (a v7.26 created_by value) onto the survivor when the survivor alone
-// could have minted them, and clears the rest so they fail closed. See
-// the file comment.
-func bindAPIKeysToSurvivor(tx *gorm.DB, username string, survivor liveUserRow, losers []liveUserRow) error {
-	var cutoff *time.Time
-	for _, l := range losers {
-		if l.isPlaceholder() {
-			continue
+	if kept != nil {
+		retiredIDs := make([]string, 0, len(retired))
+		for _, r := range retired {
+			retiredIDs = append(retiredIDs, r.ID)
 		}
-		if cutoff == nil || l.CreatedAt.Before(*cutoff) {
-			c := l.CreatedAt
-			cutoff = &c
-		}
-	}
-
-	var bound *gorm.DB
-	if cutoff == nil {
-		// Only placeholders lost, and a placeholder never had a session,
-		// so every key under this username is the survivor's.
-		bound = tx.Exec("UPDATE api_keys SET created_by = ? WHERE created_by = ?", survivor.ID, username)
-	} else {
-		bound = tx.Exec(`UPDATE api_keys SET created_by = ?
+		query := `SELECT id, name FROM api_keys
 			WHERE created_by = ?
-			  AND julianday(created_at) >= julianday(?)
-			  AND julianday(created_at) < julianday(?)`,
-			survivor.ID, username, sqliteTimestamp(survivor.CreatedAt), sqliteTimestamp(*cutoff))
-	}
-	if bound.Error != nil {
-		return errors.Wrapf(bound.Error, "failed to bind API keys created by %q to user %s", username, survivor.ID)
-	}
-	if bound.RowsAffected > 0 {
-		log.Infof("Bound %d API key(s) created under username %q to user %s", bound.RowsAffected, username, survivor.ID)
+			  AND julianday(created_at) >= (SELECT julianday(created_at) FROM users WHERE id = ?)`
+		args := []interface{}{username, kept.ID}
+		if len(retiredIDs) > 0 {
+			query += `
+			  AND julianday(created_at) < (SELECT min(julianday(created_at)) FROM users WHERE id IN ?)
+			  AND NOT EXISTS (SELECT 1 FROM users WHERE id IN ? AND julianday(created_at) IS NULL)`
+			args = append(args, retiredIDs, retiredIDs)
+		}
+		var bound []apiKeyRef
+		if err := tx.Raw(query+" ORDER BY id", args...).Scan(&bound).Error; err != nil {
+			return errors.Wrapf(err, "failed to find API keys created by %q that belong to user %s", username, kept.ID)
+		}
+		if len(bound) > 0 {
+			boundIDs := make([]string, 0, len(bound))
+			for _, k := range bound {
+				boundIDs = append(boundIDs, k.ID)
+				log.Infof("API key %s (%q), created under username %q, is bound to user %s", k.ID, k.Name, username, kept.ID)
+			}
+			if err := tx.Exec("UPDATE api_keys SET created_by = ? WHERE id IN ?", kept.ID, boundIDs).Error; err != nil {
+				return errors.Wrapf(err, "failed to bind API keys created by %q to user %s", username, kept.ID)
+			}
+		}
 	}
 
-	var ambiguous []struct {
-		ID   string
-		Name string
-	}
-	if err := tx.Raw("SELECT id, name FROM api_keys WHERE created_by = ?", username).Scan(&ambiguous).Error; err != nil {
+	var cleared []apiKeyRef
+	if err := tx.Raw("SELECT id, name FROM api_keys WHERE created_by = ? ORDER BY id", username).Scan(&cleared).Error; err != nil {
 		return errors.Wrapf(err, "failed to list unattributable API keys created by %q", username)
 	}
-	if len(ambiguous) == 0 {
+	if len(cleared) == 0 {
 		return nil
 	}
-	for _, k := range ambiguous {
-		log.Warnf("API key %s (%q) was created under username %q while more than one account could use that name; "+
-			"it cannot be attributed to the surviving account and will carry no user scopes. Re-mint it.",
+	for _, k := range cleared {
+		log.Warnf("API key %s (%q) was created under username %q, which more than one account held; "+
+			"it cannot be attributed to the remaining account and will carry no user scopes. Re-mint it.",
 			k.ID, k.Name, username)
 	}
 	if err := tx.Exec("UPDATE api_keys SET created_by = '' WHERE created_by = ?", username).Error; err != nil {
@@ -472,7 +459,7 @@ func dedupLiveUsernames(db *gorm.DB, localIssuer string) (int, error) {
 				log.Infof("Moved %d collection(s) of username %q to user %s", owned.RowsAffected, username, survivor.ID)
 			}
 
-			if err := bindAPIKeysToSurvivor(tx, username, survivor, losers); err != nil {
+			if err := bindOrClearAPIKeys(tx, username, &survivor, losers); err != nil {
 				return err
 			}
 
