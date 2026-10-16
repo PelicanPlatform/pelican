@@ -18,13 +18,9 @@
 
 package database
 
-// Coverage for the startup cleanup that resolves usernames shared by
-// several live rows before *_global_unique_username.sql runs, and for the
-// rule that keeps the built-in admin bound to this server's URL (issue
-// #3824). Each test runs the real goose migrations up to the version
-// before that migration, seeds rows in the shapes seen in production,
-// runs the cleanup, then finishes the migrations to prove the unique
-// index can now be created.
+// Each test migrates to the version before the global-unique-username
+// migration, seeds the shapes seen in production (issue #3824), runs the
+// cleanup, then finishes the migrations.
 
 import (
 	"database/sql"
@@ -42,15 +38,11 @@ const (
 	dedupOldIssuer   = "https://old-origin.example.test"
 	dedupOIDCIssuer  = "https://cilogon.org"
 
-	// The base users table from 20250929190630: no last_login_at and no
-	// deleted_at yet, the shape of a database that skipped v7.26.
+	// The base users table: no last_login_at and no deleted_at yet.
 	versionWithBaseUsersTable = 20250929190630
-	// The last universal migration v7.26 ships.
-	versionV726 = 20260220120000
+	versionV726               = 20260220120000
 )
 
-// versionBeforeGlobalUniqueUsername is the migration the cleanup must run
-// after: the last one where UNIQUE(username, issuer) is the rule.
 func versionBeforeGlobalUniqueUsername(t *testing.T) int64 {
 	t.Helper()
 	version, err := globalUniqueUsernameMigrationVersion()
@@ -77,8 +69,7 @@ type userState struct {
 	deleted bool
 }
 
-// readUserStates returns every row for a username, live or tombstoned,
-// ordered by id.
+// readUserStates returns every row for a username, live or tombstoned.
 func readUserStates(t *testing.T, db *gorm.DB, username string) []userState {
 	t.Helper()
 	rows, err := db.Raw("SELECT id, deleted_at IS NOT NULL FROM users WHERE username = ? ORDER BY id", username).Rows()
@@ -149,9 +140,7 @@ func TestGlobalUniqueUsernameMigrationVersion(t *testing.T) {
 	require.NoError(t, err, "the resolved version must name an embedded migration")
 }
 
-// The director case: Server.ExternalWebUrl changed, so password login
-// created a second "admin" row under the new URL. The row matching the
-// current URL survives even though the stale row logged in more recently.
+// The director case: the row on the current URL wins over a stale one.
 func TestDedupLiveUsernamesKeepsRowMatchingExternalWebUrl(t *testing.T) {
 	db, sqlDB := migrateToVersion(t, versionBeforeGlobalUniqueUsername(t))
 	insertLegacyUser(t, db, legacyUser{id: "oldadmin", username: "admin", sub: "admin", issuer: dedupOldIssuer,
@@ -174,8 +163,6 @@ func TestDedupLiveUsernamesKeepsRowMatchingExternalWebUrl(t *testing.T) {
 	require.NoError(t, err)
 	assert.True(t, exists)
 
-	// The surviving row is the one the admin bootstrap looks up, so the
-	// bootstrap adopts it instead of trying to insert a colliding row.
 	setExternalWebURL(t, dedupLocalIssuer)
 	require.NoError(t, BootstrapAdminAndBackfillOwners(db))
 	admin, err := BuiltinAdminUser(db)
@@ -184,10 +171,7 @@ func TestDedupLiveUsernamesKeepsRowMatchingExternalWebUrl(t *testing.T) {
 	assert.Equal(t, "newadmin", admin.ID)
 }
 
-// The origin case from issue #3824: the GHSA-rpfr-x88x-xwcw mitigation
-// script reserved (admin, cilogon.org) with a placeholder sub. Neither
-// row has ever recorded a login; the local row survives and the
-// placeholder is tombstoned.
+// The origin case: GHSA-rpfr-x88x-xwcw placeholders lose.
 func TestDedupLiveUsernamesDropsProtectivePlaceholder(t *testing.T) {
 	db, sqlDB := migrateToVersion(t, versionBeforeGlobalUniqueUsername(t))
 	insertLegacyUser(t, db, legacyUser{id: "3facd6da", username: "admin", sub: "admin", issuer: dedupLocalIssuer,
@@ -195,10 +179,7 @@ func TestDedupLiveUsernamesDropsProtectivePlaceholder(t *testing.T) {
 	insertLegacyUser(t, db, legacyUser{id: "ce7baf29", username: "admin",
 		sub: protectivePlaceholderSubPrefix + "admin__e6227487", issuer: dedupOIDCIssuer,
 		createdAt: "2026-04-23 17:40:27"})
-	// A placeholder for a Server.UIAdminUsers entry whose owner had
-	// already enrolled under a differently spelled issuer. The placeholder
-	// is newer and neither row logged in, so without the placeholder rule
-	// the created_at tiebreak would keep the wrong row.
+	// Newer than the real row, so only the placeholder rule keeps the right one.
 	insertLegacyUser(t, db, legacyUser{id: "bobreal", username: "bob", sub: "http://cilogon.org/serverA/users/42",
 		issuer: dedupOIDCIssuer + "/", createdAt: "2026-03-01 00:00:00"})
 	insertLegacyUser(t, db, legacyUser{id: "bobfake", username: "bob",
@@ -214,8 +195,6 @@ func TestDedupLiveUsernamesDropsProtectivePlaceholder(t *testing.T) {
 	finishMigrations(t, sqlDB)
 }
 
-// With no row on the local issuer, the most recent login wins; with no
-// logins at all, the newest row wins.
 func TestDedupLiveUsernamesFallsBackToRecencyThenAge(t *testing.T) {
 	db, sqlDB := migrateToVersion(t, versionBeforeGlobalUniqueUsername(t))
 	insertLegacyUser(t, db, legacyUser{id: "carol-a", username: "carol", sub: "sub-carol", issuer: dedupOIDCIssuer,
@@ -238,8 +217,7 @@ func TestDedupLiveUsernamesFallsBackToRecencyThenAge(t *testing.T) {
 	finishMigrations(t, sqlDB)
 }
 
-// An unset Server.ExternalWebUrl disables the admin rule and the
-// local-issuer preference; "admin" then follows the ordinary ranking.
+// With no URL, the sub = "admin" row with the latest login is kept, unmoved.
 func TestDedupLiveUsernamesWithoutExternalWebUrl(t *testing.T) {
 	db, sqlDB := migrateToVersion(t, versionBeforeGlobalUniqueUsername(t))
 	insertLegacyUser(t, db, legacyUser{id: "adm-local", username: "admin", sub: "admin", issuer: dedupLocalIssuer,
@@ -255,7 +233,6 @@ func TestDedupLiveUsernamesWithoutExternalWebUrl(t *testing.T) {
 	finishMigrations(t, sqlDB)
 }
 
-// Rows already tombstoned are neither counted as duplicates nor touched.
 func TestDedupLiveUsernamesIgnoresTombstones(t *testing.T) {
 	db, sqlDB := migrateToVersion(t, versionBeforeGlobalUniqueUsername(t))
 	insertLegacyUser(t, db, legacyUser{id: "live", username: "admin", sub: "admin", issuer: dedupLocalIssuer,
@@ -272,11 +249,8 @@ func TestDedupLiveUsernamesIgnoresTombstones(t *testing.T) {
 	finishMigrations(t, sqlDB)
 }
 
-// The admin rule does not need a duplicate: a lone "admin" row under an
-// old ExternalWebUrl is retired, its memberships go with it, its API keys
-// are cleared because no admin row stays to own them, and the bootstrap
-// then mints this server's own row with a new ID.
-func TestDedupLiveUsernamesRetiresLoneStaleAdmin(t *testing.T) {
+// A lone admin row on an old URL is kept and moved, with its memberships and API keys.
+func TestDedupLiveUsernamesMovesLoneStaleAdmin(t *testing.T) {
 	db, sqlDB := migrateToVersion(t, versionBeforeGlobalUniqueUsername(t))
 	insertLegacyUser(t, db, legacyUser{id: "oldadmin", username: "admin", sub: "admin", issuer: dedupOldIssuer,
 		createdAt: "2026-01-01 00:00:00", lastLoginAt: strPtr("2026-09-01 00:00:00")})
@@ -285,48 +259,72 @@ func TestDedupLiveUsernamesRetiresLoneStaleAdmin(t *testing.T) {
 
 	deleted, err := dedupLiveUsernames(db, dedupLocalIssuer)
 	require.NoError(t, err)
-	assert.Equal(t, 1, deleted)
-	assert.Equal(t, []userState{{"oldadmin", true}}, readUserStates(t, db, "admin"))
-	assert.Empty(t, groupMemberIDs(t, db, "ops"))
-	assert.Equal(t, "", readColumnByID(t, db, "api_keys", "created_by")["k-admin"],
-		"no admin row stays, so no key can be attributed to one")
+	assert.Equal(t, 0, deleted)
+	assert.Equal(t, []string{"oldadmin"}, liveUserIDs(t, db, "admin"))
+	assert.Equal(t, []string{"oldadmin"}, groupMemberIDs(t, db, "ops"))
 
 	finishMigrations(t, sqlDB)
+	assert.Equal(t, "oldadmin", readColumnByID(t, db, "api_keys", "created_by")["k-admin"])
 	setExternalWebURL(t, dedupLocalIssuer)
 	require.NoError(t, BootstrapAdminAndBackfillOwners(db))
 	admin, err := BuiltinAdminUser(db)
 	require.NoError(t, err)
 	require.NotNil(t, admin)
-	assert.NotEqual(t, "oldadmin", admin.ID)
-	assert.Equal(t, dedupLocalIssuer, admin.Issuer)
+	assert.Equal(t, "oldadmin", admin.ID)
 }
 
-// With no local "admin" row at all, every "admin" row is retired rather
-// than one being promoted, and the bootstrap creates the local one.
-func TestDedupLiveUsernamesRetiresEveryNonLocalAdmin(t *testing.T) {
+// Without a row on the current URL, one sub = "admin" row is kept and moved;
+// every other "admin" row is retired.
+func TestDedupLiveUsernamesKeepsOneAdminRow(t *testing.T) {
 	db, sqlDB := migrateToVersion(t, versionBeforeGlobalUniqueUsername(t))
-	insertLegacyUser(t, db, legacyUser{id: "oldadmin", username: "admin", sub: "admin", issuer: dedupOldIssuer,
+	insertLegacyUser(t, db, legacyUser{id: "url1admin", username: "admin", sub: "admin", issuer: dedupOldIssuer,
+		createdAt: "2025-12-01 00:00:00"})
+	insertLegacyUser(t, db, legacyUser{id: "url2admin", username: "admin", sub: "admin", issuer: dedupOldIssuer + ":8444",
 		createdAt: "2026-01-01 00:00:00", lastLoginAt: strPtr("2026-09-01 00:00:00")})
+	insertLegacyUser(t, db, legacyUser{id: "squatter", username: "admin", sub: "sub-x", issuer: dedupOIDCIssuer,
+		createdAt: "2026-02-01 00:00:00"})
 	insertLegacyUser(t, db, legacyUser{id: "phadmin", username: "admin",
-		sub: protectivePlaceholderSubPrefix + "admin__e6227487", issuer: dedupOIDCIssuer,
+		sub: protectivePlaceholderSubPrefix + "admin__e6227487", issuer: dedupOIDCIssuer + "/",
 		createdAt: "2026-04-23 17:40:27"})
 
 	deleted, err := dedupLiveUsernames(db, dedupLocalIssuer)
 	require.NoError(t, err)
-	assert.Equal(t, 2, deleted)
-	assert.Empty(t, liveUserIDs(t, db, "admin"))
+	assert.Equal(t, 3, deleted)
+	assert.Equal(t, []string{"url2admin"}, liveUserIDs(t, db, "admin"))
 
 	finishMigrations(t, sqlDB)
 	setExternalWebURL(t, dedupLocalIssuer)
-	require.NoError(t, BootstrapAdminAndBackfillOwners(db))
 	admin, err := BuiltinAdminUser(db)
 	require.NoError(t, err)
 	require.NotNil(t, admin)
-	assert.Equal(t, dedupLocalIssuer, admin.Issuer)
+	assert.Equal(t, "url2admin", admin.ID)
 }
 
-// A losing row's group memberships are removed with it, as DeleteUser
-// does; the survivor's are kept and nothing is moved between them.
+// With no sub = "admin" row left, one is created on the current URL.
+func TestDedupLiveUsernamesInsertsAdminWhenNoneRemains(t *testing.T) {
+	db, sqlDB := migrateToVersion(t, versionBeforeGlobalUniqueUsername(t))
+	insertLegacyUser(t, db, legacyUser{id: "phadmin", username: "admin",
+		sub: protectivePlaceholderSubPrefix + "admin__e6227487", issuer: dedupOIDCIssuer,
+		createdAt: "2026-04-23 17:40:27"})
+	insertLegacyAPIKey(t, db, "k-admin", "admin", "2026-05-01 00:00:00")
+
+	deleted, err := dedupLiveUsernames(db, dedupLocalIssuer)
+	require.NoError(t, err)
+	assert.Equal(t, 1, deleted)
+	live := liveUserIDs(t, db, "admin")
+	require.Len(t, live, 1)
+	assert.NotEqual(t, "phadmin", live[0])
+	assert.Equal(t, "", readColumnByID(t, db, "api_keys", "created_by")["k-admin"])
+
+	finishMigrations(t, sqlDB)
+	setExternalWebURL(t, dedupLocalIssuer)
+	admin, err := BuiltinAdminUser(db)
+	require.NoError(t, err)
+	require.NotNil(t, admin)
+	assert.Equal(t, live[0], admin.ID)
+}
+
+// A losing row's group memberships go with it; nothing is moved.
 func TestDedupLiveUsernamesRemovesLoserMemberships(t *testing.T) {
 	db, sqlDB := migrateToVersion(t, versionBeforeGlobalUniqueUsername(t))
 	insertLegacyUser(t, db, legacyUser{id: "s", username: "alice", sub: "sub-s", issuer: dedupOIDCIssuer,
@@ -345,9 +343,7 @@ func TestDedupLiveUsernamesRemovesLoserMemberships(t *testing.T) {
 	finishMigrations(t, sqlDB)
 }
 
-// v7.26 API keys record only the username, so a key goes to the kept row
-// only when it was created at or after that row and before the earliest
-// retired row. The bounds are compared as times, not text.
+// A key is bound only if kept.created_at <= key < earliest retired, compared as times.
 func TestDedupLiveUsernamesBindsOnlyAttributableAPIKeys(t *testing.T) {
 	db, sqlDB := migrateToVersion(t, versionBeforeGlobalUniqueUsername(t))
 	insertLegacyUser(t, db, legacyUser{id: "s", username: "alice", sub: "sub-s", issuer: dedupLocalIssuer,
@@ -381,9 +377,7 @@ func TestDedupLiveUsernamesBindsOnlyAttributableAPIKeys(t *testing.T) {
 		"20260917110000 must not re-attribute a cleared key")
 }
 
-// A placeholder's sub can be forged through a user-controlled subject
-// claim, and v7.26 records nothing proving it never had a session, so a
-// placeholder counts toward the cutoff like any retired row.
+// Placeholders count toward the cutoff: their sub can be forged.
 func TestDedupLiveUsernamesCountsPlaceholdersTowardAPIKeyCutoff(t *testing.T) {
 	db, sqlDB := migrateToVersion(t, versionBeforeGlobalUniqueUsername(t))
 	insertLegacyUser(t, db, legacyUser{id: "s", username: "alice", sub: "sub-s", issuer: dedupOIDCIssuer + "/",
@@ -407,9 +401,7 @@ func TestDedupLiveUsernamesCountsPlaceholdersTowardAPIKeyCutoff(t *testing.T) {
 	finishMigrations(t, sqlDB)
 }
 
-// The origin shape from issue #3824: the local "admin" row predates the
-// mitigation script's placeholder. "admin" keys follow the same rule as
-// any other duplicated username, with the local row as the kept row.
+// "admin" keys follow the same rule, with the local admin as the kept row.
 func TestDedupLiveUsernamesSettlesAdminAPIKeys(t *testing.T) {
 	db, sqlDB := migrateToVersion(t, versionBeforeGlobalUniqueUsername(t))
 	insertLegacyUser(t, db, legacyUser{id: "3facd6da", username: "admin", sub: "admin", issuer: dedupLocalIssuer,
@@ -444,9 +436,7 @@ func TestPrepareForGlobalUniqueUsernamesIsNoopOnceApplied(t *testing.T) {
 	assert.Equal(t, []userState{{"only", false}}, readUserStates(t, db, "admin"))
 }
 
-// A database past the global-unique migration without its index (here a
-// hand-dropped index) is not on the schema the cleanup was written for,
-// so the wrapper leaves its rows alone.
+// A database past the migration but missing its index is left alone.
 func TestPrepareForGlobalUniqueUsernamesSkipsPastMigration(t *testing.T) {
 	db, sqlDB := migrateToVersion(t, versionBeforeGlobalUniqueUsername(t))
 	finishMigrations(t, sqlDB)
@@ -461,12 +451,8 @@ func TestPrepareForGlobalUniqueUsernamesSkipsPastMigration(t *testing.T) {
 	assert.Equal(t, []string{"alice-1", "alice-2"}, liveUserIDs(t, db, "alice"))
 }
 
-// Nothing else a retired "admin" row referenced is moved. 20260429000000
-// had already put the collection on the row it found first (the
-// placeholder, as on the origins in issue #3824), and that is where it
-// stays; the local admin manages it through server.admin regardless.
-// Here the placeholder predates the local row, so no "admin" key can be
-// attributed to the local row and the step clears all of them.
+// A collection already on a retired admin row stays there, and with the
+// placeholder older than the local admin no "admin" key can be attributed.
 func TestPrepareForGlobalUniqueUsernamesLeavesAdminCollectionsInPlace(t *testing.T) {
 	db, sqlDB := migrateToVersion(t, versionV726)
 	require.NoError(t, db.Exec("INSERT INTO users (id, username, sub, issuer, created_at) VALUES "+
@@ -492,10 +478,7 @@ func TestPrepareForGlobalUniqueUsernamesLeavesAdminCollectionsInPlace(t *testing
 		readColumnByID(t, db, "api_keys", "created_by"))
 }
 
-// A collection whose name the survivor already owns stays with the
-// soft-deleted row: moving it would break the (owner_id, name) index
-// 20260916120000 creates. The survivor got here through a rename from
-// "bob" that left collections.owner behind.
+// A collection whose name the survivor already owns is not moved.
 func TestDedupLiveUsernamesKeepsCollectionNamesUnique(t *testing.T) {
 	db, sqlDB := migrateToVersion(t, versionBeforeGlobalUniqueUsername(t))
 	insertLegacyUser(t, db, legacyUser{id: "s", username: "alice", sub: "sub-s", issuer: dedupLocalIssuer,
@@ -511,13 +494,8 @@ func TestDedupLiveUsernamesKeepsCollectionNamesUnique(t *testing.T) {
 	assert.Equal(t, map[string]string{"c-s": "s", "c-l": "l", "c-l2": "s"}, readColumnByID(t, db, "collections", "owner_id"))
 }
 
-// The startup path end to end, from a database with the v7.26 users
-// table: it has neither last_login_at nor deleted_at when startup
-// begins. The wrapper migrates to the version before the global-unique
-// migration (adding those columns), resolves the duplicates, and the
-// remaining migrations then succeed. The negative control shows the
-// same seed fails without the wrapper, so the test exercises the
-// reported crash.
+// End to end from the base users table, with a negative control that
+// reproduces the reported crash.
 func TestPrepareForGlobalUniqueUsernamesFromPreSoftDeleteSchema(t *testing.T) {
 	seed := func(t *testing.T) (*gorm.DB, *sql.DB) {
 		db, sqlDB := migrateToVersion(t, versionWithBaseUsersTable)
