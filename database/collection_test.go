@@ -391,8 +391,6 @@ func TestRedeemCollectionOwnershipInviteLink_GroupCascade(t *testing.T) {
 	})
 }
 
-// setExternalWebURL points Server.ExternalWebUrl at url for the rest of
-// the test.
 func setExternalWebURL(t *testing.T, url string) {
 	t.Helper()
 	prev := param.Server_ExternalWebUrl.GetString()
@@ -400,7 +398,6 @@ func setExternalWebURL(t *testing.T, url string) {
 	require.NoError(t, param.Server_ExternalWebUrl.Set(url))
 }
 
-// adminRows returns the IDs of every "admin" row, live and tombstoned.
 func adminRows(t *testing.T, db *gorm.DB) (live, tombstoned []string) {
 	t.Helper()
 	var users []User
@@ -415,12 +412,9 @@ func adminRows(t *testing.T, db *gorm.DB) (live, tombstoned []string) {
 	return live, tombstoned
 }
 
-// The admin rule at every startup: an "admin" row left under an old
-// ExternalWebUrl is deleted like any account (memberships included), its
-// API keys keep pointing at it and so carry no scopes, and the bootstrap
-// mints the row for the current URL. A second run finds nothing to do,
-// and an unset URL disables the rule as it disables the bootstrap.
-func TestRetireNonLocalAdminRowsAtStartup(t *testing.T) {
+// ensureBuiltinAdmin keeps the admin row and its state across a URL change,
+// evicts a row squatting on "admin", and recreates the admin when missing.
+func TestEnsureBuiltinAdmin(t *testing.T) {
 	const oldURL = "https://old-origin.example.test"
 	const newURL = "https://origin.example.test"
 	version, err := globalUniqueUsernameMigrationVersion()
@@ -429,43 +423,45 @@ func TestRetireNonLocalAdminRowsAtStartup(t *testing.T) {
 	finishMigrations(t, sqlDB)
 
 	setExternalWebURL(t, oldURL)
+	require.NoError(t, ensureBuiltinAdmin(db))
 	require.NoError(t, BootstrapAdminAndBackfillOwners(db))
-	old, err := BuiltinAdminUser(db)
+	admin, err := BuiltinAdminUser(db)
 	require.NoError(t, err)
-	require.NotNil(t, old)
+	require.NotNil(t, admin)
 	require.NoError(t, db.Create(&Group{ID: "ops", Name: "ops", CreatedBy: CreatorUnknown}).Error)
-	require.NoError(t, db.Create(&GroupMember{GroupID: "ops", UserID: old.ID, AddedBy: CreatorUnknown}).Error)
-	require.NoError(t, db.Exec(
-		"INSERT INTO api_keys (id, name, hashed_value, created_at, created_by) VALUES ('k-old', 'k-old', 'x', '2026-02-01 00:00:00', ?)",
-		old.ID).Error)
+	require.NoError(t, db.Create(&GroupMember{GroupID: "ops", UserID: admin.ID, AddedBy: CreatorUnknown}).Error)
 
-	// The server moves to a new URL.
 	setExternalWebURL(t, newURL)
-	require.NoError(t, retireNonLocalAdminRowsAtStartup(db))
-	live, tombstoned := adminRows(t, db)
-	assert.Empty(t, live)
-	assert.Equal(t, []string{old.ID}, tombstoned)
-	var members []GroupMember
-	require.NoError(t, db.Where("group_id = ?", "ops").Find(&members).Error)
-	assert.Empty(t, members)
-	var createdBy string
-	require.NoError(t, db.Raw("SELECT created_by FROM api_keys WHERE id = 'k-old'").Scan(&createdBy).Error)
-	assert.Equal(t, old.ID, createdBy, "the API key is not re-attributed; its creator is gone, so it carries no scopes")
-
+	require.NoError(t, ensureBuiltinAdmin(db))
 	require.NoError(t, BootstrapAdminAndBackfillOwners(db))
+	moved, err := BuiltinAdminUser(db)
+	require.NoError(t, err)
+	require.NotNil(t, moved)
+	assert.Equal(t, admin.ID, moved.ID)
+	var members []GroupMember
+	require.NoError(t, db.Where("group_id = ? AND user_id = ?", "ops", admin.ID).Find(&members).Error)
+	assert.Len(t, members, 1)
+
+	require.NoError(t, ensureBuiltinAdmin(db))
+	live, tombstoned := adminRows(t, db)
+	assert.Equal(t, []string{admin.ID}, live)
+	assert.Empty(t, tombstoned)
+
+	require.NoError(t, db.Delete(&User{}, "id = ?", admin.ID).Error)
+	require.NoError(t, db.Create(&User{ID: "squatter", Username: "admin", Sub: "sub-x", Issuer: "https://idp.example.test",
+		CreatedBy: CreatorSelfEnrolled}).Error)
+	require.NoError(t, ensureBuiltinAdmin(db))
 	fresh, err := BuiltinAdminUser(db)
 	require.NoError(t, err)
 	require.NotNil(t, fresh)
-	assert.NotEqual(t, old.ID, fresh.ID)
-	assert.Equal(t, newURL, fresh.Issuer)
-
-	require.NoError(t, retireNonLocalAdminRowsAtStartup(db))
+	assert.Equal(t, "admin", fresh.Sub)
+	assert.NotEqual(t, admin.ID, fresh.ID)
 	live, tombstoned = adminRows(t, db)
 	assert.Equal(t, []string{fresh.ID}, live)
-	assert.Equal(t, []string{old.ID}, tombstoned)
+	assert.ElementsMatch(t, []string{admin.ID, "squatter"}, tombstoned)
 
 	setExternalWebURL(t, "")
-	require.NoError(t, retireNonLocalAdminRowsAtStartup(db))
+	require.NoError(t, ensureBuiltinAdmin(db))
 	live, _ = adminRows(t, db)
 	assert.Equal(t, []string{fresh.ID}, live)
 }

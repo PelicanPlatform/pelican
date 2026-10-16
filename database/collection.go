@@ -2348,43 +2348,45 @@ func UpdateUser(db *gorm.DB, id string, username, sub, issuer *string) error {
 	return nil
 }
 
-// builtinAdminUsername is the username of the built-in admin account
 const builtinAdminUsername = "admin"
 
-// retireNonLocalAdminRowsAtStartup keeps the only live built-in "admin" row
-// up-to-date on this server's current issuer. At every startup: any live "admin" row
-// whose issuer is not the current Server.ExternalWebUrl is soft-deleted, then
-// BootstrapAdminAndBackfillOwners is called to create the new built-in admin row
-// on the current issuer.
-func retireNonLocalAdminRowsAtStartup(db *gorm.DB) error {
+// ensureBuiltinAdmin makes the built-in admin the only live user using "admin" as
+// its username, linking it to the current Server.ExternalWebUrl as its issuer: It
+// retires any "admin" row whose sub is not "admin", then moves the remaining one
+// to the current URL or creates it.
+func ensureBuiltinAdmin(db *gorm.DB) error {
 	externalURL := param.Server_ExternalWebUrl.GetString()
 	if externalURL == "" {
 		return nil
 	}
-	var stale []User
-	if err := db.Where("username = ? AND issuer <> ?", builtinAdminUsername, externalURL).Find(&stale).Error; err != nil {
-		return fmt.Errorf("failed to list built-in admin rows under other issuers: %w", err)
-	}
-	for _, u := range stale {
-		log.Warnf("Retiring %q row %s (sub %q, issuer %q): its issuer is not Server.ExternalWebUrl (%q), "+
-			"and the built-in admin is bootstrapped under that URL",
-			builtinAdminUsername, u.ID, u.Sub, u.Issuer, externalURL)
-		var keys []struct {
-			ID   string
-			Name string
+	return db.Transaction(func(tx *gorm.DB) error {
+		var others []User
+		if err := tx.Where("username = ? AND sub <> ?", builtinAdminUsername, builtinAdminUsername).Find(&others).Error; err != nil {
+			return err
 		}
-		if err := db.Raw("SELECT id, name FROM api_keys WHERE created_by = ?", u.ID).Scan(&keys).Error; err != nil {
-			return fmt.Errorf("failed to list API keys created by %q row %s: %w", builtinAdminUsername, u.ID, err)
+		for _, u := range others {
+			log.Warnf("Retiring user %s (sub %q, issuer %q): only the built-in admin may hold the username %q",
+				u.ID, u.Sub, u.Issuer, builtinAdminUsername)
+			if err := DeleteUser(tx, u.ID, "", true); err != nil {
+				return err
+			}
 		}
-		for _, k := range keys {
-			log.Warnf("API key %s (%q) was created by the retired %q row %s and will carry no user scopes from now on. Please re-create it.",
-				k.ID, k.Name, builtinAdminUsername, u.ID)
+		var admin User
+		err := tx.Where("username = ? AND sub = ?", builtinAdminUsername, builtinAdminUsername).First(&admin).Error
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			slug, slugErr := generateSlug()
+			if slugErr != nil {
+				return slugErr
+			}
+			return tx.Create(&User{ID: slug, Username: builtinAdminUsername, Sub: builtinAdminUsername,
+				Issuer: externalURL, CreatedBy: CreatorSelfEnrolled}).Error
 		}
-		if err := DeleteUser(db, u.ID, "", true); err != nil {
-			return fmt.Errorf("failed to retire %q row %s: %w", builtinAdminUsername, u.ID, err)
+		if err != nil || admin.Issuer == externalURL {
+			return err
 		}
-	}
-	return nil
+		log.Warnf("Moving the built-in admin %s from issuer %q to %q", admin.ID, admin.Issuer, externalURL)
+		return tx.Model(&User{}).Where("id = ?", admin.ID).Update("issuer", externalURL).Error
+	})
 }
 
 // BootstrapAdminAndBackfillOwners ensures the built-in "admin" user

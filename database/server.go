@@ -79,9 +79,7 @@ func InitServerDatabase(serverType server_structs.ServerType) error {
 		return err
 	}
 
-	// Resolve usernames shared by several live rows before the universal
-	// migration that makes usernames globally unique; it fails on them
-	// and the server would crash-loop at startup. No-op once applied.
+	// Resolve duplicate usernames before the migration that makes them globally unique.
 	// TODO: this function can be removed once the DB migration (v7.27) is completed.
 	if err := prepareForGlobalUniqueUsernames(sqlDB, ServerDatabase); err != nil {
 		return err
@@ -97,11 +95,8 @@ func InitServerDatabase(serverType server_structs.ServerType) error {
 		return errors.Wrapf(err, "failed to run migrations for server type %s", serverType.String())
 	}
 
-	// Keep the built-in admin bound to this server's URL: retire any
-	// "admin" row under another issuer so the bootstrap below can mint
-	// its own. See retireNonLocalAdminRowsAtStartup.
-	if err := retireNonLocalAdminRowsAtStartup(ServerDatabase); err != nil {
-		return errors.Wrap(err, "failed to retire built-in admin rows under another issuer")
+	if err := ensureBuiltinAdmin(ServerDatabase); err != nil {
+		return errors.Wrap(err, "failed to ensure the built-in admin user")
 	}
 
 	// Post-migration bootstrap: ensure the built-in admin user record
