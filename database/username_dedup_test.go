@@ -273,19 +273,23 @@ func TestDedupLiveUsernamesIgnoresTombstones(t *testing.T) {
 }
 
 // The admin rule does not need a duplicate: a lone "admin" row under an
-// old ExternalWebUrl is retired, its memberships go with it, and the
-// bootstrap then mints this server's own row with a new ID.
+// old ExternalWebUrl is retired, its memberships go with it, its API keys
+// are cleared because no admin row stays to own them, and the bootstrap
+// then mints this server's own row with a new ID.
 func TestDedupLiveUsernamesRetiresLoneStaleAdmin(t *testing.T) {
 	db, sqlDB := migrateToVersion(t, versionBeforeGlobalUniqueUsername(t))
 	insertLegacyUser(t, db, legacyUser{id: "oldadmin", username: "admin", sub: "admin", issuer: dedupOldIssuer,
 		createdAt: "2026-01-01 00:00:00", lastLoginAt: strPtr("2026-09-01 00:00:00")})
 	insertGroupWithMembers(t, db, "ops", "oldadmin")
+	insertLegacyAPIKey(t, db, "k-admin", "admin", "2026-02-01 00:00:00")
 
 	deleted, err := dedupLiveUsernames(db, dedupLocalIssuer)
 	require.NoError(t, err)
 	assert.Equal(t, 1, deleted)
 	assert.Equal(t, []userState{{"oldadmin", true}}, readUserStates(t, db, "admin"))
 	assert.Empty(t, groupMemberIDs(t, db, "ops"))
+	assert.Equal(t, "", readColumnByID(t, db, "api_keys", "created_by")["k-admin"],
+		"no admin row stays, so no key can be attributed to one")
 
 	finishMigrations(t, sqlDB)
 	setExternalWebURL(t, dedupLocalIssuer)
@@ -341,57 +345,89 @@ func TestDedupLiveUsernamesRemovesLoserMemberships(t *testing.T) {
 	finishMigrations(t, sqlDB)
 }
 
-// v7.26 keys record only the username, so a key can only be given to the
-// survivor when no losing account could have minted it: created after
-// the survivor's row and before the earliest losing row that could have
-// held a session. The rest fail closed.
-func TestDedupLiveUsernamesBindsOnlyUnambiguousAPIKeys(t *testing.T) {
+// v7.26 API keys record only the username, so a key goes to the kept row
+// only when it was created at or after that row and before the earliest
+// retired row. The bounds are compared as times, not text.
+func TestDedupLiveUsernamesBindsOnlyAttributableAPIKeys(t *testing.T) {
 	db, sqlDB := migrateToVersion(t, versionBeforeGlobalUniqueUsername(t))
 	insertLegacyUser(t, db, legacyUser{id: "s", username: "alice", sub: "sub-s", issuer: dedupLocalIssuer,
 		createdAt: "2026-01-01 00:00:00"})
+	// 10:00 UTC.
 	insertLegacyUser(t, db, legacyUser{id: "l", username: "alice", sub: "sub-l", issuer: dedupOIDCIssuer,
 		createdAt: "2026-03-01 12:00:00+02:00"})
-	insertLegacyUser(t, db, legacyUser{id: "p", username: "alice",
-		sub: protectivePlaceholderSubPrefix + "alice__e6227487", issuer: dedupOIDCIssuer + "/",
-		createdAt: "2026-02-01 00:00:00"})
-	insertLegacyAPIKey(t, db, "k-before-survivor", "alice", "2025-12-01 00:00:00")
-	insertLegacyAPIKey(t, db, "k-survivor-only", "alice", "2026-02-15 00:00:00")
-	// 30 minutes before the real loser in UTC, though later as text.
-	insertLegacyAPIKey(t, db, "k-just-before-loser", "alice", "2026-03-01 09:30:00+00:00")
-	insertLegacyAPIKey(t, db, "k-ambiguous", "alice", "2026-05-01 00:00:00")
+	insertLegacyAPIKey(t, db, "k-earlier-holder", "alice", "2025-12-01 00:00:00")
+	insertLegacyAPIKey(t, db, "k-kept-only", "alice", "2026-02-15 00:00:00")
+	// 30 minutes before the retired row in UTC, though later as text.
+	insertLegacyAPIKey(t, db, "k-before-retired", "alice", "2026-03-01 09:30:00+00:00")
+	// 30 minutes after the retired row in UTC, though earlier as text.
+	insertLegacyAPIKey(t, db, "k-after-retired", "alice", "2026-03-01 10:30:00+00:00")
+	insertLegacyAPIKey(t, db, "k-later", "alice", "2026-05-01 00:00:00")
 	insertLegacyAPIKey(t, db, "k-other-user", "bob", "2026-05-01 00:00:00")
 
 	_, err := dedupLiveUsernames(db, dedupLocalIssuer)
 	require.NoError(t, err)
 	assert.Equal(t, []string{"s"}, liveUserIDs(t, db, "alice"))
 	assert.Equal(t, map[string]string{
-		"k-before-survivor":   "",
-		"k-survivor-only":     "s",
-		"k-just-before-loser": "s",
-		"k-ambiguous":         "",
-		"k-other-user":        "bob",
+		"k-earlier-holder": "",
+		"k-kept-only":      "s",
+		"k-before-retired": "s",
+		"k-after-retired":  "",
+		"k-later":          "",
+		"k-other-user":     "bob",
 	}, readColumnByID(t, db, "api_keys", "created_by"))
 
 	finishMigrations(t, sqlDB)
-	assert.Equal(t, "", readColumnByID(t, db, "api_keys", "created_by")["k-ambiguous"],
+	assert.Equal(t, "", readColumnByID(t, db, "api_keys", "created_by")["k-later"],
 		"20260917110000 must not re-attribute a cleared key")
 }
 
-// A placeholder never had a session, so when the only losers are
-// placeholders every key under the username is the survivor's.
-func TestDedupLiveUsernamesBindsAllAPIKeysWhenOnlyPlaceholdersLose(t *testing.T) {
+// A placeholder's sub can be forged through a user-controlled subject
+// claim, and v7.26 records nothing proving it never had a session, so a
+// placeholder counts toward the cutoff like any retired row.
+func TestDedupLiveUsernamesCountsPlaceholdersTowardAPIKeyCutoff(t *testing.T) {
 	db, sqlDB := migrateToVersion(t, versionBeforeGlobalUniqueUsername(t))
 	insertLegacyUser(t, db, legacyUser{id: "s", username: "alice", sub: "sub-s", issuer: dedupOIDCIssuer + "/",
-		createdAt: "2026-03-01 00:00:00"})
+		createdAt: "2026-01-01 00:00:00"})
 	insertLegacyUser(t, db, legacyUser{id: "p", username: "alice",
 		sub: protectivePlaceholderSubPrefix + "alice__e6227487", issuer: dedupOIDCIssuer,
-		createdAt: "2026-01-01 00:00:00"})
-	insertLegacyAPIKey(t, db, "k-old", "alice", "2026-02-01 00:00:00")
-	insertLegacyAPIKey(t, db, "k-new", "alice", "2026-06-01 00:00:00")
+		createdAt: "2026-04-23 17:40:27"})
+	insertLegacyAPIKey(t, db, "k-earlier-holder", "alice", "2025-12-01 00:00:00")
+	insertLegacyAPIKey(t, db, "k-before-placeholder", "alice", "2026-02-01 00:00:00")
+	insertLegacyAPIKey(t, db, "k-after-placeholder", "alice", "2026-06-01 00:00:00")
 
 	_, err := dedupLiveUsernames(db, dedupLocalIssuer)
 	require.NoError(t, err)
-	assert.Equal(t, map[string]string{"k-old": "s", "k-new": "s"}, readColumnByID(t, db, "api_keys", "created_by"))
+	assert.Equal(t, []string{"s"}, liveUserIDs(t, db, "alice"))
+	assert.Equal(t, map[string]string{
+		"k-earlier-holder":     "",
+		"k-before-placeholder": "s",
+		"k-after-placeholder":  "",
+	}, readColumnByID(t, db, "api_keys", "created_by"))
+
+	finishMigrations(t, sqlDB)
+}
+
+// The origin shape from issue #3824: the local "admin" row predates the
+// mitigation script's placeholder. "admin" keys follow the same rule as
+// any other duplicated username, with the local row as the kept row.
+func TestDedupLiveUsernamesSettlesAdminAPIKeys(t *testing.T) {
+	db, sqlDB := migrateToVersion(t, versionBeforeGlobalUniqueUsername(t))
+	insertLegacyUser(t, db, legacyUser{id: "3facd6da", username: "admin", sub: "admin", issuer: dedupLocalIssuer,
+		createdAt: "2026-01-28 18:56:07"})
+	insertLegacyUser(t, db, legacyUser{id: "ce7baf29", username: "admin",
+		sub: protectivePlaceholderSubPrefix + "admin__e6227487", issuer: dedupOIDCIssuer,
+		createdAt: "2026-04-23 17:40:27"})
+	// The same day as the local row, a few hours later.
+	insertLegacyAPIKey(t, db, "k-same-day", "admin", "2026-01-28 20:00:00")
+	insertLegacyAPIKey(t, db, "k-after-placeholder", "admin", "2026-05-01 00:00:00")
+
+	_, err := dedupLiveUsernames(db, dedupLocalIssuer)
+	require.NoError(t, err)
+	assert.Equal(t, []string{"3facd6da"}, liveUserIDs(t, db, "admin"))
+	assert.Equal(t, map[string]string{
+		"k-same-day":          "3facd6da",
+		"k-after-placeholder": "",
+	}, readColumnByID(t, db, "api_keys", "created_by"))
 
 	finishMigrations(t, sqlDB)
 }
@@ -425,14 +461,13 @@ func TestPrepareForGlobalUniqueUsernamesSkipsPastMigration(t *testing.T) {
 	assert.Equal(t, []string{"alice-1", "alice-2"}, liveUserIDs(t, db, "alice"))
 }
 
-// Nothing a retired "admin" row referenced is moved. 20260429000000 had
-// already put the collection on the row it found first (the placeholder,
-// as on the origins in issue #3824), and that is where it stays; the
-// local admin manages it through server.admin regardless. "admin" keys
-// keep their username until 20260917110000, which attributes the ones
-// the local row predates and clears the rest, so a key minted before the
-// ExternalWebUrl change fails closed.
-func TestPrepareForGlobalUniqueUsernamesLeavesAdminReferencesToMigrations(t *testing.T) {
+// Nothing else a retired "admin" row referenced is moved. 20260429000000
+// had already put the collection on the row it found first (the
+// placeholder, as on the origins in issue #3824), and that is where it
+// stays; the local admin manages it through server.admin regardless.
+// Here the placeholder predates the local row, so no "admin" key can be
+// attributed to the local row and the step clears all of them.
+func TestPrepareForGlobalUniqueUsernamesLeavesAdminCollectionsInPlace(t *testing.T) {
 	db, sqlDB := migrateToVersion(t, versionV726)
 	require.NoError(t, db.Exec("INSERT INTO users (id, username, sub, issuer, created_at) VALUES "+
 		"('oldadmin', 'admin', 'admin', ?, '2026-03-01 12:00:00+02:00'), "+
@@ -448,12 +483,12 @@ func TestPrepareForGlobalUniqueUsernamesLeavesAdminReferencesToMigrations(t *tes
 	setExternalWebURL(t, dedupLocalIssuer)
 	require.NoError(t, prepareForGlobalUniqueUsernames(sqlDB, db))
 	assert.Equal(t, []string{"newadmin"}, liveUserIDs(t, db, "admin"))
-	assert.Equal(t, map[string]string{"k-before": "admin", "k-between": "admin", "k-after": "admin"},
-		readColumnByID(t, db, "api_keys", "created_by"), "the step does not touch admin keys")
+	assert.Equal(t, map[string]string{"k-before": "", "k-between": "", "k-after": ""},
+		readColumnByID(t, db, "api_keys", "created_by"))
 	finishMigrations(t, sqlDB)
 
 	assert.Equal(t, map[string]string{"c1": "phadmin"}, readColumnByID(t, db, "collections", "owner_id"))
-	assert.Equal(t, map[string]string{"k-after": "newadmin", "k-before": "", "k-between": ""},
+	assert.Equal(t, map[string]string{"k-after": "", "k-before": "", "k-between": ""},
 		readColumnByID(t, db, "api_keys", "created_by"))
 }
 
