@@ -26,6 +26,13 @@ on:
         required: false
         type: boolean
         default: false
+      environment:
+        # The environment that holds pull-only credentials for the image,
+        # if it is in a private repo.
+        # When empty, the image is pulled anonymously.
+        required: false
+        type: string
+        default: ""
 
 permissions:
   contents: read
@@ -34,8 +41,19 @@ jobs:
   run-tests:
     name: Linux
     runs-on: ubuntu-latest
+    environment: ${{ inputs.environment }}
     container:
       image: ${{ inputs.image }}
+      # GitHub rejects an empty username or password,
+      # which is what a job outside of the environment sees.
+      credentials: >-
+        ${{
+          secrets.PELICAN_HARBOR_PULL_USER && secrets.PELICAN_HARBOR_PULL_PASSWORD
+          && fromJSON(format('{{"username":{0},"password":{1}}}',
+               toJSON(secrets.PELICAN_HARBOR_PULL_USER),
+               toJSON(secrets.PELICAN_HARBOR_PULL_PASSWORD)))
+          || fromJSON('{}')
+        }}
       volumes:
         # Expose directories on the host that we'd like to empty.
         - /usr/local/lib/android:/host/usr/local/lib/android

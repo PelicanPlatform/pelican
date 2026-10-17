@@ -23,6 +23,11 @@ version: 2
 # Configure the release process.
 
 release:
+  # Create each new release as a draft, so that it is not public
+  # until someone publishes it.
+  draft: true
+  # Replace any draft left behind by an earlier run for the same tag.
+  replace_existing_draft: true
   # Mark each new release as a pre-release.
   prerelease: true
 checksum:
