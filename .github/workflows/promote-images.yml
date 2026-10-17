@@ -1,0 +1,391 @@
+---
+name: Promote Container Images
+
+# Copies a semver tag's release images from the private repo, where
+# build-and-test.yml pushed them, to the public repo, and moves the
+# floating tags (e.g., "v26.x"), once reviewers approve.
+#
+# The repos come from .github/scripts/container-images/config.sh
+# on `main`, and the list of images from the same file at the tag.
+# The digests come from the tag's build.
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "The semver tag to promote"
+        required: true
+        type: string
+      allow-failed-tests:
+        description: "Promote even if the tag's tests failed"
+        required: false
+        type: boolean
+        default: false
+
+defaults:
+  run:
+    # bash-isms have a way of sneaking in unnoticed.
+    shell: bash
+
+permissions:
+  contents: read
+
+# Promoting two tags at once could race to move the floating tags.
+# GitHub keeps only one pending run per group, so dispatching a third
+# run while one is in progress cancels the second.
+concurrency:
+  group: ${{ github.workflow }}
+  cancel-in-progress: false
+
+jobs:
+  # Determine what to promote, and list it in the run summary for the
+  # reviewers. This must be its own job, because none of a job's steps
+  # run until its environment's reviewers approve it.
+  validate:
+    name: Validate ${{ inputs.tag }}
+    outputs:
+      digests: ${{ steps.build.outputs.DIGESTS }}
+      images: ${{ steps.config.outputs.IMAGES }}
+      registry-host: ${{ steps.config.outputs.REGISTRY_HOST }}
+      source-repo: ${{ steps.config.outputs.SOURCE_REPO }}
+      target-repo: ${{ steps.config.outputs.TARGET_REPO }}
+    permissions:
+      contents: read
+      # Find the tag's build, and download its artifacts.
+      actions: read
+    runs-on: ubuntu-latest
+    steps:
+      - name: Validate the tag
+        env:
+          TAG: ${{ inputs.tag }}
+        run: |
+          # Match the semver tags that build-and-test.yml runs for.
+          if ! [[ ${TAG} =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-rc\.[0-9]+)?$ ]]; then
+            echo "::error::Not a recognized semver tag: ${TAG}"
+            exit 1
+          fi
+
+      - name: Checkout the container image configuration
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          sparse-checkout: .github/scripts/container-images
+          persist-credentials: false
+
+      - name: Checkout the tag's container image configuration
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          ref: refs/tags/${{ inputs.tag }}
+          path: tag
+          sparse-checkout: .github/scripts/container-images
+          persist-credentials: false
+
+      - name: Determine where to copy images from and to
+        id: config
+        env:
+          TAG: ${{ inputs.tag }}
+        run: |
+          set -eu
+
+          # Take the repos from the dispatched ref, which must be `main`
+          # for the later jobs' environments to let them run, so that the tag
+          # cannot change them.
+
+          source .github/scripts/container-images/config.sh
+
+          if [ -z "${PRIVATE_REPO}" ] || [ -z "${PUBLIC_REPO}" ]; then
+            echo "::error::${GITHUB_REPOSITORY} does not promote images; see config.sh"
+            exit 1
+          fi
+          if [ "${PRIVATE_REPO%%/*}" != "${PUBLIC_REPO%%/*}" ]; then
+            echo "::error::The private and public repos must be on the same registry host"
+            exit 1
+          fi
+
+          # Take the release images from the tag, whose build pushed them,
+          # because a release branch might list different ones than `main`.
+          # Parse the tag's config.sh rather than source it, so that it can
+          # affect only the list.
+
+          tag_config=tag/.github/scripts/container-images/config.sh
+
+          if [ ! -f "${tag_config}" ]; then
+            echo "::error::${TAG} predates config.sh, so its images were not pushed to ${PRIVATE_REPO}"
+            exit 1
+          fi
+
+          read -ra images <<< "$(awk '
+            /^RELEASE_IMAGES=\($/ { in_list = 1; next }
+            in_list && /^\)$/     { exit }
+            in_list               { sub(/#.*/, ""); print }
+          ' "${tag_config}" | tr '\n' ' ')"
+
+          if [ "${#images[@]}" -eq 0 ]; then
+            echo "::error::Found no RELEASE_IMAGES in ${TAG}'s config.sh"
+            exit 1
+          fi
+
+          # The names end up in commands that run with push credentials.
+          for image in "${images[@]}"; do
+            if ! [[ ${image} =~ ^[a-z0-9]+([._-][a-z0-9]+)*$ ]]; then
+              echo "::error::Not an image name in ${TAG}'s RELEASE_IMAGES: ${image}"
+              exit 1
+            fi
+          done
+
+          printf 'IMAGES=%s\n'        "${images[*]}"       >> "${GITHUB_OUTPUT}"
+          printf 'REGISTRY_HOST=%s\n' "${PUBLIC_REPO%%/*}" >> "${GITHUB_OUTPUT}"
+          printf 'SOURCE_REPO=%s\n'   "${PRIVATE_REPO}"    >> "${GITHUB_OUTPUT}"
+          printf 'TARGET_REPO=%s\n'   "${PUBLIC_REPO}"     >> "${GITHUB_OUTPUT}"
+
+      - name: Find the digests that the tag's build pushed
+        id: build
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ inputs.tag }}
+          ALLOW_FAILED_TESTS: ${{ inputs.allow-failed-tests }}
+          IMAGES: ${{ steps.config.outputs.IMAGES }}
+          SOURCE_REPO: ${{ steps.config.outputs.SOURCE_REPO }}
+          TARGET_REPO: ${{ steps.config.outputs.TARGET_REPO }}
+        run: |
+          set -euo pipefail
+
+          # Any workflow run for a semver tag can push to the private repo,
+          # even to a tag that has yet to be built, so take the digests from
+          # the tag's own build. Require it to have succeeded, so that its
+          # tests passed, unless the dispatcher allows them to have failed.
+
+          if [ "${ALLOW_FAILED_TESTS}" = "true" ]; then
+            status=completed
+          else
+            status=success
+          fi
+
+          commit=$(git -C tag rev-parse HEAD)
+
+          runs=$(gh api -X GET "repos/${GITHUB_REPOSITORY}/actions/workflows/build-and-test.yml/runs" \
+            -f event=push -f head_sha="${commit}" -f status="${status}")
+          run=$(jq -c --arg tag "${TAG}" \
+            'first(.workflow_runs[] | select(.head_branch == $tag)) // empty' <<< "${runs}")
+
+          if [ -z "${run}" ]; then
+            echo "::error::Found no ${status} build of ${TAG} at ${commit}"
+            exit 1
+          fi
+
+          run_id=$(jq -r .id <<< "${run}")
+          run_url=$(jq -r .html_url <<< "${run}")
+
+          digests_dir="${RUNNER_TEMP}/manifest-digests"
+          if ! gh run download "${run_id}" --repo "${GITHUB_REPOSITORY}" \
+              --pattern 'manifest-digest-*' --dir "${digests_dir}"; then
+            echo "::error::Could not download the digests from ${run_url}; have they expired?"
+            exit 1
+          fi
+
+          # The digests end up in commands that run with push credentials.
+
+          digests='{}'
+          for image in ${IMAGES}; do
+            digest_file="${digests_dir}/manifest-digest-${image}/digest"
+            if [ ! -f "${digest_file}" ]; then
+              echo "::error::Found no digest for ${image} in ${run_url}"
+              exit 1
+            fi
+            digest=$(< "${digest_file}")
+            if ! [[ ${digest} =~ ^sha256:[0-9a-f]{64}$ ]]; then
+              echo "::error::Not a digest for ${image}: ${digest}"
+              exit 1
+            fi
+            digests=$(jq -c --arg image "${image}" --arg digest "${digest}" '.[$image] = $digest' <<< "${digests}")
+          done
+
+          printf 'DIGESTS=%s\n' "${digests}" >> "${GITHUB_OUTPUT}"
+
+          # Show the reviewers what they are approving, because anyone who
+          # can push a tag controls it.
+
+          commit_url="${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/commit/${commit}"
+
+          {
+            echo "## Images to promote"
+            echo
+            if [ "${ALLOW_FAILED_TESTS}" = "true" ]; then
+              echo "> [!CAUTION]"
+              echo "> **Tests might have failed.**"
+              echo "> This promotion was dispatched with \`allow-failed-tests\`."
+              echo "> Check [its build](${run_url}) before approving."
+              echo
+            fi
+            echo "From \`${SOURCE_REPO}\` to \`${TARGET_REPO}\`,"
+            echo "as listed by ${TAG} ([\`${commit:0:7}\`](${commit_url}))"
+            echo "and pushed by [its build](${run_url}):"
+            echo
+            jq -r 'to_entries[] | "- `\(.key)@\(.value)`"' <<< "${digests}"
+          } | tee -a "${GITHUB_STEP_SUMMARY}"
+
+  approve:
+    name: Approve ${{ inputs.tag }}
+    needs: validate
+    environment: image-promotion
+    permissions:
+      # Read the run's review history.
+      actions: read
+    runs-on: ubuntu-latest
+    steps:
+      - name: Record and check the approval
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ inputs.tag }}
+        run: |
+          set -euo pipefail
+
+          # Copy the review history, which covers every attempt of this
+          # run, to the run summary, where it is easier to find.
+          reviews=$(gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}/approvals" \
+            | jq '[.[] | select(any(.environments[]; .name == "image-promotion"))]')
+
+          {
+            echo "## Promotion of ${TAG}"
+            echo
+            jq -r 'if length == 0 then "- None found" else .[]
+                | "- \(.state) by @\(.user.login)"
+                  + (if (.comment // "") != "" then ": " + (.comment | gsub("\n"; "\n  ")) else "" end)
+              end' <<< "${reviews}"
+          } | tee -a "${GITHUB_STEP_SUMMARY}"
+
+          # The environment's protection rules pass without an approval
+          # if it has no required reviewers, e.g., because GitHub created it
+          # when this workflow first referred to it.
+          if ! jq -e 'any(.[]; .state == "approved")' <<< "${reviews}" > /dev/null; then
+            echo "::error::Found no approval; does image-promotion have required reviewers?"
+            exit 1
+          fi
+
+  promote:
+    name: Promote ${{ inputs.tag }}
+    needs: [validate, approve]
+    environment: harbor-promote
+    runs-on: ubuntu-latest
+    env:
+      TAG: ${{ inputs.tag }}
+      DIGESTS: ${{ needs.validate.outputs.digests }}
+      IMAGES: ${{ needs.validate.outputs.images }}
+      SOURCE_REPO: ${{ needs.validate.outputs.source-repo }}
+      TARGET_REPO: ${{ needs.validate.outputs.target-repo }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          persist-credentials: false
+
+      # Docker keeps one credential per registry host, so this account
+      # must be able to read the private repo and write the public one.
+      - name: Log in to OSG Harbor
+        uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f  # v4.6.0
+        with:
+          registry: ${{ needs.validate.outputs.registry-host }}
+          username: ${{ secrets.PELICAN_HARBOR_PUSH_USER }}
+          password: ${{ secrets.PELICAN_HARBOR_PUSH_PASSWORD }}
+
+      - name: Check the images
+        id: check
+        run: |
+          set -euo pipefail
+
+          # Check every image before copying any, so that a bad image stops
+          # the run before it copies the others.
+
+          errors="${RUNNER_TEMP}/skopeo-errors"
+
+          digest() {
+            docker buildx imagetools inspect --format '{{json .Manifest}}' "$1" | jq -r .digest
+          }
+
+          to_copy=()
+
+          for image in ${IMAGES}; do
+            echo "::group::${image}"
+
+            source_ref="${SOURCE_REPO}/${image}:${TAG}"
+            target_ref="${TARGET_REPO}/${image}:${TAG}"
+
+            source_digest=$(digest "${source_ref}")
+            expected_digest=$(jq -r --arg image "${image}" '.[$image]' <<< "${DIGESTS}")
+
+            if [ "${source_digest}" != "${expected_digest}" ]; then
+              echo "::error::${source_ref} is ${source_digest}, but the tag's build pushed ${expected_digest}"
+              exit 1
+            fi
+
+            # skopeo reads the credentials that docker/login-action saved.
+            # Harbor reports an image that is not yet in the public repo as
+            # "repository <project>/<image> not found".
+            if ! tags=$(skopeo list-tags "docker://${TARGET_REPO}/${image}" 2> "${errors}"); then
+              if ! grep -qF "repository ${TARGET_REPO#*/}/${image} not found" "${errors}"; then
+                cat "${errors}" >&2
+                exit 1
+              fi
+              echo "Not yet in ${TARGET_REPO}"
+              tags='{"Tags": []}'
+            fi
+
+            # Skip an image that an earlier run already copied, because
+            # Harbor rejects any push to an immutable tag, even of the same
+            # digest.
+            if jq -e --arg tag "${TAG}" 'any(.Tags[]; . == $tag)' <<< "${tags}" > /dev/null; then
+              target_digest=$(digest "${target_ref}")
+              if [ "${source_digest}" != "${target_digest}" ]; then
+                echo "::error::${target_ref} is ${target_digest}, but ${source_ref} is ${source_digest}"
+                exit 1
+              fi
+              echo "Already promoted"
+            else
+              to_copy+=("${image}")
+            fi
+
+            echo "::endgroup::"
+          done
+
+          printf 'TO_COPY=%s\n' "${to_copy[*]}" >> "${GITHUB_OUTPUT}"
+
+      - name: Copy images
+        env:
+          TO_COPY: ${{ steps.check.outputs.TO_COPY }}
+        run: |
+          set -eu
+
+          # Copy by digest, so that what is copied is what was approved.
+
+          for image in ${TO_COPY}; do
+            echo "::group::${image}"
+            digest=$(jq -r --arg image "${image}" '.[$image]' <<< "${DIGESTS}")
+            docker buildx imagetools create \
+              -t "${TARGET_REPO}/${image}:${TAG}" "${SOURCE_REPO}/${image}@${digest}"
+            echo "::endgroup::"
+          done
+
+      - name: Move the floating tags
+        run: |
+          set -euo pipefail
+
+          for image in ${IMAGES}; do
+            echo "::group::${image}"
+
+            # Every image is in the public repo by now, so a failure to list
+            # its tags is fatal, lest the floating tags move to an older release.
+            floating_tags=$(skopeo list-tags "docker://${TARGET_REPO}/${image}" \
+              | jq -r '.Tags[]' \
+              | python3 .github/scripts/container-images/floating_image_tags.py "${TAG}")
+            echo "Floating tags: ${floating_tags}"
+
+            args=()
+            for floating_tag in ${floating_tags}; do
+              args+=(-t "${TARGET_REPO}/${image}:${floating_tag}")
+            done
+
+            if [ "${#args[@]}" -gt 0 ]; then
+              docker buildx imagetools create "${args[@]}" "${TARGET_REPO}/${image}:${TAG}"
+            fi
+
+            echo "::endgroup::"
+          done

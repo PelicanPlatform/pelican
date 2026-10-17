@@ -14,9 +14,36 @@ permissions:
   contents: read
 
 jobs:
+  # Only the repos listed in .github/scripts/container-images/config.sh
+  # create releases. That includes forks, so that they can test the release
+  # process.
+  params:
+    name: Check whether to release
+    outputs:
+      release: ${{ steps.params.outputs.RELEASE }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout the container image configuration
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          sparse-checkout: .github/scripts/container-images
+          persist-credentials: false
+
+      - name: Check whether this repo is listed
+        id: params
+        run: |
+          set -eu
+          source .github/scripts/container-images/config.sh
+          if [ -n "${PRIVATE_REPO}" ]; then
+            echo "RELEASE=true" >> "${GITHUB_OUTPUT}"
+          else
+            echo "RELEASE=false" >> "${GITHUB_OUTPUT}"
+          fi
+
   web-build:
     name: Build Web UI
-    if: ${{ github.repository == 'PelicanPlatform/pelican' }}
+    needs: params
+    if: ${{ needs.params.outputs.release == 'true' }}
     runs-on: ubuntu-latest
     # This job exists so that "pnpm install" never runs on a runner that holds a
     # write-scoped token. It is GoReleaser's "before" hook, hoisted out of
@@ -107,7 +134,6 @@ jobs:
   goreleaser:
     name: GoReleaser
     needs: web-build
-    if: ${{ github.repository == 'PelicanPlatform/pelican' }}
     runs-on: ubuntu-latest
     # Nothing here runs pnpm, and "--skip=before" keeps GoReleaser from
     # running the hooks that would.
@@ -155,8 +181,3 @@ jobs:
           args: release --clean --skip=before --config .goreleaser.generated.yml
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
-  upload-release:
-    name: Upload Release
-    needs: goreleaser
-    uses: ./.github/workflows/post-release.yml

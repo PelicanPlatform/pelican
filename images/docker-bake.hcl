@@ -20,10 +20,12 @@
 # per image. Building them in one invocation lets BuildKit build the stages
 # they share only once.
 #
-# The build-and-test.yml workflow sets the variables below.
+# The build-and-test.yml workflow sets the variables below, except TAG.
 # Locally, run from the root of the repository:
 #
 #   IMAGES_TO_BUILD=origin,cache docker buildx bake -f images/docker-bake.hcl --load
+#
+# To build for another architecture, also set PLATFORM, e.g., to "linux/arm64".
 
 # Comma-separated lists of the images to build and to push.
 variable "IMAGES_TO_BUILD" { default = "director,registry,origin,cache" }
@@ -32,17 +34,13 @@ variable "IMAGES_TO_PUSH" { default = "" }
 # Where to push images, e.g., "hub.osg-htc.org/pelican_platform".
 variable "REGISTRY_REPO" { default = "" }
 
-# The platform and architecture to build for.
+# The platform to build for.
 variable "PLATFORM" { default = "linux/amd64" }
-variable "ARCH" { default = "amd64" }
 
-# Tags to apply to the image, without the architecture suffix.
-variable "GITHUB_SHA" { default = "" }
+# The tag for the images that are not pushed. It gets the architecture
+# as a suffix, e.g., "dev-amd64", so that a build for one architecture
+# does not replace another's.
 variable "TAG" { default = "dev" }
-variable "TIMESTAMP" { default = "" }
-
-# Determines whether to tag the image with "latest".
-variable "IS_LATEST" { default = "false" }
 
 function "should_push" {
   params = [image]
@@ -52,14 +50,7 @@ function "should_push" {
 function "tags" {
   params = [image]
   result = [
-    for tag in compact(concat(
-      [
-        GITHUB_SHA != "" ? "sha-${substr(GITHUB_SHA, 0, 7)}" : "",
-        TAG,
-        TIMESTAMP,
-      ],
-      IS_LATEST == "true" ? ["latest"] : [],
-    )) : "${REGISTRY_REPO != "" ? "${REGISTRY_REPO}/" : ""}${image}:${tag}-${ARCH}"
+    "${REGISTRY_REPO != "" ? "${REGISTRY_REPO}/" : ""}${image}:${TAG}-${split("/", PLATFORM)[1]}"
   ]
 }
 
@@ -75,8 +66,11 @@ target "image" {
   target     = img
   platforms  = [PLATFORM]
 
-  # Push only the images in IMAGES_TO_PUSH.
+  # Push only the images in IMAGES_TO_PUSH, and push them by digest only.
+  # build-and-test.yml tags them when it combines the architectures'
+  # images into one manifest, so that a build that fails partway does not
+  # leave behind tags that a registry might treat as immutable.
   # Leave the others' output unset so that --load still applies to them.
-  tags   = tags(img)
-  output = should_push(img) ? ["type=registry"] : []
+  tags   = should_push(img) ? ["${REGISTRY_REPO}/${img}"] : tags(img)
+  output = should_push(img) ? ["type=registry,push-by-digest=true"] : []
 }
