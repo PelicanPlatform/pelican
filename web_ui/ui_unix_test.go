@@ -51,6 +51,13 @@ func TestDoReload(t *testing.T) {
 	require.NoError(t, param.Server_UIPasswordFile.Set(passwordFile))
 	hook := test.NewGlobal()
 
+	// This test asserts on Debug-level entries; logrus no longer runs above
+	// the configured level (see config.initFilterLogging), so request the
+	// verbosity explicitly.
+	prevLevel := logrus.GetLevel()
+	logrus.SetLevel(logrus.DebugLevel)
+	t.Cleanup(func() { logrus.SetLevel(prevLevel) })
+
 	// Without a authdb set up, it should return nil with log message
 	err := doReload()
 	require.NoError(t, err)
