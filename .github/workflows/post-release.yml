@@ -4,8 +4,8 @@ name: Post-Release Actions
 
 on:
   release:
-    types: [published]
-  workflow_call:
+    # The "released" type excludes drafts and pre-releases.
+    types: [released]
 
 permissions: {}
 
