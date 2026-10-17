@@ -600,8 +600,14 @@ func (u *tierUploader) releaseLocalCopy(instanceHash InstanceHash, prev *CacheMe
 		}
 		u.eviction.NoteUsageDecrease(sid, bytes)
 	}
+	// Remove the local files under the instance's fence, as a deletion
+	// does, so that a fetch of the same version made after a deletion of the
+	// relocated object cannot have its new files removed here.  Nothing of
+	// the record is deleted, so writers are not fenced off.
+	release := u.storage.fences.exclude(instanceHash)
 	u.storage.invalidateObjectCaches(instanceHash, prev.ChunkCount())
 	u.storage.deleteChunkFiles(instanceHash, prev.ContentLength, prev.StorageID, prev.ChunkSizeCode, prev.ChunkLocations)
+	release(false)
 	return true
 }
 

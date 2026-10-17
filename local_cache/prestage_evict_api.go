@@ -237,7 +237,11 @@ func (q *prestageQueue) prestage(req *prestageRequest) {
 		return
 	}
 
-	reader, err := q.pc.Get(context.Background(), req.path, req.token)
+	// A prestage has no client to go away, but it must not outlast the
+	// cache: reading under the cache's download context ends a read
+	// waiting for a block when the cache closes.
+	ctx := q.pc.downloadCtx
+	reader, err := q.pc.Get(ctx, req.path, req.token)
 	if err != nil {
 		status := 500
 		msg := err.Error()
@@ -265,6 +269,23 @@ func (q *prestageQueue) prestage(req *prestageRequest) {
 		}
 		if readErr != nil {
 			req.SetDone(500, fmt.Sprintf("I/O failure when prestaging: %v", readErr))
+			return
+		}
+	}
+
+	// Reading the last byte is not the end of the download behind it: it
+	// still has to be verified and marked complete.  Report success only
+	// once it has been, so that a prestaged object is cached when the
+	// request says so.
+	if rr, ok := reader.(*RangeReader); ok {
+		if err := rr.WaitForCompletion(ctx); err != nil {
+			req.SetDone(500, fmt.Sprintf("Failure when prestaging: %v", err))
+			return
+		}
+		// WaitForCompletion stops waiting, without an error, when ctx
+		// ends; the download was then not seen to be verified.
+		if err := ctx.Err(); err != nil {
+			req.SetDone(500, fmt.Sprintf("Failure when prestaging: %v", err))
 			return
 		}
 	}

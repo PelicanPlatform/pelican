@@ -19,6 +19,7 @@
 package local_cache
 
 import (
+	"bytes"
 	"context"
 	"encoding/binary"
 	"io"
@@ -326,7 +327,7 @@ type StorageManager struct {
 	// removals are immediately visible across goroutines.  Idle entries are
 	// evicted after blockStateTTL and reloaded from the database on next
 	// access.
-	blockStates *ttlcache.Cache[InstanceHash, *ObjectBlockState]
+	blockStates *blockStateCache
 
 	// diskCrypto caches metadata + BlockEncryptor for disk-backed objects
 	// so that ReadBlocks / WriteBlocks / NewBlockWriter skip the DB
@@ -359,6 +360,24 @@ type StorageManager struct {
 	// pins tracks object versions with live readers, so a delete path that
 	// respects them does not pull data out from under one.  See pin.go.
 	pins *pinSet
+
+	// fences orders the database writes of each instance's writers against
+	// the instance's deletion, so that a writer still running when its
+	// instance is deleted writes nothing more of it.  See write_fence.go.
+	fences *instanceFences
+
+	// beforeDeleteFiles, set only by tests, runs as an object's local files
+	// are about to be deleted.
+	beforeDeleteFiles func(InstanceHash)
+	// beforeWriterOpens, set only by tests, runs as NewBlockWriter is about
+	// to open (and perhaps create) the object's file.
+	beforeWriterOpens func(InstanceHash)
+	// beforeClearCorrupt, set only by tests, runs as an auto-repair is about
+	// to clear the blocks it found corrupt.
+	beforeClearCorrupt func(InstanceHash)
+	// beforeFileCached, set only by tests, runs when a reader has opened
+	// one of an instance's files and is about to cache its descriptor.
+	beforeFileCached func(InstanceHash)
 
 	// liveAppends holds the instance hashes of AppendWriters this process
 	// still owns, as a set (the value is always struct{}{}).  A persisted
@@ -599,6 +618,7 @@ func NewStorageManager(db *CacheDB, dirs []string, inlineMax int, egrp *errgroup
 		chooseDir:      defaultChooseDir,
 		pins:           newPinSet(),
 		blockStates:    newBlockStateCache(db),
+		fences:         newInstanceFences(),
 		diskCrypto: ttlcache.New[InstanceHash, *diskCryptoEntry](
 			ttlcache.WithTTL[InstanceHash, *diskCryptoEntry](diskCryptoTTL),
 		),
@@ -838,6 +858,7 @@ func NewStorageManagerReadOnly(baseDir string, db *CacheDB) (*StorageManager, er
 		inlineMaxBytes: InlineThreshold,
 		pins:           newPinSet(),
 		blockStates:    newBlockStateCache(db),
+		fences:         newInstanceFences(),
 		diskCrypto: ttlcache.New[InstanceHash, *diskCryptoEntry](
 			ttlcache.WithTTL[InstanceHash, *diskCryptoEntry](diskCryptoTTL),
 		),
@@ -905,6 +926,17 @@ func (sm *StorageManager) getDiskCrypto(instanceHash InstanceHash) (*diskCryptoE
 // complete.  All I/O must use ReadAt / WriteAt (offset-based,
 // concurrency-safe).
 func (sm *StorageManager) getFile(instanceHash InstanceHash, storageID StorageID) (*refCountedFile, error) {
+	return sm.getFileFor(instanceHash, storageID, false)
+}
+
+// getFileFor is getFile for a caller that may already be making a fenced
+// write of the instance (writing), which orders it against a deletion.  Any
+// other caller opens the file and caches its descriptor under the instance's
+// fence held shared (see instanceFences.shared): otherwise a deletion and a
+// fetch of the same version again could land between the open and the
+// caching, and the descriptor of the deleted file would be cached under the
+// new instance's key, failing every read of it until the entry expired.
+func (sm *StorageManager) getFileFor(instanceHash InstanceHash, storageID StorageID, writing bool) (*refCountedFile, error) {
 	key := chunkFileKey{instanceHash: instanceHash, chunkIndex: 0}
 	if sm.fdCacheMaxSize > 0 {
 		if item := sm.openFiles.Get(key); item != nil {
@@ -917,19 +949,39 @@ func (sm *StorageManager) getFile(instanceHash InstanceHash, storageID StorageID
 	}
 
 	objectPath := sm.getObjectPathForDir(storageID, instanceHash)
-
-	file, err := os.OpenFile(objectPath, os.O_RDWR, 0600)
+	rc, err := sm.openAndCache(instanceHash, key, objectPath, writing)
 	if err != nil {
 		return nil, errors.Wrap(err, "failed to open object file")
 	}
-
-	rc := newRefCountedFile(file)
-	if sm.fdCacheMaxSize > 0 {
-		// The cache takes its own reference.
-		rc.Acquire()
-		sm.openFiles.Set(key, rc, ttlcache.DefaultTTL)
-	}
 	return rc, nil
+}
+
+// openAndCache opens one of an instance's files and, with the descriptor
+// cache on, caches the descriptor; see getFileFor for writing.
+func (sm *StorageManager) openAndCache(instanceHash InstanceHash, key chunkFileKey, path string, writing bool) (*refCountedFile, error) {
+	var rc *refCountedFile
+	var err error
+	open := func() {
+		var file *os.File
+		if file, err = os.OpenFile(path, os.O_RDWR, 0600); err != nil {
+			return
+		}
+		rc = newRefCountedFile(file)
+		if sm.beforeFileCached != nil {
+			sm.beforeFileCached(instanceHash)
+		}
+		if sm.fdCacheMaxSize > 0 {
+			// The cache takes its own reference.
+			rc.Acquire()
+			sm.openFiles.Set(key, rc, ttlcache.DefaultTTL)
+		}
+	}
+	if writing {
+		open()
+	} else {
+		sm.fences.shared(instanceHash, open)
+	}
+	return rc, err
 }
 
 // invalidateObjectCaches removes all in-memory cached state for an object:
@@ -1002,6 +1054,12 @@ func (sm *StorageManager) getChunkPath(storageID StorageID, instanceHash Instanc
 // chunkIndex is 0-based.  The caller MUST call Release() when done.
 // Returns an error if the chunk is not allocated (StorageID = 0).
 func (sm *StorageManager) getChunkFile(instanceHash InstanceHash, meta *CacheMetadata, chunkIndex int) (*refCountedFile, error) {
+	return sm.getChunkFileFor(instanceHash, meta, chunkIndex, false)
+}
+
+// getChunkFileFor is getChunkFile for a caller that may already be making a
+// fenced write of the instance (writing); see getFileFor.
+func (sm *StorageManager) getChunkFileFor(instanceHash InstanceHash, meta *CacheMetadata, chunkIndex int, writing bool) (*refCountedFile, error) {
 	if !meta.IsChunked() || chunkIndex == 0 {
 		// Non-chunked objects or chunk 0 use the base file path
 		storageID := meta.StorageID
@@ -1011,7 +1069,7 @@ func (sm *StorageManager) getChunkFile(instanceHash InstanceHash, meta *CacheMet
 			}
 			return nil, errors.New("cannot get file for inline storage")
 		}
-		return sm.getFile(instanceHash, storageID)
+		return sm.getFileFor(instanceHash, storageID, writing)
 	}
 
 	// For chunks > 0, check if allocated
@@ -1032,16 +1090,9 @@ func (sm *StorageManager) getChunkFile(instanceHash InstanceHash, meta *CacheMet
 
 	storageID := meta.GetChunkStorageID(chunkIndex)
 	chunkPath := sm.getChunkPath(storageID, instanceHash, chunkIndex)
-
-	file, err := os.OpenFile(chunkPath, os.O_RDWR, 0600)
+	rc, err := sm.openAndCache(instanceHash, key, chunkPath, writing)
 	if err != nil {
 		return nil, errors.Wrapf(err, "failed to open chunk %d file", chunkIndex)
-	}
-
-	rc := newRefCountedFile(file)
-	if sm.fdCacheMaxSize > 0 {
-		rc.Acquire()
-		sm.openFiles.Set(key, rc, ttlcache.DefaultTTL)
 	}
 	return rc, nil
 }
@@ -1063,7 +1114,15 @@ func (sm *StorageManager) DirIDs() []StorageID {
 }
 
 // StoreInline stores small data inline in BadgerDB
-func (sm *StorageManager) StoreInline(ctx context.Context, instanceHash InstanceHash, meta *CacheMetadata, data []byte) error {
+func (sm *StorageManager) StoreInline(ctx context.Context, instanceHash InstanceHash, meta *CacheMetadata, data []byte) (err error) {
+	// A creation: see instanceFences.create.
+	sm.fences.create(instanceHash, func() { err = sm.storeInline(ctx, instanceHash, meta, data) })
+	return err
+}
+
+// storeInline is StoreInline for a caller that orders the creation against
+// deletion itself.
+func (sm *StorageManager) storeInline(ctx context.Context, instanceHash InstanceHash, meta *CacheMetadata, data []byte) error {
 	if len(data) > sm.inlineMaxBytes {
 		return errors.Errorf("data too large for inline storage: %d > %d", len(data), sm.inlineMaxBytes)
 	}
@@ -1157,7 +1216,17 @@ func (sm *StorageManager) ReadInline(instanceHash InstanceHash) ([]byte, error) 
 // storage directory.  The full contentLength is charged to the usage counter
 // at creation time so that the accounting matches the filesystem's
 // pre-allocation (Truncate).  Returns the metadata with encryption keys set up.
-func (sm *StorageManager) InitDiskStorage(ctx context.Context, instanceHash InstanceHash, contentLength int64, storageID StorageID, namespaceID NamespaceID) (*CacheMetadata, error) {
+func (sm *StorageManager) InitDiskStorage(ctx context.Context, instanceHash InstanceHash, contentLength int64, storageID StorageID, namespaceID NamespaceID) (meta *CacheMetadata, err error) {
+	// A creation: see instanceFences.create.
+	sm.fences.create(instanceHash, func() {
+		meta, err = sm.initDiskStorage(ctx, instanceHash, contentLength, storageID, namespaceID)
+	})
+	return meta, err
+}
+
+// initDiskStorage is InitDiskStorage for a caller that orders the creation against
+// deletion itself.
+func (sm *StorageManager) initDiskStorage(ctx context.Context, instanceHash InstanceHash, contentLength int64, storageID StorageID, namespaceID NamespaceID) (*CacheMetadata, error) {
 	// If another goroutine already initialized storage for this instance,
 	// return the existing metadata rather than generating a second DataKey
 	// (which would cause a set-once conflict in MergeMetadata).
@@ -1262,6 +1331,21 @@ func (sm *StorageManager) InitLazyChunkedStorage(
 	instanceHash InstanceHash,
 	contentLength int64,
 	chunkSizeCode ChunkSizeCode,
+) (meta *CacheMetadata, err error) {
+	// A creation: see instanceFences.create.
+	sm.fences.create(instanceHash, func() {
+		meta, err = sm.initLazyChunkedStorage(ctx, instanceHash, contentLength, chunkSizeCode)
+	})
+	return meta, err
+}
+
+// initLazyChunkedStorage is InitLazyChunkedStorage for a caller that orders the creation against
+// deletion itself.
+func (sm *StorageManager) initLazyChunkedStorage(
+	ctx context.Context,
+	instanceHash InstanceHash,
+	contentLength int64,
+	chunkSizeCode ChunkSizeCode,
 ) (*CacheMetadata, error) {
 	// If another goroutine already initialized storage for this instance,
 	// return the existing metadata rather than generating a second DataKey.
@@ -1331,6 +1415,22 @@ func (sm *StorageManager) AllocateChunk(
 	instanceHash InstanceHash,
 	meta *CacheMetadata,
 	chunkIndex int,
+) (updated *CacheMetadata, err error) {
+	// Creates a file of the instance and rewrites its record: a creation
+	// (see instanceFences.create).
+	sm.fences.create(instanceHash, func() {
+		updated, err = sm.allocateChunk(ctx, instanceHash, meta, chunkIndex)
+	})
+	return updated, err
+}
+
+// allocateChunk is AllocateChunk for a caller that orders it against
+// deletion itself: writeBlocks, through its write fence.
+func (sm *StorageManager) allocateChunk(
+	ctx context.Context,
+	instanceHash InstanceHash,
+	meta *CacheMetadata,
+	chunkIndex int,
 ) (*CacheMetadata, error) {
 	// Check if already allocated
 	if meta.IsChunkAllocated(chunkIndex) {
@@ -1390,6 +1490,17 @@ func (sm *StorageManager) AllocateChunk(
 // WriteBlocks writes encrypted blocks to disk storage
 // This is the main write path for large objects
 func (sm *StorageManager) WriteBlocks(instanceHash InstanceHash, startOffset int64, data []byte) error {
+	// Joined before the metadata is read, so that a deletion after the read
+	// fences the write (see instanceFences).
+	fence := sm.fences.join(instanceHash)
+	defer fence.leave()
+	return sm.writeBlocksThrough(fence, instanceHash, startOffset, data)
+}
+
+// writeBlocksThrough is WriteBlocks for a writer with a membership of the
+// instance's write fence of its own (an AppendWriter), which it writes
+// through, so that the writer's whole life is fenced and not only the call.
+func (sm *StorageManager) writeBlocksThrough(fence *writeFence, instanceHash InstanceHash, startOffset int64, data []byte) error {
 	// Get cached metadata + encryptor
 	dc, err := sm.getDiskCrypto(instanceHash)
 	if err != nil {
@@ -1406,13 +1517,60 @@ func (sm *StorageManager) WriteBlocks(instanceHash InstanceHash, startOffset int
 		return errors.New("writing to middle of block not supported; use block-aligned writes")
 	}
 
-	return sm.writeBlocks(instanceHash, meta, encryptor, startOffset, data)
+	completed := false
+	if !fence.write(func() {
+		if err = sm.writeBlocks(instanceHash, meta, encryptor, startOffset, data); err == nil {
+			completed = sm.checkAndMarkComplete(instanceHash, meta)
+		}
+	}) {
+		return errInstanceDeleted
+	}
+	if completed && sm.onObjectComplete != nil {
+		sm.onObjectComplete(instanceHash)
+	}
+	return err
 }
+
+// clearCorruptBlocks clears blocks that an auto-repair found corrupt, from
+// the database and from state, the in-memory block state of the reader's
+// instance, so that they are fetched again -- only if the instance is still
+// the one the reader read, whose record carried dataKey.  The reader found
+// the blocks corrupt reading by hash; if the instance has been deleted
+// since and the same version fetched again under the hash, the blocks are
+// the new instance's, which nothing has found corrupt.  The record is
+// checked, and the blocks cleared, under the instance's fence held shared,
+// so no deletion lands between the two.  It reports whether it cleared.
+// The caller must not hold the fence.
+func (sm *StorageManager) clearCorruptBlocks(instanceHash InstanceHash, dataKey []byte, state *ObjectBlockState, blocks []uint32) (bool, error) {
+	if sm.beforeClearCorrupt != nil {
+		sm.beforeClearCorrupt(instanceHash)
+	}
+	var cleared bool
+	var err error
+	sm.fences.shared(instanceHash, func() {
+		var meta *CacheMetadata
+		if meta, err = sm.db.GetMetadata(instanceHash); err != nil || meta == nil || !bytes.Equal(meta.DataKey, dataKey) {
+			return
+		}
+		if err = sm.db.ClearBlocks(instanceHash, blocks); err != nil {
+			return
+		}
+		// Visible to all readers immediately.
+		state.RemoveMany(blocks)
+		cleared = true
+	})
+	return cleared, err
+}
+
+// errInstanceDeleted is the error of a write to an object deleted while it
+// was being written.
+var errInstanceDeleted = errors.New("the object was deleted while it was being written")
 
 // writeBlocks encrypts and writes a contiguous range of blocks to disk.
 // It handles both chunked and non-chunked objects: for non-chunked objects
 // every block maps to chunk 0 and the single object file, so the chunk
-// bookkeeping collapses to a no-op.
+// bookkeeping collapses to a no-op.  The caller makes the call through the
+// instance's write fence.
 func (sm *StorageManager) writeBlocks(instanceHash InstanceHash, meta *CacheMetadata, encryptor *BlockEncryptor, startOffset int64, data []byte) error {
 	// Make a local copy of metadata so we never mutate the cached
 	// diskCryptoEntry (which is shared/read-only).
@@ -1431,7 +1589,7 @@ func (sm *StorageManager) writeBlocks(instanceHash InstanceHash, meta *CacheMeta
 			return rc.File(), nil
 		}
 		if !meta.IsChunkAllocated(chunkIdx) {
-			updatedMeta, err := sm.AllocateChunk(context.Background(), instanceHash, meta, chunkIdx)
+			updatedMeta, err := sm.allocateChunk(context.Background(), instanceHash, meta, chunkIdx)
 			if err != nil {
 				return nil, errors.Wrapf(err, "failed to allocate chunk %d", chunkIdx)
 			}
@@ -1439,7 +1597,8 @@ func (sm *StorageManager) writeBlocks(instanceHash InstanceHash, meta *CacheMeta
 			// Invalidate the diskCrypto cache so future callers see updated metadata
 			sm.diskCrypto.Delete(instanceHash)
 		}
-		rc, err := sm.getChunkFile(instanceHash, meta, chunkIdx)
+		// writeBlocks runs inside a fenced write (see its comment).
+		rc, err := sm.getChunkFileFor(instanceHash, meta, chunkIdx, true)
 		if err != nil {
 			if !errors.Is(err, os.ErrNotExist) {
 				return nil, err
@@ -1581,29 +1740,27 @@ func (sm *StorageManager) writeBlocks(instanceHash InstanceHash, meta *CacheMeta
 		}
 	}
 
-	// Check if download is complete
-	sm.checkAndMarkComplete(instanceHash, meta)
-
 	return nil
 }
 
-// checkAndMarkComplete checks if all blocks are downloaded and marks the object as complete
-func (sm *StorageManager) checkAndMarkComplete(instanceHash InstanceHash, meta *CacheMetadata) {
+// checkAndMarkComplete checks if all blocks are downloaded and marks the
+// object as complete, reporting whether it did.  The caller makes the call
+// through the instance's write fence, and runs onObjectComplete.
+func (sm *StorageManager) checkAndMarkComplete(instanceHash InstanceHash, meta *CacheMetadata) bool {
 	totalBlocks := CalculateBlockCount(meta.ContentLength)
 	downloadedCount, err := sm.db.GetDownloadedBlockCount(instanceHash)
 	if err != nil {
 		log.Warnf("Failed to check download completion: %v", err)
-		return
+		return false
 	}
-	if uint32(downloadedCount) == totalBlocks {
-		completionMeta := &CacheMetadata{Completed: time.Now()}
-		if err := sm.db.MergeMetadata(instanceHash, completionMeta); err != nil {
-			log.Warnf("Failed to update completion time: %v", err)
-		}
-		if sm.onObjectComplete != nil {
-			sm.onObjectComplete(instanceHash)
-		}
+	if uint32(downloadedCount) != totalBlocks {
+		return false
 	}
+	completionMeta := &CacheMetadata{Completed: time.Now()}
+	if err := sm.db.MergeMetadata(instanceHash, completionMeta); err != nil {
+		log.Warnf("Failed to update completion time: %v", err)
+	}
+	return true
 }
 
 // ReadBlocks reads and decrypts blocks from disk storage.
@@ -2043,46 +2200,129 @@ func (sm *StorageManager) IsComplete(instanceHash InstanceHash) (bool, error) {
 	return uint32(downloadedCount) == totalBlocks, nil
 }
 
-// Delete removes an object from storage
+// Delete removes an object from storage.
+//
+// The record, the in-memory state and the local files go with the
+// instance's writers and creators shut out (see instanceFences): no writer
+// of the instance writes anything of it afterwards, and a creation of the
+// instance anew -- a fetch of the same version -- happens wholly before or
+// wholly after, so it never loses its new files to this deletion.  Only
+// the database transaction and the unlinking of the files run inside; a
+// copy on a tiering target is deleted after, over the network.
 func (sm *StorageManager) Delete(instanceHash InstanceHash) error {
+	return sm.deleteExcluded(instanceHash, sm.fences.exclude(instanceHash))
+}
+
+// deleteAsWriter is Delete for a writer that condemned what it wrote and
+// drops the object -- a fill, a reader's own fetch, or a download: it
+// deletes the instance w writes, and reports true, unless that instance has
+// been deleted since w joined.  The hash may name a new instance by then --
+// the same version fetched again -- which is not the writer's to delete.  w
+// must not have left yet.
+func (sm *StorageManager) deleteAsWriter(w *writeFence) (bool, error) {
+	release := sm.fences.excludeAs(w)
+	if release == nil {
+		return false, nil
+	}
+	return sm.deleteExcludedIf(w.hash, release, nil)
+}
+
+// deleteIf is Delete for a caller whose verdict is on one life of the
+// instance, which still reports what it saw: it deletes the instance, and
+// reports true, only if still, given the instance's record, says the record
+// is still the one the verdict is on.  The record is read with the
+// instance's writers shut out, so nothing can delete the instance, nor
+// make it again, between the check and the deletion.
+func (sm *StorageManager) deleteIf(instanceHash InstanceHash, still func(*CacheMetadata) bool) (bool, error) {
+	return sm.deleteExcludedIf(instanceHash, sm.fences.exclude(instanceHash), still)
+}
+
+// deleteExcluded is Delete for a caller that has shut the instance's
+// writers out, with release.
+func (sm *StorageManager) deleteExcluded(instanceHash InstanceHash, release func(deleted bool)) error {
+	_, err := sm.deleteExcludedIf(instanceHash, release, nil)
+	return err
+}
+
+// deleteExcludedIf is deleteExcluded, made only if still -- when not nil --
+// accepts the instance's record; it reports whether it deleted.
+func (sm *StorageManager) deleteExcludedIf(instanceHash InstanceHash, release func(deleted bool), still func(*CacheMetadata) bool) (bool, error) {
 	// Get metadata to determine storage mode
 	meta, err := sm.db.GetMetadata(instanceHash)
 	if err != nil {
-		return errors.Wrap(err, "failed to get metadata")
+		release(false)
+		return false, errors.Wrap(err, "failed to get metadata")
+	}
+	if still != nil && !still(meta) {
+		release(false)
+		return false, nil
 	}
 
-	// Delete from database (handles inline data, block state, LRU)
-	if err := sm.db.DeleteObject(instanceHash); err != nil {
-		return errors.Wrap(err, "failed to delete database entries")
-	}
-
-	// Remove all in-memory cached state for this object.
 	chunkCount := 1
 	if meta != nil {
 		chunkCount = meta.ChunkCount()
 	}
-	sm.invalidateObjectCaches(instanceHash, chunkCount)
+	if err := sm.deleteRecordLocked(instanceHash, chunkCount); err != nil {
+		release(false)
+		return false, err
+	}
 
 	// If stored on a tiering target, delete the remote object; otherwise
 	// delete all chunk files on disk.
+	var target *tierTarget
 	if meta != nil {
-		if target := sm.getTierTarget(meta.StorageID); target != nil {
-			delCtx, delCancel := context.WithTimeout(context.Background(), tierSweepOpTimeout)
-			err := target.deleteObject(delCtx, instanceHash)
-			delCancel()
-			if err != nil {
-				log.Warnf("Failed to delete %s from tiering target %d (consistency sweep will retry): %v", instanceHash, meta.StorageID, err)
-			}
-		} else if meta.IsDisk() {
+		if target = sm.getTierTarget(meta.StorageID); target == nil && meta.IsDisk() {
 			sm.deleteChunkFiles(instanceHash, meta.ContentLength, meta.StorageID, meta.ChunkSizeCode, meta.ChunkLocations)
 		}
 	}
+	release(true)
 
+	if target != nil {
+		delCtx, delCancel := context.WithTimeout(context.Background(), tierSweepOpTimeout)
+		err := target.deleteObject(delCtx, instanceHash)
+		delCancel()
+		if err != nil {
+			log.Warnf("Failed to delete %s from tiering target %d (consistency sweep will retry): %v", instanceHash, meta.StorageID, err)
+		}
+	}
+
+	return true, nil
+}
+
+// deleteRecord removes an object's database entries (metadata, inline data,
+// block state, LRU) together with every in-memory cache of it -- block state,
+// disk crypto, file descriptors -- but not its files.  The two go together:
+// a cache entry outliving its record would be handed to the object when it
+// is next created under the same hash, with a fresh data key and an empty
+// bitmap, claiming blocks it does not have.  chunkCount is the number of
+// chunk files (1 for a non-chunked object).
+//
+// Both happen with the instance's writers shut out, which fences off every
+// writer of the instance still running (see instanceFences): none of them
+// writes anything of it from then on, so nothing it writes outlives the
+// delete.
+func (sm *StorageManager) deleteRecord(instanceHash InstanceHash, chunkCount int) error {
+	release := sm.fences.exclude(instanceHash)
+	err := sm.deleteRecordLocked(instanceHash, chunkCount)
+	release(err == nil)
+	return err
+}
+
+// deleteRecordLocked is deleteRecord for a caller holding the instance's
+// fence exclusively.
+func (sm *StorageManager) deleteRecordLocked(instanceHash InstanceHash, chunkCount int) error {
+	if err := sm.db.DeleteObject(instanceHash); err != nil {
+		return errors.Wrap(err, "failed to delete database entries")
+	}
+	sm.invalidateObjectCaches(instanceHash, chunkCount)
 	return nil
 }
 
 // deleteChunkFiles removes all chunk files for an object from disk.
 func (sm *StorageManager) deleteChunkFiles(instanceHash InstanceHash, contentLen int64, baseStorageID StorageID, chunkSizeCode ChunkSizeCode, chunkLocations []ChunkLocation) {
+	if sm.beforeDeleteFiles != nil {
+		sm.beforeDeleteFiles(instanceHash)
+	}
 	chunkCount := CalculateChunkCount(contentLen, chunkSizeCode)
 	for chunkIdx := 0; chunkIdx < chunkCount; chunkIdx++ {
 		var storageID StorageID
@@ -2131,11 +2371,43 @@ func (sm *StorageManager) EvictByLRU(storageID StorageID, namespaceID NamespaceI
 	// isPinned is called from inside the eviction transaction.  That is safe
 	// because pins.mu is a leaf: pinning never opens a Badger transaction, so
 	// the two locks cannot be acquired in opposing orders.
-	evicted, skipped, err := sm.db.EvictByLRU(storageID, namespaceID, maxObjects, maxBytes, sm.pins.isPinned)
+	//
+	// Each object is shut off from its writers (see instanceFences) before
+	// the transaction deletes it, and they are let back in once its
+	// in-memory state is gone too.  A writer's write therefore either
+	// commits before the fence is taken -- and the eviction, committing
+	// later, deletes it -- or is fenced off.  Taking a fence waits only for
+	// a write in progress, and a fence is a leaf lock like pins.mu.
+	releases := make(map[InstanceHash]func(deleted bool))
+	claim := func(hash InstanceHash) {
+		if _, held := releases[hash]; !held {
+			releases[hash] = sm.fences.exclude(hash)
+		}
+	}
+	evicted, skipped, err := sm.db.EvictByLRU(storageID, namespaceID, maxObjects, maxBytes, sm.pins.isPinned, claim)
 	if err != nil {
+		for _, release := range releases {
+			release(false)
+		}
 		// Return the attempted (uncommitted) objects alongside the error
 		// so the caller can log which objects were involved in a conflict.
 		return evicted, 0, skipped, errors.Wrap(err, "failed to evict objects by LRU")
+	}
+	// An evicted object's in-memory state and local files go before its
+	// fence is released, as in Delete: a fetch of the same version then
+	// creates its new files after these are gone, never before.
+	for _, obj := range evicted {
+		sm.invalidateObjectCaches(obj.instanceHash, CalculateChunkCount(obj.contentLen, obj.chunkSizeCode))
+		if sm.getTierTarget(obj.storageID) == nil && obj.storageID != StorageIDInline {
+			sm.deleteChunkFiles(obj.instanceHash, obj.contentLen, obj.storageID, obj.chunkSizeCode, obj.chunkLocations)
+		}
+		if release, held := releases[obj.instanceHash]; held {
+			release(true)
+			delete(releases, obj.instanceHash)
+		}
+	}
+	for _, release := range releases {
+		release(false) // claimed, but its deletion failed
 	}
 
 	var totalFreed uint64
@@ -2153,11 +2425,8 @@ func (sm *StorageManager) EvictByLRU(storageID StorageID, namespaceID NamespaceI
 			totalFreed += uint64(bytes)
 		}
 
-		// Remove all in-memory cached state for this object.
-		sm.invalidateObjectCaches(obj.instanceHash, CalculateChunkCount(obj.contentLen, obj.chunkSizeCode))
-
-		// Delete the backing data: remote object for tiered objects,
-		// chunk files on disk otherwise.
+		// Delete a tiered object's remote copy; its local files, if any,
+		// went above.
 		if target := sm.getTierTarget(obj.storageID); target != nil {
 			delCtx, delCancel := context.WithTimeout(context.Background(), tierSweepOpTimeout)
 			err := target.deleteObject(delCtx, obj.instanceHash)
@@ -2166,8 +2435,6 @@ func (sm *StorageManager) EvictByLRU(storageID StorageID, namespaceID NamespaceI
 				log.Warnf("Failed to delete evicted object %s from tiering target %d (consistency sweep will retry): %v",
 					obj.instanceHash, obj.storageID, err)
 			}
-		} else if obj.storageID != StorageIDInline {
-			sm.deleteChunkFiles(obj.instanceHash, obj.contentLen, obj.storageID, obj.chunkSizeCode, obj.chunkLocations)
 		}
 	}
 
@@ -2541,6 +2808,10 @@ type BlockWriter struct {
 	meta         *CacheMetadata
 	bitmap       *roaring.Bitmap   // Snapshot used for skip-detection (optimization)
 	sharedState  *ObjectBlockState // Shared state updated after each block write
+	// fence makes every database write of the writer through the
+	// instance's write fence, so that none lands after the instance is
+	// deleted (see instanceFences); left when the writer closes.
+	fence        *writeFence
 	buffer       []byte
 	currentBlock uint32
 	totalBlocks  uint32
@@ -2564,6 +2835,23 @@ type BlockWriter struct {
 // already-downloaded blocks.  startBlock specifies which block number the
 // first incoming byte corresponds to (use 0 to start from the beginning).
 func (sm *StorageManager) NewBlockWriter(instanceHash InstanceHash, startBlock uint32, existingBitmap *roaring.Bitmap, onComplete func()) (*BlockWriter, error) {
+	// Join the instance's write fence before reading anything of it, so
+	// that a deletion after the read also fences this writer.
+	return sm.newBlockWriterIn(sm.fences.join(instanceHash), instanceHash, startBlock, existingBitmap, onComplete)
+}
+
+// newBlockWriterIn is NewBlockWriter for a caller that joined the instance's
+// write fence itself, before it read what decided the writer's work -- a
+// fill or a reader's own fetch, which checks that the object is still the
+// one its fetcher was made for.  The writer takes the membership over and
+// leaves it when it closes, or here if it cannot be made.
+func (sm *StorageManager) newBlockWriterIn(fence *writeFence, instanceHash InstanceHash, startBlock uint32, existingBitmap *roaring.Bitmap, onComplete func()) (bw *BlockWriter, err error) {
+	defer func() {
+		if err != nil {
+			fence.leave()
+		}
+	}()
+
 	// Get cached metadata + encryptor
 	dc, err := sm.getDiskCrypto(instanceHash)
 	if err != nil {
@@ -2581,14 +2869,25 @@ func (sm *StorageManager) NewBlockWriter(instanceHash InstanceHash, startBlock u
 		return nil, errors.Wrap(err, "failed to get shared block state")
 	}
 
-	// Open the file for read/write, creating it and its parent directory if necessary.
+	if sm.beforeWriterOpens != nil {
+		sm.beforeWriterOpens(instanceHash)
+	}
+	// Open the file for read/write, creating it and its parent directory if
+	// necessary -- through the fence, as this may create the file: once the
+	// instance has been deleted, the writer must not make its file again.
 	objectPath := sm.getObjectPathForDir(meta.StorageID, instanceHash)
-	file, err := os.OpenFile(objectPath, os.O_RDWR|os.O_CREATE, 0600)
-	if errors.Is(err, os.ErrNotExist) {
-		if mkdirErr := os.MkdirAll(filepath.Dir(objectPath), 0750); mkdirErr != nil {
-			return nil, errors.Wrap(mkdirErr, "failed to create object directory")
-		}
+	var file *os.File
+	if !fence.write(func() {
 		file, err = os.OpenFile(objectPath, os.O_RDWR|os.O_CREATE, 0600)
+		if errors.Is(err, os.ErrNotExist) {
+			if mkdirErr := os.MkdirAll(filepath.Dir(objectPath), 0750); mkdirErr != nil {
+				err = errors.Wrap(mkdirErr, "failed to create object directory")
+				return
+			}
+			file, err = os.OpenFile(objectPath, os.O_RDWR|os.O_CREATE, 0600)
+		}
+	}) {
+		return nil, errInstanceDeleted
 	}
 	if err != nil {
 		return nil, errors.Wrap(err, "failed to open object file for writing")
@@ -2623,6 +2922,7 @@ func (sm *StorageManager) NewBlockWriter(instanceHash InstanceHash, startBlock u
 		meta:         meta,
 		bitmap:       existingBitmap,
 		sharedState:  sharedState,
+		fence:        fence,
 		buffer:       make([]byte, 0, BlockDataSize),
 		currentBlock: startBlock,
 		totalBlocks:  CalculateBlockCount(meta.ContentLength),
@@ -2734,27 +3034,53 @@ func (bw *BlockWriter) flushWriteBatch() error {
 	if bw.batchCount == 0 {
 		return nil
 	}
-
-	fileOffset := BlockOffset(bw.batchStart)
-	if _, err := bw.file.File().WriteAt(bw.writeBatch, fileOffset); err != nil {
-		return errors.Wrapf(err, "failed to write blocks %d–%d", bw.batchStart, bw.batchStart+bw.batchCount-1)
+	dropBatch := func() {
+		bw.writeBatch = bw.writeBatch[:0]
+		bw.batchCount = 0
+	}
+	// Once the object is condemned and being dropped, no writer may
+	// publish anything of it: another writer's verdict condemned it, and a
+	// reader must not be woken to serve blocks of it.  The delete that
+	// follows the condemnation fences off what this check cannot -- a
+	// writer already past it -- below.
+	if bw.sharedState != nil && bw.sharedState.Condemned() != nil {
+		dropBatch()
+		return nil
 	}
 
+	// The blocks are written and marked present through the instance's
+	// write fence: once the instance is deleted -- dropped as condemned,
+	// evicted, or deleted explicitly -- the rows marked now would outlive
+	// the delete and be taken for blocks of the object when it is next
+	// fetched under the same hash.  A fenced-off writer writes nothing and
+	// reports no error; the instance it was writing is gone.
 	endBlock := bw.batchStart + bw.batchCount - 1
-	if err := bw.sm.db.MarkBlocksDownloaded(bw.instanceHash, bw.batchStart, endBlock, bw.meta.StorageID, bw.meta.NamespaceID, bw.meta.ContentLength); err != nil {
-		return errors.Wrapf(err, "failed to mark blocks %d–%d as downloaded", bw.batchStart, endBlock)
+	var err error
+	written := bw.fence.write(func() {
+		if _, err = bw.file.File().WriteAt(bw.writeBatch, BlockOffset(bw.batchStart)); err != nil {
+			err = errors.Wrapf(err, "failed to write blocks %d–%d", bw.batchStart, endBlock)
+			return
+		}
+		if err = bw.sm.db.MarkBlocksDownloaded(bw.instanceHash, bw.batchStart, endBlock, bw.meta.StorageID, bw.meta.NamespaceID, bw.meta.ContentLength); err != nil {
+			err = errors.Wrapf(err, "failed to mark blocks %d–%d as downloaded", bw.batchStart, endBlock)
+		}
+	})
+	if err != nil {
+		return err
+	}
+	if !written {
+		dropBatch()
+		return nil
 	}
 
 	// Update the shared in-memory block state so all concurrent readers
-	// see these blocks as available immediately.
+	// see these blocks as available immediately -- in one step, so that
+	// the batch costs one lock and one wakeup of the readers waiting on
+	// the object, not one of each per block.
 	if bw.sharedState != nil {
-		for block := bw.batchStart; block <= endBlock; block++ {
-			bw.sharedState.Add(block)
-		}
+		bw.sharedState.AddRange(bw.batchStart, endBlock)
 	}
-
-	bw.writeBatch = bw.writeBatch[:0]
-	bw.batchCount = 0
+	dropBatch()
 	return nil
 }
 
@@ -2767,6 +3093,7 @@ func (bw *BlockWriter) Close() error {
 		return nil
 	}
 	bw.closed = true
+	defer bw.fence.leave()
 
 	// For unknown-size transfers (chunked encoding), set ContentLength
 	// BEFORE writing the last block so the block bitmap records the
@@ -2778,8 +3105,7 @@ func (bw *BlockWriter) Close() error {
 		bw.totalBlocks = CalculateBlockCount(bw.bytesWritten)
 		// Persist the now-known size so the last MarkBlocksDownloaded
 		// (and any concurrent readers) can use the correct value.
-		sizeMeta := &CacheMetadata{ContentLength: bw.bytesWritten}
-		if err := bw.sm.db.MergeMetadata(bw.instanceHash, sizeMeta); err != nil {
+		if err := bw.mergeMetadata(&CacheMetadata{ContentLength: bw.bytesWritten}); err != nil {
 			log.Warnf("Failed to update content length for unknown-size download: %v", err)
 		}
 		// Invalidate the diskCrypto cache so that subsequent ReadBlocks
@@ -2787,13 +3113,24 @@ func (bw *BlockWriter) Close() error {
 		bw.sm.diskCrypto.Delete(bw.instanceHash)
 	}
 
-	// Write any remaining partial block (last block of file).
-	// For unknown-size transfers the updated ContentLength ensures
-	// MarkBlocksDownloaded adds exactly the right usage for this block.
+	// Write any remaining partial block -- but only if it is the object's
+	// final block, complete.  Anything else means the input stopped
+	// mid-block (a failed or cancelled transfer whose caller closed rather
+	// than aborted), and writing the fragment would mark a short,
+	// mis-encrypted block present: every read of it fails authentication,
+	// and anything resuming the fill skips it as done.  For unknown-size
+	// transfers the updated ContentLength makes the buffer the final block
+	// by definition, and ensures MarkBlocksDownloaded adds exactly the right
+	// usage for it.
 	if len(bw.buffer) > 0 {
-		if err := bw.writeCurrentBlock(); err != nil {
-			bw.file.Release()
-			return errors.Wrap(err, "failed to write final block")
+		if bw.bufferIsFinalBlock() {
+			if err := bw.writeCurrentBlock(); err != nil {
+				bw.file.Release()
+				return errors.Wrap(err, "failed to write final block")
+			}
+		} else {
+			log.Debugf("Discarding a partial block %d of %s: the input ended mid-block", bw.currentBlock, bw.instanceHash)
+			bw.buffer = bw.buffer[:0]
 		}
 	}
 
@@ -2808,25 +3145,61 @@ func (bw *BlockWriter) Close() error {
 	// now that ContentLength is known.  For known-size transfers the file
 	// was already pre-allocated to the exact size by InitDiskStorage /
 	// NewBlockWriter, so this is a no-op.
-	if bw.totalBlocks > 0 {
-		actualSize := CalculateFileSize(bw.meta.ContentLength)
-		if err := bw.file.File().Truncate(actualSize); err != nil {
-			log.Warnf("Failed to truncate file to actual size: %v", err)
+	//
+	// Then donate the file descriptor to the cache.  The cache's own ref
+	// was not yet taken (the BlockWriter owned the sole ref), so Acquire
+	// for the cache and then Release the writer's ref.  Both go through the
+	// write fence: once the instance has been deleted, the descriptor is of
+	// a deleted file, and cached it would be found by a new instance under
+	// the same hash, every read of which would then fail.
+	bw.fence.write(func() {
+		if bw.totalBlocks > 0 {
+			actualSize := CalculateFileSize(bw.meta.ContentLength)
+			if err := bw.file.File().Truncate(actualSize); err != nil {
+				log.Warnf("Failed to truncate file to actual size: %v", err)
+			}
 		}
-	}
-
-	// Donate the file descriptor to the cache.  The cache's own ref was
-	// not yet taken (the BlockWriter owned the sole ref), so Acquire for
-	// the cache and then Release the writer's ref.
-	if bw.sm.fdCacheMaxSize > 0 {
-		bw.file.Acquire() // for the cache
-		bw.sm.openFiles.Set(chunkFileKey{instanceHash: bw.instanceHash, chunkIndex: 0}, bw.file, ttlcache.DefaultTTL)
-	}
+		if bw.sm.fdCacheMaxSize > 0 {
+			bw.file.Acquire() // for the cache
+			bw.sm.openFiles.Set(chunkFileKey{instanceHash: bw.instanceHash, chunkIndex: 0}, bw.file, ttlcache.DefaultTTL)
+		}
+	})
 	bw.file.Release() // writer's ref
 
-	// Check if download is complete and call callback
-	downloadedCount, err := bw.sm.db.GetDownloadedBlockCount(bw.instanceHash)
-	if err == nil && uint32(downloadedCount) == bw.totalBlocks {
+	bw.completeIfWhole()
+	return nil
+}
+
+// mergeMetadata merges meta into the instance's record through the writer's
+// write fence: once the instance has been deleted it writes nothing, where
+// MergeMetadata would make a record for it afresh.  It may be called from
+// outside the writer, and after the writer has closed, when it writes
+// nothing either (see writeFence.clone).
+func (bw *BlockWriter) mergeMetadata(meta *CacheMetadata) error {
+	fence := bw.fence.clone()
+	defer fence.leave()
+	var err error
+	fence.write(func() { err = bw.sm.db.MergeMetadata(bw.instanceHash, meta) })
+	return err
+}
+
+// completeIfWhole marks the object complete, and runs the completion
+// callbacks, if every one of its blocks is now present.  The caller holds
+// bw.mu and has flushed the writer.  The check and the marking go through
+// the write fence, with onComplete, which records the download's checksums
+// and latest version: a completion recorded after the instance is deleted
+// would be a phantom completion of the next instance under its hash.
+func (bw *BlockWriter) completeIfWhole() {
+	if bw.sharedState != nil && bw.sharedState.Condemned() != nil {
+		return // see flushWriteBatch
+	}
+	completed := false
+	bw.fence.write(func() {
+		downloadedCount, err := bw.sm.db.GetDownloadedBlockCount(bw.instanceHash)
+		if err != nil || uint32(downloadedCount) != bw.totalBlocks {
+			return
+		}
+		completed = true
 		// Mark as completed via merge to avoid overwriting concurrent changes.
 		bw.meta.Completed = time.Now()
 		completionMeta := &CacheMetadata{Completed: bw.meta.Completed}
@@ -2846,15 +3219,84 @@ func (bw *BlockWriter) Close() error {
 		if bw.onComplete != nil {
 			bw.onComplete()
 		}
+	})
 
-		// Notify the completion observer (e.g. the tiering uploader) so the
-		// object can be considered for tiering.
-		if bw.sm.onObjectComplete != nil {
-			bw.sm.onObjectComplete(bw.instanceHash)
+	// Notify the completion observer (e.g. the tiering uploader) so the
+	// object can be considered for tiering.
+	if completed && bw.sm.onObjectComplete != nil {
+		bw.sm.onObjectComplete(bw.instanceHash)
+	}
+}
+
+// bufferIsFinalBlock reports whether the buffered partial block is the
+// object's last block, exactly as long as that block should be.
+func (bw *BlockWriter) bufferIsFinalBlock() bool {
+	if bw.meta.ContentLength < 0 {
+		return true // unknown size: Close decides where the object ends
+	}
+	if bw.totalBlocks == 0 || bw.currentBlock != bw.totalBlocks-1 {
+		return false
+	}
+	return int64(len(bw.buffer)) == bw.meta.ContentLength-int64(bw.currentBlock)*BlockDataSize
+}
+
+// StopEarly closes the writer of a transfer that stopped before the end for a
+// reason that says nothing against the data it delivered (see
+// transferStopKeepsData): the cache cancelled it, or the connection broke.
+// Like Abort, it keeps the whole blocks and discards a partial one -- unless
+// that is the object's final block, complete -- and does not finalize an
+// object of unknown size.  Unlike Abort, it then checks, as Close does,
+// whether every block of the object is now present: the transfer may have
+// filled the object's last hole before it stopped, and the object must then
+// be marked complete, or nothing ever would.  Safe to call more than once,
+// and after Close or Abort.
+func (bw *BlockWriter) StopEarly() {
+	bw.mu.Lock()
+	defer bw.mu.Unlock()
+	if bw.closed {
+		return
+	}
+	bw.closed = true
+	defer bw.fence.leave()
+	defer bw.file.Release()
+	if len(bw.buffer) > 0 && bw.meta.ContentLength >= 0 && bw.bufferIsFinalBlock() {
+		if err := bw.writeCurrentBlock(); err != nil {
+			log.Warnf("Failed to write the final block of %s while stopping a write: %v", bw.instanceHash, err)
 		}
 	}
+	bw.buffer = bw.buffer[:0]
+	if err := bw.flushWriteBatch(); err != nil {
+		log.Warnf("Failed to flush the whole blocks of %s while stopping a write: %v", bw.instanceHash, err)
+		return
+	}
+	if bw.meta.ContentLength >= 0 {
+		bw.completeIfWhole()
+	}
+}
 
-	return nil
+// Abort closes the writer after a transfer that failed in a way that
+// condemns its data, such as a checksum mismatch, or before it got under way.
+// Nothing more is published: the blocks still waiting in the write batch and
+// a partial block in the buffer are discarded, an object of unknown size is
+// not finalized at the point the input happened to stop, and the object is
+// never marked complete.  The batch must not be flushed, because flushing
+// marks its blocks present and wakes every reader waiting for them -- who
+// would read and serve them before anything had marked the object bad; the
+// caller drops the object next (see BlockFetcherV2.dropIfCondemned and
+// PersistentCache.endAdoptedDownload).  Every error path must use Abort or
+// StopEarly rather than Close.  Safe to call more than once, and after Close.
+func (bw *BlockWriter) Abort() {
+	bw.mu.Lock()
+	defer bw.mu.Unlock()
+	if bw.closed {
+		return
+	}
+	bw.closed = true
+	bw.buffer = bw.buffer[:0]
+	bw.writeBatch = bw.writeBatch[:0]
+	bw.batchCount = 0
+	bw.file.Release()
+	bw.fence.leave()
 }
 
 // Flush writes any accumulated batch of encrypted blocks to disk and

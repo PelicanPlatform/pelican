@@ -75,13 +75,22 @@ type tierTarget struct {
 	lastProbeError atomic.Value
 }
 
+// wrapTierBackendForTest, when set, wraps every tier backend as it is opened.
+// Tests use it to inject faults before the cache's background goroutines
+// start using the backend; nothing sets it in production.
+var wrapTierBackendForTest func(TierBackend) TierBackend
+
 // newTierTarget opens the backend for cfg and probes its capabilities.  No
 // object I/O happens beyond the capability probe; identity resolution is a
 // separate, explicit step.
 func newTierTarget(ctx context.Context, cfg TierTargetConfig) (*tierTarget, error) {
-	backend, err := newBlobTierBackend(ctx, cfg)
+	blob, err := newBlobTierBackend(ctx, cfg)
 	if err != nil {
 		return nil, err
+	}
+	var backend TierBackend = blob
+	if wrap := wrapTierBackendForTest; wrap != nil {
+		backend = wrap(backend)
 	}
 	t := &tierTarget{cfg: cfg, backend: backend}
 	t.healthy.Store(true)
@@ -293,6 +302,30 @@ type tierObjectStream struct {
 	// onChanged is called, at most once, when the target reports that it
 	// no longer holds that copy -- the object was overwritten in the bucket.
 	onChanged func()
+
+	// stopReadCtx undoes setReadContext; called by Close.
+	stopReadCtx func()
+}
+
+// setReadContext makes the stream's requests end when ctx ends, as well as
+// when the stream's own context does.  A stream serving an HTTP client is
+// made under a context that outlives the request (see
+// PersistentCache.GetSeekableReader), and http.ServeContent can only call
+// Read; without this, a read stalled on a slow or stuck target would not
+// notice its client leaving, and would keep the object pinned and the
+// request open until the target answered.  Call it before reading.
+func (s *tierObjectStream) setReadContext(ctx context.Context) {
+	merged, cancel := context.WithCancelCause(s.ctx)
+	stop := context.AfterFunc(ctx, func() { cancel(context.Cause(ctx)) })
+	prev := s.stopReadCtx
+	s.ctx = merged
+	s.stopReadCtx = func() {
+		stop()
+		cancel(nil)
+		if prev != nil {
+			prev()
+		}
+	}
 }
 
 func newTierObjectStream(ctx context.Context, target *tierTarget, hash InstanceHash, size int64) *tierObjectStream {
@@ -339,6 +372,13 @@ func (s *tierObjectStream) Read(p []byte) (int, error) {
 	n, err := s.body.Read(p)
 	s.position += int64(n)
 	s.bodyOffset = s.position
+	if err != nil && err != io.EOF && s.ctx.Err() != nil {
+		// The stream's reader has gone (or the cache is closing): nothing
+		// to reopen for.
+		s.body.Close()
+		s.body = nil
+		return n, context.Cause(s.ctx)
+	}
 	if err != nil && err != io.EOF {
 		// The body is no longer usable.  Drop it and leave bodyOffset where it
 		// is so the next Read reopens at the current position rather than
@@ -390,10 +430,14 @@ func (s *tierObjectStream) Close() error {
 		s.onClose()
 		s.onClose = nil
 	}
+	var err error
 	if s.body != nil {
-		err := s.body.Close()
+		err = s.body.Close()
 		s.body = nil
-		return err
 	}
-	return nil
+	if s.stopReadCtx != nil {
+		s.stopReadCtx()
+		s.stopReadCtx = nil
+	}
+	return err
 }

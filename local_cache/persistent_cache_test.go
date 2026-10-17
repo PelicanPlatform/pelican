@@ -1535,8 +1535,6 @@ func storeTestObject(
 
 	meta, err := storage.InitDiskStorage(ctx, instanceHash, contentLength, storageID, namespaceID)
 	require.NoError(t, err)
-	meta.Completed = time.Now().Add(-10 * time.Minute)
-	require.NoError(t, storage.SetMetadata(instanceHash, meta))
 
 	// Write data blocks
 	require.NoError(t, storage.WriteBlocks(instanceHash, 0, data))
@@ -1546,6 +1544,13 @@ func storeTestObject(
 	bm := roaring.NewBitmap()
 	bm.AddRange(0, uint64(totalBlocks))
 	require.NoError(t, storage.db.SetBlockState(instanceHash, bm))
+
+	// Backdate the completion only now that the blocks are there, as a real
+	// download completes an object: a complete object without its blocks is
+	// one that anything watching for completed objects -- the tiering
+	// uploader's startup scan -- can pick up and fail on.
+	meta.Completed = time.Now().Add(-10 * time.Minute)
+	require.NoError(t, storage.SetMetadata(instanceHash, meta))
 }
 
 // TestVerifyObject_CorrectChecksum creates a disk-backed object with a
