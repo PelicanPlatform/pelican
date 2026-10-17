@@ -25,6 +25,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"regexp"
 	"runtime"
 	"sort"
 	"strings"
@@ -1023,8 +1024,26 @@ func (sm *StorageManager) invalidateObjectCaches(instanceHash InstanceHash, chun
 	}
 }
 
-// getObjectPathForDir returns the full path for an object in a specific directory.
+// instanceHashPattern is the form of every instance hash the cache makes:
+// a SHA-256 digest in lowercase hex (see ParseInstanceHash).
+var instanceHashPattern = regexp.MustCompile(`^[0-9a-f]{64}$`)
+
+// getObjectPathForDir returns the full path for an object in a specific
+// directory, or "" if the instance hash is not a well-formed one.
+//
+// Every instance hash is a digest the cache computed itself, so a malformed
+// one should never reach here; but the hash names the object's file, and a
+// path built from anything else -- a name with a separator or "..", say --
+// could reach outside the storage directory.  So it is checked where every
+// object path is made, and callers treat "" as a path that cannot be used.
 func (sm *StorageManager) getObjectPathForDir(storageID StorageID, instanceHash InstanceHash) string {
+	if !instanceHashPattern.MatchString(string(instanceHash)) {
+		return ""
+	}
+	rel := GetInstanceStoragePath(instanceHash)
+	if strings.Contains(rel, "..") {
+		return ""
+	}
 	dir, ok := sm.dirs[storageID]
 	if !ok {
 		// Fallback to first dir (should not happen in practice)
@@ -1033,7 +1052,7 @@ func (sm *StorageManager) getObjectPathForDir(storageID StorageID, instanceHash 
 			break
 		}
 	}
-	return filepath.Join(dir, GetInstanceStoragePath(instanceHash))
+	return filepath.Join(dir, rel)
 }
 
 // storageIsResolvable reports whether a storage ID names something this manager
@@ -1283,6 +1302,9 @@ func (sm *StorageManager) initDiskStorage(ctx context.Context, instanceHash Inst
 
 	// Create the file; createFile lazily creates the parent directory
 	objectPath := sm.getObjectPathForDir(storageID, instanceHash)
+	if objectPath == "" {
+		return nil, errors.Errorf("invalid instance hash %q", instanceHash)
+	}
 	file, err := createFile(objectPath)
 	if err != nil {
 		return nil, errors.Wrap(err, "failed to create object file")
@@ -2901,6 +2923,9 @@ func (sm *StorageManager) newBlockWriterIn(fence *writeFence, instanceHash Insta
 	// necessary -- through the fence, as this may create the file: once the
 	// instance has been deleted, the writer must not make its file again.
 	objectPath := sm.getObjectPathForDir(meta.StorageID, instanceHash)
+	if objectPath == "" {
+		return nil, errors.Errorf("invalid instance hash %q", instanceHash)
+	}
 	var file *os.File
 	if !fence.write(func() {
 		file, err = os.OpenFile(objectPath, os.O_RDWR|os.O_CREATE, 0600)

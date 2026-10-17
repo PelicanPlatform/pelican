@@ -22,6 +22,7 @@ import (
 	"context"
 	"io"
 	"os"
+	"strings"
 	"testing"
 	"time"
 
@@ -574,6 +575,30 @@ func TestAutoRepairClearsNothingOfARefetch(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, env.data[BlockDataSize:2*BlockDataSize], got)
 	assert.Zero(t, env.storage.fences.size())
+}
+
+// TestObjectPathsOnlyFromWellFormedHashes checks that an object's path is
+// built only from a well-formed instance hash -- 64 lowercase hex digits,
+// as the cache computes them -- so that no other string can name a file,
+// let alone one outside the storage directory, and that creating an object
+// under any other hash fails.
+func TestObjectPathsOnlyFromWellFormedHashes(t *testing.T) {
+	env := newTornBlockEnv(t, tornObjectBlocks*BlockDataSize-17)
+	good := InstanceHash(strings.Repeat("ab", 32))
+	assert.NotEmpty(t, env.storage.getObjectPathForDir(env.diskID(), good))
+	for _, bad := range []InstanceHash{
+		"",
+		"../../../../etc/passwd",
+		InstanceHash("../" + strings.Repeat("a", 61)),
+		InstanceHash(strings.Repeat("a", 63)),
+		InstanceHash(strings.Repeat("A", 64)),
+		InstanceHash(strings.Repeat("a", 62) + "/x"),
+	} {
+		require.Empty(t, env.storage.getObjectPathForDir(env.diskID(), bad), "%q", bad)
+		assert.Empty(t, env.storage.getChunkPath(env.diskID(), bad, 2), "%q", bad)
+		_, err := env.storage.InitDiskStorage(context.Background(), bad, 100, env.diskID(), 1)
+		assert.Error(t, err, "%q", bad)
+	}
 }
 
 // TestCachingADescriptorReleasesTheOneItReplaces checks that caching a

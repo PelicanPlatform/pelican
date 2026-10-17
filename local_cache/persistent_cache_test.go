@@ -937,7 +937,7 @@ func TestZeroBlockReadFailure(t *testing.T) {
 	require.NoError(t, err)
 	defer storage.Close()
 
-	instanceHash := InstanceHash("zero_block_test_0123456789abcdef0123456789abcdef01")
+	instanceHash := InstanceHash("0000b10c0123456789abcdef0123456789abcdef0123456789abcdef01234567")
 
 	// Generate encryption keys.
 	encMgr := db.GetEncryptionManager()

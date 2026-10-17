@@ -201,7 +201,7 @@ func TestAppendWriterRefundsOverAllocation(t *testing.T) {
 
 	const chunkSize = 2 * 1024 * 1024
 	sizeCode := BytesToChunkSizeCode(chunkSize)
-	hash := InstanceHash(randomHexForTest(t, 31))
+	hash := InstanceHash(randomHexForTest(t, 32))
 	nsID := NamespaceID(7)
 
 	w, err := sm.NewAppendWriter(t.Context(), hash, nsID, sizeCode)
