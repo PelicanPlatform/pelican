@@ -104,6 +104,20 @@ ARG XROOTD_MULTIUSER_RELEASE=
 # ARG XROOTD_MULTIUSER_RELEASE="1.1.osg${OSG_SERIES}.${BASE_OS}"
 
 #################################################################
+# GoReleaser
+#
+# These stages exist only to supply the GoReleaser binary to later
+# stages. There are two because pelican-build-base runs on the
+# build platform, while pelican-dev targets the target platform.
+#
+# Keep the two FROM lines on the same version. The GitHub Actions
+# workflows read the version from these lines (see
+# .github/scripts/goreleaser-version.sh).
+#################################################################
+FROM --platform=${BUILDPLATFORM} goreleaser/goreleaser:v2.18.3@sha256:b61a4eedf5e3b1d283792dade34ee0f8c6cce3e6f1f65851d3b397b8f8a75b6d AS goreleaser-build
+FROM goreleaser/goreleaser:v2.18.3@sha256:b61a4eedf5e3b1d283792dade34ee0f8c6cce3e6f1f65851d3b397b8f8a75b6d AS goreleaser-target
+
+#################################################################
 # Pelican Build Base
 #
 # This stage sets up the infrastructure for building the Pelican
@@ -115,6 +129,9 @@ ARG BUILDPLATFORM
 ARG BUILDOS
 ARG BUILDARCH
 
+# Install GoReleaser.
+COPY --from=goreleaser-build /usr/bin/goreleaser /usr/local/bin/goreleaser
+
 WORKDIR /pelican-build
 RUN --mount=type=bind,source=go.mod,target=/context/go.mod \
     --mount=type=bind,source=web_ui/frontend/package.json,target=/context/package.json \
@@ -124,17 +141,9 @@ RUN --mount=type=bind,source=go.mod,target=/context/go.mod \
   set -eux
   set -o pipefail
 
-  # Install GoReleaser and other tools.
+  # Install other tools. (GoReleaser is copied in above.)
 
-  cat >/etc/yum.repos.d/goreleaser.repo <<-EOF
-		[goreleaser]
-		name=GoReleaser
-		baseurl=https://repo.goreleaser.com/yum/
-		enabled=1
-		gpgcheck=0
-		exclude=goreleaser-pro
-	EOF
-  dnf install -y goreleaser jq make
+  dnf install -y jq make
 
   # Install Go.
   # Use go.mod and the go.dev API to determine the most recent version.
@@ -708,6 +717,9 @@ ARG TARGETPLATFORM
 ARG TARGETOS
 ARG TARGETARCH
 
+# Install GoReleaser.
+COPY --from=goreleaser-target /usr/bin/goreleaser /usr/local/bin/goreleaser
+
 RUN --mount=type=bind,source=go.mod,target=/context/go.mod \
     --mount=type=bind,source=web_ui/frontend/package.json,target=/context/package.json \
     --mount=type=cache,id=dnf-${TARGETPLATFORM},target=/var/cache/dnf,sharing=locked \
@@ -716,17 +728,9 @@ RUN --mount=type=bind,source=go.mod,target=/context/go.mod \
   set -eux
   set -o pipefail
 
-  # Install GoReleaser and other tools.
+  # Install other tools. (GoReleaser is copied in above.)
 
-  cat >/etc/yum.repos.d/goreleaser.repo <<-EOF
-		[goreleaser]
-		name=GoReleaser
-		baseurl=https://repo.goreleaser.com/yum/
-		enabled=1
-		gpgcheck=0
-		exclude=goreleaser-pro
-	EOF
-  dnf install -y goreleaser jq make
+  dnf install -y jq make
 
   # Install Go.
   # Use go.mod and the go.dev API to determine the most recent version.
