@@ -178,6 +178,7 @@ func stageBurstObjects(t *testing.T, ft *fed_test_utils.FedTest, prefix string, 
 // legal but not expected: it requires the tag's FIFO to be full at an instant
 // when the tag holds no in-flight transfer at all.
 func TestScheduler_BurstRejects429(t *testing.T) {
+	test_utils.SkipIfShort(t, "burst load against a full federation")
 	t.Cleanup(test_utils.SetupTestLogging(t))
 	server_utils.ResetTestState()
 	defer server_utils.ResetTestState()

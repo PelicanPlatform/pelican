@@ -33,6 +33,7 @@ import (
 
 	"github.com/pelicanplatform/pelican/metrics"
 	"github.com/pelicanplatform/pelican/server_utils"
+	"github.com/pelicanplatform/pelican/test_utils"
 )
 
 // TestPOSIXv2MetricsCollection verifies that POSIXv2 filesystem operations
@@ -121,9 +122,7 @@ func TestPOSIXv2MetricsCollection(t *testing.T) {
 
 // TestPOSIXv2SlowOperationMetrics verifies that slow operations (>2s) are tracked
 func TestPOSIXv2SlowOperationMetrics(t *testing.T) {
-	if testing.Short() {
-		t.Skip("Skipping slow operation test in short mode")
-	}
+	test_utils.SkipIfShort(t, "waits on deliberately slow (>2s) operations")
 
 	tmpDir := t.TempDir()
 

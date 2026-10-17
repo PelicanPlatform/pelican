@@ -120,6 +120,7 @@ func runRclone(t *testing.T, configPath string, args ...string) (string, error) 
 
 // TestRcloneDownload tests downloading files via rclone
 func TestRcloneDownload(t *testing.T) {
+	test_utils.SkipIfShort(t, "needs rclone and a full federation per test")
 	if !checkRcloneInstalled() {
 		t.Skip("rclone is not installed, skipping rclone integration tests")
 	}
@@ -205,6 +206,7 @@ func TestRcloneDownload(t *testing.T) {
 
 // TestRcloneUpload tests uploading files via rclone
 func TestRcloneUpload(t *testing.T) {
+	test_utils.SkipIfShort(t, "needs rclone and a full federation per test")
 	if !checkRcloneInstalled() {
 		t.Skip("rclone is not installed, skipping rclone integration tests")
 	}
@@ -285,6 +287,7 @@ func TestRcloneUpload(t *testing.T) {
 
 // TestRcloneSync tests bidirectional sync operations
 func TestRcloneSync(t *testing.T) {
+	test_utils.SkipIfShort(t, "needs rclone and a full federation per test")
 	if !checkRcloneInstalled() {
 		t.Skip("rclone is not installed, skipping rclone integration tests")
 	}
@@ -360,6 +363,7 @@ func TestRcloneSync(t *testing.T) {
 
 // TestRcloneWithExpiredToken tests that rclone properly refreshes expired tokens
 func TestRcloneTokenRefresh(t *testing.T) {
+	test_utils.SkipIfShort(t, "needs rclone and a full federation per test")
 	if !checkRcloneInstalled() {
 		t.Skip("rclone is not installed, skipping rclone integration tests")
 	}

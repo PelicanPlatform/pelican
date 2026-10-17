@@ -21,6 +21,12 @@ on:
         required: false
         type: boolean
         default: false
+      full_suite:
+        # When false, "go test" runs with -short, which skips the tests
+        # marked with test_utils.SkipIfShort.
+        required: false
+        type: boolean
+        default: false
   workflow_dispatch:
 
 permissions:
@@ -118,8 +124,9 @@ jobs:
             --junitfile junit-client.xml \
             -- \
             -p=2 \
-            -timeout=${{ inputs.race_detection && '45m' || '30m' }} \
+            -timeout=${{ (inputs.race_detection || inputs.full_suite || github.event_name == 'push') && '45m' || '30m' }} \
             ${{ inputs.race_detection && '-race' || '' }} \
+            ${{ !(inputs.full_suite || github.event_name == 'push') && '-short' || '' }} \
             -tags=client \
             ./e2e_fed_tests \
             ./local_cache \
@@ -139,8 +146,9 @@ jobs:
             --junitfile junit-server.xml \
             -- \
             -p=2 \
-            -timeout=${{ inputs.race_detection && '45m' || '30m' }} \
+            -timeout=${{ (inputs.race_detection || inputs.full_suite || github.event_name == 'push') && '45m' || '30m' }} \
             ${{ inputs.race_detection && '-race' || '' }} \
+            ${{ !(inputs.full_suite || github.event_name == 'push') && '-short' || '' }} \
             -tags=server \
             $PACKAGES
 

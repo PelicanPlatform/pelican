@@ -102,6 +102,7 @@ func getUserUID(t *testing.T, username string) uint32 {
 // 2. Checksums are stored in xattrs
 // 3. Downloads return the correct checksums
 func TestOriginMultiuser(t *testing.T) {
+	test_utils.SkipIfShort(t, "multiuser origin needs root and a full federation")
 	// Skip if not running as root - Multiuser feature requires root privileges
 	if os.Geteuid() != 0 {
 		t.Skip("Skipping multiuser test: must run as root")
@@ -258,6 +259,7 @@ func TestOriginMultiuser(t *testing.T) {
 //
 // This is a regression test for https://github.com/pelicanplatform/pelican/issues/3146
 func TestMultiuserChecksumFallback(t *testing.T) {
+	test_utils.SkipIfShort(t, "multiuser origin needs root and a full federation")
 	if os.Geteuid() != 0 {
 		t.Skip("Skipping multiuser test: must run as root")
 	}

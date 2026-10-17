@@ -154,6 +154,12 @@ go test -tags "client,server" ./...
 
 Tests that run `pelican` or `pelican-server` as a subprocess get them from the helpers in `test_utils/binaries.go`, which build each binary on first use. CI instead points them at its GoReleaser builds by setting `TEST_PELICAN_BINARY` and `TEST_PELICAN_SERVER_BINARY` (Windows sets only the former). To test the same kind of binaries locally, build them with GoReleaser (see above) and set these variables to the binaries' absolute paths, which `.github/scripts/go-test/goreleaser_binaries.sh` prints; `test_utils/binaries.go` documents these and the other `TEST_PELICAN_*` variables.
 
+**Test tiers:** The presumption is that every test runs everywhere, always. CI passes `-short` to `go test` on every push and runs the full suite on a schedule. Mark a test with `test_utils.SkipIfShort(t, "reason")` as its first statement only when one of two things holds. First, it exercises something esoteric: a backend, service or privilege the per-push runners should not depend on, such as HTCondor, rclone, minio or root. Second, measurement shows that the time it adds to a CI run is not worth what it checks; a test that is off the critical path, or that takes a second, saves nothing by being skipped. Both are judgement calls, and the second must rest on observed timings (the JUnit artifacts give per-test times), not on reading the code. To reproduce what a push runs, add `-short`:
+
+```bash
+go test -short -tags "client,server" ./...
+```
+
 **Test individual modules (use whichever tags apply to that module):**
 
 ```bash

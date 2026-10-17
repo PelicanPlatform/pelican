@@ -51,6 +51,7 @@ import (
 // file transfer plugin, starts a data federation, and verifies that jobs can
 // successfully transfer files using the plugin.
 func TestHTCondorPlugin(t *testing.T) {
+	test_utils.SkipIfShort(t, "needs HTCondor")
 	// Setup test logging
 	t.Cleanup(test_utils.SetupTestLogging(t))
 

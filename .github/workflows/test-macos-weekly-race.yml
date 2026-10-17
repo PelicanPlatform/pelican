@@ -1,0 +1,47 @@
+---
+name: Run Tests (macOS) [weekly, race detector]
+
+# The full test suite under the race detector. It runs weekly rather than
+# nightly because known data races make it fail until they are addressed;
+# a weekly run keeps the results visible without burying the daily run.
+
+on:
+  schedule:
+    - cron: "0 9 * * 0"  # at 09:00 every Sunday
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  run-tests:
+    name: Test
+    uses: ./.github/workflows/test-macos.yml
+    with:
+      full_suite: true
+      race_detection: true
+
+  analyze-runs:
+    name: Analyze Runs
+    if: ${{ !cancelled() }}
+    needs: [run-tests]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      # download_junit_artifacts.sh runs "gh run list" and "gh run download"
+      # over the previous runs of this workflow.
+      actions: read
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+
+      - name: Download artifacts
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          bash .github/scripts/analyze-junit-results/download_junit_artifacts.sh "Run Tests (macOS) [weekly, race detector]"
+
+      - name: Analyze test results
+        run: |
+          python3 .github/scripts/analyze-junit-results/analyze_junit_results.py
+          cat test-failure-analysis.md >> $GITHUB_STEP_SUMMARY

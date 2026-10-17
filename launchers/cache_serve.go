@@ -150,6 +150,10 @@ func cacheServeWithPersistentCache(ctx context.Context, engine *gin.Engine, egrp
 	// Cache.HighWaterMark, etc. instead of LocalCache.* params.
 	cfg := local_cache.PersistentCacheConfig{
 		Mode: local_cache.CacheModeServer,
+		// The federation token manager started below delivers tokens to
+		// the cache; site-local caches have no manager and must not wait
+		// for one.
+		ExpectFedToken: !param.Cache_EnableSiteLocalMode.GetBool(),
 	}
 
 	// Populate storage directories from config if set.

@@ -531,3 +531,4 @@ jobs:
     uses: ./.github/workflows/test-linux.yml
     with:
       image: ${{ needs.params.outputs.registry-repo }}/pelican-test:${{ needs.tags.outputs.TAG }}
+      full_suite: ${{ github.event_name == 'push' }}
