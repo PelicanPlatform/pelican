@@ -27,6 +27,8 @@ import (
 	"github.com/stretchr/testify/require"
 	"golang.org/x/crypto/bcrypt"
 	"gorm.io/gorm"
+
+	"github.com/pelicanplatform/pelican/param"
 )
 
 func setupCollectionTestDB(t *testing.T) *gorm.DB {
@@ -387,4 +389,79 @@ func TestRedeemCollectionOwnershipInviteLink_GroupCascade(t *testing.T) {
 		assert.Equal(t, "third-party", afterGrp.OwnerID,
 			"a group already re-homed to a third party must NOT be yanked back by a downstream collection transfer")
 	})
+}
+
+func setExternalWebURL(t *testing.T, url string) {
+	t.Helper()
+	prev := param.Server_ExternalWebUrl.GetString()
+	t.Cleanup(func() { require.NoError(t, param.Server_ExternalWebUrl.Set(prev)) })
+	require.NoError(t, param.Server_ExternalWebUrl.Set(url))
+}
+
+func adminRows(t *testing.T, db *gorm.DB) (live, tombstoned []string) {
+	t.Helper()
+	var users []User
+	require.NoError(t, db.Unscoped().Where("username = ?", builtinAdminUsername).Order("id").Find(&users).Error)
+	for _, u := range users {
+		if u.DeletedAt.Valid {
+			tombstoned = append(tombstoned, u.ID)
+		} else {
+			live = append(live, u.ID)
+		}
+	}
+	return live, tombstoned
+}
+
+// ensureBuiltinAdmin keeps the admin row and its state across a URL change,
+// evicts a row squatting on "admin", and recreates the admin when missing.
+func TestEnsureBuiltinAdmin(t *testing.T) {
+	const oldURL = "https://old-origin.example.test"
+	const newURL = "https://origin.example.test"
+	version, err := globalUniqueUsernameMigrationVersion()
+	require.NoError(t, err)
+	db, sqlDB := migrateToVersion(t, version)
+	finishMigrations(t, sqlDB)
+
+	setExternalWebURL(t, oldURL)
+	require.NoError(t, ensureBuiltinAdmin(db))
+	require.NoError(t, BootstrapAdminAndBackfillOwners(db))
+	admin, err := BuiltinAdminUser(db)
+	require.NoError(t, err)
+	require.NotNil(t, admin)
+	require.NoError(t, db.Create(&Group{ID: "ops", Name: "ops", CreatedBy: CreatorUnknown}).Error)
+	require.NoError(t, db.Create(&GroupMember{GroupID: "ops", UserID: admin.ID, AddedBy: CreatorUnknown}).Error)
+
+	setExternalWebURL(t, newURL)
+	require.NoError(t, ensureBuiltinAdmin(db))
+	require.NoError(t, BootstrapAdminAndBackfillOwners(db))
+	moved, err := BuiltinAdminUser(db)
+	require.NoError(t, err)
+	require.NotNil(t, moved)
+	assert.Equal(t, admin.ID, moved.ID)
+	var members []GroupMember
+	require.NoError(t, db.Where("group_id = ? AND user_id = ?", "ops", admin.ID).Find(&members).Error)
+	assert.Len(t, members, 1)
+
+	require.NoError(t, ensureBuiltinAdmin(db))
+	live, tombstoned := adminRows(t, db)
+	assert.Equal(t, []string{admin.ID}, live)
+	assert.Empty(t, tombstoned)
+
+	require.NoError(t, db.Delete(&User{}, "id = ?", admin.ID).Error)
+	require.NoError(t, db.Create(&User{ID: "squatter", Username: "admin", Sub: "sub-x", Issuer: "https://idp.example.test",
+		CreatedBy: CreatorSelfEnrolled}).Error)
+	require.NoError(t, ensureBuiltinAdmin(db))
+	fresh, err := BuiltinAdminUser(db)
+	require.NoError(t, err)
+	require.NotNil(t, fresh)
+	assert.Equal(t, "admin", fresh.Sub)
+	assert.NotEqual(t, admin.ID, fresh.ID)
+	live, tombstoned = adminRows(t, db)
+	assert.Equal(t, []string{fresh.ID}, live)
+	assert.ElementsMatch(t, []string{admin.ID, "squatter"}, tombstoned)
+
+	setExternalWebURL(t, "")
+	require.NoError(t, ensureBuiltinAdmin(db))
+	live, _ = adminRows(t, db)
+	assert.Equal(t, []string{fresh.ID}, live)
 }
