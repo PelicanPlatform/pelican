@@ -217,7 +217,10 @@ func registerDirectorAd(appCtx context.Context, egrp *errgroup.Group, ctx *gin.C
 		if fAd.AdType == server_structs.OriginType.String() {
 			sType = server_structs.OriginType
 		}
-		finishRegisterServeAd(appCtx, ctx, fAd.ServiceAd, sType)
+		// Forwarded by a peer director, which resolved the advertised name
+		// against the registry before forwarding; this endpoint is
+		// director-authenticated and already trusted to insert ads at all.
+		finishRegisterServeAd(appCtx, ctx, fAd.ServiceAd, sType, true)
 		if ctx.IsAborted() {
 			return
 		}

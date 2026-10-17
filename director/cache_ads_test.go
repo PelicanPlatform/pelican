@@ -221,22 +221,22 @@ func TestRecordAd(t *testing.T) {
 
 	t.Run("topology-server-added-if-no-duplicate", func(t *testing.T) {
 		defer serverAds.DeleteAll()
-		recordAd(context.Background(), mockTopology.ServerAd, &mockTopology.NamespaceAds)
+		recordAd(context.Background(), mockTopology.ServerAd, &mockTopology.NamespaceAds, true)
 		assert.Len(t, serverAds.Items(), 1)
 		assert.True(t, serverAds.Has(topologyServerUrl.String()))
 	})
 
 	t.Run("pelican-server-added-if-no-duplicate", func(t *testing.T) {
 		defer serverAds.DeleteAll()
-		recordAd(context.Background(), mockPelican.ServerAd, &mockPelican.NamespaceAds)
+		recordAd(context.Background(), mockPelican.ServerAd, &mockPelican.NamespaceAds, true)
 		assert.Len(t, serverAds.Items(), 1)
 		assert.True(t, serverAds.Has(pelicanServerUrl.String()))
 	})
 
 	t.Run("pelican-server-overwrites-topology", func(t *testing.T) {
 		defer serverAds.DeleteAll()
-		recordAd(context.Background(), mockTopology.ServerAd, &mockTopology.NamespaceAds)
-		recordAd(context.Background(), mockPelican.ServerAd, &mockPelican.NamespaceAds)
+		recordAd(context.Background(), mockTopology.ServerAd, &mockTopology.NamespaceAds, true)
+		recordAd(context.Background(), mockPelican.ServerAd, &mockPelican.NamespaceAds, true)
 
 		assert.Len(t, serverAds.Items(), 1)
 		assert.True(t, serverAds.Has(pelicanServerUrl.String()))
@@ -247,8 +247,8 @@ func TestRecordAd(t *testing.T) {
 
 	t.Run("topology-server-is-ignored-with-dup-pelican-server", func(t *testing.T) {
 		defer serverAds.DeleteAll()
-		recordAd(context.Background(), mockPelican.ServerAd, &mockPelican.NamespaceAds)
-		recordAd(context.Background(), mockTopology.ServerAd, &mockTopology.NamespaceAds)
+		recordAd(context.Background(), mockPelican.ServerAd, &mockPelican.NamespaceAds, true)
+		recordAd(context.Background(), mockTopology.ServerAd, &mockTopology.NamespaceAds, true)
 
 		assert.Len(t, serverAds.Items(), 1)
 		assert.True(t, serverAds.Has(pelicanServerUrl.String()))
@@ -279,7 +279,7 @@ func TestRecordAd(t *testing.T) {
 		mockUrl := url.URL{Scheme: "https", Host: "192.168.100.100"}
 		serverAd := server_structs.ServerAd{URL: mockUrl, WebURL: mockUrl, FromTopology: false}
 		serverAd.Initialize("TEST_ORIGIN")
-		updatedAd := recordAd(context.Background(), serverAd, &mockPelican.NamespaceAds)
+		updatedAd := recordAd(context.Background(), serverAd, &mockPelican.NamespaceAds, true)
 		assert.NotEmpty(t, updatedAd.Longitude)
 		assert.NotEmpty(t, updatedAd.Latitude)
 		_, ok := healthTestUtils[mockUrl.String()]
@@ -647,4 +647,116 @@ func TestGetCachedDowntimesDedup(t *testing.T) {
 	require.Len(t, downtimes, 2)
 
 	assert.ElementsMatch(t, []string{"dup-id", "registry-id"}, []string{downtimes[0].UUID, downtimes[1].UUID})
+}
+
+// TestRecordAdServerRelocation covers what happens when an operator moves a
+// server to a new endpoint (new host, port, or scheme) without changing its
+// registration name. The director keys advertisements by URL but keys
+// downtime/filtering by name, so without explicit handling the old and new
+// ads compete as if they were two independent servers -- and each request
+// can be matchmade to either, serving whichever namespace metadata (issuer,
+// collections URL) that instance advertised.
+func TestRecordAdShutdownAndCoexistence(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
+	t.Cleanup(func() {
+		shutdownHealthTests()
+		shutdownStatUtils()
+	})
+	resetHealthTests()
+	shutdownStatUtils()
+
+	serverAds.DeleteAll()
+	go serverAds.Start()
+	t.Cleanup(func() {
+		serverAds.DeleteAll()
+		serverAds.Stop()
+	})
+
+	const name = "OSDF-TUTORIAL-ORIGIN"
+	oldURL := url.URL{Scheme: "https", Host: "tutorial-origin.example.org:8443"}
+	newURL := url.URL{Scheme: "https", Host: "tutorial-origin.example.org"}
+
+	const registryPrefix = "/origins/tutorial-origin.example.org"
+
+	mkAdIn := func(prefix string, u url.URL, srvName string, startTime int64, status string) server_structs.ServerAd {
+		ad := server_structs.ServerAd{
+			URL:            u,
+			Type:           server_structs.OriginType.String(),
+			Status:         status,
+			RegistryPrefix: prefix,
+		}
+		ad.Name = srvName
+		ad.StartTime = startTime
+		return ad
+	}
+	mkAd := func(u url.URL, srvName string, startTime int64, status string) server_structs.ServerAd {
+		return mkAdIn(registryPrefix, u, srvName, startTime, status)
+	}
+	nsAds := []server_structs.NamespaceAd{}
+
+	t.Run("shutdown-ad-removes-entry-and-replacement-does-not-resurrect-it", func(t *testing.T) {
+		defer serverAds.DeleteAll()
+		recordAd(context.Background(), mkAd(oldURL, name, 1000, ""), &nsAds, true)
+		require.True(t, serverAds.Has(oldURL.String()))
+
+		// Graceful shutdown: the final ad carries the shutdown status.
+		recordAd(context.Background(), mkAd(oldURL, name, 1000, "shutting down"), &nsAds, true)
+		assert.False(t, serverAds.Has(oldURL.String()), "a shutting-down server must leave matchmaking immediately")
+
+		// The replacement's healthy ad clears the name-keyed downtime filter;
+		// that must not bring the old endpoint's ad back.
+		recordAd(context.Background(), mkAd(newURL, name, 2000, ""), &nsAds, true)
+		assert.True(t, serverAds.Has(newURL.String()))
+		assert.False(t, serverAds.Has(oldURL.String()))
+	})
+
+	t.Run("distinct-servers-coexist", func(t *testing.T) {
+		defer serverAds.DeleteAll()
+		other := url.URL{Scheme: "https", Host: "other-origin.example.org"}
+		recordAd(context.Background(), mkAd(oldURL, name, 1000, ""), &nsAds, true)
+		recordAd(context.Background(), mkAd(other, "SOME-OTHER-ORIGIN", 2000, ""), &nsAds, true)
+		assert.True(t, serverAds.Has(oldURL.String()), "different names are different servers")
+		assert.True(t, serverAds.Has(other.String()))
+	})
+
+	t.Run("co-hosted servers sharing a hostname-derived name coexist", func(t *testing.T) {
+		// Name falls back to the hostname when Xrootd.Sitename is unset, so
+		// two origins on one host advertise under the same name at different
+		// ports. They are separate registrations and both must stay: this is
+		// how the cross-origin TPC tests are built, and treating one as a
+		// relocation of the other silently removed an origin mid-test.
+		defer serverAds.DeleteAll()
+		const sharedName = "co-hosted.example.org"
+		first := url.URL{Scheme: "https", Host: "co-hosted.example.org:34233"}
+		second := url.URL{Scheme: "https", Host: "co-hosted.example.org:43335"}
+
+		recordAd(context.Background(), mkAdIn("/origins/first", first, sharedName, 1000, ""), &nsAds, true)
+		recordAd(context.Background(), mkAdIn("/origins/second", second, sharedName, 2000, ""), &nsAds, true)
+
+		assert.True(t, serverAds.Has(first.String()),
+			"a co-hosted origin must not be evicted as though the other had moved")
+		assert.True(t, serverAds.Has(second.String()), "the second origin must be recorded")
+	})
+
+	t.Run("same-name-different-server-type-coexists", func(t *testing.T) {
+		defer serverAds.DeleteAll()
+		cacheURL := url.URL{Scheme: "https", Host: "tutorial-cache.example.org"}
+		cacheAd := mkAd(cacheURL, name, 2000, "")
+		cacheAd.Type = server_structs.CacheType.String()
+		recordAd(context.Background(), mkAd(oldURL, name, 1000, ""), &nsAds, true)
+		recordAd(context.Background(), cacheAd, &nsAds, true)
+		assert.True(t, serverAds.Has(oldURL.String()), "an origin and a cache sharing a name are distinct servers")
+		assert.True(t, serverAds.Has(cacheURL.String()))
+	})
+
+	t.Run("without-start-times-both-ads-are-kept", func(t *testing.T) {
+		defer serverAds.DeleteAll()
+		// Older Pelican versions do not report StartTime; we cannot tell a
+		// replacement from a deliberate multi-instance deployment, so leave
+		// the existing behavior (both ads live out their TTLs) alone.
+		recordAd(context.Background(), mkAd(oldURL, name, 0, ""), &nsAds, true)
+		recordAd(context.Background(), mkAd(newURL, name, 0, ""), &nsAds, true)
+		assert.True(t, serverAds.Has(oldURL.String()))
+		assert.True(t, serverAds.Has(newURL.String()))
+	})
 }
