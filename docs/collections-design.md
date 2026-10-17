@@ -25,6 +25,8 @@ The exported namespace controls whether public reads are permitted. *However*, c
 
 The example usage scenario is allowing a PI to have a storage area for their group. The origin administrator would create a collection, making the PI an owner. The group of PI’s postdocs would be the administrator of the collection. This means the PI, other than taking responsibility, is not involved in the day-to-day management. The postdocs would add the group’s undergraduates to a read-only group and the graduate students to a read-write group.
 
+Creating a collection requires the `server.collection_admin` scope (or `server.admin`, which implies it). The collections API checks that role on every create, for cookie and bearer callers alike, and the issuer mints the `collection.create:/` scope only to collection admins. Collection management scopes use the same path convention as `storage.*` and `share.access`: `collection.read:/` is the blanket capability, and `collection.modify:/<id>` names one collection.
+
 # Shares
 
 A share is a special type of collection that can be created and managed by users who otherwise lack the privilege to create a collection. When data is accessed via the share, it’s done impersonating the owner. The intent is to allow users to share or delegate access that they have to their collaborators.
