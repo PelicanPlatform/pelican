@@ -107,6 +107,10 @@ type duReport struct {
 
 func duMain(cmd *cobra.Command, args []string) error {
 	ctx := cmd.Context()
+
+	// Set up signal handlers to flush logs on SIGTERM
+	client.SetupSignalHandlers()
+
 	if err := config.InitClient(); err != nil {
 		log.Errorln(err)
 		if client.IsRetryable(err) {
