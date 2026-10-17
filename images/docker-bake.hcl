@@ -41,9 +41,6 @@ variable "GITHUB_SHA" { default = "" }
 variable "TAG" { default = "dev" }
 variable "TIMESTAMP" { default = "" }
 
-# Determines whether to tag the image with "latest".
-variable "IS_LATEST" { default = "false" }
-
 function "should_push" {
   params = [image]
   result = contains(split(",", IMAGES_TO_PUSH), image)
@@ -52,14 +49,11 @@ function "should_push" {
 function "tags" {
   params = [image]
   result = [
-    for tag in compact(concat(
-      [
-        GITHUB_SHA != "" ? "sha-${substr(GITHUB_SHA, 0, 7)}" : "",
-        TAG,
-        TIMESTAMP,
-      ],
-      IS_LATEST == "true" ? ["latest"] : [],
-    )) : "${REGISTRY_REPO != "" ? "${REGISTRY_REPO}/" : ""}${image}:${tag}-${ARCH}"
+    for tag in compact([
+      GITHUB_SHA != "" ? "sha-${substr(GITHUB_SHA, 0, 7)}" : "",
+      TAG,
+      TIMESTAMP,
+    ]) : "${REGISTRY_REPO != "" ? "${REGISTRY_REPO}/" : ""}${image}:${tag}-${ARCH}"
   ]
 }
 

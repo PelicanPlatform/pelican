@@ -110,7 +110,9 @@ Second, you will need to do the following:
 
 1. Update [.github/workflows/build-and-test.yml](.github/workflows/build-and-test.yml) with your GitHub fork and corresponding container image registry. (At the discretion of Pelican's core contributors, this change can be merged into the main [PelicanPlatform/pelican](https://github.com/PelicanPlatform/pelican) repository.)
 
-1. Add `PELICAN_HARBOR_ROBOT_USER` and `PELICAN_HARBOR_ROBOT_PASSWORD` repository secrets to your fork, with contents befitting of their names. (The image registry used by Pelican is implemented by [Harbor](https://goharbor.io/), hence the secrets' names, but any Docker-like registry should work.)
+1. Create an environment named `harbor-tags` on your fork, and add `PELICAN_HARBOR_ROBOT_USER` and `PELICAN_HARBOR_ROBOT_PASSWORD` environment secrets to it, with contents befitting of their names. Only the jobs that push images built off of semver tags join this environment. (The image registry used by Pelican is implemented by [Harbor](https://goharbor.io/), hence the secrets' names, but any Docker-like registry should work.)
+
+1. If pulling images from your registry requires authentication, also add `PELICAN_HARBOR_PULL_USER` and `PELICAN_HARBOR_PULL_PASSWORD` repository secrets to your fork, preferably for an account that can only pull.
 
 1. As needed, create a new release or pre-release on your fork. The tag should be a [semver](https://semver.org/) tag following Pelican's release tagging scheme. The branch should be the one that you will eventually use to create pull requests against the main [PelicanPlatform/pelican](https://github.com/PelicanPlatform/pelican) repo.
 

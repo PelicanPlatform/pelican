@@ -155,8 +155,3 @@ jobs:
           args: release --clean --skip=before --config .goreleaser.generated.yml
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
-  upload-release:
-    name: Upload Release
-    needs: goreleaser
-    uses: ./.github/workflows/post-release.yml
