@@ -1,3 +1,5 @@
+'use client';
+
 /**
  * AppBar equivalent for the NavigationItem component
  * Uses List component to render the navigation items
@@ -12,75 +14,95 @@ import {
   ListItemButton,
   ListItemIcon,
   ListItemText,
-  Skeleton,
+  ListSubheader,
 } from '@mui/material';
+import { ExpandLess, ExpandMore } from '@mui/icons-material';
 import Link from 'next/link';
+import { usePathname } from 'next/navigation';
+
 import {
+  NavigationGroupProps,
   NavigationItemProps,
+  NavigationViewer,
+  NAV_GROUP_SUBHEADER_SX,
+  NAV_SELECTED_SX,
   StaticNavigationChildItemProps,
   StaticNavigationItemProps,
   StaticNavigationParentItemProps,
+  hasVisibleItem,
+  isActive,
+  isVisible,
 } from '@/components/layout/Navigation';
-import { ExportRes } from '@/components/DataExportTable';
 import { evaluateOrReturn } from '@/helpers/util';
 
-// hasAnyMatchingScope returns true when the caller holds at least one of the
-// scopes an item lists in its anyScopes. Undefined on either side means "no
-// scope-based admittance", so we return false and let the role check decide.
-const hasAnyMatchingScope = (
-  itemScopes: string[] | undefined,
-  userScopes: string[] | undefined
-): boolean => {
-  if (!itemScopes || !userScopes) return false;
-  return itemScopes.some((s) => userScopes.includes(s));
-};
-
 export const NavigationItem = ({
+  authenticated,
   exportType,
   role,
   scopes,
   config,
   onClose,
 }: { onClose: () => void } & NavigationItemProps) => {
-  // Hard rejections first: when role or exportType are known and don't
-  // match, hide the item without ever showing the loading skeleton.
-  // Order matters — non-admins never load exportType (the upstream
-  // /origin_ui/exports fetch is skipped for them), so a role-based
-  // rejection has to be able to short-circuit before the exportType
-  // skeleton branch below would otherwise sit forever.
-  //
-  // anyScopes: an item that admits scope holders in addition to a role
-  // (e.g. the log viewer is reachable via server.admin OR pelican.log_read)
-  // must NOT be hidden by a bare role mismatch when the caller does hold
-  // one of the listed scopes. Match the AuthenticatedContent gate so a
-  // user who can visit the page can also see it in the burger menu.
-  if (
-    config?.allowedRoles &&
-    role !== undefined &&
-    !config.allowedRoles.includes(role) &&
-    !hasAnyMatchingScope(config?.anyScopes, scopes)
-  ) {
-    return null;
-  }
-  if (
-    config?.allowedExportTypes &&
-    exportType !== undefined &&
-    !config.allowedExportTypes.includes(exportType as ExportRes['type'])
-  ) {
+  const viewer: NavigationViewer = { authenticated, role, scopes, exportType };
+
+  return <ResolvedItem config={config} viewer={viewer} onClose={onClose} />;
+};
+
+/**
+ * Mirrors the rail's grouping so the two surfaces present the same structure.
+ * A user who learns the navigation on a laptop and one who learns it on a
+ * tablet should end up with the same map of the app.
+ */
+export const NavigationGroup = ({
+  group,
+  onClose,
+  ...viewer
+}: {
+  group: NavigationGroupProps;
+  onClose: () => void;
+} & NavigationViewer) => {
+  if (!hasVisibleItem(group, viewer)) {
     return null;
   }
 
-  // Still waiting on data we'd need to make a final decision.
-  if (
-    (config?.allowedRoles && role === undefined) ||
-    (config?.allowedExportTypes && exportType === undefined)
-  ) {
-    return <NavigationItemSkeleton />;
+  return (
+    <li>
+      <ListSubheader
+        component={'div'}
+        disableSticky
+        sx={NAV_GROUP_SUBHEADER_SX}
+      >
+        {group.group}
+      </ListSubheader>
+      <List disablePadding aria-label={group.group}>
+        {group.items.map((item) => (
+          <NavigationItem
+            key={evaluateOrReturn(item.title)}
+            config={item}
+            onClose={onClose}
+            {...viewer}
+          />
+        ))}
+      </List>
+    </li>
+  );
+};
+
+type ResolvedItemProps = {
+  config: StaticNavigationItemProps;
+  viewer: NavigationViewer;
+  onClose: () => void;
+};
+
+/** An item the caller may or may not be admitted to; absent when they aren't. */
+const ResolvedItem = ({ config, viewer, onClose }: ResolvedItemProps) => {
+  if (!isVisible(config, viewer)) {
+    return null;
   }
 
   // If the item has children, render a menu
   if ('children' in config) {
-    return <NavigationMenu config={config} onClose={onClose} />;
+    return <NavigationMenu config={config} viewer={viewer} onClose={onClose} />;
   }
 
   // Otherwise, render the navigation item
@@ -91,75 +113,80 @@ const NavigationChildItem = ({
   title,
   href,
   icon,
+  exactMatch,
   onClose,
-}: { onClose: () => void } & StaticNavigationChildItemProps) => {
-  return (
-    <Link href={evaluateOrReturn(href)} onClick={onClose}>
-      <ListItemButton>
-        <ListItemIcon>{icon}</ListItemIcon>
-        <ListItemText primary={evaluateOrReturn(title)} />
-      </ListItemButton>
-    </Link>
-  );
-};
+}: {
+  onClose: () => void;
+} & StaticNavigationChildItemProps) => {
+  const pathname = usePathname();
 
-const NavigationItemSkeleton = () => {
+  const label = evaluateOrReturn(title);
+  const path = evaluateOrReturn(href);
+  const active = isActive(path, pathname, exactMatch);
+
   return (
-    <Skeleton variant='rounded' height={'100%'} width={'100%'}>
-      <ListItem>
-        <ListItemText primary={'Loading'} />
-      </ListItem>
-    </Skeleton>
+    <ListItem disablePadding>
+      <ListItemButton
+        component={Link}
+        href={path}
+        onClick={onClose}
+        selected={active}
+        aria-current={active ? 'page' : undefined}
+        sx={NAV_SELECTED_SX}
+      >
+        <ListItemIcon sx={{ color: 'inherit' }}>{icon}</ListItemIcon>
+        <ListItemText
+          primary={label}
+          sx={{
+            '& .MuiListItemText-primary': {
+              fontSize: '1rem',
+              fontWeight: active ? 600 : 400,
+            },
+          }}
+        />
+      </ListItemButton>
+    </ListItem>
   );
 };
 
 const NavigationMenu = ({
-  onClose,
   config,
+  viewer,
+  onClose,
 }: {
-  onClose: () => void;
   config: StaticNavigationParentItemProps;
+  viewer: NavigationViewer;
+  onClose: () => void;
 }) => {
   const [open, setOpen] = useState(false);
 
+  const label = evaluateOrReturn(config.title);
+
   return (
-    <>
+    <li>
       <ListItemButton
         onClick={() => setOpen(!open)}
-        style={{ backgroundColor: open ? '#d1f4ff' : 'inherit' }}
+        aria-expanded={open}
+        sx={{ bgcolor: open ? 'action.selected' : 'transparent' }}
       >
         <ListItemIcon>{config.icon}</ListItemIcon>
-        <ListItemText primary={evaluateOrReturn(config.title)} />
+        <ListItemText primary={label} />
+        {open ? <ExpandLess /> : <ExpandMore />}
       </ListItemButton>
       <Collapse in={open} timeout='auto' unmountOnExit>
-        <List component='div' disablePadding>
-          <Box pl={1} borderLeft={'#d1f4ff solid 16px'}>
-            {config.children.map((config) => (
-              <NavigationMenuItem
-                key={evaluateOrReturn(config.title)}
-                config={config}
+        <List component='div' disablePadding aria-label={label}>
+          <Box sx={{ pl: 1, borderLeft: 16, borderColor: 'primary.light' }}>
+            {config.children.map((child) => (
+              <ResolvedItem
+                key={evaluateOrReturn(child.title)}
+                config={child}
+                viewer={viewer}
                 onClose={onClose}
               />
             ))}
           </Box>
         </List>
       </Collapse>
-    </>
+    </li>
   );
-};
-
-const NavigationMenuItem = ({
-  onClose,
-  config,
-}: {
-  onClose: () => void;
-  config: StaticNavigationItemProps;
-}) => {
-  // If this item has children, render a nested menu
-  if ('children' in config) {
-    return <NavigationMenu config={config} onClose={onClose} />;
-  }
-
-  // Otherwise, render the navigation item
-  return <NavigationChildItem {...config} onClose={onClose} />;
 };

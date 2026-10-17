@@ -47,7 +47,7 @@ import {
   ConfigDisplay,
   RestartBox,
   TableOfContents,
-} from '@/app/config/components';
+} from '@/app/settings/config/components';
 import AuthenticatedContent from '@/components/layout/AuthenticatedContent';
 import { getConfig } from '@/helpers/api';
 import { AlertDispatchContext } from '@/components/AlertProvider';

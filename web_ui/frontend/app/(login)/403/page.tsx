@@ -20,9 +20,10 @@
 
 import React, { useContext } from 'react';
 import useApiSWR from '@/hooks/useApiSWR';
-import { Box, Button, Typography } from '@mui/material';
+import { Box, Button, Stack } from '@mui/material';
 import { alertOnError } from '@/helpers/util';
 import { AlertDispatchContext } from '@/components/AlertProvider';
+import AuthPanel from '../components/AuthPanel';
 
 /**
  * Landing page for 403 error
@@ -38,42 +39,43 @@ const Page = () => {
   );
 
   return (
-    <Box
-      sx={{
-        display: 'flex',
-        flexDirection: 'column',
-        justifyContent: 'center',
-        alignItems: 'center',
-        height: '90vh',
-      }}
+    <AuthPanel
+      title={'403 Forbidden'}
+      description={
+        'You do not have permission to access this page. Your login details are shown below; if this is the wrong account, log out and sign in with the correct one.'
+      }
     >
-      <Box
-        sx={{
-          textAlign: 'center',
-        }}
-      >
-        <Typography variant='h1'>403 Forbidden</Typography>
-        <Typography variant='body1' sx={{ maxWidth: '80ch' }}>
-          You do not have permission to access this page. Your account details
-          are shown below. If this is the wrong account, log out and sign in
-          with the correct one.
-        </Typography>
-        <Box my={2}>
-          <Box component={'code'} sx={{ overflowWrap: 'anywhere' }}>
-            {JSON.stringify(data)}
-          </Box>
+      <Stack spacing={2}>
+        <Box
+          component={'pre'}
+          sx={{
+            m: 0,
+            p: 1.5,
+            borderRadius: 2,
+            bgcolor: 'grey.100',
+            color: 'text.secondary',
+            fontFamily: 'monospace',
+            fontSize: '0.8rem',
+            lineHeight: 1.5,
+            textAlign: 'left',
+            whiteSpace: 'pre-wrap',
+            overflowWrap: 'anywhere',
+          }}
+        >
+          {JSON.stringify(data, null, 2)}
         </Box>
         <Button
           variant='contained'
-          color='primary'
+          size='large'
+          fullWidth
           onClick={() =>
             alertOnError(handleLogout, 'Failed to logout', dispatch)
           }
         >
           Logout
         </Button>
-      </Box>
-    </Box>
+      </Stack>
+    </AuthPanel>
   );
 };
 
