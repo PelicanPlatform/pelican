@@ -77,6 +77,10 @@ var ErrNoStore = errors.New("origin response has Cache-Control: no-store")
 // subsequent callers must retry independently.
 var ErrNoStoreRetry = errors.New("no-store download in progress; retry independently")
 
+// errCacheClosing fails a download that would start a background transfer
+// once the cache has begun to close (see whileOpen).
+var errCacheClosing = errors.New("the cache is closing")
+
 // isEvictedError returns true when err is characteristic of an object that was
 // evicted between resolveObject (which found its metadata) and the subsequent
 // attempt to open a reader.  This lets GetSeekableReader / GetRange retry
@@ -197,9 +201,18 @@ type PersistentCache struct {
 	// Active downloads tracking
 	activeDownloads   map[ObjectHash]*persistentDownload
 	activeDownloadsMu sync.RWMutex
-	downloadWg        sync.WaitGroup     // Tracks in-flight download goroutines (adopted transfers + inline drains)
+	downloadWg        sync.WaitGroup     // Tracks in-flight download goroutines (adopted transfers + inline drains); add to it only through whileOpen
 	downloadCtx       context.Context    // Cancelled during Close() to stop in-flight transfers
 	downloadCancel    context.CancelFunc // Cancels downloadCtx
+
+	// beforeHandOff, set only by tests, runs in performDownload after a
+	// disk download has marked its object as downloading and before it
+	// hands the transfer to a fetcher.
+	beforeHandOff func(dl *persistentDownload)
+	// afterTierChangeDrop, set only by tests, runs once a proxied read that
+	// found its tiered copy changed has dropped the object, or declined to
+	// (see openTierStream).
+	afterTierChangeDrop func(hash InstanceHash, dropped bool)
 
 	// Active range-on-miss init deduplication (keyed by objectHash)
 	initGroup singleflight.Group
@@ -222,6 +235,9 @@ type PersistentCache struct {
 	wasConfigured bool
 	closed        atomic.Bool
 	closeDone     chan struct{} // closed after Close() finishes its work
+	// openMu orders starting a background transfer against Close: see
+	// whileOpen.  Close sets closed under the write lock.
+	openMu sync.RWMutex
 
 	// Shared prefetch semaphore: limits total concurrent prefetch/background
 	// download operations across all BlockFetcherV2 instances and
@@ -255,7 +271,7 @@ type persistentDownload struct {
 	// noStoreReader is the read end of an io.Pipe that streams the response
 	// body when the origin sends Cache-Control: no-store (or private).
 	// Only the first caller consumes this; waiters receive ErrNoStoreRetry.
-	noStoreReader io.ReadCloser
+	noStoreReader *noStoreBody
 	noStoreMeta   *CacheMetadata
 
 	// forceNoStore streams the response through without persisting it, for
@@ -270,13 +286,7 @@ type persistentDownload struct {
 	completionDone chan struct{} // Closed when background finalization completes
 	completionErr  atomic.Value  // Stores error from background finalization (type error)
 
-	// Client tracking: stores the UnixNano timestamp of the last
-	// time a client registered with this download.  completeDownload
-	// periodically checks this timestamp and cancels the download
-	// if the time since the last activity exceeds
-	// LocalCache.PrefetchTimeout.
-	lastClientActivity atomic.Int64
-	cancelFn           context.CancelFunc // Cancels the per-download context
+	cancelFn context.CancelFunc // Cancels the per-download context
 
 	// fetcher is the BlockFetcherV2 driving the background download.
 	// Set by performDownload during the disk-mode handoff.
@@ -285,22 +295,10 @@ type persistentDownload struct {
 	fetcher *BlockFetcherV2
 }
 
-// RegisterClient records that a client is actively consuming data from
-// this download and returns a deregistration function (currently a no-op
-// kept for symmetry).  Each call updates the activity timestamp so the
-// idle timer in completeDownload sees recent activity.
-func (dl *persistentDownload) RegisterClient() func() {
-	dl.lastClientActivity.Store(time.Now().UnixNano())
-	return func() {
-		// No-op: the idle timer checks elapsed time since last activity
-		// rather than a client count, so deregistration is unnecessary.
-	}
-}
-
 // revalidation carries no-store streaming data from revalidateObject back
 // to the caller.  Only non-nil when the origin responds with no-store.
 type revalidation struct {
-	noStoreReader io.ReadCloser  // Non-nil if origin now says no-store
+	noStoreReader *noStoreBody   // Non-nil if origin now says no-store
 	noStoreMeta   *CacheMetadata // Metadata for no-store response
 }
 
@@ -309,7 +307,7 @@ type revalidation struct {
 type revalResult struct {
 	instanceHash  InstanceHash
 	meta          *CacheMetadata
-	noStoreReader io.ReadCloser
+	noStoreReader *noStoreBody
 	noStoreMeta   *CacheMetadata
 	stale         bool // true ⇒ revalidation failed, serve stale data
 }
@@ -998,7 +996,7 @@ func (pc *PersistentCache) Config(egrp *errgroup.Group) error {
 //  4. Stop the consistency checker.
 //  5. Close the database.
 func (pc *PersistentCache) Close() error {
-	if pc.closed.Swap(true) {
+	if pc.beginClose() {
 		// Another goroutine is already closing; wait for it to finish
 		// so the caller can be sure all resources are released.
 		<-pc.closeDone
@@ -1072,7 +1070,8 @@ func (pc *PersistentCache) KeyChangeCallback() func(ctx context.Context) error {
 	}
 }
 
-// Get retrieves an object from the cache, downloading if necessary
+// Get retrieves an object from the cache, downloading if necessary.  The
+// reader returned reads under ctx, as GetRange's does.
 func (pc *PersistentCache) Get(ctx context.Context, objectPath, token string) (io.ReadCloser, error) {
 	return pc.GetRange(ctx, objectPath, token, "")
 }
@@ -1102,7 +1101,7 @@ type objectResolution struct {
 	token        string
 	meta         *CacheMetadata
 	dl           *persistentDownload // non-nil when a background download was started
-	noStoreRC    io.ReadCloser       // non-nil when the origin says no-store
+	noStoreRC    *noStoreBody        // non-nil when the origin says no-store
 	noStoreMeta  *CacheMetadata      // metadata for no-store streaming responses
 }
 
@@ -1244,9 +1243,10 @@ func (pc *PersistentCache) resolveObject(
 }
 
 // newFetchingRangeReader creates a RangeReader for the given byte range with
-// an attached BlockFetcherV2 for on-demand fetching, plus client registration
-// for a background download (if any).  All cleanup is wired into the
-// RangeReader's onClose callback.
+// an attached BlockFetcherV2 for on-demand fetching.  All cleanup is wired
+// into the RangeReader's onClose callback.  (Like every RangeReader, it also
+// counts as an open reader of the object for as long as it is open, which
+// keeps any background fill of the object going; see NewRangeReader.)
 //
 // When an active download (res.dl) has an attached fetcher, the reader reuses
 // it instead of creating a new one.  This avoids duplicate origin transfers:
@@ -1330,11 +1330,6 @@ func (pc *PersistentCache) newFetchingRangeReader(
 		}
 	}
 
-	var dlClientDone func()
-	if res.dl != nil {
-		dlClientDone = res.dl.RegisterClient()
-	}
-
 	// Pin the version for the life of the reader.  This is the cache's real
 	// serving path -- every HTTP GET arrives here via GetSeekableReader or
 	// GetRange -- so without a pin here the protection that
@@ -1344,8 +1339,8 @@ func (pc *PersistentCache) newFetchingRangeReader(
 	// so a reader that loses its object mid-stream fails the transfer.
 	//
 	// The release is chained into onClose below, and onClose is the same
-	// callback that already deregisters the download client and closes the
-	// lazy fetcher: if a caller leaks a RangeReader it leaks those too, so
+	// callback that already closes the lazy fetcher, and Close also detaches
+	// the reader from the object's block state: if a caller leaks a RangeReader it leaks those too, so
 	// this adds no new lifetime requirement.  The pin's release function is
 	// idempotent, so a double Close is harmless.
 	unpin := pc.storage.PinObject(res.instanceHash)
@@ -1353,11 +1348,11 @@ func (pc *PersistentCache) newFetchingRangeReader(
 	rr, err := NewRangeReader(pc.storage, res.instanceHash, startByte, endByte, fetchCallback)
 	if err != nil {
 		unpin()
-		if dlClientDone != nil {
-			dlClientDone()
-		}
 		closeLazy()
 		return nil, err
+	}
+	rr.startFill = func(block, last uint32, overDownload bool) (bool, <-chan struct{}) {
+		return pc.startFill(res, rr.blockState, block, last, overDownload)
 	}
 
 	// If a download is backing this reader, expose its terminal state so
@@ -1378,9 +1373,6 @@ func (pc *PersistentCache) newFetchingRangeReader(
 	}
 
 	rr.onClose = func() {
-		if dlClientDone != nil {
-			dlClientDone()
-		}
 		// Close the lazy fetcher if it was ever created.  For the
 		// reused-fetcher path (fetcher != nil), lazyBf is always nil
 		// so closeLazy is a no-op.
@@ -1389,6 +1381,98 @@ func (pc *PersistentCache) newFetchingRangeReader(
 	}
 
 	return rr, nil
+}
+
+// beginClose marks the cache as closing, once every start already under way
+// (see whileOpen) has finished, and reports whether it already was.
+func (pc *PersistentCache) beginClose() (alreadyClosing bool) {
+	pc.openMu.Lock()
+	defer pc.openMu.Unlock()
+	return pc.closed.Swap(true)
+}
+
+// whileOpen runs start, which registers a background goroutine with
+// downloadWg and launches it, unless the cache is closing; it reports
+// whether start ran.  Close waits on downloadWg once it has set closed, and a
+// WaitGroup must not gain its first member while being waited on, so a
+// check of closed followed by downloadWg.Add could, between the two, let
+// Close return -- shutting down the transfer engine and the database -- with
+// the goroutine still to start.  Close sets closed under the write lock,
+// (beginClose), which a start holds the read lock against, so a start either
+// happens wholly before Close sets closed (and is waited for) or sees it set.
+// start must not block.
+func (pc *PersistentCache) whileOpen(start func()) bool {
+	pc.openMu.RLock()
+	defer pc.openMu.RUnlock()
+	if pc.closed.Load() {
+		return false
+	}
+	start()
+	return true
+}
+
+// startFill starts a background fill of a partly cached object, for a reader
+// that needs a block that no download or fill is writing: one transfer from
+// that block to the next block present, or to last (the end of the reader's
+// range), whichever comes first.  It reports whether a fill now covers the
+// block -- this one, or another reader's that got there first -- so the
+// reader should wait for it on the shared block state, and, when this call
+// started one, a channel closed when it ends.
+//
+// A fill is a background download like the one a miss starts, and follows
+// the same rules: like a miss, it takes no slot of the prefetch semaphore --
+// it runs because a reader is waiting for it, and there is one per gap a
+// reader is in, so readers bound fills as they bound misses -- it goes on
+// while any reader of the object is open and is cancelled once none has been
+// for the prefetch timeout, it accepts only the version of the
+// object being filled, and it keeps the whole blocks it wrote if it stops
+// early for a benign reason (see transferStopKeepsData), but drops the object
+// -- telling its readers why -- if it fails in a way that condemns what it
+// wrote (see BlockFetcherV2.dropIfCondemned).
+func (pc *PersistentCache) startFill(res *objectResolution, state *ObjectBlockState, block, last uint32, overDownload bool) (covered bool, started <-chan struct{}) {
+	if pc.closed.Load() || res.meta == nil || res.meta.ContentLength <= 0 {
+		return false, nil
+	}
+	fill := state.beginFill(block, last, overDownload)
+	if fill == nil {
+		// Already written, or something else is writing it.
+		return true, nil
+	}
+	var fedTP client.TokenProvider
+	if pc.getFedToken() != "" {
+		fedTP = pc.fedTokenAsProvider()
+	}
+	bf, err := NewBlockFetcherV2(pc.storage, res.instanceHash, res.pelicanURL, res.token, fedTP, pc.te,
+		BlockFetcherV2Config{PrefetchSem: pc.prefetchSem})
+	if err != nil {
+		state.endFill(fill)
+		log.Debugf("Not filling %s in the background: %v", res.instanceHash, err)
+		return false, nil
+	}
+	log.Debugf("Filling blocks %d-%d of %s in the background", fill.start, fill.end, res.instanceHash)
+	// The fill outlives the reader that started it by up to the prefetch
+	// timeout, so it pins the object itself, as a reader does: eviction
+	// must not delete an object under a writer still filling it.
+	unpin := pc.storage.PinObject(res.instanceHash)
+	launched := pc.whileOpen(func() {
+		pc.downloadWg.Add(1)
+		go func() {
+			defer pc.downloadWg.Done()
+			defer unpin()
+			defer state.endFill(fill)
+			defer bf.Close()
+			if err := bf.Fill(pc.downloadCtx, fill.start, fill.end); err != nil {
+				log.Debugf("Background fill of blocks %d-%d of %s ended early: %v", fill.start, fill.end, res.instanceHash, err)
+			}
+		}()
+	})
+	if !launched {
+		bf.Close()
+		state.endFill(fill)
+		unpin()
+		return false, nil
+	}
+	return true, fill.done
 }
 
 // GetSeekableReader returns a seekable reader for the full object with on-demand block fetching.
@@ -1400,6 +1484,10 @@ func (pc *PersistentCache) newFetchingRangeReader(
 // only the blocks the caller actually reads, avoiding a potentially expensive
 // full transfer.  Callers should set rangeOnly when they know the request is
 // for a sub-range of the object (e.g. an HTTP Range request).
+//
+// The reader reads under ctx; a caller whose ctx must outlive the reader's
+// client -- because it also drives the download -- sets the client's with
+// SetReadContext.
 func (pc *PersistentCache) GetSeekableReader(ctx context.Context, objectPath, bearerToken string, rangeOnly bool) (*SeekableReader, *CacheMetadata, error) {
 	// Retry once if the object is evicted between resolveObject and reader
 	// creation.  The second pass re-resolves the object (triggering a fresh
@@ -1413,10 +1501,7 @@ func (pc *PersistentCache) GetSeekableReader(ctx context.Context, objectPath, be
 
 		// Handle no-store streaming response
 		if res.noStoreRC != nil {
-			return &SeekableReader{RangeReader: &RangeReader{
-				size:          res.noStoreMeta.ContentLength,
-				noStoreReader: res.noStoreRC,
-			}}, res.noStoreMeta, nil
+			return &SeekableReader{RangeReader: newNoStoreReader(ctx, res.noStoreRC, res.noStoreMeta)}, res.noStoreMeta, nil
 		}
 
 		// Zero-byte file: nothing to read, no fetcher needed.
@@ -1445,6 +1530,7 @@ func (pc *PersistentCache) GetSeekableReader(ctx context.Context, objectPath, be
 			}
 			return nil, nil, errors.Wrap(err, "failed to create seekable reader")
 		}
+		rr.SetReadContext(ctx)
 
 		return &SeekableReader{RangeReader: rr}, res.meta, nil
 	}
@@ -1452,7 +1538,18 @@ func (pc *PersistentCache) GetSeekableReader(ctx context.Context, objectPath, be
 	return nil, nil, errors.New("failed to create seekable reader after retry")
 }
 
-// GetRange retrieves a range of an object from the cache
+// newNoStoreReader makes the reader of a no-store response, reading under
+// ctx: once ctx ends, a read blocked on the response's pipe returns, and the
+// transfer writing the pipe fails (see RangeReader.SetReadContext).
+func newNoStoreReader(ctx context.Context, body *noStoreBody, meta *CacheMetadata) *RangeReader {
+	rr := &RangeReader{size: meta.ContentLength, noStoreReader: body}
+	rr.SetReadContext(ctx)
+	return rr
+}
+
+// GetRange retrieves a range of an object from the cache.  A reader that
+// may wait for blocks, or fetch them, reads under ctx: once ctx ends, a Read
+// waiting for a block gives up.
 func (pc *PersistentCache) GetRange(ctx context.Context, objectPath, token, rangeHeader string) (io.ReadCloser, error) {
 	// Retry once if the object is evicted between resolveObject and reader
 	// creation.  See GetSeekableReader for a detailed explanation.
@@ -1465,7 +1562,7 @@ func (pc *PersistentCache) GetRange(ctx context.Context, objectPath, token, rang
 
 		// Handle no-store streaming response
 		if res.noStoreRC != nil {
-			return res.noStoreRC, nil
+			return newNoStoreReader(ctx, res.noStoreRC, res.noStoreMeta), nil
 		}
 
 		// Objects tiered to a tiering target stream directly from the
@@ -1506,19 +1603,23 @@ func (pc *PersistentCache) GetRange(ctx context.Context, objectPath, token, rang
 					}
 					return nil, err
 				}
+				rr.SetReadContext(ctx)
 				return rr, nil
 			}
 		}
 
 		// Return full object reader.
 		//
-		// When a background download is in progress (res.dl != nil) we
-		// must use a fetching RangeReader so that blocks which haven't
-		// been written yet can be waited-for or fetched on demand.  The
-		// plain ObjectReader calls ReadBlocks directly and would fail
-		// with "block N not yet downloaded" if the download hasn't
-		// reached a particular block.
-		if res.dl != nil && res.meta.ContentLength > 0 {
+		// Unless the object is known to be complete, use a fetching
+		// RangeReader, so that blocks not yet on disk are waited for (a
+		// background download may be writing them) or fetched on demand.
+		// That covers a download in progress (res.dl != nil) and a partly
+		// cached object: one initialized by a range read, or a download
+		// that stopped early and kept its whole blocks.  The plain
+		// ObjectReader calls ReadBlocks directly and would fail with
+		// "block N not yet downloaded" at the first missing block -- for
+		// a prestage, on every attempt until the object was evicted.
+		if res.meta.ContentLength > 0 && res.meta.IsDisk() && (res.dl != nil || res.meta.Completed.IsZero()) {
 			rr, rrErr := pc.newFetchingRangeReader(res, 0, res.meta.ContentLength-1)
 			if rrErr != nil {
 				if attempt < maxAttempts-1 && isEvictedError(rrErr) {
@@ -1527,6 +1628,7 @@ func (pc *PersistentCache) GetRange(ctx context.Context, objectPath, token, rang
 				}
 				return nil, rrErr
 			}
+			rr.SetReadContext(ctx)
 			return rr, nil
 		}
 
@@ -1574,8 +1676,9 @@ func (pc *PersistentCache) Stat(objectPath, token string) (uint64, error) {
 	return pc.stat(objectPath, token, false)
 }
 
-// StatCachedOnly returns the size of an object only if it's cached.
-// Returns 0, ErrNotCached if the object is not in the cache.
+// StatCachedOnly returns the size of an object only if it's cached, whole.
+// Returns 0, ErrNotCached if the object is not in the cache or only part of
+// it is.
 func (pc *PersistentCache) StatCachedOnly(objectPath, token string) (uint64, error) {
 	return pc.stat(objectPath, token, true)
 }
@@ -1730,7 +1833,13 @@ func (pc *PersistentCache) stat(objectPath, token string, cachedOnly bool) (uint
 		if mErr != nil {
 			return 0, errors.Wrap(mErr, "failed to check cache")
 		}
-		if meta != nil {
+		// For a cached-only stat (Cache-Control: only-if-cached) the object
+		// must be stored whole.  A partly cached one -- initialized by a
+		// range read, a download in progress, or one that stopped early and
+		// kept its whole blocks -- is not a stored response: serving it would
+		// fetch the missing blocks from the origin, which the client asked
+		// not to happen.  And a size not yet known is no size at all.
+		if meta != nil && meta.ContentLength >= 0 && (!cachedOnly || !meta.Completed.IsZero()) {
 			return uint64(meta.ContentLength), nil
 		}
 	}
@@ -2141,6 +2250,38 @@ func (pc *PersistentCache) performDownload(ctx context.Context, dl *persistentDo
 
 	// Create a decision writer that buffers data until we know the size
 	dw := newDecisionWriter(pc, dl)
+	// A fetcher that adopts the transfer releases the download's write
+	// fence when the transfer ends; otherwise it is released here.
+	defer func() {
+		if !tcHandedOff {
+			dw.releaseFence()
+		}
+	}()
+
+	// Once the object is marked as downloading (markDownloading, below),
+	// readers that find it -- through this download, or as a cache hit
+	// once the latest-ETag mapping is stored -- wait in WaitForBlock for
+	// the download to write their blocks, and only ClearDownloading ends
+	// that wait.  The fetcher that adopts the transfer clears it when the
+	// transfer ends (see endAdoptedDownload); on every way out that never
+	// got that far, it is cleared here, or those readers would wait until
+	// their own contexts ended.  The state marked is the download's own --
+	// the one its writer publishes blocks to -- and that state is the one
+	// cleared, never one looked up by hash afterwards: by then the object
+	// may have been deleted and the same version fetched again under the
+	// same hash, and the new instance's mark is its own download's.
+	var downloadingState *ObjectBlockState
+	markDownloading := func() {
+		if state := dw.diskState(); state != nil {
+			state.SetDownloading()
+			downloadingState = state
+		}
+	}
+	defer func() {
+		if downloadingState != nil && !tcHandedOff {
+			downloadingState.ClearDownloading()
+		}
+	}()
 
 	// Derive a per-download context from the cache-wide downloadCtx.
 	// PersistentCache.Close() cancels downloadCtx which cascades to all
@@ -2149,6 +2290,14 @@ func (pc *PersistentCache) performDownload(ctx context.Context, dl *persistentDo
 	// clients remain.
 	dlCtx, dlCancel := context.WithCancel(pc.downloadCtx)
 	dl.cancelFn = dlCancel
+	// A transfer that nothing adopts is stopped on the way out: otherwise
+	// one whose hand-off failed runs on -- from a stalled origin, until the
+	// cache closes -- writing into a writer nothing will finish.
+	defer func() {
+		if !tcHandedOff {
+			dlCancel()
+		}
+	}()
 	transferOpts := []client.TransferOption{
 		client.WithToken(userToken),
 		client.WithWriter(dw),
@@ -2200,6 +2349,19 @@ func (pc *PersistentCache) performDownload(ctx context.Context, dl *persistentDo
 		return nil
 	})
 
+	// awaitResult returns the transfer's result, waiting for it the first
+	// time it is asked for: the forwarder above sends exactly one, and more
+	// than one path below may want it.
+	var result *client.TransferResults
+	var resultReceived bool
+	awaitResult := func() *client.TransferResults {
+		if !resultReceived {
+			result = <-resultChan
+			resultReceived = true
+		}
+		return result
+	}
+
 	// Wait for either metadata or result (whichever comes first).
 	// We watch both the request context and the download context so that
 	// PersistentCache.Close() (which cancels downloadCtx) can abort the
@@ -2216,10 +2378,11 @@ func (pc *PersistentCache) performDownload(ctx context.Context, dl *persistentDo
 			"etag":       etag,
 			"url":        sourceURL.String(),
 		}).Debug("Received early metadata")
-	case result := <-resultChan:
+	case result = <-resultChan:
 		// Transfer completed before we got metadata (shouldn't happen for successful transfers)
-		if result != nil && result.Error != nil {
-			return result.Error
+		resultReceived = true
+		if err := transferResultErr(result); err != nil {
+			return err
 		}
 		// If we got here without metadata, the transfer completed very quickly
 		// Check the decision writer's buffer for size
@@ -2275,17 +2438,7 @@ func (pc *PersistentCache) performDownload(ctx context.Context, dl *persistentDo
 			// Combine any data buffered before the decision with the pipe.
 			// This avoids writing into the pipe before a consumer is reading
 			// (io.Pipe is unbuffered, so that would deadlock).
-			var noStoreReader io.ReadCloser
-			if len(buffered) > 0 {
-				noStoreReader = &multiReadCloser{
-					Reader: io.MultiReader(bytes.NewReader(buffered), pr),
-					close:  pr.Close,
-				}
-			} else {
-				noStoreReader = pr
-			}
-
-			dl.noStoreReader = noStoreReader
+			dl.noStoreReader = newNoStoreBody(buffered, pr, dlCancel)
 			dl.noStoreMeta = &CacheMetadata{
 				ETag:          dl.etag,
 				LastModified:  dl.lastModified,
@@ -2298,20 +2451,24 @@ func (pc *PersistentCache) performDownload(ctx context.Context, dl *persistentDo
 
 			// Spawn a background goroutine to finish receiving the transfer
 			// and close the pipe writer when done.  The caller reads from pr.
+			if !pc.whileOpen(func() {
+				pc.downloadWg.Add(1)
+				pc.egrp.Go(func() error {
+					defer pc.downloadWg.Done()
+					defer tc.Close()
+					defer close(dl.completionDone)
+					if err := transferResultErr(awaitResult()); err != nil {
+						pw.CloseWithError(err)
+					} else {
+						pw.Close()
+					}
+					return nil
+				})
+			}) {
+				pw.CloseWithError(errCacheClosing)
+				return errCacheClosing
+			}
 			tcHandedOff = true
-			pc.downloadWg.Add(1)
-			pc.egrp.Go(func() error {
-				defer pc.downloadWg.Done()
-				defer tc.Close()
-				defer close(dl.completionDone)
-				result := <-resultChan
-				if result != nil && result.Error != nil {
-					pw.CloseWithError(result.Error)
-				} else {
-					pw.Close()
-				}
-				return nil
-			})
 
 			return ErrNoStore
 		}
@@ -2330,10 +2487,7 @@ func (pc *PersistentCache) performDownload(ctx context.Context, dl *persistentDo
 				if err := dw.SetDiskMode(ctx, -1); err != nil {
 					return errors.Wrap(err, "failed to set disk mode for unknown size")
 				}
-				sharedState, err := pc.storage.GetSharedBlockState(dl.instanceHash)
-				if err == nil {
-					sharedState.SetDownloading()
-				}
+				markDownloading()
 
 				// The origin used chunked encoding (no Content-Length header),
 				// so the real size is unknown.  Issue a HEAD (stat) request to
@@ -2355,7 +2509,7 @@ func (pc *PersistentCache) performDownload(ctx context.Context, dl *persistentDo
 					} else {
 						log.Debugf("performDownload: HEAD stat returned size %d for %s", statInfo.Size, dl.objectHash)
 						sizeMeta := &CacheMetadata{ContentLength: statInfo.Size}
-						if mergeErr := pc.storage.MergeMetadata(dl.instanceHash, sizeMeta); mergeErr != nil {
+						if mergeErr := dw.mergeDiskMetadata(sizeMeta); mergeErr != nil {
 							log.Warnf("Failed to update content length from HEAD: %v", mergeErr)
 						} else {
 							// Invalidate the diskCrypto cache so that the
@@ -2367,22 +2521,19 @@ func (pc *PersistentCache) performDownload(ctx context.Context, dl *persistentDo
 				} else if statErr != nil {
 					log.Debugf("performDownload: HEAD stat failed for %s (proceeding with unknown size): %v", dl.objectHash, statErr)
 				}
-			case result := <-resultChan:
+			case result = <-resultChan:
 				// Transfer finished before reaching the threshold.
 				// All data is in the decisionWriter's buffer.
-				if result != nil && result.Error != nil {
-					return result.Error
+				resultReceived = true
+				if err := transferResultErr(result); err != nil {
+					return err
 				}
 				actualSize := int64(dw.BufferLen())
 				log.Debugf("performDownload: Unknown size transfer completed — %d bytes, using inline", actualSize)
 				if err := dw.SetInlineMode(ctx, actualSize); err != nil {
 					return errors.Wrap(err, "failed to set inline mode for deferred decision")
 				}
-				if err := dw.Finalize(dl); err != nil {
-					return errors.Wrap(err, "failed to finalize inline storage")
-				}
-				close(dl.completionDone)
-				return nil
+				return finishInlineDownload(dl, dw, result, -1)
 			case <-ctx.Done():
 				return ctx.Err()
 			case <-pc.downloadCtx.Done():
@@ -2401,10 +2552,7 @@ func (pc *PersistentCache) performDownload(ctx context.Context, dl *persistentDo
 			// Mark the shared block state as having an active download so
 			// that concurrent readers wait for blocks instead of starting
 			// duplicate range downloads from the origin.
-			sharedState, err := pc.storage.GetSharedBlockState(dl.instanceHash)
-			if err == nil {
-				sharedState.SetDownloading()
-			}
+			markDownloading()
 		}
 	} else {
 		// No metadata received — the transfer completed before the origin
@@ -2421,10 +2569,7 @@ func (pc *PersistentCache) performDownload(ctx context.Context, dl *persistentDo
 			if err := dw.SetDiskMode(ctx, bufLen); err != nil {
 				return errors.Wrap(err, "failed to set disk mode")
 			}
-			sharedState, err := pc.storage.GetSharedBlockState(dl.instanceHash)
-			if err == nil {
-				sharedState.SetDownloading()
-			}
+			markDownloading()
 		}
 	}
 
@@ -2432,16 +2577,11 @@ func (pc *PersistentCache) performDownload(ctx context.Context, dl *persistentDo
 	// and the caller needs metadata to be available immediately after
 	// downloadObject returns.
 	if dw.inlineMode {
-		result := <-resultChan
-		if result != nil && result.Error != nil {
-			return result.Error
+		size := int64(-1)
+		if metadataReceived {
+			size = metadata.ObjectSize
 		}
-		dl.checksums = clientChecksumsToCache(result)
-		if err := dw.Finalize(dl); err != nil {
-			return errors.Wrap(err, "failed to finalize inline storage")
-		}
-		close(dl.completionDone)
-		return nil
+		return finishInlineDownload(dl, dw, awaitResult(), size)
 	}
 
 	// Store the ETag mapping eagerly so that concurrent and subsequent
@@ -2460,6 +2600,9 @@ func (pc *PersistentCache) performDownload(ctx context.Context, dl *persistentDo
 	// with chunk-notification and ETA tracking, drives the transfer to
 	// completion via its idle-timeout loop, and can serve on-demand range
 	// fetches for blocks ahead of the sequential position.
+	if pc.beforeHandOff != nil {
+		pc.beforeHandOff(dl)
+	}
 	fetcher, fetcherErr := NewBlockFetcherV2(
 		pc.storage, dl.instanceHash, dl.sourceURL, userToken, fedTP, pc.te,
 		BlockFetcherV2Config{PrefetchSem: pc.prefetchSem},
@@ -2467,50 +2610,179 @@ func (pc *PersistentCache) performDownload(ctx context.Context, dl *persistentDo
 	if fetcherErr != nil {
 		return errors.Wrap(fetcherErr, "failed to create block fetcher for handoff")
 	}
+	if fetcher.blockState != downloadingState {
+		// The object was deleted since the download made its writer, and
+		// perhaps fetched again: the fetcher holds another instance's
+		// block state, whose readers it would keep waiting for this
+		// download's blocks, which go nowhere.
+		fetcher.Close()
+		return errors.Wrap(errInstanceDeleted, "failed to create block fetcher for handoff")
+	}
 	dl.fetcher = fetcher
 
+	if resultReceived {
+		// The transfer already reported (before its metadata); hand that
+		// result on rather than leave the fetcher waiting for another.
+		resultChan = make(chan *client.TransferResults, 1)
+		resultChan <- result
+	}
+
+	// The fetcher releases the download's fence only after the exit
+	// function returns, so endAdoptedDownload drops the object through it.
+	fence := dw.diskFence()
+	if !pc.whileOpen(func() {
+		fetcher.AdoptTransfer(dlCtx, dl.cancelFn, tc, dw, resultChan, pc.egrp, &pc.downloadWg,
+			func(err error) { pc.endAdoptedDownload(dl, fence, downloadingState, err) })
+	}) {
+		fetcher.Close()
+		return errCacheClosing
+	}
 	tcHandedOff = true
-	fetcher.AdoptTransfer(dlCtx, tc, dw, resultChan, pc.egrp, &pc.downloadWg,
-		func(err error) {
-			if sharedState, stateErr := pc.storage.GetSharedBlockState(dl.instanceHash); stateErr == nil {
-				sharedState.ClearDownloading()
-			}
-			if err != nil {
-				dl.completionErr.Store(err)
-				// The download finished but failed verification (e.g. the
-				// origin's reported digest doesn't match the bytes we
-				// received).  By the time we get here, BlockWriter.Close has
-				// already fired onComplete -- which unconditionally marked
-				// the instance Completed and stored the latest-ETag mapping.
-				// Tear that down now so the poisoned object is not served as
-				// a cache hit to future requests; the next request will miss
-				// and re-fetch from the origin.
-				if delErr := pc.storage.Delete(dl.instanceHash); delErr != nil {
-					log.Warnf("Failed to evict failed-verification instance %s: %v",
-						dl.instanceHash, delErr)
-				}
-				if delErr := pc.db.DeleteLatestETag(dl.objectHash); delErr != nil {
-					log.Warnf("Failed to clear latest-ETag for failed-verification %s: %v",
-						dl.objectHash, delErr)
-				}
-			}
-			close(dl.completionDone)
-		},
-	)
 
 	return nil
 }
 
-// multiReadCloser combines an io.Reader (e.g. io.MultiReader) with a
-// close function.  This is used to prepend buffered data before a pipe
-// reader while still allowing Close() to clean up the pipe.
-type multiReadCloser struct {
-	io.Reader
-	close func() error
+// endAdoptedDownload finishes a whole-object download that a fetcher adopted,
+// once its transfer has ended in err (nil on success).
+//
+// sharedState is the block state the download marked as downloading -- its
+// own instance's -- and fence its membership of the instance's write fence,
+// still held.  The download's verdict touches only its own instance: if
+// that has been deleted while the download ran, and perhaps the same
+// version fetched again under the same hash, the new instance is neither
+// deleted nor condemned, and its downloading mark, which is its own
+// download's, stays.
+func (pc *PersistentCache) endAdoptedDownload(dl *persistentDownload, fence *writeFence, sharedState *ObjectBlockState, err error) {
+	defer close(dl.completionDone)
+	bad := err != nil && pc.adoptedTransferDataIsBad(dl.instanceHash, err)
+	if bad {
+		// Mark the object bad before waking anyone: a reader waiting for a
+		// block the download never wrote wakes on ClearDownloading, and
+		// must find the reason rather than start a fetch of its own into
+		// an instance about to be deleted.  Readers that came through the
+		// download see completionErr; readers that joined it as a cache
+		// hit hold only the block state.
+		dl.completionErr.Store(err)
+		if sharedState != nil {
+			sharedState.condemn(err)
+		}
+	}
+	if sharedState != nil {
+		sharedState.ClearDownloading()
+	}
+	if err == nil {
+		return
+	}
+	if !bad {
+		// The transfer stopped early for a reason that says nothing
+		// against the data -- cancelled because no reader remained, the
+		// connection broke, or the cache is shutting down -- and the
+		// writer kept the whole blocks already written, dropping only the
+		// fragment after them.  They are good data, so the object stays,
+		// partly cached, and later reads fetch the rest by range like any
+		// other partial object.  No error is recorded either: a reader
+		// still attached fetches its missing blocks the same way, so the
+		// failure is not its to report.
+		log.Debugf("Download of %s stopped early (%v); keeping the blocks already written",
+			dl.instanceHash, err)
+		return
+	}
+	// The bytes themselves are suspect, or the object can never be
+	// completed: tear it down so it is not served, and so the next request
+	// misses and fetches the object from the origin again.  Delete also
+	// drops the latest-ETag mapping -- but only if it still names this
+	// version: a request may meanwhile have found a newer one, whose
+	// mapping must stay.
+	if dropped, delErr := pc.storage.deleteAsWriter(fence); delErr != nil {
+		log.Warnf("Failed to evict instance %s after a failed download (%v); until it is, every request for it fails: %v",
+			dl.instanceHash, err, delErr)
+	} else if !dropped {
+		log.Debugf("Not evicting %s after a failed download (%v): it was deleted while it was being downloaded",
+			dl.instanceHash, err)
+	}
 }
 
-func (m *multiReadCloser) Close() error {
-	return m.close()
+// transferResultErr is the error a transfer's result reports.  A nil result
+// -- the transfer client went away without reporting the job, which
+// performDownload forwards as nil -- is errAdoptedTransferUnreported: it says
+// nothing about whether the body arrived whole, so it is never a success.
+func transferResultErr(result *client.TransferResults) error {
+	if result == nil {
+		return errAdoptedTransferUnreported
+	}
+	return result.Error
+}
+
+// finishInlineDownload stores a small object held in memory once its transfer
+// has reported -- unless the transfer failed, never reported, or delivered
+// other than size bytes (when the size is known; -1 if not).  Storing it
+// otherwise would make the object complete at whatever length its input
+// happened to stop.
+func finishInlineDownload(dl *persistentDownload, dw *decisionWriter, result *client.TransferResults, size int64) error {
+	if err := transferResultErr(result); err != nil {
+		return err
+	}
+	if got := int64(dw.BufferLen()); size >= 0 && got != size {
+		return errors.Errorf("the transfer delivered %d bytes of an object of %d", got, size)
+	}
+	dl.checksums = clientChecksumsToCache(result)
+	if err := dw.Finalize(dl); err != nil {
+		return errors.Wrap(err, "failed to finalize inline storage")
+	}
+	close(dl.completionDone)
+	return nil
+}
+
+// adoptedTransferDataIsBad reports whether a download that ended in err left
+// data that must not be kept, as opposed to stopping early with whole blocks
+// that are good.  Only a stop whose cause is known to say nothing against the
+// bytes keeps them (see transferStopKeepsData); every other failure --
+// including a checksum mismatch, a change of version at the origin, and any
+// failure a server reported -- condemns them.  So does an unknown size, since
+// the blocks written then cannot be placed.
+func (pc *PersistentCache) adoptedTransferDataIsBad(instanceHash InstanceHash, err error) bool {
+	if !transferStopKeepsData(err) {
+		return true
+	}
+	meta, metaErr := pc.storage.GetMetadata(instanceHash)
+	return metaErr != nil || meta == nil || meta.ContentLength < 0
+}
+
+// noStoreBody is the body of a no-store response: whatever the decision
+// writer buffered before the decision, then the read end of the pipe the
+// rest of the transfer is written to.
+type noStoreBody struct {
+	io.Reader
+	pipe *io.PipeReader
+	// stop cancels the transfer writing the pipe.
+	stop context.CancelFunc
+}
+
+// newNoStoreBody prepends buffered to the pipe's read end.  Buffering before
+// the decision avoids writing into the pipe before anything reads it, which
+// would deadlock: io.Pipe is unbuffered.  stop cancels the transfer that
+// writes the pipe.
+func newNoStoreBody(buffered []byte, pr *io.PipeReader, stop context.CancelFunc) *noStoreBody {
+	b := &noStoreBody{Reader: pr, pipe: pr, stop: stop}
+	if len(buffered) > 0 {
+		b.Reader = io.MultiReader(bytes.NewReader(buffered), pr)
+	}
+	return b
+}
+
+// Close closes the pipe's read end, so that a read blocked on it returns,
+// and cancels the transfer writing it: a no-store response has one reader,
+// and once that has gone nothing will read what the transfer brings -- from
+// a stalled origin, perhaps nothing until the transfer times out.
+func (b *noStoreBody) Close() error {
+	return b.CloseWithError(nil)
+}
+
+// CloseWithError is Close, with err as the error the transfer's next write
+// fails with, if it gets that far before it is cancelled.
+func (b *noStoreBody) CloseWithError(err error) error {
+	b.stop()
+	return b.pipe.CloseWithError(err)
 }
 
 // decisionWriter buffers data until a storage decision is made based on response headers.
@@ -2538,9 +2810,16 @@ type decisionWriter struct {
 
 	// For disk mode
 	blockWriter io.WriteCloser
-	diskMeta    *CacheMetadata
-	ctx         context.Context
-	size        int64
+	// fence is a membership of the instance's write fence at the
+	// BlockWriter's generation, for the download's own metadata writes
+	// that may come after the writer has closed -- the checksums the
+	// transfer's result brings (see instanceFences).  Released, once, by
+	// whoever ends the download: the fetcher that adopted it, or
+	// performDownload if none did.
+	fence    *writeFence
+	diskMeta *CacheMetadata
+	ctx      context.Context
+	size     int64
 
 	// For pipe mode (no-store streaming)
 	pipeWriter *io.PipeWriter
@@ -2622,6 +2901,28 @@ func (w *decisionWriter) Close() error {
 	return nil
 }
 
+// CloseWithError is how the transfer engine closes a writer when a transfer
+// ends (see the client's WithWriter): with the transfer's error, or nil on
+// success.  A failed transfer stopped at an arbitrary byte, so the disk
+// writer is stopped early or aborted rather than closed, according to why
+// (see endWrite), and a no-store stream's reader is handed the error rather
+// than a clean EOF that would make a truncated body look complete.
+func (w *decisionWriter) CloseWithError(err error) error {
+	if err == nil {
+		return w.Close()
+	}
+	w.mu.Lock()
+	defer w.mu.Unlock()
+
+	if w.diskMode && w.blockWriter != nil {
+		return endWrite(w.blockWriter, err)
+	}
+	if w.pipeMode && w.pipeWriter != nil {
+		return w.pipeWriter.CloseWithError(err)
+	}
+	return nil
+}
+
 // ThresholdReady returns a channel that is closed once the internal buffer
 // has accumulated at least InlineMaxBytes of data while still undecided.
 // Used by performDownload to wake up when enough data has arrived to
@@ -2636,6 +2937,63 @@ func (w *decisionWriter) BufferLen() int {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 	return len(w.buffer)
+}
+
+// mergeDiskMetadata merges meta into the record of the object being written
+// to disk, through the download's write fence, so that nothing is recorded
+// for it once it has been deleted (see instanceFences).  For a writer in
+// disk mode.
+func (w *decisionWriter) mergeDiskMetadata(meta *CacheMetadata) error {
+	var err error
+	if !w.writeFenced(func() { err = w.pc.storage.MergeMetadata(w.dl.instanceHash, meta) }) {
+		return errInstanceDeleted
+	}
+	return err
+}
+
+// writeFenced runs fn, a database write of the download's, through the
+// download's write fence, and reports whether it ran; see
+// writeFence.write.  A writer that never entered disk mode has no fence,
+// and nothing on disk to fence, and runs fn.
+func (w *decisionWriter) writeFenced(fn func()) bool {
+	w.mu.Lock()
+	fence := w.fence
+	w.mu.Unlock()
+	if fence == nil {
+		fn()
+		return true
+	}
+	return fence.write(fn)
+}
+
+// diskFence returns the download's membership of the write fence, or nil
+// before disk mode; see fence.
+func (w *decisionWriter) diskFence() *writeFence {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	return w.fence
+}
+
+// diskState returns the block state the download's BlockWriter publishes
+// blocks to -- that of the instance the writer joined -- or nil before disk
+// mode or after the writer has been handed off.
+func (w *decisionWriter) diskState() *ObjectBlockState {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	if bw, ok := w.blockWriter.(*BlockWriter); ok {
+		return bw.sharedState
+	}
+	return nil
+}
+
+// releaseFence leaves the download's write fence; see fence.
+func (w *decisionWriter) releaseFence() {
+	w.mu.Lock()
+	fence := w.fence
+	w.mu.Unlock()
+	if fence != nil {
+		fence.leave()
+	}
 }
 
 // HandoffBlockWriter atomically replaces the decisionWriter's internal
@@ -2815,6 +3173,7 @@ func (w *decisionWriter) SetDiskMode(ctx context.Context, size int64) error {
 		return w.setupErr
 	}
 	w.blockWriter = blockWriter
+	w.fence = blockWriter.fence.clone()
 
 	// Flush buffered data to block writer
 	if len(w.buffer) > 0 {

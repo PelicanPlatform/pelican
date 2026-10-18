@@ -84,6 +84,11 @@ type AppendWriter struct {
 	// a whole number of chunks and always >= written.
 	provisional int64
 
+	// fence makes the writer's rewrites of the object's record through the
+	// instance's write fence, so that none lands after the object is
+	// deleted (see instanceFences); left once the writer is done.
+	fence *writeFence
+
 	closed bool
 }
 
@@ -109,7 +114,13 @@ func (sm *StorageManager) NewAppendWriter(
 	// Register before anything is persisted so that a reclamation pass which
 	// observes the intent record always also observes the live writer.
 	sm.liveAppends.Store(instanceHash, struct{}{})
-	rollback := func() { sm.liveAppends.Delete(instanceHash) }
+	// Joined before the object is created, so that a deletion of it at any
+	// point after fences this writer off.
+	fence := sm.fences.join(instanceHash)
+	rollback := func() {
+		sm.liveAppends.Delete(instanceHash)
+		fence.leave()
+	}
 
 	// Start with a single chunk's worth of provisional length; growTo extends
 	// it as the stream advances.
@@ -119,7 +130,10 @@ func (sm *StorageManager) NewAppendWriter(
 		return nil, errors.Wrap(err, "failed to initialize chunked storage")
 	}
 	meta.NamespaceID = namespaceID
-	if err := sm.db.SetMetadata(instanceHash, meta); err != nil {
+	if !fence.write(func() { err = sm.db.SetMetadata(instanceHash, meta) }) {
+		err = errInstanceDeleted
+	}
+	if err != nil {
 		rollback()
 		return nil, errors.Wrap(err, "failed to record namespace on new object")
 	}
@@ -131,11 +145,16 @@ func (sm *StorageManager) NewAppendWriter(
 		StartedAt:   time.Now(),
 		NamespaceID: namespaceID,
 	}); err != nil {
+		// An object deleted already is not deleted again, as in Abort: its
+		// hash may name a new instance by now.
+		stale := fence.stale()
 		rollback()
 		// Leave nothing half-built: the object is unreachable without the
 		// writer we are declining to return.
-		if delErr := sm.Delete(instanceHash); delErr != nil {
-			log.Warnf("Failed to clean up %s after append-intent failure: %v", instanceHash, delErr)
+		if !stale {
+			if delErr := sm.Delete(instanceHash); delErr != nil {
+				log.Warnf("Failed to clean up %s after append-intent failure: %v", instanceHash, delErr)
+			}
 		}
 		return nil, errors.Wrap(err, "failed to record the append-in-flight marker")
 	}
@@ -148,6 +167,7 @@ func (sm *StorageManager) NewAppendWriter(
 		chunkSize:    chunkSize,
 		sizeCode:     chunkSizeCode,
 		provisional:  chunkSize,
+		fence:        fence,
 		pending:      make([]byte, 0, BlockDataSize*writeBatchBlocks),
 	}, nil
 }
@@ -195,7 +215,7 @@ func (w *AppendWriter) flush(data []byte) error {
 	if err := w.growTo(w.flushed + int64(len(data))); err != nil {
 		return err
 	}
-	if err := w.sm.WriteBlocks(w.instanceHash, w.flushed, data); err != nil {
+	if err := w.sm.writeBlocksThrough(w.fence, w.instanceHash, w.flushed, data); err != nil {
 		return errors.Wrapf(err, "failed to write %d bytes at offset %d", len(data), w.flushed)
 	}
 	w.flushed += int64(len(data))
@@ -228,6 +248,24 @@ func (w *AppendWriter) growTo(endOffset int64) error {
 	chunksNeeded := endOffset/w.chunkSize + 1
 	newLength := chunksNeeded * w.chunkSize
 
+	// The record is read and rewritten through the fence: SetMetadata would
+	// otherwise make the record of a deleted object again.
+	var err error
+	if !w.fence.write(func() { err = w.growRecord(newLength, chunksNeeded) }) {
+		return errInstanceDeleted
+	}
+	if err != nil {
+		return err
+	}
+	// The cached copy carries the old length and chunk table.
+	w.sm.diskCrypto.Delete(w.instanceHash)
+	w.provisional = newLength
+	return nil
+}
+
+// growRecord rewrites the object's record for a provisional length of
+// newLength, chunksNeeded chunks.  Called through the writer's fence.
+func (w *AppendWriter) growRecord(newLength, chunksNeeded int64) error {
 	meta, err := w.sm.db.GetMetadata(w.instanceHash)
 	if err != nil {
 		return errors.Wrap(err, "failed to read metadata while growing object")
@@ -247,9 +285,6 @@ func (w *AppendWriter) growTo(endOffset int64) error {
 	if err := w.sm.db.SetMetadata(w.instanceHash, meta); err != nil {
 		return errors.Wrap(err, "failed to grow object metadata")
 	}
-	// The cached copy carries the old length and chunk table.
-	w.sm.diskCrypto.Delete(w.instanceHash)
-	w.provisional = newLength
 	return nil
 }
 
@@ -271,7 +306,21 @@ func (w *AppendWriter) Finalize() (*CacheMetadata, error) {
 		w.pending = nil
 	}
 	w.closed = true
+	defer w.fence.leave()
 
+	// The record is finished through the fence, so that an object deleted
+	// meanwhile is not made again.
+	var meta *CacheMetadata
+	var err error
+	if !w.fence.write(func() { meta, err = w.finalizeRecord() }) {
+		return nil, errInstanceDeleted
+	}
+	return meta, err
+}
+
+// finalizeRecord records the object's true length and trims its tail.
+// Called through the writer's fence.
+func (w *AppendWriter) finalizeRecord() (*CacheMetadata, error) {
 	actual := w.written
 	meta, err := w.sm.db.GetMetadata(w.instanceHash)
 	if err != nil {
@@ -335,7 +384,8 @@ func (w *AppendWriter) finalizeEmpty(meta *CacheMetadata) (*CacheMetadata, error
 	meta.ChunkSizeCode = ChunkingDisabled
 	meta.StorageID = StorageIDInline
 
-	if err := w.sm.StoreInline(w.ctx, w.instanceHash, meta, nil); err != nil {
+	// storeInline, not StoreInline: the caller already holds the fence.
+	if err := w.sm.storeInline(w.ctx, w.instanceHash, meta, nil); err != nil {
 		return nil, errors.Wrap(err, "failed to store the empty object")
 	}
 	w.sm.diskCrypto.Delete(w.instanceHash)
@@ -412,9 +462,16 @@ func (w *AppendWriter) releaseUnusedChunk(meta *CacheMetadata, chunkIdx int) {
 func (w *AppendWriter) Abort() error {
 	w.closed = true
 	w.pending = nil
+	// An object deleted already is not deleted again: its hash may name a
+	// new instance by now, made by a fetch of the same version.
+	stale := w.fence.stale()
+	w.fence.leave()
 	// Delete drops the intent record inside the same transaction as the
 	// metadata; this only clears the in-process registration.
 	w.sm.liveAppends.Delete(w.instanceHash)
+	if stale {
+		return nil
+	}
 	return w.sm.Delete(w.instanceHash)
 }
 

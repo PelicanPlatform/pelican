@@ -237,7 +237,11 @@ func (q *prestageQueue) prestage(req *prestageRequest) {
 		return
 	}
 
-	reader, err := q.pc.Get(context.Background(), req.path, req.token)
+	// A prestage has no client to go away, but it must not outlast the
+	// cache: reading under the cache's download context ends a read
+	// waiting for a block when the cache closes.
+	ctx := q.pc.downloadCtx
+	reader, err := q.pc.Get(ctx, req.path, req.token)
 	if err != nil {
 		status := 500
 		msg := err.Error()
@@ -265,6 +269,23 @@ func (q *prestageQueue) prestage(req *prestageRequest) {
 		}
 		if readErr != nil {
 			req.SetDone(500, fmt.Sprintf("I/O failure when prestaging: %v", readErr))
+			return
+		}
+	}
+
+	// Reading the last byte is not the end of the download behind it: it
+	// still has to be verified and marked complete.  Report success only
+	// once it has been, so that a prestaged object is cached when the
+	// request says so.
+	if rr, ok := reader.(*RangeReader); ok {
+		if err := rr.WaitForCompletion(ctx); err != nil {
+			req.SetDone(500, fmt.Sprintf("Failure when prestaging: %v", err))
+			return
+		}
+		// WaitForCompletion stops waiting, without an error, when ctx
+		// ends; the download was then not seen to be verified.
+		if err := ctx.Err(); err != nil {
+			req.SetDone(500, fmt.Sprintf("Failure when prestaging: %v", err))
 			return
 		}
 	}
@@ -523,10 +544,7 @@ func (pc *PersistentCache) EvictObject(objectPath, token string) error {
 	pelicanURL := pc.normalizePath(objectPath)
 	objectHash := pc.db.ObjectHash(pelicanURL)
 
-	pc.activeDownloadsMu.RLock()
-	_, inUse := pc.activeDownloads[objectHash]
-	pc.activeDownloadsMu.RUnlock()
-	if inUse {
+	if pc.downloadInProgress(objectHash) {
 		return errors.New("object is in use")
 	}
 
@@ -548,6 +566,28 @@ func (pc *PersistentCache) EvictObject(objectPath, token string) error {
 	}
 
 	return nil
+}
+
+// downloadInProgress reports whether a download of the object is still
+// under way, which eviction must not pull the object out from under.  A
+// download's entry in activeDownloads outlives it: a goroutine removes it
+// once completionDone is closed, so an entry whose completionDone is
+// closed is a finished download -- and the object it cached may be evicted
+// like any other.  Looking only at the entry made an eviction just after a
+// download refuse, or skip, an object that was complete.
+func (pc *PersistentCache) downloadInProgress(objectHash ObjectHash) bool {
+	pc.activeDownloadsMu.RLock()
+	dl, ok := pc.activeDownloads[objectHash]
+	pc.activeDownloadsMu.RUnlock()
+	if !ok {
+		return false
+	}
+	select {
+	case <-dl.completionDone:
+		return false
+	default:
+		return true
+	}
 }
 
 // EvictPrefix evicts all cached objects whose source URL starts with the
@@ -576,10 +616,7 @@ func (pc *PersistentCache) EvictPrefix(prefix, token string, immediate bool) (in
 
 		// Skip objects being actively downloaded.
 		objectHash := pc.db.ObjectHash(meta.SourceURL)
-		pc.activeDownloadsMu.RLock()
-		_, inUse := pc.activeDownloads[objectHash]
-		pc.activeDownloadsMu.RUnlock()
-		if inUse {
+		if pc.downloadInProgress(objectHash) {
 			log.Debugf("Skipping in-use object during prefix eviction: %s", meta.SourceURL)
 			return nil
 		}

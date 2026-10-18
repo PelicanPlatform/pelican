@@ -450,7 +450,7 @@ func TestCorruption_VerifyBlockIntegrity(t *testing.T) {
 	const contentLen = 3 * local_cache.BlockDataSize
 	content := generateTestData(contentLen)
 
-	fileHash := local_cache.InstanceHash("deadbeef1234567890abcdef")
+	fileHash := local_cache.InstanceHash("deadbeef1234567890abcdef1234567890abcdef1234567890abcdef12345678")
 
 	// Get the assigned storage ID for the single directory.
 	assignedDirs := storage.GetDirs()

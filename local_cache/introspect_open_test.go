@@ -204,8 +204,12 @@ func TestOpenCacheDBReadOnlyRefusesWrites(t *testing.T) {
 	objHash := db.ObjectHash(sourceURL)
 
 	mutations := map[string]func() error{
-		"SetMetadata":    func() error { return db.SetMetadata(instHash, &CacheMetadata{ETag: "nope"}) },
-		"MergeMetadata":  func() error { return db.MergeMetadata(instHash, &CacheMetadata{ETag: "nope"}) },
+		"SetMetadata":   func() error { return db.SetMetadata(instHash, &CacheMetadata{ETag: "nope"}) },
+		"MergeMetadata": func() error { return db.MergeMetadata(instHash, &CacheMetadata{ETag: "nope"}) },
+		"MergeExistingMetadata": func() error {
+			_, err := db.MergeExistingMetadata(instHash, &CacheMetadata{ETag: "nope"})
+			return err
+		},
 		"DeleteMetadata": func() error { return db.DeleteMetadata(instHash) },
 		"SetLatestETag":  func() error { return db.SetLatestETag(objHash, "nope", time.Now()) },
 		"DeleteLatestETag": func() error {
@@ -242,7 +246,7 @@ func TestOpenCacheDBReadOnlyRefusesWrites(t *testing.T) {
 		},
 		"ReloadSalt": func() error { return db.ReloadSalt() },
 		"EvictByLRU": func() error {
-			_, _, err := db.EvictByLRU(StorageIDInline, 1, 1, 0, nil)
+			_, _, err := db.EvictByLRU(StorageIDInline, 1, 1, 0, nil, nil)
 			return err
 		},
 		"SetTierUploadIntent": func() error {
