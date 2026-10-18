@@ -1,0 +1,101 @@
+# Tiering a Cache to dCache
+
+The V2 Cache (`Cache.EnableV2`) can move completed objects from its local disks to remote storage, configured through [`Cache.TieringTargets`](/parameters#Cache-TieringTargets).
+Besides S3, Google Cloud Storage and Azure Blob Storage, a tiering target can be a WebDAV collection, and in particular a directory on a [dCache](https://www.dcache.org/) WebDAV door.
+This page describes how the Cache uses such a target, and what a dCache site needs to configure to lend a Cache its storage.
+
+## How the Cache Uses dCache
+
+The Cache stores objects below the target's collection with plain WebDAV requests (`MKCOL`, `PUT`, `HEAD`, `GET`, `PROPFIND` and `DELETE`), presenting the bearer token it reads from the target's `TokenFile`.
+
+To serve a tiered object, the Cache redirects the client to dCache rather than sending the bytes itself, using a dCache macaroon in place of the pre-signed URL an S3 target would use:
+
+- The Cache asks the door for one read-only macaroon covering the target's collection, valid for [`Cache.TieringRedirectExpiry`](/parameters#Cache-TieringRedirectExpiry) plus ten minutes, and asks for a fresh one every minute in the background.
+- For each redirect, it restricts that macaroon itself, without contacting dCache, to downloading the one object until `Cache.TieringRedirectExpiry` from now.
+- It sends the client to the object's URL on the door with the restricted macaroon as the `authz` query parameter, and the door sends the client on to the pool that holds the object.
+
+Before redirecting any client, and again every minute, the Cache fetches its identity object through a URL minted this way, with no other credential.
+While that fails, or while the Cache holds no usable macaroon, it reads the object from dCache with its own token and proxies it to the client instead.
+The `tiering-storage` health component and the `pelican_cache_tiering_redirect_capable` metric show which of the two a target is doing.
+
+Setting `DisableMacaroons: true` on a target makes the Cache never ask for macaroons, so its objects are always proxied.
+
+## Configuring the Cache
+
+A dCache target names the Cache's directory on the door with `WebDavUrl`, and the token with `TokenFile`:
+
+```yaml
+Cache:
+  TieringTargets:
+    - WebDavUrl: https://dcache.example.org:2880/pnfs/example.org/data/pelican
+      Prefix: cache
+      MaxSize: 50TB
+      TokenFile: /etc/pelican/dcache.token
+```
+
+The directory named by `WebDavUrl` must exist; the Cache creates `Prefix` and the directories below it.
+`MaxSize` is the most the Cache stores on the target, and should fit within the space the site lends it.
+The Cache assumes that it alone writes below the prefix, so do not share it with another Cache or another application.
+See [`Cache.TieringTargets`](/parameters#Cache-TieringTargets) for every key.
+
+## Configuring dCache for a Pelican Cache
+
+### The Cache's Token
+
+The Cache needs a token from an issuer the site's gPlazma trusts, and that token must not carry `storage.*` scopes (such as `storage.read:/` or `storage.modify:/pelican`).
+dCache does not issue macaroons for a token with `storage.*` scopes, whatever paths they name, and the target then serves every object by proxying; the Cache logs a warning naming this.
+A token without `storage.*` scopes is mapped to a dCache user, and dCache's own permissions decide what it may do.
+A WLCG-profile token still carries the `wlcg.ver` claim and a `scope` claim, which can hold, for example, just `openid`.
+
+In gPlazma, accept the issuer with the `oidc` plugin and map the token's subject to a dedicated dCache user, for example:
+
+```
+# gplazma.conf
+auth    optional    oidc
+map     optional    multimap
+map     requisite   authzdb
+session requisite   authzdb
+```
+
+```
+# dcache.conf (or the layout's gplazma section)
+gplazma.oidc.provider!pelican = https://issuer.example.org -profile=wlcg
+gplazma.oidc.audience-targets = https://dcache.example.org:2880
+```
+
+```
+# multimap.conf
+oidc:<subject of the cache's token>@pelican    username:pelican-cache uid:5000 gid:5000,true
+```
+
+```
+# storage-authzdb
+authorize pelican-cache read-write 5000 5000 / / /
+```
+
+That user must own the Cache's directory, so that it can create, write, list and delete everything below it.
+
+Instead of relying on directory ownership alone, the user can be confined with a storage-authzdb root, such as `/pnfs/example.org/data/pelican`.
+The door then shows the user that root as `/`, so `WebDavUrl` names the Cache's directory as the user sees it (`https://dcache.example.org:2880/` for the root itself), and `Prefix` must not be empty, because dCache does not issue such a user a macaroon for its root directory.
+
+Set `gplazma.oidc.audience-targets` to the audience the Cache's token carries.
+An `https` issuer's certificate must be trusted by dCache's Java trust store.
+
+### Renewing the Token
+
+The Cache re-reads `TokenFile` on every request, so a renewed token takes effect without a restart.
+Renew it before it expires with whatever tool the issuer supports, such as `htgettoken` or `oidc-agent`, and replace the file atomically: write the new token to a temporary file in the same directory and rename it over `TokenFile`, so the Cache never reads a partly written token.
+An empty `TokenFile` is an error, not a request for anonymous access.
+
+### The WebDAV Door and Pools
+
+- The door must serve `https`: dCache issues macaroons only over TLS.
+- Enable `webdav.redirect.on-read=true`, so that redirected clients read from the pools rather than through the door.
+- Pools must serve `https` movers (`pool.enable.encrypted-transfers`, the default), and clients must be able to reach the pools directly and trust the host certificates of both the door and the pools.
+- In dCache 11.2 and later, the door limits what one client address may do.
+  By default, an address whose requests fail authentication or authorization (401 or 403) more than `webdav.limits.error.max-allowed` (3) times within `webdav.limits.error.block.window.time` (20 seconds) is answered with 429 for that long, and one address may use at most `webdav.limits.rate.per-client.fractions` (25) percent of `webdav.limits.rate.overall` (1000 requests per second).
+  Many clients behind one NAT presenting expired redirect URLs, or the Cache itself proxying many objects from one address, can reach those limits, so size them for the expected load.
+
+### Clocks
+
+The expiry of a redirect URL is computed from the Cache's clock and checked against the door's, so both must be kept in sync, for example with NTP.
