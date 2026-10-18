@@ -292,7 +292,7 @@ To support these legacy tools, Pelican has been built to behave similarly as `st
 
 ### `pelican-server` Server Alias (Docker only)
 
-In the official Pelican Docker images (e.g. `hub.opensciencegrid.org/pelican_platform/osdf-origin`), a symlink named `osdf-server` is created that points to `pelican-server`.
+In the official Pelican Docker images (e.g. `hub.osg-htc.org/pelican_platform/osdf-origin`), a symlink named `osdf-server` is created that points to `pelican-server`.
 When the server binary is invoked as `osdf-server`, it automatically applies OSDF defaults (equivalent to setting `Federation.DiscoveryUrl: https://osg-htc.org`) so OSDF container deployments do not need to specify the federation URL explicitly.
 
 The `osdf-server` symlink is used as the `ENTRYPOINT` in the `osdf-origin`, `osdf-cache`, `osdf-director`, and `osdf-registry` Docker image targets. It is a Docker-only convenience and is not installed by the RPM packages.

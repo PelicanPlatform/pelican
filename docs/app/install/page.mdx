@@ -57,6 +57,12 @@ Pelican follows the [semantic versioning scheme](https://semver.org/), so, for e
 - 10 represents feature releases (each increment within the same major release represents new, backward-compatible functionality)
 - 5 represents a bug fix/patch release
 
+Starting with v26, each major release has two release streams:
+- `vN.0.z` releases contain only bug fixes for the `vN.0` release.
+- `vN.y.z` releases, with `y` of 1 or more, contain new features along with bug fixes.
+
+The Pelican Docker images have tags that follow each stream. See [Choosing an image tag](./install/docker.mdx#choosing-an-image-tag) for details.
+
 The download table above includes Pelican versions as old as `v7.6.x` To download older versions, please refer to our [GitHub release archive](https://github.com/PelicanPlatform/pelican/releases).
 
 ## Install Pelican Executable
