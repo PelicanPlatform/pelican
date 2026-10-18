@@ -822,7 +822,8 @@ func (sm *StorageManager) getTierTarget(id StorageID) *tierTarget {
 	return sm.tierTargets[id]
 }
 
-// Close stops TTL cache eviction goroutines and releases cached resources.
+// Close stops TTL cache eviction goroutines and releases cached resources,
+// the tiering targets' among them.
 //
 // Only the caches that were actually started are stopped.  ttlcache's Stop is
 // an unbuffered channel send that its Start loop receives, so stopping a cache
@@ -854,6 +855,11 @@ func (sm *StorageManager) Close() {
 	}
 	if sm.ptCache != nil {
 		sm.ptCache.Close()
+	}
+	// Release the tiering targets' client resources.  Closing one a second
+	// time only returns an error, which is of no interest here.
+	for _, target := range sm.tierTargets {
+		_ = target.Close()
 	}
 }
 
