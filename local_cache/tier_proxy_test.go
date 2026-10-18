@@ -46,11 +46,16 @@ import (
 // stall is set, a read of a body it opened blocks until the read's context
 // ends, signalling held, or until the test releases the stall, when the
 // read goes on; while changed is set, every open reports that the target no
-// longer holds the copy that was uploaded.
+// longer holds the copy that was uploaded.  While holdPuts is set, an upload
+// blocks until its context ends; closedDuringPut records the backend being
+// closed while one was blocked.
 type stallingTierBackend struct {
 	TierBackend
-	stall   atomic.Bool
-	changed atomic.Bool
+	stall           atomic.Bool
+	changed         atomic.Bool
+	holdPuts        atomic.Bool
+	putsHeld        atomic.Int32
+	closedDuringPut atomic.Bool
 	// stalled counts the reads blocked now.
 	stalled  atomic.Int32
 	held     chan struct{}
@@ -76,6 +81,23 @@ func (b *stallingTierBackend) OpenRange(ctx context.Context, key string, offset 
 		return nil, err
 	}
 	return &stallingTierBody{ReadCloser: body, ctx: ctx, b: b}, nil
+}
+
+func (b *stallingTierBackend) Put(ctx context.Context, key, contentType string, size int64, body io.Reader) (TierObjectInfo, error) {
+	if b.holdPuts.Load() && key != tierProbeKey {
+		b.putsHeld.Add(1)
+		defer b.putsHeld.Add(-1)
+		<-ctx.Done()
+		return TierObjectInfo{}, ctx.Err()
+	}
+	return b.TierBackend.Put(ctx, key, contentType, size, body)
+}
+
+func (b *stallingTierBackend) Close() error {
+	if b.putsHeld.Load() > 0 {
+		b.closedDuringPut.Store(true)
+	}
+	return b.TierBackend.Close()
 }
 
 type stallingTierBody struct {
@@ -318,4 +340,35 @@ func tierProxyTestData(n int) []byte {
 		data[i] = byte(i % 241)
 	}
 	return data
+}
+
+// TestTierCacheCloseStopsUploadsFirst: closing the cache stops the tiering
+// uploader, and waits for it, before the tiering targets are closed -- so an
+// upload in flight is abandoned rather than failed against a closed backend,
+// and is not counted against the object.
+func TestTierCacheCloseStopsUploadsFirst(t *testing.T) {
+	env := newMemTierCache(t)
+	env.backend.holdPuts.Store(true)
+	pc := env.pc
+	const path = "/test/tiered/closing.bin"
+	data := tierProxyTestData(4 * BlockDataSize)
+	normalized := pc.normalizePath(path)
+	objectHash := pc.db.ObjectHash(normalized)
+	hash := pc.db.InstanceHash("etag-closing", objectHash)
+	_, err := pc.storage.InitDiskStorage(env.ctx, hash, int64(len(data)), env.diskID, pc.getNamespaceID(path))
+	require.NoError(t, err)
+	require.NoError(t, pc.db.MergeMetadata(hash, &CacheMetadata{ETag: "etag-closing", SourceURL: normalized}))
+	require.NoError(t, pc.db.SetLatestETag(objectHash, "etag-closing", time.Now()))
+	require.NoError(t, pc.storage.WriteBlocks(hash, 0, data))
+	require.Eventually(t, func() bool { return env.backend.putsHeld.Load() > 0 },
+		15*time.Second, 10*time.Millisecond, "the uploader should start tiering the object")
+
+	require.NoError(t, pc.Close())
+	assert.False(t, env.backend.closedDuringPut.Load(), "the target was closed under an upload in flight")
+	assert.Zero(t, env.backend.putsHeld.Load(), "Close returned with an upload still in flight")
+	pc.tierUploader.inflightMu.Lock()
+	assert.Zero(t, pc.tierUploader.failures[hash], "an abandoned upload is not a failed attempt")
+	pc.tierUploader.inflightMu.Unlock()
+	assert.Zero(t, pc.storage.getTierTarget(env.tierID).probeFailures.Load(),
+		"an abandoned upload does not probe, and fail, the target")
 }

@@ -376,3 +376,20 @@ func TestTierGivesUpOnAnObject(t *testing.T) {
 	queued, _ := env.uploader.backfillScan(ctx)
 	assert.Zero(t, queued)
 }
+
+// TestStorageManagerClosesTierTargets: closing the storage manager releases
+// its tiering targets' client resources -- here the in-memory bucket, which
+// refuses requests once closed -- and closing it again is harmless.
+func TestStorageManagerClosesTierTargets(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	env := newMemTierEnv(t, ctx)
+	_, exists, err := env.target.backend.Stat(ctx, tierIdentityKey)
+	require.NoError(t, err)
+	require.True(t, exists)
+
+	env.storage.Close()
+	_, _, err = env.target.backend.Stat(ctx, tierIdentityKey)
+	assert.ErrorContains(t, err, "closed", "the target's bucket should be closed with the storage manager")
+	env.storage.Close()
+}
