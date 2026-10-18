@@ -3351,7 +3351,8 @@ description: |+
     The file is re-read for every request, so a token rotated in place is picked up
     without a restart; an empty file is an error rather than a request for anonymous
     access.  The token needs permission to read, write, create collections in,
-    delete from and list the collection.
+    delete from and list the collection.  For dCache, it must not carry `storage.*`
+    scopes (see below).
   - **DisableMacaroons** (bool, optional, default false): never ask the service for
     macaroons, so objects on the target are always proxied through the cache.
 
@@ -3371,13 +3372,15 @@ description: |+
   client reads whatever the target currently holds; proxied reads are pinned to the entity
   tag recorded at upload, as they are for buckets without versioning.
 
-  Not every token can be exchanged for a macaroon.  dCache issues one only when it can
-  express the token's restrictions as macaroon caveats, which it cannot do for the
-  scope-based authorization that WLCG and SciTokens profiles produce (`storage.read:`,
-  `storage.modify:` and similar scopes): with such a token the target is proxy-only.  dCache
-  also issues macaroons only over `https`.  Minted URLs carry an expiry computed from the
-  cache's clock and checked against the door's, so the two clocks must agree to well within
-  ${Cache.TieringRedirectExpiry}, as they must for pre-signed URLs.
+  The cache's token must not carry `storage.*` scopes (`storage.read:`, `storage.modify:`
+  and similar): dCache does not issue macaroons for such a token, whatever paths its scopes
+  name, and the target then serves by proxying, with a warning in the log that says so.  Use
+  a token without `storage.*` scopes that the door maps to a dCache user owning the
+  target's directory.  dCache also issues macaroons only over `https`.  Minted URLs carry
+  an expiry computed from the cache's clock and checked against the door's, so the two
+  clocks must agree to well within ${Cache.TieringRedirectExpiry}, as they must for
+  pre-signed URLs.  [Tiering a Cache to dCache](/operating-a-federation/cache/dcache-tiering)
+  describes the configuration a dCache site needs.
 
   The remaining keys apply to every target:
 
