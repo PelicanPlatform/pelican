@@ -298,17 +298,11 @@ func makeCollectionAPIRequest(ctx context.Context, method, endpoint string, body
 		return nil, errors.Wrap(err, "failed to construct API URL")
 	}
 
-	// Build scope string. With a collection ID the scope names that
-	// collection ("collection.read:collection_id"); without one it must
-	// carry the path form ("collection.create:/"), which is what the
-	// issuer mints and the only form its scope filter will grant.
+	// Collection scopes are path-form: "collection.read:/" for the blanket
+	// capability (list, create), "collection.read:/<id>" for one collection.
 	scopeStr := string(scope)
 	if strings.HasPrefix(scopeStr, "collection.") {
-		if collectionID != "" {
-			scopeStr = scopeStr + ":" + collectionID
-		} else {
-			scopeStr = scopeStr + ":/"
-		}
+		scopeStr = scopeStr + ":/" + collectionID
 	}
 
 	// Collection operations are control-plane: the origin's collections API is

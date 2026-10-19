@@ -69,10 +69,13 @@ func TestCollectionCLILocalIssuerE2E(t *testing.T) {
 	require.NotEmpty(t, issuerMeta.RegistrationURL, "local issuer must advertise a dynamic-registration endpoint")
 	require.NotEmpty(t, issuerMeta.DeviceAuthURL, "local issuer must advertise a device-authorization endpoint")
 
-	// Register a client and run the real device-code flow for a collection scope.
-	// collection.read is what the collections list endpoint requires; it is one
-	// of the namespace-agnostic management scopes any authenticated user holds.
-	scopes := []string{"collection.read:/"}
+	// Register a client and run the real device-code flow for the scopes the
+	// collections CLI requests (cmd/origin_collections.go builds them in this
+	// path form). collection.read:/ is what the list endpoint requires and is
+	// a management scope any authenticated user holds. collection.create:/ is
+	// requested too: testuser is NOT a collection admin, so the issuer must
+	// refuse it, and the create endpoint must refuse the token regardless.
+	scopes := []string{"collection.read:/", "collection.create:/"}
 	drcp := oauth2.DCRPConfig{
 		ClientRegistrationEndpointURL: issuerMeta.RegistrationURL,
 		Transport:                     config.GetTransport(),
@@ -138,6 +141,8 @@ func TestCollectionCLILocalIssuerE2E(t *testing.T) {
 	assert.Equal(t, "testuser", claims["sub"])
 	assert.Contains(t, extractScopes(claims), "collection.read:/",
 		"the local issuer should mint the namespace-agnostic collection.read scope")
+	assert.NotContains(t, extractScopes(claims), "collection.create:/",
+		"collection.create is a collection-admin capability; the issuer must not mint it to testuser")
 
 	// The payoff: the collections API accepts this local-issuer bearer token.
 	// Before the fix the CLI discovered the origin's data-namespace issuer,
@@ -152,4 +157,29 @@ func TestCollectionCLILocalIssuerE2E(t *testing.T) {
 	_ = resp.Body.Close()
 	require.Equal(t, http.StatusOK, resp.StatusCode,
 		"collections API must accept the local-issuer bearer token; got %d (body: %s)", resp.StatusCode, string(body))
+
+	// The same token must be refused by the create endpoint. Because the
+	// issuer declined collection.create:/ above, the token cannot even
+	// authenticate for create (it carries neither web_ui.access nor a
+	// create scope), so the refusal comes from the authentication step. The
+	// role gate behind it — which refuses a non-admin even WITH a create
+	// scope on the token — is pinned by origin's TestCollectionsAPI.
+	createBody := `{"name":"cli-rogue","namespace":"/data","visibility":"private"}`
+	createReq, err := http.NewRequest("POST", listURL, strings.NewReader(createBody))
+	require.NoError(t, err)
+	createReq.Header.Set("Authorization", "Bearer "+accessToken)
+	createReq.Header.Set("Content-Type", "application/json")
+	createResp, err := httpClient.Do(createReq)
+	require.NoError(t, err)
+	createRespBody, _ := io.ReadAll(createResp.Body)
+	_ = createResp.Body.Close()
+	assert.Equal(t, http.StatusForbidden, createResp.StatusCode,
+		"a non-admin device-flow token must be refused at create (body: %s)", string(createRespBody))
+	// Pin WHICH gate refused: the scope validator, not the role check. If
+	// this assertion starts failing with a body that names
+	// server.collection_admin, the token has begun authenticating for
+	// create and is being stopped by the role gate instead — a change in
+	// the issuer's scope policy worth noticing, not silently accepting.
+	assert.Contains(t, string(createRespBody), "does not contain any of the scopes",
+		"the refusal should come from the scope-validation step")
 }

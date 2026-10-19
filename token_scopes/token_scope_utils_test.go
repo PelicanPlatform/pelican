@@ -142,3 +142,38 @@ func TestParseResources(t *testing.T) {
 	require.NoError(t, tok.Set("scope", "storage.create:/foo"))
 	assert.Equal(t, []ResourceScope{{Authorization: Wlcg_Storage_Create, Resource: "/foo"}}, ParseResourceScopeString(tok))
 }
+
+func TestCheckCollectionScope(t *testing.T) {
+	tests := []struct {
+		name         string
+		tokenScope   string
+		expected     TokenScope
+		collectionID string
+		want         bool
+	}{
+		// Bare and blanket forms satisfy any request for that action.
+		{"bare-no-id", "collection.read", Collection_Read, "", true},
+		{"bare-with-id", "collection.read", Collection_Read, "abc123", true},
+		{"blanket-no-id", "collection.read:/", Collection_Read, "", true},
+		{"blanket-with-id", "collection.create:/", Collection_Create, "abc123", true},
+		{"case-insensitive-action", "Collection.Read:/", Collection_Read, "", true},
+		// Per-collection form is honored when the caller names a collection.
+		{"id-matches", "collection.modify:/abc123", Collection_Modify, "abc123", true},
+		{"id-mismatch", "collection.modify:/abc123", Collection_Modify, "zzz999", false},
+		{"id-form-without-requested-id", "collection.modify:/abc123", Collection_Modify, "", true},
+		{"id-is-case-sensitive", "collection.modify:/ABC123", Collection_Modify, "abc123", false},
+		// Retired and malformed suffixes are rejected.
+		{"legacy-id-without-slash", "collection.modify:abc123", Collection_Modify, "abc123", false},
+		{"empty-suffix", "collection.modify:", Collection_Modify, "abc123", false},
+		{"trailing-slash-on-id", "collection.modify:/abc123/", Collection_Modify, "abc123", false},
+		// Wrong action, wrong family.
+		{"wrong-action", "collection.read:/abc123", Collection_Modify, "abc123", false},
+		{"storage-scope-never-matches", "storage.read:/", Collection_Read, "", false},
+		{"non-collection-expected", "storage.read:/", Wlcg_Storage_Read, "", false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equal(t, tt.want, CheckCollectionScope(tt.tokenScope, tt.expected, tt.collectionID))
+		})
+	}
+}
