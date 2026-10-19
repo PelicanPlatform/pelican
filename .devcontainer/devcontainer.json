@@ -2,7 +2,7 @@
 // For config options, see https://containers.dev/implementors/json_reference/
 {
 	"name": "Pelican",
-	"image": "hub.opensciencegrid.org/pelican_platform/pelican-dev:latest-itb",
+	"image": "hub.osg-htc.org/pelican_platform/pelican-dev:latest-itb",
 	"workspaceFolder": "/workspaces/${localWorkspaceFolderBasename}",
 	"forwardPorts": [
 		8444,

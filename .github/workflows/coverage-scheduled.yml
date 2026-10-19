@@ -23,7 +23,7 @@ jobs:
     name: Collect coverage (${{ matrix.binary_name }})
     runs-on: ubuntu-latest
     container:
-      image: hub.opensciencegrid.org/pelican_platform/pelican-test:latest-itb
+      image: hub.osg-htc.org/pelican_platform/pelican-test:latest-itb
     strategy:
       fail-fast: false
       matrix:
