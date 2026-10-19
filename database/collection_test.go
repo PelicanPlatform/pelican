@@ -430,6 +430,10 @@ func TestEnsureBuiltinAdmin(t *testing.T) {
 	require.NotNil(t, admin)
 	require.NoError(t, db.Create(&Group{ID: "ops", Name: "ops", CreatedBy: CreatorUnknown}).Error)
 	require.NoError(t, db.Create(&GroupMember{GroupID: "ops", UserID: admin.ID, AddedBy: CreatorUnknown}).Error)
+	require.NoError(t, db.Create(&User{ID: "alice", Username: "alice", Sub: "sub-alice", Issuer: "https://idp.example.test",
+		CreatedBy: CreatorSelfEnrolled}).Error)
+	require.NoError(t, db.Create(&UserIdentity{ID: "li-admin", UserID: admin.ID, Sub: "sub-linked-1", Issuer: "https://idp.example.test"}).Error)
+	require.NoError(t, db.Create(&UserIdentity{ID: "li-alice", UserID: "alice", Sub: "sub-linked-2", Issuer: "https://idp.example.test"}).Error)
 
 	setExternalWebURL(t, newURL)
 	require.NoError(t, ensureBuiltinAdmin(db))
@@ -441,6 +445,10 @@ func TestEnsureBuiltinAdmin(t *testing.T) {
 	var members []GroupMember
 	require.NoError(t, db.Where("group_id = ? AND user_id = ?", "ops", admin.ID).Find(&members).Error)
 	assert.Len(t, members, 1)
+	var linked []UserIdentity
+	require.NoError(t, db.Order("id").Find(&linked).Error)
+	require.Len(t, linked, 1)
+	assert.Equal(t, "li-alice", linked[0].ID, "only the admin's identities are unlinked")
 
 	require.NoError(t, ensureBuiltinAdmin(db))
 	live, tombstoned := adminRows(t, db)
@@ -459,6 +467,11 @@ func TestEnsureBuiltinAdmin(t *testing.T) {
 	live, tombstoned = adminRows(t, db)
 	assert.Equal(t, []string{fresh.ID}, live)
 	assert.ElementsMatch(t, []string{admin.ID, "squatter"}, tombstoned)
+	require.NoError(t, db.Create(&UserIdentity{ID: "li-fresh", UserID: fresh.ID, Sub: "sub-linked-3", Issuer: "https://idp.example.test"}).Error)
+	require.NoError(t, ensureBuiltinAdmin(db))
+	require.NoError(t, db.Order("id").Find(&linked).Error)
+	require.Len(t, linked, 1)
+	assert.Equal(t, "li-alice", linked[0].ID)
 
 	setExternalWebURL(t, "")
 	require.NoError(t, ensureBuiltinAdmin(db))

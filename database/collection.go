@@ -2353,7 +2353,8 @@ const builtinAdminUsername = "admin"
 // ensureBuiltinAdmin makes the built-in admin the only live user using "admin" as
 // its username, linking it to the current Server.ExternalWebUrl as its issuer: It
 // retires any "admin" row whose sub is not "admin", then moves the remaining one
-// to the current URL or creates it.
+// to the current URL or creates it. It also unlinks every secondary identity
+// from that row, since the built-in admin logs in by password only.
 func ensureBuiltinAdmin(db *gorm.DB) error {
 	externalURL := param.Server_ExternalWebUrl.GetString()
 	if externalURL == "" {
@@ -2373,19 +2374,33 @@ func ensureBuiltinAdmin(db *gorm.DB) error {
 		}
 		var admin User
 		err := tx.Where("username = ? AND sub = ?", builtinAdminUsername, builtinAdminUsername).First(&admin).Error
-		if errors.Is(err, gorm.ErrRecordNotFound) {
+		switch {
+		case errors.Is(err, gorm.ErrRecordNotFound):
 			slug, slugErr := generateSlug()
 			if slugErr != nil {
 				return slugErr
 			}
-			return tx.Create(&User{ID: slug, Username: builtinAdminUsername, Sub: builtinAdminUsername,
-				Issuer: externalURL, CreatedBy: CreatorSelfEnrolled}).Error
-		}
-		if err != nil || admin.Issuer == externalURL {
+			admin = User{ID: slug, Username: builtinAdminUsername, Sub: builtinAdminUsername,
+				Issuer: externalURL, CreatedBy: CreatorSelfEnrolled}
+			if err := tx.Create(&admin).Error; err != nil {
+				return err
+			}
+		case err != nil:
 			return err
+		case admin.Issuer != externalURL:
+			log.Warnf("Moving the built-in admin %s from issuer %q to %q", admin.ID, admin.Issuer, externalURL)
+			if err := tx.Model(&User{}).Where("id = ?", admin.ID).Update("issuer", externalURL).Error; err != nil {
+				return err
+			}
 		}
-		log.Warnf("Moving the built-in admin %s from issuer %q to %q", admin.ID, admin.Issuer, externalURL)
-		return tx.Model(&User{}).Where("id = ?", admin.ID).Update("issuer", externalURL).Error
+		unlinked := tx.Where("user_id = ?", admin.ID).Delete(&UserIdentity{})
+		if unlinked.Error != nil {
+			return unlinked.Error
+		}
+		if unlinked.RowsAffected > 0 {
+			log.Warnf("Unlinked %d identity(ies) from the built-in admin %s: it logs in by password only", unlinked.RowsAffected, admin.ID)
+		}
+		return nil
 	})
 }
 
