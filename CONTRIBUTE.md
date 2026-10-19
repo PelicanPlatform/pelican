@@ -186,7 +186,7 @@ The repository now includes a `.devcontainer` configuration, so you don't need t
 
   VS Code will automatically detect the `.devcontainer/devcontainer.json` configuration and use it.
 
-- Wait for Dev Container to start: There will be a loading notification at the bottom-right corner while the Dev Container is starting. The first time may take several minutes as it pulls the development container image (`hub.opensciencegrid.org/pelican_platform/pelican-dev:latest-itb`).
+- Wait for Dev Container to start: There will be a loading notification at the bottom-right corner while the Dev Container is starting. The first time may take several minutes as it pulls the development container image (`hub.osg-htc.org/pelican_platform/pelican-dev:latest-itb`).
 
   ![dev-container-loading](./docs/images/dev-container-loading.png)
 

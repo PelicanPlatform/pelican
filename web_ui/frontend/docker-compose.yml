@@ -8,7 +8,7 @@ services:
     command: build --clean --snapshot --config .goreleaser.generated.yml
 
   pelican-server-central:
-    image: hub.opensciencegrid.org/pelican_platform/pelican-dev:latest-itb
+    image: hub.osg-htc.org/pelican_platform/pelican-dev:latest-itb
     ports:
       - '8440:8440'
     working_dir: /app
@@ -22,7 +22,7 @@ services:
   pelican-server-origin:
     depends_on:
       - pelican-server-central
-    image: hub.opensciencegrid.org/pelican_platform/pelican-dev:latest-itb
+    image: hub.osg-htc.org/pelican_platform/pelican-dev:latest-itb
     ports:
       - '8444:8444'
       - '8445:8445'
