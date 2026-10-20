@@ -82,7 +82,7 @@ ARG LOTMAN_RELEASE=
 # Until the two places are programmatically synchronized, please double-check by hand
 # when doing version changes.
 ARG XRDCL_PELICAN_SRC_BUILD=false
-ARG XRDCL_PELICAN_VER=1.8.2
+ARG XRDCL_PELICAN_VER=1.8.4
 ARG XRDCL_PELICAN_RELEASE=
 # ARG XRDCL_PELICAN_RELEASE="1.osg${OSG_SERIES}.${BASE_OS}"
 ARG XROOTD_LOTMAN_SRC_BUILD=false
@@ -94,7 +94,7 @@ ARG XROOTD_S3_HTTP_VER=0.6.9
 ARG XROOTD_S3_HTTP_RELEASE=
 # ARG XROOTD_S3_HTTP_RELEASE=".osg${OSG_SERIES}.${BASE_OS}"
 ARG XRDHTTP_PELICAN_SRC_BUILD=false
-ARG XRDHTTP_PELICAN_VER=0.0.11
+ARG XRDHTTP_PELICAN_VER=0.0.13
 ARG XRDHTTP_PELICAN_RELEASE=
 # ARG XRDHTTP_PELICAN_RELEASE="1.osg${OSG_SERIES}.${BASE_OS}"
 ARG XROOTD_MULTIUSER_SRC_BUILD=false
@@ -324,8 +324,8 @@ ARG XROOTD_GID
 # We install from the selected OSG repo and pin the version.
 # NOTE: If you update this version, you must also update the version in
 # github_scripts/osx_install.sh.
-ARG XROOTD_VER="5.9.7"
-ARG XROOTD_RELEASE="1.2.osg${OSG_SERIES}.${BASE_OS}"
+ARG XROOTD_VER="5.9.8"
+ARG XROOTD_RELEASE="1.3.osg${OSG_SERIES}.${BASE_OS}"
 
 # The packages need to be installed in a single dnf command in
 # order to avoid unresolvable dependencies.
