@@ -160,6 +160,7 @@ var runtimeConfigurableMap = map[string]bool{
 	"Cache.XRootDPrefix": false,
 	"Client.AssumeDirectorServerHeader": false,
 	"Client.CredentialFile": false,
+	"Client.DefaultChecksumAlgo": false,
 	"Client.DirectorRetries": false,
 	"Client.DisableHttpProxy": false,
 	"Client.DisableProxyFallback": false,
@@ -686,6 +687,7 @@ var stringAccessors = map[string]func(*Config) string{
 	"ClientAgent.PidFile": func(c *Config) string { return c.ClientAgent.PidFile },
 	"ClientAgent.Socket": func(c *Config) string { return c.ClientAgent.Socket },
 	"Client.CredentialFile": func(c *Config) string { return c.Client.CredentialFile },
+	"Client.DefaultChecksumAlgo": func(c *Config) string { return c.Client.DefaultChecksumAlgo },
 	"ConfigBase": func(c *Config) string { return c.ConfigBase },
 	"Director.AdvertiseUrl": func(c *Config) string { return c.Director.AdvertiseUrl },
 	"Director.CacheSortMethod": func(c *Config) string { return c.Director.CacheSortMethod },
@@ -1495,6 +1497,7 @@ var allParameterNames = []string{
 	"Cache.XRootDPrefix",
 	"Client.AssumeDirectorServerHeader",
 	"Client.CredentialFile",
+	"Client.DefaultChecksumAlgo",
 	"Client.DirectorRetries",
 	"Client.DisableHttpProxy",
 	"Client.DisableProxyFallback",
@@ -1994,6 +1997,7 @@ var (
 	ClientAgent_PidFile = StringParam{"ClientAgent.PidFile"}
 	ClientAgent_Socket = StringParam{"ClientAgent.Socket"}
 	Client_CredentialFile = StringParam{"Client.CredentialFile"}
+	Client_DefaultChecksumAlgo = StringParam{"Client.DefaultChecksumAlgo"}
 	ConfigBase = StringParam{"ConfigBase"}
 	Director_AdvertiseUrl = StringParam{"Director.AdvertiseUrl"}
 	Director_CacheSortMethod = StringParam{"Director.CacheSortMethod"}
@@ -2561,6 +2565,7 @@ func init() {
 		"ClientAgent.PidFile": ClientAgent_PidFile,
 		"ClientAgent.Socket": ClientAgent_Socket,
 		"Client.CredentialFile": Client_CredentialFile,
+		"Client.DefaultChecksumAlgo": Client_DefaultChecksumAlgo,
 		"ConfigBase": ConfigBase,
 		"Director.AdvertiseUrl": Director_AdvertiseUrl,
 		"Director.CacheSortMethod": Director_CacheSortMethod,

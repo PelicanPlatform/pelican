@@ -14,7 +14,7 @@ pelican object put {source ...} {destination} [flags]
 
 ```
       --async                          Run the transfer asynchronously through the client API server and return a job ID
-      --checksum-algorithm string      Checksum algorithm to use for upload and validation
+      --checksum-algorithm string      Checksum algorithm to use for upload and validation. Available algorithms are: md5, crc32c, crc32, sha
       --checksums string               Verify files against a checksums manifest. The format is ALGORITHM:FILENAME
       --dest-token string              Token file for the destination (overrides --token for writes)
       --dry-run                        Show what would be uploaded without actually uploading
