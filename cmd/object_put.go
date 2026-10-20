@@ -41,6 +41,8 @@ import (
 	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
 	"github.com/spf13/cobra"
+	"github.com/spf13/pflag"
+	"github.com/spf13/viper"
 
 	"github.com/pelicanplatform/pelican/client"
 	"github.com/pelicanplatform/pelican/client_agent"
@@ -56,6 +58,15 @@ var (
 		Run:   putMain,
 	}
 )
+
+func bindPflags(flagSet *pflag.FlagSet) {
+	// Since `--checksum-algorithm` has a client-side config parameter in `pelican.yaml`,
+	// we will need to bind that config param to this pflag
+	err := viper.BindPFlag(param.Client_ObjectPutChecksumAlgo.GetName(), flagSet.Lookup("checksum-algorithm"))
+	if err != nil {
+		panic(err)
+	}
+}
 
 func init() {
 	flagSet := putCmd.Flags()
@@ -74,6 +85,7 @@ func init() {
 	flagSet.String("metadata-body", "", "Path to a file holding an opaque metadata blob (e.g. an XML manifest). When supplied, the upload PUT is sent as multipart/form-data and the blob is forwarded to the origin's metadata-publish endpoint byte-for-byte. May be used alongside --metadata-file.")
 	flagSet.String("metadata-content-type", "", "Override the Content-Type of the metadata blob supplied via --metadata-body. Defaults to a value sniffed from the file extension (.xml ⇒ application/xml, .json ⇒ application/json, .yaml/.yml ⇒ application/yaml, .txt ⇒ text/plain, .csv ⇒ text/csv, otherwise application/octet-stream).")
 	objectCmd.AddCommand(putCmd)
+	bindPflags(flagSet)
 }
 
 type manifestEntry struct {
@@ -163,6 +175,27 @@ func inferRemoteObjectName(destURL *url.URL, localSource string) (string, error)
 	// string, so the stale RawPath has to go or String() would emit it.
 	inferred.RawPath = ""
 	return inferred.String(), nil
+}
+
+// getChecksumOptions add checksum options if requested
+func getChecksumOptions(requireChecksum bool) ([]client.TransferOption, error) {
+	options := make([]client.TransferOption, 0, 10)
+	checksumAlgorithm := param.Client_ObjectPutChecksumAlgo.GetString()
+	if requireChecksum || checksumAlgorithm != "" {
+		options = append(options, client.WithRequireChecksum())
+	}
+	if checksumAlgorithm != "" {
+		checksumType := client.ChecksumFromHttpDigest(checksumAlgorithm)
+		if checksumType == client.AlgUnknown {
+			var validAlgorithms []string
+			for _, alg := range client.KnownChecksumTypes() {
+				validAlgorithms = append(validAlgorithms, client.HttpDigestFromChecksum(alg))
+			}
+			return nil, errors.Errorf("Unknown checksum algorithm: %q. Valid algorithms are: %s", checksumAlgorithm, strings.Join(validAlgorithms, ", "))
+		}
+		options = append(options, client.WithRequestChecksums([]client.ChecksumType{checksumType}))
+	}
+	return options, nil
 }
 
 func putMain(cmd *cobra.Command, args []string) {
@@ -312,25 +345,14 @@ func putMain(cmd *cobra.Command, args []string) {
 	// Set the progress bars to the command line option
 	tokenOpts := resolveTokenOptions(cmd)
 
-	// Add checksum options if requested
-	checksumAlgorithm, _ := cmd.Flags().GetString("checksum-algorithm")
+	// Get checksum algorithm if required
 	requireChecksum, _ := cmd.Flags().GetBool("require-checksum")
-	if requireChecksum || checksumAlgorithm != "" {
-		options = append(options, client.WithRequireChecksum())
+	checksumOptions, err := getChecksumOptions(requireChecksum)
+	if err != nil {
+		log.Errorln(err)
+		os.Exit(1)
 	}
-	if checksumAlgorithm != "" {
-		checksumType := client.ChecksumFromHttpDigest(checksumAlgorithm)
-		if checksumType == client.AlgUnknown {
-			log.Errorln("Unknown checksum algorithm:", checksumAlgorithm)
-			var validAlgorithms []string
-			for _, alg := range client.KnownChecksumTypes() {
-				validAlgorithms = append(validAlgorithms, client.HttpDigestFromChecksum(alg))
-			}
-			log.Errorln("Valid algorithms are:", strings.Join(validAlgorithms, ", "))
-			os.Exit(1)
-		}
-		options = append(options, client.WithRequestChecksums([]client.ChecksumType{checksumType}))
-	}
+	options = append(options, checksumOptions...)
 
 	pb := newProgressBar()
 	defer pb.shutdown()

@@ -29,6 +29,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/spf13/cobra"
+	"github.com/spf13/pflag"
+	"github.com/spf13/viper"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -388,6 +391,93 @@ func TestInferRemoteObjectName(t *testing.T) {
 			_, err := inferRemoteObjectName(destURL, localSource)
 			require.Error(t, err, "a source with no object name to infer must be refused")
 			assert.Contains(t, err.Error(), "cannot infer a remote object name")
+		})
+	}
+}
+
+// TestGetChecksumOptions is a table-driven unit test for the function
+// setChecksumOptions()
+func TestGetChecksumOptions(t *testing.T) {
+	// Clean up to ensure no global states leak in/out
+	server_utils.ResetTestState()
+	t.Cleanup(server_utils.ResetTestState)
+
+	// The table
+	testcases := []struct {
+		name          string                  // Name of the subtest
+		algoName      string                  // Name of the algo provided in the config yaml file
+		reqChksum     bool                    // Is `--require-checksum` provided or not
+		expectOptions []client.TransferOption // Expected result
+		expectErr     bool                    // Expected error
+	}{
+		{"no algo provided", "", false, []client.TransferOption{}, false},
+		{"crc32 in yaml", "crc32", false, []client.TransferOption{client.WithRequireChecksum(), client.WithRequestChecksums([]client.ChecksumType{client.AlgCRC32})}, false},
+		{"bogus in yaml", "bogus", false, nil, true},
+		{"--require-checksum only", "", true, []client.TransferOption{client.WithRequireChecksum()}, false},
+	}
+
+	// Run tests in loop
+	for _, testcase := range testcases {
+		t.Run(testcase.name, func(t *testing.T) {
+			require.NoError(t, param.Client_ObjectPutChecksumAlgo.Set(testcase.algoName))
+			options, err := getChecksumOptions(testcase.reqChksum)
+			if testcase.expectErr {
+				require.ErrorContains(t, err, "Valid algorithms are")
+			} else {
+				require.NoError(t, err)
+			}
+			assert.ElementsMatch(t, testcase.expectOptions, options, "TransferOption slice does not match")
+		})
+	}
+}
+
+// TestBindPFlags ensures that `--checksum-algorithm` is correctly bind to `Client.ObjectPutChecksumAlgo` config
+func TestBindPFlags(t *testing.T) {
+	server_utils.ResetTestState() // This reset pflags bind by viper
+	t.Cleanup(server_utils.ResetTestState)
+
+	// We need to re-bind the pflags with a helper function
+	bindPflags(putCmd.Flags())
+	require.NoError(t, viper.BindPFlag("config", rootCmd.PersistentFlags().Lookup("config")))
+
+	// We swap the putMain with a stub to only test the helper, not other stuff in putMain
+	// The goal is to test when config file and CLI flag is ready, helper can read the correct value
+	var gotChecksumAlgo string
+	savedRun := putCmd.Run
+	putCmd.Run = func(cmd *cobra.Command, args []string) {
+		require.NoError(t, config.InitClient()) // config is read here
+		gotChecksumAlgo = param.Client_ObjectPutChecksumAlgo.GetString()
+	}
+	t.Cleanup(func() { putCmd.Run = savedRun })
+
+	// Setup temp pelican.yaml
+	cfgPath := filepath.Join(t.TempDir(), "p.yaml")
+	require.NoError(t, os.WriteFile(cfgPath, []byte("Client:\n  ObjectPutChecksumAlgo: sha\n"), 0644))
+
+	// Table of tests
+	testcases := []struct {
+		name  string
+		flags []string
+		want  string
+	}{
+		{"yaml only", []string{"--config", cfgPath}, "sha"},
+		{"flag only", []string{"--checksum-algorithm", "crc32"}, "crc32"},
+		{"flag overwrites yaml", []string{"--config", cfgPath, "--checksum-algorithm", "crc32"}, "crc32"},
+	}
+
+	for _, testcase := range testcases {
+		t.Run(testcase.name, func(t *testing.T) {
+			t.Cleanup(func() {
+				rootCmd.SetArgs(nil)
+				putCmd.SetContext(nil)
+				for _, fl := range []*pflag.Flag{putCmd.Flags().Lookup("checksum-algorithm"), rootCmd.PersistentFlags().Lookup("config")} {
+					require.NoError(t, fl.Value.Set(fl.DefValue))
+					fl.Changed = false
+				}
+			})
+			rootCmd.SetArgs(append(append([]string{"object", "put"}, testcase.flags...), "dummy_src", "pelican://foo/bar"))
+			require.NoError(t, rootCmd.Execute())
+			assert.Equal(t, testcase.want, gotChecksumAlgo)
 		})
 	}
 }

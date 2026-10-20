@@ -101,6 +101,7 @@ type Config struct {
 		IsPlugin bool `mapstructure:"isplugin" yaml:"IsPlugin"`
 		MaximumDownloadSpeed int `mapstructure:"maximumdownloadspeed" yaml:"MaximumDownloadSpeed"`
 		MinimumDownloadSpeed int `mapstructure:"minimumdownloadspeed" yaml:"MinimumDownloadSpeed"`
+		ObjectPutChecksumAlgo string `mapstructure:"objectputchecksumalgo" yaml:"ObjectPutChecksumAlgo"`
 		PreferredCaches []string `mapstructure:"preferredcaches" yaml:"PreferredCaches"`
 		SlowTransferRampupTime time.Duration `mapstructure:"slowtransferrampuptime" yaml:"SlowTransferRampupTime"`
 		SlowTransferWindow time.Duration `mapstructure:"slowtransferwindow" yaml:"SlowTransferWindow"`
@@ -704,6 +705,7 @@ type configWithType struct {
 		IsPlugin struct { Type string; Value bool }
 		MaximumDownloadSpeed struct { Type string; Value int }
 		MinimumDownloadSpeed struct { Type string; Value int }
+		ObjectPutChecksumAlgo struct { Type string; Value string }
 		PreferredCaches struct { Type string; Value []string }
 		SlowTransferRampupTime struct { Type string; Value time.Duration }
 		SlowTransferWindow struct { Type string; Value time.Duration }

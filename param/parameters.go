@@ -168,6 +168,7 @@ var runtimeConfigurableMap = map[string]bool{
 	"Client.IsPlugin": false,
 	"Client.MaximumDownloadSpeed": false,
 	"Client.MinimumDownloadSpeed": false,
+	"Client.ObjectPutChecksumAlgo": false,
 	"Client.PreferredCaches": false,
 	"Client.SlowTransferRampupTime": false,
 	"Client.SlowTransferWindow": false,
@@ -686,6 +687,7 @@ var stringAccessors = map[string]func(*Config) string{
 	"ClientAgent.PidFile": func(c *Config) string { return c.ClientAgent.PidFile },
 	"ClientAgent.Socket": func(c *Config) string { return c.ClientAgent.Socket },
 	"Client.CredentialFile": func(c *Config) string { return c.Client.CredentialFile },
+	"Client.ObjectPutChecksumAlgo": func(c *Config) string { return c.Client.ObjectPutChecksumAlgo },
 	"ConfigBase": func(c *Config) string { return c.ConfigBase },
 	"Director.AdvertiseUrl": func(c *Config) string { return c.Director.AdvertiseUrl },
 	"Director.CacheSortMethod": func(c *Config) string { return c.Director.CacheSortMethod },
@@ -1503,6 +1505,7 @@ var allParameterNames = []string{
 	"Client.IsPlugin",
 	"Client.MaximumDownloadSpeed",
 	"Client.MinimumDownloadSpeed",
+	"Client.ObjectPutChecksumAlgo",
 	"Client.PreferredCaches",
 	"Client.SlowTransferRampupTime",
 	"Client.SlowTransferWindow",
@@ -1994,6 +1997,7 @@ var (
 	ClientAgent_PidFile = StringParam{"ClientAgent.PidFile"}
 	ClientAgent_Socket = StringParam{"ClientAgent.Socket"}
 	Client_CredentialFile = StringParam{"Client.CredentialFile"}
+	Client_ObjectPutChecksumAlgo = StringParam{"Client.ObjectPutChecksumAlgo"}
 	ConfigBase = StringParam{"ConfigBase"}
 	Director_AdvertiseUrl = StringParam{"Director.AdvertiseUrl"}
 	Director_CacheSortMethod = StringParam{"Director.CacheSortMethod"}
@@ -2561,6 +2565,7 @@ func init() {
 		"ClientAgent.PidFile": ClientAgent_PidFile,
 		"ClientAgent.Socket": ClientAgent_Socket,
 		"Client.CredentialFile": Client_CredentialFile,
+		"Client.ObjectPutChecksumAlgo": Client_ObjectPutChecksumAlgo,
 		"ConfigBase": ConfigBase,
 		"Director.AdvertiseUrl": Director_AdvertiseUrl,
 		"Director.CacheSortMethod": Director_CacheSortMethod,
