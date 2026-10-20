@@ -23,6 +23,9 @@ set -ex
 
 brew install coreutils
 
+# xrootd 6 bindings use setuptools
+brew install python-setuptools
+
 # Build every dependency below against OpenSSL 3. Newer macOS runner images
 # ship Homebrew's OpenSSL 4, where X509_NAME_get_entry() and
 # X509_NAME_ENTRY_get_data() return const pointers, and the XRootD we build
