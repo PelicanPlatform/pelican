@@ -62,11 +62,22 @@ jobs:
           check-latest: true
           cache: false
 
-      - name: Pin the Go build cache
+      - name: Pin the Go build cache and temp directory
         # Point every later Go build, including those run by tests, at the
         # same cache. Tests that start an origin or cache set
         # XDG_CACHE_HOME, which on Linux would otherwise move Go's default.
-        run: echo "GOCACHE=$(go env GOCACHE)" >> "$GITHUB_ENV"
+        #
+        # Both the cache and the temp directory (so every t.TempDir) go under
+        # RUNNER_TEMP on the D: drive. Left on the C: OS disk, compiling and
+        # testing at once can stall the whole runner until GitHub reports
+        # that it "lost communication" with it, with no log.
+        run: |
+          mkdir -p "$RUNNER_TEMP/go-build" "$RUNNER_TEMP/tmp"
+          {
+            echo "GOCACHE=$(cygpath -w "$RUNNER_TEMP/go-build")"
+            echo "TMP=$(cygpath -w "$RUNNER_TEMP/tmp")"
+            echo "TEMP=$(cygpath -w "$RUNNER_TEMP/tmp")"
+          } >> "$GITHUB_ENV"
 
       - name: Install gotestsum
         run: |
