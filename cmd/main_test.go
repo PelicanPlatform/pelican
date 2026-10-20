@@ -25,11 +25,11 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"runtime"
 	"strings"
 	"sync"
 	"testing"
-	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -152,94 +152,71 @@ func TestHandleCLIVersionFlag(t *testing.T) {
 	}
 }
 
+// copyExecutable copies the executable at src to dst, which must not exist.
+func copyExecutable(t *testing.T, src, dst string) {
+	t.Helper()
+	in, err := os.Open(src)
+	require.NoError(t, err)
+	defer in.Close()
+	out, err := os.OpenFile(dst, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0755)
+	require.NoError(t, err)
+	_, copyErr := io.Copy(out, in)
+	closeErr := out.Close()
+	require.NoError(t, copyErr)
+	require.NoError(t, closeErr)
+}
+
 func TestHandleCLIExecutableAlias(t *testing.T) {
-	aliasTestMutex := sync.Mutex{} // Lock to ensure each t.Run goroutine have consistent access to binary
-
 	// Isolate the test from system config
-	configDir := t.TempDir()
-	os.Setenv("PELICAN_CONFIGDIR", configDir)
-	defer os.Unsetenv("PELICAN_CONFIGDIR")
+	t.Setenv("PELICAN_CONFIGDIR", t.TempDir())
 
-	// If we're in the process started by exec.Command, run the handleCLI function.
-	if os.Getenv("BE_CRASHER") == "1" {
-		err := handleCLI(os.Args[1:])
-		if err != nil {
-			t.Fatalf("Function returns error")
-		}
-		return
-	}
-
-	oldArgs := os.Args
-	os.Args = []string{}
-	defer func() {
-		os.Args = oldArgs
-	}()
 	testCases := []struct {
 		name     string
-		args     []string
+		execName string
 		expected string
 	}{
 		{
 			"no-alias",
-			[]string{"pelican"},
+			"pelican",
 			rootCmd.Long,
 		},
 		{
 			"stashcp",
-			[]string{"stashcp"},
+			"stashcp",
 			"No Source or Destination", // slightly different error message, good for testing though
 		},
 		{
 			"stash_plugin",
-			[]string{"stash_plugin"},
+			"stash_plugin",
 			"No source or destination specified",
 		},
 		{
 			"osdf_plugin",
-			[]string{"stash_plugin"},
+			"osdf_plugin",
 			"No source or destination specified",
 		},
 		{
 			"pelican_xfer_plugin",
-			[]string{"stash_plugin"},
+			"pelican_xfer_plugin",
+			"No source or destination specified",
+		},
+		{
+			"pelican_plugin",
+			"pelican_plugin",
 			"No source or destination specified",
 		},
 	}
 
-	cleanupBinary := func(name string) {
-		err := os.Remove(name) // Clean up the test binary when done.
-		assert.NoError(t, err, "No binary to remove for "+name)
-		waitDuration := time.Tick(100 * time.Millisecond)
-		times := 3
-		for times > 0 {
-			<-waitDuration
-			_, err := os.Stat(name)
-			if err != nil { // Ensure that the binary was successfully removed
-				return
-			} else {
-				times--
-			}
-		}
-		t.Error("Failed to remove binary after 300ms for ", name)
-	}
+	batchTest := func(t *testing.T, execName string, expected string) {
+		// Alias dispatch looks only at the base name of the executable,
+		// so run the copy from a directory of its own.
+		// On Windows, removing the copy can fail for a short while,
+		// likely because an antivirus scanner has it open.
+		// TempDir's cleanup retries the removal for ~2 seconds.
+		binary := filepath.Join(t.TempDir(), execName)
+		copyExecutable(t, test_utils.GetPelicanBinary(t), binary)
 
-	batchTest := func(t *testing.T, arguments []string, expected string) {
-		aliasTestMutex.Lock()
-		defer aliasTestMutex.Unlock()
-
-		// Get the pelican binary
-		pelicanBinary := test_utils.GetPelicanBinary(t)
-
-		if _, err := os.Stat(arguments[0]); err != nil { // Binary not found, copy it
-			if err := exec.Command("cp", pelicanBinary, arguments[0]).Run(); err != nil {
-				t.Fatal(err, "Error copying the binary to "+arguments[0])
-			}
-			defer cleanupBinary(arguments[0])
-		}
-
-		// Run the test binary with the BE_CRASHER environment variable set.
-		cmd := exec.Command("./"+arguments[0], arguments[1:]...)
-		cmd.Env = append(os.Environ(), "BE_CRASHER=1")
+		cmd := exec.Command(binary)
 
 		// Set up pipes to capture stdout and stderr.
 		stdout, _ := cmd.StdoutPipe()
@@ -283,7 +260,7 @@ func TestHandleCLIExecutableAlias(t *testing.T) {
 		}
 		// Apparently both stashcp and *_plug will trigger Exit(1) with error if
 		// the arguments are not enough/solid
-		if strings.ToLower(strings.TrimSuffix(arguments[0], ".exe")) != "pelican" {
+		if strings.ToLower(strings.TrimSuffix(execName, ".exe")) != "pelican" {
 			assert.Contains(t, errString, expected, "Output does not match expectation")
 		} else {
 			assert.NoError(t, err, "Should not have error running the function: "+errString)
@@ -291,30 +268,18 @@ func TestHandleCLIExecutableAlias(t *testing.T) {
 		}
 	}
 	for _, tc := range testCases {
-		if os := runtime.GOOS; os == "windows" {
+		t.Run(tc.name+"-windows", func(t *testing.T) {
+			batchTest(t, tc.execName+".exe", tc.expected)
+		})
+		if runtime.GOOS == "windows" {
 			// On Windows, you can only do *.exe
-			t.Run(tc.name+"-windows", func(t *testing.T) {
-				preserve := tc.args[0]
-				tc.args[0] = preserve + ".exe"
-				batchTest(t, tc.args, tc.expected)
-				tc.args[0] = preserve
-			})
-		} else {
-			t.Run(tc.name, func(t *testing.T) {
-				batchTest(t, tc.args, tc.expected)
-			})
-			t.Run(tc.name+"-windows", func(t *testing.T) {
-				preserve := tc.args[0]
-				tc.args[0] = preserve + ".exe"
-				batchTest(t, tc.args, tc.expected)
-				tc.args[0] = preserve
-			})
-			t.Run(tc.name+"-mixedCase", func(t *testing.T) {
-				preserve := tc.args[0]
-				tc.args[0] = strings.ToUpper(preserve)
-				batchTest(t, tc.args, tc.expected)
-				tc.args[0] = preserve
-			})
+			continue
 		}
+		t.Run(tc.name, func(t *testing.T) {
+			batchTest(t, tc.execName, tc.expected)
+		})
+		t.Run(tc.name+"-mixedCase", func(t *testing.T) {
+			batchTest(t, strings.ToUpper(tc.execName), tc.expected)
+		})
 	}
 }
