@@ -90,6 +90,8 @@ mkdir build
 cd build
 cmake .. -GNinja -DCMAKE_INSTALL_PREFIX="$PWD/release_dir"
 ninja install
+echo "Listing client.plugins.d for xrdcl-pelican"
+find release_dir/etc/xrootd/client.plugins.d -not -type d -ls
 sudo mkdir -p /etc/xrootd/client.plugins.d/
 sudo cp release_dir/etc/xrootd/client.plugins.d/pelican-plugin.conf /etc/xrootd/client.plugins.d/
 popd
@@ -101,6 +103,8 @@ mkdir build
 cd build
 cmake .. -GNinja -DCMAKE_INSTALL_PREFIX="$PWD/release_dir"
 ninja install
+echo "Listing new libs for xrdhttp-pelican"
+find "$PWD/release_dir/lib" -not -type d -ls
 xrootd_libdir=$(grealpath "$(dirname "$(grealpath "$(which xrootd)")")"/../lib/)
 echo "Will install xrdhttp-pelican into: $xrootd_libdir"
 sudo mkdir -p "$xrootd_libdir"
@@ -127,6 +131,8 @@ mkdir build
 cd build
 cmake .. -GNinja -DCMAKE_INSTALL_PREFIX="$PWD/release_dir"
 ninja install
+echo "Listing new libs for xrootd-s3-http"
+find "$PWD/release_dir/lib" -not -type d -ls
 xrootd_libdir=$(grealpath "$(dirname "$(grealpath "$(which xrootd)")")"/../lib/)
 echo "Will install into: $xrootd_libdir"
 sudo mkdir -p "$xrootd_libdir"
