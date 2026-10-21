@@ -79,6 +79,12 @@ func InitServerDatabase(serverType server_structs.ServerType) error {
 		return err
 	}
 
+	// Resolve duplicate usernames before the migration that makes them globally unique.
+	// TODO: this function can be removed once the DB migration (v7.27) is completed.
+	if err := prepareForGlobalUniqueUsernames(sqlDB, ServerDatabase); err != nil {
+		return err
+	}
+
 	// Always run universal migrations first
 	if err := utils.MigrateDB(sqlDB, EmbedUniversalMigrations, "universal_migrations"); err != nil {
 		return err
@@ -87,6 +93,10 @@ func InitServerDatabase(serverType server_structs.ServerType) error {
 	// Apply server-type-specific migrations
 	if err := runServerTypeMigrations(sqlDB, serverType); err != nil {
 		return errors.Wrapf(err, "failed to run migrations for server type %s", serverType.String())
+	}
+
+	if err := ensureBuiltinAdmin(ServerDatabase); err != nil {
+		return errors.Wrap(err, "failed to ensure the built-in admin user")
 	}
 
 	// Post-migration bootstrap: ensure the built-in admin user record

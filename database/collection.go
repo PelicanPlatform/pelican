@@ -2348,6 +2348,62 @@ func UpdateUser(db *gorm.DB, id string, username, sub, issuer *string) error {
 	return nil
 }
 
+const builtinAdminUsername = "admin"
+
+// ensureBuiltinAdmin makes the built-in admin the only live user using "admin" as
+// its username, linking it to the current Server.ExternalWebUrl as its issuer: It
+// retires any "admin" row whose sub is not "admin", then moves the remaining one
+// to the current URL or creates it. It also unlinks every secondary identity
+// from that row, since the built-in admin logs in by password only.
+func ensureBuiltinAdmin(db *gorm.DB) error {
+	externalURL := param.Server_ExternalWebUrl.GetString()
+	if externalURL == "" {
+		return nil
+	}
+	return db.Transaction(func(tx *gorm.DB) error {
+		var others []User
+		if err := tx.Where("username = ? AND sub <> ?", builtinAdminUsername, builtinAdminUsername).Find(&others).Error; err != nil {
+			return err
+		}
+		for _, u := range others {
+			log.Warnf("Retiring user %s (sub %q, issuer %q): only the built-in admin may hold the username %q",
+				u.ID, u.Sub, u.Issuer, builtinAdminUsername)
+			if err := DeleteUser(tx, u.ID, "", true); err != nil {
+				return err
+			}
+		}
+		var admin User
+		err := tx.Where("username = ? AND sub = ?", builtinAdminUsername, builtinAdminUsername).First(&admin).Error
+		switch {
+		case errors.Is(err, gorm.ErrRecordNotFound):
+			slug, slugErr := generateSlug()
+			if slugErr != nil {
+				return slugErr
+			}
+			admin = User{ID: slug, Username: builtinAdminUsername, Sub: builtinAdminUsername,
+				Issuer: externalURL, CreatedBy: CreatorSelfEnrolled}
+			if err := tx.Create(&admin).Error; err != nil {
+				return err
+			}
+		case err != nil:
+			return err
+		case admin.Issuer != externalURL:
+			log.Warnf("Moving the built-in admin %s from issuer %q to %q", admin.ID, admin.Issuer, externalURL)
+			if err := tx.Model(&User{}).Where("id = ?", admin.ID).Update("issuer", externalURL).Error; err != nil {
+				return err
+			}
+		}
+		unlinked := tx.Where("user_id = ?", admin.ID).Delete(&UserIdentity{})
+		if unlinked.Error != nil {
+			return unlinked.Error
+		}
+		if unlinked.RowsAffected > 0 {
+			log.Warnf("Unlinked %d identity(ies) from the built-in admin %s: it logs in by password only", unlinked.RowsAffected, admin.ID)
+		}
+		return nil
+	})
+}
+
 // BootstrapAdminAndBackfillOwners ensures the built-in "admin" user
 // record exists and that every group has a real owner_id. Both are
 // runtime concerns (the admin's primary identity is keyed off
@@ -2371,7 +2427,7 @@ func BootstrapAdminAndBackfillOwners(db *gorm.DB) error {
 	//    historically created the row with sub == username == "admin"
 	//    and issuer == externalURL — so we follow the same shape.
 	var admin User
-	err := db.Where("username = ? AND issuer = ?", "admin", externalURL).First(&admin).Error
+	err := db.Where("username = ? AND issuer = ?", builtinAdminUsername, externalURL).First(&admin).Error
 	if errors.Is(err, gorm.ErrRecordNotFound) {
 		slug, slugErr := generateSlug()
 		if slugErr != nil {
@@ -2379,8 +2435,8 @@ func BootstrapAdminAndBackfillOwners(db *gorm.DB) error {
 		}
 		admin = User{
 			ID:        slug,
-			Username:  "admin",
-			Sub:       "admin",
+			Username:  builtinAdminUsername,
+			Sub:       builtinAdminUsername,
 			Issuer:    externalURL,
 			CreatedBy: CreatorSelfEnrolled,
 		}
@@ -2390,7 +2446,7 @@ func BootstrapAdminAndBackfillOwners(db *gorm.DB) error {
 			if !strings.Contains(createErr.Error(), "UNIQUE constraint failed") {
 				return createErr
 			}
-			if reErr := db.Where("username = ? AND issuer = ?", "admin", externalURL).First(&admin).Error; reErr != nil {
+			if reErr := db.Where("username = ? AND issuer = ?", builtinAdminUsername, externalURL).First(&admin).Error; reErr != nil {
 				return reErr
 			}
 		}
@@ -2686,7 +2742,7 @@ func BuiltinAdminUser(db *gorm.DB) (*User, error) {
 		return nil, nil
 	}
 	var admin User
-	err := db.Where("username = ? AND issuer = ?", "admin", externalURL).First(&admin).Error
+	err := db.Where("username = ? AND issuer = ?", builtinAdminUsername, externalURL).First(&admin).Error
 	if errors.Is(err, gorm.ErrRecordNotFound) {
 		return nil, nil
 	}
