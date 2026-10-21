@@ -82,6 +82,22 @@ func MigrateDB(sqldb *sql.DB, migrationFS embed.FS, migrationPath string) error 
 	return MigrateServerSpecificDB(sqldb, migrationFS, migrationPath, "")
 }
 
+// MigrateDBUpTo applies the universal migrations up to `version` and returns
+// the database's goose version afterwards.
+func MigrateDBUpTo(sqldb *sql.DB, migrationFS embed.FS, migrationPath string, version int64) (int64, error) {
+	goose.SetBaseFS(migrationFS)
+
+	if err := goose.SetDialect("sqlite3"); err != nil {
+		return 0, err
+	}
+	goose.SetTableName("goose_db_version")
+
+	if err := goose.UpTo(sqldb, migrationPath, version); err != nil {
+		return 0, err
+	}
+	return goose.GetDBVersion(sqldb)
+}
+
 func MigrateServerSpecificDB(sqldb *sql.DB, migrationFS embed.FS, migrationPath string, tablePrefix string) error {
 	goose.SetBaseFS(migrationFS)
 
