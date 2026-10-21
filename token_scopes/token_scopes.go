@@ -98,6 +98,7 @@ var UserGrantableScopes = []TokenScope{
 	Server_Admin,
 	Server_UserAdmin,
 	Server_CollectionAdmin,
+	Monitoring_Scrape,
 	Monitoring_Query,
 }
 

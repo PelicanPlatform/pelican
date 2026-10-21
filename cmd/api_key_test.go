@@ -442,3 +442,32 @@ func TestApiKeyCommandStructure(t *testing.T) {
 		assert.NotNil(t, expirationFlag)
 	})
 }
+
+func TestParseApiKeyResponse(t *testing.T) {
+	t.Run("token-present", func(t *testing.T) {
+		key, err := parseApiKeyResponse([]byte(`{"token":"abcde.0123"}`))
+		require.NoError(t, err)
+		assert.Equal(t, "abcde.0123", key)
+	})
+
+	t.Run("error-envelope-with-2xx", func(t *testing.T) {
+		// A 2xx body that is an error envelope must come back as an error.
+		key, err := parseApiKeyResponse([]byte(`{"status":"error","msg":"creator does not have authority to grant scope(s): monitoring.query"}`))
+		require.Error(t, err)
+		assert.Empty(t, key)
+		assert.Contains(t, err.Error(), "monitoring.query")
+	})
+
+	t.Run("json-without-token", func(t *testing.T) {
+		key, err := parseApiKeyResponse([]byte(`{"status":"success"}`))
+		require.Error(t, err)
+		assert.Empty(t, key)
+	})
+
+	t.Run("non-json-is-an-error", func(t *testing.T) {
+		key, err := parseApiKeyResponse([]byte("not json"))
+		require.Error(t, err)
+		assert.Empty(t, key)
+		assert.Contains(t, err.Error(), "not valid JSON")
+	})
+}
