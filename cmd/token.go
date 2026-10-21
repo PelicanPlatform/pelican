@@ -568,7 +568,6 @@ func createToken(cmd *cobra.Command, args []string) error {
 		log.Debugf("Auto-detected KID %q from issuer's JWKS for the matched signing key", effectiveKid)
 	}
 
-
 	// Set token lifetime — either via --expiration (RFC3339) or --lifetime (seconds).
 	// expirationStr was already validated above; here we just compute the duration.
 	if expirationStr != "" {
