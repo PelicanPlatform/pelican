@@ -118,7 +118,11 @@ pushd xrootd-s3-http
 # so it wins. Use the plain -Wno- form (not -Wno-error=): clang honors it,
 # while GCC/older compilers that don't know the option ignore it silently
 # rather than erroring on an unknown -Wno-error= target.
-sed -i.bak 's/-Wall -Werror/-Wall -Werror -Wno-deprecated-literal-operator/' CMakeLists.txt
+#
+# -Wno-inconsistent-missing-override avoids an error with the _second_
+# definition of AccHttpCallout::Access, which is deliberately not marked as
+# override because it's not part of the original interface.
+sed -i.bak 's/-Wall -Werror/-Wall -Werror -Wno-deprecated-literal-operator -Wno-inconsistent-missing-override/' CMakeLists.txt
 mkdir build
 cd build
 cmake .. -GNinja -DCMAKE_INSTALL_PREFIX="$PWD/release_dir"
