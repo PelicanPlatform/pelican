@@ -142,3 +142,67 @@ func TestParseResources(t *testing.T) {
 	require.NoError(t, tok.Set("scope", "storage.create:/foo"))
 	assert.Equal(t, []ResourceScope{{Authorization: Wlcg_Storage_Create, Resource: "/foo"}}, ParseResourceScopeString(tok))
 }
+
+// TestSciTokenScope2WlcgScope test if the translation function can
+// always translate SciToken scope to the equivalent WLCG scope.
+// Meanwhile, any other scope should not be touched.
+func TestSciTokenScope2WlcgScope(t *testing.T) {
+	t.Run("SciToken-scope-always-translates-to-WLCG", func(t *testing.T) {
+		rs := ResourceScope{Authorization: Scitokens_Read, Resource: "/foo"}
+		rs.SciTokenScope2WlcgScope()
+		assert.Equal(t, ResourceScope{Authorization: Wlcg_Storage_Read, Resource: "/foo"}, rs, "SciToken read should be translated to WLCG storage.read")
+
+		rs = ResourceScope{Authorization: Scitokens_Write, Resource: "/foo"}
+		rs.SciTokenScope2WlcgScope()
+		assert.Equal(t, ResourceScope{Authorization: Wlcg_Storage_Modify, Resource: "/foo"}, rs, "SciToken write should be translated to WLCG storage.modify")
+	})
+
+	t.Run("Other-scopes-are-always-ignored", func(t *testing.T) {
+		// Every scope in token_scopes.go except Scitokens_Read and Scitokens_Write
+		otherScopes := []TokenScope{
+			Pelican_Advertise,
+			Pelican_DirectorTestReport,
+			Pelican_DirectorServiceDiscovery,
+			Pelican_NamespaceDelete,
+			Pelican_DirectorAdvertise,
+			Pelican_DowntimeCreate,
+			Pelican_DowntimeModify,
+			Pelican_DowntimeDelete,
+			Pelican_Metadata,
+			WebUi_Access,
+			Server_Admin,
+			Server_UserAdmin,
+			Server_CollectionAdmin,
+			Pelican_LoggingModify,
+			Pelican_LogRead,
+			Registry_EditRegistration,
+			Monitoring_Scrape,
+			Monitoring_Query,
+			Broker_Reverse,
+			Broker_Retrieve,
+			Broker_Callback,
+			Localcache_Purge,
+			Collection_Create,
+			Collection_Read,
+			Collection_Modify,
+			Collection_Delete,
+			Share_Access,
+			Pelican_Transfer,
+			Wlcg_Storage_Read,
+			Wlcg_Storage_Create,
+			Wlcg_Storage_Modify,
+			Wlcg_Storage_Stage,
+			Lot_Create,
+			Lot_Read,
+			Lot_Modify,
+			Lot_Delete,
+			Lot_Reclaim,
+		}
+
+		for _, scope := range otherScopes {
+			rs := ResourceScope{Authorization: scope, Resource: "/foo"}
+			rs.SciTokenScope2WlcgScope()
+			assert.Equal(t, ResourceScope{Authorization: scope, Resource: "/foo"}, rs, "scope %q should be left unchanged", scope)
+		}
+	})
+}
