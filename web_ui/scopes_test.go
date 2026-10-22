@@ -21,6 +21,7 @@ package web_ui
 import (
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/glebarez/sqlite"
 	"github.com/sirupsen/logrus"
@@ -29,6 +30,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"gorm.io/gorm"
 
+	"github.com/pelicanplatform/pelican/api_token"
 	"github.com/pelicanplatform/pelican/database"
 	"github.com/pelicanplatform/pelican/param"
 	"github.com/pelicanplatform/pelican/server_utils"
@@ -406,5 +408,81 @@ func TestWarnNonUsernameAdminEntries(t *testing.T) {
 		joined := strings.Join(msgs, "\n")
 		assert.Contains(t, joined, param.Server_UserAdminUsers.GetName())
 		assert.Contains(t, joined, param.Server_CollectionAdminUsers.GetName())
+	})
+}
+
+// The API-key creator check has no cookie to read the creator's groups
+// from, so they must come from the memberships mirrored at login.
+// Otherwise an administrator whose authority is only Server.AdminGroups
+// cannot mint a key with a user-grantable scope, and a key they minted
+// earlier loses those scopes on use.
+func TestApiKeyCreatorSeesMirroredGroups(t *testing.T) {
+	setup := func(t *testing.T, source string) *gorm.DB {
+		db := setupScopesTestDB(t)
+		require.NoError(t, param.Server_AdminGroups.Set([]string{"ops-admins"}))
+		require.NoError(t, param.Server_UserAdminGroups.Set([]string{"useradmins"}))
+		require.NoError(t, param.Issuer_GroupSource.Set(source))
+		require.NoError(t, param.Issuer_AssertedGroupMembershipTTL.Set(168*time.Hour))
+		return db
+	}
+	newUser := func(t *testing.T, db *gorm.DB, id, username string) *database.User {
+		u := &database.User{ID: id, Username: username, Sub: id + "@idp", Issuer: "https://idp.example", Status: database.UserStatusActive}
+		require.NoError(t, db.Create(u).Error)
+		return u
+	}
+	// What a login does with the groups the configured source asserts.
+	login := func(user *database.User, groups ...string) {
+		RecordAssertedGroups(database.ConfiguredGroupSource(), user.ID, user.Username, groups)
+	}
+
+	for _, source := range []string{database.GroupSourceTypeOIDC, database.GroupSourceTypeFile, database.GroupSourceTypeGitHub} {
+		t.Run("AdminGroups administrator via "+source+" mints and uses user-grantable scopes", func(t *testing.T) {
+			db := setup(t, source)
+			dave := newUser(t, db, "u-dave", "dave")
+			login(dave, "ops-admins")
+
+			assert.True(t, contains(api_token.EffectiveScopesForUser(dave.ID), token_scopes.Server_Admin))
+			for _, scope := range []token_scopes.TokenScope{token_scopes.Monitoring_Query, token_scopes.Monitoring_Scrape, token_scopes.Server_Admin} {
+				key, err := api_token.CreateApiKey(db, "key-"+scope.String(), dave.ID, scope.String(), time.Time{})
+				require.NoError(t, err, "creator holds server.admin through Server.AdminGroups")
+				assert.NoError(t, api_token.Verify(key, []token_scopes.TokenScope{scope}, true))
+			}
+		})
+	}
+
+	t.Run("UserAdminGroups member is matched per scope", func(t *testing.T) {
+		db := setup(t, database.GroupSourceTypeOIDC)
+		uma := newUser(t, db, "u-uma", "uma")
+		login(uma, "useradmins")
+
+		got := api_token.EffectiveScopesForUser(uma.ID)
+		assert.True(t, contains(got, token_scopes.Server_UserAdmin))
+		assert.False(t, contains(got, token_scopes.Server_Admin))
+		_, err := api_token.CreateApiKey(db, "key", uma.ID, token_scopes.Monitoring_Query.String(), time.Time{})
+		var notGrantable *api_token.ScopesNotGrantableError
+		assert.ErrorAs(t, err, &notGrantable)
+	})
+
+	t.Run("a retracted membership revokes the key's scopes on use", func(t *testing.T) {
+		db := setup(t, database.GroupSourceTypeOIDC)
+		dave := newUser(t, db, "u-dave", "dave")
+		login(dave, "ops-admins")
+		key, err := api_token.CreateApiKey(db, "key", dave.ID, token_scopes.Monitoring_Query.String(), time.Time{})
+		require.NoError(t, err)
+		require.NoError(t, api_token.Verify(key, []token_scopes.TokenScope{token_scopes.Monitoring_Query}, true))
+
+		login(dave) // the source no longer asserts ops-admins
+		assert.Error(t, api_token.Verify(key, []token_scopes.TokenScope{token_scopes.Monitoring_Query}, true))
+	})
+
+	t.Run("a membership older than the TTL no longer counts", func(t *testing.T) {
+		db := setup(t, database.GroupSourceTypeOIDC)
+		dave := newUser(t, db, "u-dave", "dave")
+		login(dave, "ops-admins")
+		require.True(t, contains(api_token.EffectiveScopesForUser(dave.ID), token_scopes.Server_Admin))
+
+		stale := time.Now().Add(-169 * time.Hour)
+		require.NoError(t, db.Exec("UPDATE group_members SET asserted_at = ? WHERE user_id = ?", stale, dave.ID).Error)
+		assert.False(t, contains(api_token.EffectiveScopesForUser(dave.ID), token_scopes.Server_Admin))
 	})
 }
