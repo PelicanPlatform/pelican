@@ -36,7 +36,8 @@
 # ARG TARGETARCH
 
 # For selecting OSG-maintained packages.
-ARG ALMALINUX_TAG=9
+# BASE_OS must match the major version of the AlmaLinux base image
+# in the FROM lines below (e.g., "el9" for almalinux:9.x).
 ARG BASE_OS=el9
 ARG OSG_SERIES=25
 ARG OSG_REPO=osg-testing
@@ -103,16 +104,33 @@ ARG XROOTD_MULTIUSER_RELEASE=
 # ARG XROOTD_MULTIUSER_RELEASE="1.1.osg${OSG_SERIES}.${BASE_OS}"
 
 #################################################################
+# GoReleaser
+#
+# These stages exist only to supply the GoReleaser binary to later
+# stages. There are two because pelican-build-base runs on the
+# build platform, while pelican-dev targets the target platform.
+#
+# Keep the two FROM lines on the same version.
+# The GitHub Actions workflows read the version from these lines
+# (see .github/scripts/goreleaser-version.sh).
+#################################################################
+FROM --platform=${BUILDPLATFORM} goreleaser/goreleaser:v2.18.3@sha256:b61a4eedf5e3b1d283792dade34ee0f8c6cce3e6f1f65851d3b397b8f8a75b6d AS goreleaser-build
+FROM goreleaser/goreleaser:v2.18.3@sha256:b61a4eedf5e3b1d283792dade34ee0f8c6cce3e6f1f65851d3b397b8f8a75b6d AS goreleaser-target
+
+#################################################################
 # Pelican Build Base
 #
 # This stage sets up the infrastructure for building the Pelican
 # binaries. The actual build happens in a later stage because it
 # depends on the target we're building for.
 #################################################################
-FROM --platform=${BUILDPLATFORM} almalinux:${ALMALINUX_TAG} AS pelican-build-base
+FROM --platform=${BUILDPLATFORM} almalinux:9.8@sha256:9819dc675b67b595c2b59e42be7763fca1a8bb217fa5944e04daa22e9a64db16 AS pelican-build-base
 ARG BUILDPLATFORM
 ARG BUILDOS
 ARG BUILDARCH
+
+# Install GoReleaser.
+COPY --from=goreleaser-build /usr/bin/goreleaser /usr/local/bin/goreleaser
 
 WORKDIR /pelican-build
 
@@ -131,17 +149,7 @@ RUN --mount=type=bind,source=go.mod,target=/context/go.mod \
   set -eux
   set -o pipefail
 
-  # Install GoReleaser and other tools.
-
-  cat >/etc/yum.repos.d/goreleaser.repo <<-EOF
-		[goreleaser]
-		name=GoReleaser
-		baseurl=https://repo.goreleaser.com/yum/
-		enabled=1
-		gpgcheck=0
-		exclude=goreleaser-pro
-	EOF
-  dnf install -y goreleaser jq make
+  dnf install -y git jq make
 
   # Install Go.
   # Use go.mod and the go.dev API to determine the most recent version.
@@ -242,7 +250,7 @@ ENDRUN
 # This stage should contain setup common to all images that we wish
 # to build (director, registry, origin, cache, etc.).
 #################################################################
-FROM almalinux:${ALMALINUX_TAG} AS pelican-software-base
+FROM almalinux:9.8@sha256:9819dc675b67b595c2b59e42be7763fca1a8bb217fa5944e04daa22e9a64db16 AS pelican-software-base
 ARG TARGETPLATFORM
 ARG BASE_OS
 ARG OSG_SERIES
@@ -277,6 +285,10 @@ RUN --mount=type=bind,source=images/pelican.yaml,target=/context/pelican.yaml \
   # is triggered uses relatively up-to-date metadata.
 
   printf '%s\n' "metadata_expire=1800" >> /etc/dnf/dnf.conf
+
+  # Apply security updates released since the pinned base image was built.
+
+  dnf upgrade -y --security
 
   # Install OSG's yum repositories (https://osg-htc.org/docs/common/yum/).
 
@@ -580,7 +592,7 @@ ENDRUN
 #################################################################
 # Pelican Client
 #################################################################
-FROM gcr.io/distroless/static-debian13:nonroot AS client
+FROM gcr.io/distroless/static-debian13:nonroot@sha256:e2e927ec666bae08560abb3c55d0659eceabb657f56b6782ab500a9fc7f555e3 AS client
 ARG TARGETOS TARGETARCH
 COPY --from=pelican-build /pelican-build/dist/pelican_${TARGETOS}_${TARGETARCH}/pelican /bin/pelican
 ENTRYPOINT ["/bin/pelican"]
@@ -711,6 +723,9 @@ ARG TARGETPLATFORM
 ARG TARGETOS
 ARG TARGETARCH
 
+# Install GoReleaser.
+COPY --from=goreleaser-target /usr/bin/goreleaser /usr/local/bin/goreleaser
+
 RUN --mount=type=bind,source=go.mod,target=/context/go.mod \
     --mount=type=bind,source=web_ui/frontend/package.json,target=/context/package.json \
     --mount=type=cache,id=dnf-${TARGETPLATFORM},target=/var/cache/dnf,sharing=locked \
@@ -719,17 +734,7 @@ RUN --mount=type=bind,source=go.mod,target=/context/go.mod \
   set -eux
   set -o pipefail
 
-  # Install GoReleaser and other tools.
-
-  cat >/etc/yum.repos.d/goreleaser.repo <<-EOF
-		[goreleaser]
-		name=GoReleaser
-		baseurl=https://repo.goreleaser.com/yum/
-		enabled=1
-		gpgcheck=0
-		exclude=goreleaser-pro
-	EOF
-  dnf install -y goreleaser jq make
+  dnf install -y git jq make
 
   # Install Go.
   # Use go.mod and the go.dev API to determine the most recent version.
