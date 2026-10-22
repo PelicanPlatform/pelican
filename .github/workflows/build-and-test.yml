@@ -433,3 +433,9 @@ jobs:
       # Semver-tag builds push the test image to a private repo.
       environment: >-
         ${{ needs.params.outputs.environment == 'harbor-tags' && 'harbor-pull' || '' }}
+    # These secrets exist only in the harbor-pull environment,
+    # so they are empty here.
+    # Passing them by name lets the called job read the real values.
+    secrets:
+      PELICAN_HARBOR_PULL_USER: ${{ secrets.PELICAN_HARBOR_PULL_USER }}
+      PELICAN_HARBOR_PULL_PASSWORD: ${{ secrets.PELICAN_HARBOR_PULL_PASSWORD }}
