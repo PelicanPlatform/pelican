@@ -33,6 +33,14 @@ on:
         required: false
         type: string
         default: ""
+    secrets:
+      # The pull-only credentials in the environment above.
+      # GitHub hides an environment's secrets from a reusable workflow
+      # unless the caller passes them.
+      PELICAN_HARBOR_PULL_USER:
+        required: false
+      PELICAN_HARBOR_PULL_PASSWORD:
+        required: false
 
 permissions:
   contents: read
