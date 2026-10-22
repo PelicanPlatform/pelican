@@ -89,6 +89,7 @@ The whole set is then filtered to the catalogue in [Management scopes](#manageme
 Two further rules govern the edges.
 New accounts are granted `Server.NewUserDefaultScopes` at creation, and later edits to that setting do not apply retroactively.
 An API token re-intersects its stored scopes against its creator's *current* effective set on every use, so a token cannot outlive the authority it was minted from.
+That set includes the creator's group memberships as mirrored at their last login, so `Server.AdminGroups` and the other configuration group lists count for an API token as they do for a web session, until the membership is retracted or expires.
 
 ## User administration
 
