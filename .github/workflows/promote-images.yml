@@ -65,6 +65,31 @@ jobs:
             exit 1
           fi
 
+      - name: Check the tag's release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ inputs.tag }}
+        run: |
+          set -euo pipefail
+
+          # An RC may be promoted whatever the state of its release,
+          # but a full release's images should go public only once it has.
+
+          if [[ ${TAG} == *-rc.* ]]; then
+            exit 0
+          fi
+
+          # The API returns only published releases, not drafts.
+          if ! release=$(gh api "repos/${GITHUB_REPOSITORY}/releases/tags/${TAG}"); then
+            echo "::error::Found no published release for ${TAG}; is it still a draft?"
+            exit 1
+          fi
+
+          if [ "$(jq -r .prerelease <<< "${release}")" = "true" ]; then
+            echo "::error::The release for ${TAG} is still marked as a pre-release"
+            exit 1
+          fi
+
       - name: Checkout the container image configuration
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
         with:

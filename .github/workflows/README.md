@@ -44,7 +44,7 @@ On a semver tag, in the repos listed in `config.sh`, `release.yml` runs GoReleas
 
 1. Push a semver tag. `build-and-test.yml`, `release.yml`, and the macOS and Windows tests run.
 1. Once they pass, review the draft release. Publish it, either as a pre-release (for an RC to be shared) or as a full release.
-1. Run "Promote Container Images" with the tag. A reviewer for the `image-promotion` environment must approve the run; its summary lists the images and digests to be copied. Promote one tag at a time, and check that each run finishes: dispatching a third run while one is still in progress cancels the second. If a run fails, re-run it.
+1. Run "Promote Container Images" with the tag. Unless the tag is an RC, its release must be published as a full release. A reviewer for the `image-promotion` environment must approve the run; its summary lists the images and digests to be copied. Promote one tag at a time, and check that each run finishes: dispatching a third run while one is still in progress cancels the second. If a run fails, re-run it.
 
 For a tag cut only for testing, only step 1 is necessary.
 
