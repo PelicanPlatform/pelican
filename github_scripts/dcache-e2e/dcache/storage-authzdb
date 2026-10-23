@@ -1,0 +1,6 @@
+version 2.1
+
+#         user           access     uid  gid  home root         fsroot
+authorize pelican        read-write 1000 1000 /    /            /
+authorize pelicanrenewed read-write 1000 1000 /    /            /
+authorize pelicanchroot  read-write 1001 1001 /    /data/chroot /

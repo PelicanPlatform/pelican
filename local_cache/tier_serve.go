@@ -29,6 +29,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
 
 	"github.com/pelicanplatform/pelican/param"
@@ -240,9 +241,10 @@ func (pc *PersistentCache) tryTierRedirect(w http.ResponseWriter, r *http.Reques
 		return false
 	}
 	target := pc.storage.getTierTarget(meta.StorageID)
-	if target == nil || !target.canRedirect {
+	if target == nil || !target.redirectUsable() {
 		// Either the object is not tiered, or its target cannot hand out a
-		// URL the client could fetch on its own; proxy instead.
+		// URL the client could fetch on its own -- not at all, or not as
+		// of its latest self-test; proxy instead.
 		return false
 	}
 	// A URL the client fetches over something other than HTTP -- a file://
@@ -305,7 +307,15 @@ func (pc *PersistentCache) tryTierRedirect(w http.ResponseWriter, r *http.Reques
 
 	targetURL, err := target.redirectURL(r.Context(), instanceHash, tierRedirectExpiry(), meta.Remote)
 	if err != nil {
-		reqLog.WithError(err).Warn("Failed to build a redirect URL for the tier target; falling back to proxying")
+		// A target that is between credentials says so with
+		// ErrTierRedirectUnavailable; that state is reported once, by the
+		// backend and the redirect self-test, not on every request.
+		entry := reqLog.WithError(err)
+		if errors.Is(err, ErrTierRedirectUnavailable) {
+			entry.Debug("The tier target cannot issue a redirect URL right now; proxying")
+		} else {
+			entry.Warn("Failed to build a redirect URL for the tier target; falling back to proxying")
+		}
 		return false
 	}
 	// The credential check above was made against the host the startup probe
