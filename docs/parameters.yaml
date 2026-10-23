@@ -971,6 +971,14 @@ type: stringSlice
 default: none
 components: ["client"]
 ---
+name: Client.ObjectPutChecksumAlgo
+description: |+
+  The algorithm to use for `object put` validation. This configuration parameter can be overwritten
+  by the `--checksum-algorithm` flag in CLI.
+type: string
+default: none
+components: ["client"]
+---
 ############################
 #  ClientAgent-level Configs #
 ############################
