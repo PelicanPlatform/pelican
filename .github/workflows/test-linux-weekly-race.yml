@@ -18,7 +18,7 @@ jobs:
     name: Test
     uses: ./.github/workflows/test-linux.yml
     with:
-      image: hub.opensciencegrid.org/pelican_platform/pelican-test:latest-itb
+      image: hub.osg-htc.org/pelican_platform/pelican-test:latest-itb
       full_suite: true
       race_detection: true
 
