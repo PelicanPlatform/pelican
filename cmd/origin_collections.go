@@ -33,6 +33,7 @@ import (
 	"time"
 
 	"github.com/pkg/errors"
+	log "github.com/sirupsen/logrus"
 	"github.com/spf13/cobra"
 
 	"github.com/pelicanplatform/pelican/config"
@@ -53,91 +54,46 @@ var (
 	}
 )
 
-// Director server response structures
-type directorServerResponse struct {
-	Name           string `json:"name"`
-	WebURL         string `json:"webUrl"`
-	Type           string `json:"type"`
-	AuthURL        string `json:"authUrl"`
-	RegistryPrefix string `json:"registryPrefix"`
+func collectionOriginWebUrl() (string, error) {
+	webUrl := param.Server_ExternalWebUrl.GetString()
+	if webUrl == "" {
+		return "", errors.Errorf("cannot determine the origin to manage: %s is not set", param.Server_ExternalWebUrl.GetName())
+	}
+	log.Debugf("Managing collections on the origin at %q (from %s)", webUrl, param.Server_ExternalWebUrl.GetName())
+	return webUrl, nil
 }
 
-// getDirectorOriginWebUrl queries the Director API to find an origin server's web URL
-func getDirectorOriginWebUrl(ctx context.Context) (string, error) {
-	fedInfo, err := config.GetFederation(ctx)
+// checkCollectionOrigin confirms that the server at originWebUrl is an origin
+// with a collections API before any device-code approval starts.
+func checkCollectionOrigin(ctx context.Context, originWebUrl string) error {
+	probeUrl, err := url.JoinPath(originWebUrl, "/api/v1.0/origin_ui/collections")
 	if err != nil {
-		return "", errors.Wrap(err, "failed to get federation information")
+		return errors.Wrapf(err, "failed to construct the collections API URL from %q", originWebUrl)
 	}
-
-	directorUrlStr := fedInfo.DirectorEndpoint
-	if directorUrlStr == "" {
-		return "", errors.New("Director endpoint not found in federation configuration. Please set Federation.DirectorUrl")
-	}
-
-	directorUrl, err := url.Parse(directorUrlStr)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, probeUrl, nil)
 	if err != nil {
-		return "", errors.Wrap(err, "invalid Director URL")
+		return errors.Wrap(err, "failed to create the collections API probe request")
 	}
+	req.Header.Set("User-Agent", "pelican-client/"+config.GetVersion())
 
-	// Construct the servers API endpoint
-	serversUrl, err := url.JoinPath(directorUrl.String(), "/api/v1.0/director_ui/servers")
+	resp, err := config.GetClient().Do(req)
 	if err != nil {
-		return "", errors.Wrap(err, "failed to construct Director servers URL")
-	}
-
-	// Query with server_type=origin to only get origin servers
-	serversUrlParsed, err := url.Parse(serversUrl)
-	if err != nil {
-		return "", errors.Wrap(err, "failed to parse Director servers URL")
-	}
-	q := serversUrlParsed.Query()
-	q.Set("server_type", "origin")
-	serversUrlParsed.RawQuery = q.Encode()
-
-	// Make HTTP request
-	client := &http.Client{Transport: config.GetTransport()}
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, serversUrlParsed.String(), nil)
-	if err != nil {
-		return "", errors.Wrap(err, "failed to create Director API request")
-	}
-
-	resp, err := client.Do(req)
-	if err != nil {
-		return "", errors.Wrap(err, "failed to query Director API")
+		return errors.Wrapf(err, "cannot reach an origin at %s; run this command on the origin host or set %s to the origin's web URL",
+			originWebUrl, param.Server_ExternalWebUrl.GetName())
 	}
 	defer resp.Body.Close()
+	// Drain so the connection can be reused; the body is a small JSON error.
+	_, _ = io.Copy(io.Discard, resp.Body)
 
-	if resp.StatusCode != http.StatusOK {
-		body, readErr := io.ReadAll(resp.Body)
-		if readErr != nil {
-			return "", errors.Errorf("Director API returned status %d (failed to read body: %v)", resp.StatusCode, readErr)
-		}
-		return "", errors.Errorf("Director API returned status %d: %s", resp.StatusCode, string(body))
+	switch {
+	case resp.StatusCode == http.StatusUnauthorized || resp.StatusCode == http.StatusForbidden || (resp.StatusCode >= 200 && resp.StatusCode < 300):
+		log.Debugf("The server at %q serves the collections API (probe status %d)", originWebUrl, resp.StatusCode)
+		return nil
+	case resp.StatusCode == http.StatusNotFound:
+		return errors.New("this command runs on the origin host only")
+	default:
+		return errors.Errorf("the server at %s answered the collections API probe with status %d", originWebUrl, resp.StatusCode)
 	}
-
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return "", errors.Wrap(err, "failed to read Director API response")
-	}
-
-	var servers []directorServerResponse
-	if err := json.Unmarshal(body, &servers); err != nil {
-		return "", errors.Wrap(err, "failed to parse Director API response")
-	}
-
-	if len(servers) == 0 {
-		return "", errors.New("no origin servers found in Director")
-	}
-
-	// Use the first origin server found
-	// TODO: In a federation with multiple origins, this may not target the desired origin.
-	// Consider adding a --origin-url flag to explicitly specify the target origin server.
-	origin := servers[0]
-	if origin.WebURL == "" {
-		return "", errors.Errorf("origin server '%s' does not have a webUrl", origin.Name)
-	}
-
-	return origin.WebURL, nil
 }
 
 // acquireOAuthToken performs OAuth2 device flow to get a token with the specified scopes
@@ -286,9 +242,11 @@ func deviceCodeSupported(grantTypes *[]string) bool {
 // makeCollectionAPIRequest makes an authenticated HTTP request to the collections API
 // collectionID is optional - if provided, it will be included in the scope for ACL checking
 func makeCollectionAPIRequest(ctx context.Context, method, endpoint string, body interface{}, scope token_scopes.TokenScope, collectionID string) ([]byte, error) {
-	// Get origin web URL from Director
-	originWebUrl, err := getDirectorOriginWebUrl(ctx)
+	originWebUrl, err := collectionOriginWebUrl()
 	if err != nil {
+		return nil, err
+	}
+	if err := checkCollectionOrigin(ctx, originWebUrl); err != nil {
 		return nil, err
 	}
 
