@@ -12,7 +12,7 @@ import {
   expandObject,
   isParameterMetadata,
   sortMetadata,
-} from '@/app/config/util';
+} from '@/app/settings/config/util';
 
 export interface TableOfContentsProps {
   metadata: ParameterMetadataRecord;
