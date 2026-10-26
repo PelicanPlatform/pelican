@@ -168,7 +168,7 @@ export default function Home() {
                 <Typography variant={'subtitle1'} pb={2}>
                   {user !== undefined &&
                     user?.role == 'admin' &&
-                    'Awaiting completion by their creators before they can be reviewed by you.'}
+                    'Awaiting completion by their creators. You can also complete one yourself: click its pencil button, fill in the missing fields and choose its owner, and it moves to the review queue.'}
                   {user !== undefined &&
                     user?.role != 'admin' &&
                     'Awaiting completion by their creators.'}
