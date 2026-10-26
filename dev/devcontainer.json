@@ -2,7 +2,7 @@
 // README at: https://github.com/devcontainers/templates/tree/main/src/cpp
 {
 	"name": "Pelican",
-	"image": "hub.osg-htc.org/pelican_platform/pelican-dev:latest-itb",
+	"image": "hub.osg-htc.org/pelican-ci/pelican-dev:latest-itb",
 
 	// Use 'forwardPorts' to make a list of ports inside the container available locally.
 	// "forwardPorts": [],

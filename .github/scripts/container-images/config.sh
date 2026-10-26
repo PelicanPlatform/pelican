@@ -21,10 +21,12 @@
 #
 # Sets:
 #
-#   - PRIVATE_REPO: Where images built off of semver tags are pushed.
+#   - CI_REPO: Where automated builds push images, both those built off
+#     of `main` and those built off of semver tags. Without it, nothing
+#     is pushed.
 #
-#   - PUBLIC_REPO: Where images built off of `main` are pushed,
-#     and where promote-images.yml copies the release images to.
+#   - RELEASE_REPO: Where promote-images.yml copies a semver tag's
+#     release images to, once someone approves. Nothing else pushes here.
 #
 #   - RELEASE_IMAGES: The images that a release consists of.
 #
@@ -36,24 +38,24 @@
 # only one credential per host, and promotion needs to read from one repo
 # while writing to the other.
 
-PRIVATE_REPO=""
-PUBLIC_REPO=""
+CI_REPO=""
+RELEASE_REPO=""
 
 case "${GITHUB_REPOSITORY}" in
   PelicanPlatform/pelican)
-    PRIVATE_REPO="hub.osg-htc.org/pelican-ci"
-    PUBLIC_REPO="hub.osg-htc.org/pelican_platform" ;;
+    CI_REPO="hub.osg-htc.org/pelican-ci"
+    RELEASE_REPO="hub.osg-htc.org/pelican_platform" ;;
 
   # Some testing scenarios require the ability to push container images
   # to a registry. Here, we list developers who have forked the main
   # PelicanPlatform/pelican repo and are able to push images somewhere.
 
   brianaydemir/pelicanplatform-pelican)
-    PRIVATE_REPO="hub.osg-htc.org/brian.aydemir.r2"
-    PUBLIC_REPO="hub.osg-htc.org/brian.aydemir.r1" ;;
+    CI_REPO="hub.osg-htc.org/brian.aydemir.r2"
+    RELEASE_REPO="hub.osg-htc.org/brian.aydemir.r1" ;;
 
   matyasselmeci/pelican)
-    PRIVATE_REPO="hub.osg-htc.org/matyasosg" ;;
+    CI_REPO="hub.osg-htc.org/matyasosg" ;;
 esac
 
 RELEASE_IMAGES=(
