@@ -28,7 +28,7 @@ on:
         default: false
       environment:
         # The environment that holds pull-only credentials for the image,
-        # if it is in a private repo.
+        # if pulling it requires them.
         # When empty, the image is pulled anonymously.
         required: false
         type: string

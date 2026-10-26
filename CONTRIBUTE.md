@@ -108,19 +108,19 @@ Second, you will need to do the following:
 
 1. Enable the running of GitHub Actions on your fork. They are disabled by default.
 
-1. Update [.github/scripts/container-images/config.sh](.github/scripts/container-images/config.sh) with your GitHub fork and corresponding container image repository, as its `PRIVATE_REPO`. (At the discretion of Pelican's core contributors, this change can be merged into the main [PelicanPlatform/pelican](https://github.com/PelicanPlatform/pelican) repository.)
+1. Update [.github/scripts/container-images/config.sh](.github/scripts/container-images/config.sh) with your GitHub fork and corresponding container image repository, as its `CI_REPO`. (At the discretion of Pelican's core contributors, this change can be merged into the main [PelicanPlatform/pelican](https://github.com/PelicanPlatform/pelican) repository.)
 
-1. Create an environment named `harbor-tags` on your fork, and add `PELICAN_HARBOR_PUSH_USER` and `PELICAN_HARBOR_PUSH_PASSWORD` environment secrets to it, with contents befitting of their names. Only the jobs that push images built off of semver tags join this environment. (The image registry used by Pelican is implemented by [Harbor](https://goharbor.io/), hence the secrets' names, but any Docker-like registry should work.)
+1. Create an environment named `harbor-ci` on your fork, and add `PELICAN_HARBOR_PUSH_USER` and `PELICAN_HARBOR_PUSH_PASSWORD` environment secrets to it, with contents befitting of their names. Only the jobs that push images built off of `main` or semver tags join this environment. (The image registry used by Pelican is implemented by [Harbor](https://goharbor.io/), hence the secrets' names, but any Docker-like registry should work.)
 
-1. If pulling images from your registry requires authentication, also create an environment named `harbor-pull` on your fork, and add `PELICAN_HARBOR_PULL_USER` and `PELICAN_HARBOR_PULL_PASSWORD` environment secrets to it, preferably for an account that can only pull. The Linux tests for semver tags join this environment.
+1. If pulling images from your registry requires authentication, also create an environment named `harbor-pull` on your fork, and add `PELICAN_HARBOR_PULL_USER` and `PELICAN_HARBOR_PULL_PASSWORD` environment secrets to it, preferably for an account that can only pull. The Linux tests for pushes to `main` and to semver tags join this environment.
 
-1. As needed, push a new tag to your fork. The tag should be a [semver](https://semver.org/) tag following Pelican's release tagging scheme. The branch should be the one that you will eventually use to create pull requests against the main [PelicanPlatform/pelican](https://github.com/PelicanPlatform/pelican) repo. The tag's images are pushed to your `PRIVATE_REPO`, and a draft release is created for it.
+1. As needed, push a new tag to your fork. The tag should be a [semver](https://semver.org/) tag following Pelican's release tagging scheme. The branch should be the one that you will eventually use to create pull requests against the main [PelicanPlatform/pelican](https://github.com/PelicanPlatform/pelican) repo. The tag's images are pushed to your `CI_REPO`, and a draft release is created for it.
 
 1. Review the results of the GitHub Actions that were triggered.
 
 1. Delete releases and pre-releases, and their corresponding tags, as needed to keep your fork clean.
 
-To also test the pushes of images built off of `main` and the promotion of images (see [.github/workflows/README.md](.github/workflows/README.md)), set `PUBLIC_REPO` for your fork as well, on the same registry host as `PRIVATE_REPO`. Then create the `harbor-main`, `harbor-promote`, and `image-promotion` environments on your fork, as described in that README.
+To also test the promotion of images (see [.github/workflows/README.md](.github/workflows/README.md)), set `RELEASE_REPO` for your fork as well, on the same registry host as `CI_REPO`. Then create the `harbor-promote` and `image-promotion` environments on your fork, as described in that README.
 
 ## Development Environment Setup
 
@@ -186,7 +186,7 @@ The repository now includes a `.devcontainer` configuration, so you don't need t
 
   VS Code will automatically detect the `.devcontainer/devcontainer.json` configuration and use it.
 
-- Wait for Dev Container to start: There will be a loading notification at the bottom-right corner while the Dev Container is starting. The first time may take several minutes as it pulls the development container image (`hub.osg-htc.org/pelican_platform/pelican-dev:latest-itb`).
+- Wait for Dev Container to start: There will be a loading notification at the bottom-right corner while the Dev Container is starting. The first time may take several minutes as it pulls the development container image (`hub.osg-htc.org/pelican-ci/pelican-dev:latest-itb`).
 
   ![dev-container-loading](./docs/images/dev-container-loading.png)
 

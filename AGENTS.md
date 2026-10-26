@@ -292,7 +292,7 @@ Key steps:
 
 1. Fork and clone the repository
 1. Install Docker and VSCode
-1. Pull the development container: `hub.osg-htc.org/pelican_platform/pelican-dev:latest-itb`
+1. Pull the development container: `hub.osg-htc.org/pelican-ci/pelican-dev:latest-itb`
 1. Create `.devcontainer/devcontainer.json` using the template from `dev/devcontainer.json`
 1. Build Pelican from source inside the container
 

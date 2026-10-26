@@ -35,7 +35,7 @@ from stdin, is a newer release that would get the same one. Prints nothing
 for anything other than a vX.Y.Z tag, but reads all of stdin regardless, so
 that it is safe at the end of a pipeline run with "set -o pipefail".
 
-The existing tags must be the image's tags in the public repo, as in
+The existing tags must be the image's tags in the release repo, as in
 promote-images.yml. Git tags will not do, because they include tags that
 were never promoted.
 """
