@@ -85,12 +85,23 @@ func checkCollectionOrigin(ctx context.Context, originWebUrl string) error {
 	// Drain so the connection can be reused; the body is a small JSON error.
 	_, _ = io.Copy(io.Discard, resp.Body)
 
+	// This block is a heuristic for whether `pelican-server origin collection`
+	// is running on an origin host. It reads the status codes returned by the
+	// layers in front of the collections handler, not the handler's own codes.
 	switch {
-	case resp.StatusCode == http.StatusUnauthorized || resp.StatusCode == http.StatusForbidden || (resp.StatusCode >= 200 && resp.StatusCode < 300):
+	// 401 is web_ui.AuthHandler turning away a request with no token before
+	// the handler runs: the route exists, so an origin with a collections API
+	// is listening and the command is running on an origin host; continue.
+	case resp.StatusCode == http.StatusUnauthorized:
 		log.Debugf("The server at %q serves the collections API (probe status %d)", originWebUrl, resp.StatusCode)
 		return nil
+	// 404 is gin's router, not Pelican code: only the origin module registers
+	// this route, so a cache, director or registry answers 404 here. This is
+	// not an origin host.
 	case resp.StatusCode == http.StatusNotFound:
 		return errors.New("this command runs on the origin host only")
+	// Anything else means the heuristic cannot tell: a server is there but
+	// unwell, or something other than Pelican answers at that URL.
 	default:
 		return errors.Errorf("the server at %s answered the collections API probe with status %d", originWebUrl, resp.StatusCode)
 	}

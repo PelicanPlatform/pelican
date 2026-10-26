@@ -102,8 +102,10 @@ func TestCheckCollectionOrigin(t *testing.T) {
 		require.NoError(t, checkCollectionOrigin(ctx, newServer(t, http.StatusUnauthorized).URL))
 	})
 
-	t.Run("origin answers 403", func(t *testing.T) {
-		require.NoError(t, checkCollectionOrigin(ctx, newServer(t, http.StatusForbidden).URL))
+	t.Run("403 is not taken as proof of an origin", func(t *testing.T) {
+		err := checkCollectionOrigin(ctx, newServer(t, http.StatusForbidden).URL)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "403")
 	})
 
 	t.Run("non-origin server answers 404", func(t *testing.T) {
