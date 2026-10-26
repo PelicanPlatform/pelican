@@ -155,4 +155,5 @@ Using IDs is what makes renaming safe. A rename changes one row in `users` or `g
   - API key creation is admin-only: the web UI’s API-key endpoints require the server-admin privilege.
   - Actions from API keys must be distinguishable (for creators / deleters, etc) from those done by the web UI. At least the key ID must be recorded if a key was used.
   - Users can lose authorizations after the API key was used. Thus, when an API key is used, its scopes must be intersected with the current scopes for the user.
+  - The current scopes include the creator's group memberships as mirrored at their last login, so `Server.AdminGroups` and the other configuration group lists count here as they do for a web session; a retracted or expired mirrored membership stops counting.
   - For that intersection only, a creator who currently holds `server.admin` keeps every user-grantable scope on the key: anyone with the admin permission should be assumed to have the ability to perform any user-grantable scope, even if they're not otherwise listed explicitly for the account. The general effective-scope computation is not widened.

@@ -88,12 +88,10 @@ import (
 // (Server.UIAdminUsers, Server.AdminGroups, ...) flow through too —
 // the same evaluation an interactive login would see.
 //
-// The user's external (cookie-asserted) groups aren't available
-// here — API-token Verify runs on the bearer-token path, not a
-// cookie path — so we pass nil. Group-derived scopes via DB
-// membership still apply via database.EffectiveScopes; the only
-// gap is OIDC-asserted groups, which by definition aren't part of
-// an API token's audit trail.
+// No cookie carries the creator's groups on this path, so they come
+// from the memberships mirrored at login (database.GroupNamesForGranting);
+// a membership the provider retracted, or one older than
+// Issuer.AssertedGroupMembershipTTL, no longer counts.
 func init() {
 	api_token.DB = func() *gorm.DB { return database.ServerDatabase }
 
@@ -122,12 +120,20 @@ func init() {
 		if user.Status == database.UserStatusInactive {
 			return nil
 		}
-		identity := UserIdentity{
+		// Fill identity.Groups with group memberships that still grant.
+		// EffectiveScopesForIdentity only consults the Server.*AdminGroups
+		// lists when the identity carries groups.
+		groups, err := database.GroupNamesForGranting(database.ServerDatabase, user.ID)
+		if err != nil {
+			log.Warnf("Failed to look up group memberships of API key creator %s: %v", user.ID, err)
+			return nil
+		}
+		return EffectiveScopesForIdentity(UserIdentity{
 			Username: user.Username,
 			ID:       user.ID,
 			Sub:      user.Sub,
-		}
-		return EffectiveScopesForIdentity(identity)
+			Groups:   groups,
+		})
 	}
 }
 
