@@ -15,7 +15,7 @@ import (
 
 type (
 	exportsRes struct {
-		Type              string        `json:"type"`              // "posix" | "s3" | "https" | "globus" | "xroot"
+		Type              string        `json:"type"`              // Origin.StorageType verbatim; any server_structs.OriginStorageType
 		Status            regStatusEnum `json:"status"`            // Origin registration status
 		StatusDescription string        `json:"statusDescription"` // Description of the status
 		EditUrl           string        `json:"editUrl"`           // URL to edit the origin registration

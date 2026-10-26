@@ -21,6 +21,7 @@ import React, { ReactElement, useEffect, useMemo, useState } from 'react';
 import { Edit, Settings } from '@mui/icons-material';
 import useSWR from 'swr';
 import { getErrorMessage } from '@/helpers/util';
+import { exportCardKind } from '@/helpers/exports';
 import { Capabilities } from '@/types';
 import { CapabilitiesDisplay } from '@/components';
 import { useSearchParams } from 'next/navigation';
@@ -41,11 +42,27 @@ type ExportResCommon = {
   editUrl: string;
 };
 
+// `type` is the origin's Origin.StorageType verbatim (server_structs.OriginStorageType
+// on the Go side), so it can take values this UI has never heard of. The
+// variants below describe the per-backend entry shapes; the last one keeps
+// an unknown backend from failing the type check, and exportCardKind() (see
+// helpers/exports.ts) keeps it from rendering as nothing.
 export type ExportRes = ExportResCommon &
   (
-    | { type: 's3'; exports: S3ExportEntry[] }
-    | { type: 'posix'; exports: PosixExportEntry[] }
-    | { type: 'globus'; exports: GlobusExportEntry[] }
+    | { type: 's3' | 's3v2'; exports: S3ExportEntry[] }
+    | {
+        type:
+          | 'posix'
+          | 'posixv2'
+          | 'xroot'
+          | 'ssh'
+          | 'https'
+          | 'httpsv2'
+          | 'pstore';
+        exports: PosixExportEntry[];
+      }
+    | { type: 'globus' | 'globusv2'; exports: GlobusExportEntry[] }
+    | { type: string; exports: ExportEntry[] }
   );
 
 interface ExportEntry {
@@ -284,6 +301,38 @@ export const GlobusDataExportCard = ({
   );
 };
 
+// Fallback for a storage type without a dedicated card: the registration
+// status (with its "Complete Registration" button), the federation prefix,
+// and the capabilities are common to every export, whatever the backend.
+export const GenericDataExportCard = ({ entry }: { entry: ExportEntry }) => {
+  return (
+    <Paper elevation={1}>
+      {entry.status != 'Completed' && <DataExportStatus {...entry} />}
+      <Grid container p={1}>
+        <Grid
+          size={{
+            xs: 12,
+            md: 9,
+          }}
+        >
+          <ValueLabel
+            value={entry.federationPrefix}
+            label={'Federation Prefix'}
+          />
+        </Grid>
+        <Grid
+          size={{
+            xs: 12,
+            md: 3,
+          }}
+        >
+          <CapabilitiesDisplay {...entry} />
+        </Grid>
+      </Grid>
+    </Paper>
+  );
+};
+
 export const Paginator = ({
   data,
   page,
@@ -320,56 +369,34 @@ export const RecordTable = ({ data }: { data: ExportRes }): ReactElement => {
     return Object.values(data.exports).slice(start, end);
   }, [page, data]);
 
-  switch (data.type) {
-    case 's3':
-      return (
-        <>
-          {entryPage.map((entry, index) => (
-            <Box key={entry.federationPrefix} pb={1}>
-              <S3DataExportCard entry={entry as S3ExportEntry} />
-            </Box>
-          ))}
-          <Paginator
-            data={data.exports}
-            page={page}
-            pageSize={2}
-            setPage={setPage}
-          />
-        </>
-      );
-    case 'posix':
-      return (
-        <>
-          {entryPage.map((entry, index) => (
-            <Box key={entry.federationPrefix} pb={1}>
-              <PosixDataExportCard entry={entry as PosixExportEntry} />
-            </Box>
-          ))}
-          <Paginator
-            data={data.exports}
-            page={page}
-            pageSize={2}
-            setPage={setPage}
-          />
-        </>
-      );
-    case 'globus':
-      return (
-        <>
-          {entryPage.map((entry, index) => (
-            <Box key={entry.federationPrefix} pb={1}>
-              <GlobusDataExportCard entry={entry as GlobusExportEntry} />
-            </Box>
-          ))}
-          <Paginator
-            data={data.exports}
-            page={page}
-            pageSize={2}
-            setPage={setPage}
-          />
-        </>
-      );
-  }
+  const card = (entry: ExportEntry): ReactElement => {
+    switch (exportCardKind(data.type)) {
+      case 's3':
+        return <S3DataExportCard entry={entry as S3ExportEntry} />;
+      case 'globus':
+        return <GlobusDataExportCard entry={entry as GlobusExportEntry} />;
+      case 'posix':
+        return <PosixDataExportCard entry={entry as PosixExportEntry} />;
+      case 'generic':
+        return <GenericDataExportCard entry={entry} />;
+    }
+  };
+
+  return (
+    <>
+      {entryPage.map((entry) => (
+        <Box key={entry.federationPrefix} pb={1}>
+          {card(entry)}
+        </Box>
+      ))}
+      <Paginator
+        data={data.exports}
+        page={page}
+        pageSize={2}
+        setPage={setPage}
+      />
+    </>
+  );
 };
 
 export const getExportData = async (): Promise<ExportRes> => {
