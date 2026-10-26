@@ -11,16 +11,17 @@ name: Build and Test
 #   - For pull requests: We never push images to a registry.
 #     In fact, we can't, because the credentials aren't available.
 #
-#   - Pushes to main: We push only pelican-test and pelican-dev.
+#   - Pushes to main: We push only pelican-test and pelican-dev,
+#     to the CI repo.
 #
 #   - Pushes to semver tags: We push the release and test images
-#     to a private repo, and record their digests as artifacts.
+#     to the CI repo, and record their digests as artifacts.
 #
 #     The promote-images.yml workflow copies the release images,
-#     by those digests, to the public repo once someone approves
+#     by those digests, to the release repo once someone approves
 #     the release.
 #
-# The private and public repos for each GitHub repo,
+# The CI and release repos for each GitHub repo,
 # along with the list of release images,
 # are defined in .github/scripts/container-images/config.sh.
 
@@ -81,25 +82,27 @@ jobs:
           IS_TAG_BUILD=${{ startsWith(github.ref, 'refs/tags/') }}
           IS_MAIN_BUILD=${{ github.ref == 'refs/heads/main' }}
 
-          # Define where this repo pushes images (PRIVATE_REPO and
-          # PUBLIC_REPO), and the RELEASE_IMAGES.
+          # Define where this repo pushes images (CI_REPO and RELEASE_REPO),
+          # and the RELEASE_IMAGES.
 
           source .github/scripts/container-images/config.sh
 
-          # Push release and test images built off of semver tags to the
-          # private repo, and test and dev images built off of 'main' to
-          # the public repo, if there is one. Otherwise, push nothing.
+          # Push release and test images built off of semver tags,
+          # and test and dev images built off of 'main', to the CI repo,
+          # if there is one. Otherwise, push nothing.
 
           PUSH_DEVTEST=false
           PUSH_RELEASE=false
           REGISTRY_REPO=""
 
-          if ${IS_TAG_BUILD} && [ -n "${PRIVATE_REPO}" ]; then
-            PUSH_RELEASE=true
-            REGISTRY_REPO="${PRIVATE_REPO}"
-          elif ${IS_MAIN_BUILD} && [ -n "${PUBLIC_REPO}" ]; then
-            PUSH_DEVTEST=true
-            REGISTRY_REPO="${PUBLIC_REPO}"
+          if [ -n "${CI_REPO}" ]; then
+            if ${IS_TAG_BUILD}; then
+              PUSH_RELEASE=true
+              REGISTRY_REPO="${CI_REPO}"
+            elif ${IS_MAIN_BUILD}; then
+              PUSH_DEVTEST=true
+              REGISTRY_REPO="${CI_REPO}"
+            fi
           fi
 
           # Define the other images that we know how to build,
@@ -123,10 +126,8 @@ jobs:
           # Define the environment that holds the credentials for pushing.
 
           ENVIRONMENT=""
-          if ${PUSH_RELEASE}; then
-            ENVIRONMENT=harbor-tags
-          elif ${PUSH_DEVTEST}; then
-            ENVIRONMENT=harbor-main
+          if ${PUSH_RELEASE} || ${PUSH_DEVTEST}; then
+            ENVIRONMENT=harbor-ci
           fi
 
           # Define which images to build: all of them, except the dev image
@@ -430,9 +431,10 @@ jobs:
     with:
       image: ${{ needs.params.outputs.registry-repo }}/pelican-test:${{ needs.tags.outputs.TAG }}
       full_suite: ${{ github.event_name == 'push' }}
-      # Semver-tag builds push the test image to a private repo.
+      # Pushes put the test image in the CI repo,
+      # which might require credentials to pull from.
       environment: >-
-        ${{ needs.params.outputs.environment == 'harbor-tags' && 'harbor-pull' || '' }}
+        ${{ needs.params.outputs.environment != '' && 'harbor-pull' || '' }}
     # These secrets exist only in the harbor-pull environment,
     # so they are empty here.
     # Passing them by name lets the called job read the real values.

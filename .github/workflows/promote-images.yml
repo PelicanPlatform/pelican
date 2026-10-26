@@ -1,13 +1,12 @@
 ---
 name: Promote Container Images
 
-# Copies a semver tag's release images from the private repo, where
-# build-and-test.yml pushed them, to the public repo, and moves the
-# floating tags (e.g., "v26.x"), once reviewers approve.
+# Copies a semver tag's release images from the CI repo,
+# where build-and-test.yml pushed them, to the release repo,
+# and moves the floating tags once reviewers approve.
 #
-# The repos come from .github/scripts/container-images/config.sh
-# on `main`, and the list of images from the same file at the tag.
-# The digests come from the tag's build.
+# The repos come from .github/scripts/container-images/config.sh on `main`.
+# The list of images comes from the same file at the tag.
 
 on:
   workflow_dispatch:
@@ -117,12 +116,12 @@ jobs:
 
           source .github/scripts/container-images/config.sh
 
-          if [ -z "${PRIVATE_REPO}" ] || [ -z "${PUBLIC_REPO}" ]; then
+          if [ -z "${CI_REPO}" ] || [ -z "${RELEASE_REPO}" ]; then
             echo "::error::${GITHUB_REPOSITORY} does not promote images; see config.sh"
             exit 1
           fi
-          if [ "${PRIVATE_REPO%%/*}" != "${PUBLIC_REPO%%/*}" ]; then
-            echo "::error::The private and public repos must be on the same registry host"
+          if [ "${CI_REPO%%/*}" != "${RELEASE_REPO%%/*}" ]; then
+            echo "::error::The CI and release repos must be on the same registry host"
             exit 1
           fi
 
@@ -134,7 +133,7 @@ jobs:
           tag_config=tag/.github/scripts/container-images/config.sh
 
           if [ ! -f "${tag_config}" ]; then
-            echo "::error::${TAG} predates config.sh, so its images were not pushed to ${PRIVATE_REPO}"
+            echo "::error::${TAG} predates config.sh, so its images were not pushed to ${CI_REPO}"
             exit 1
           fi
 
@@ -157,10 +156,10 @@ jobs:
             fi
           done
 
-          printf 'IMAGES=%s\n'        "${images[*]}"       >> "${GITHUB_OUTPUT}"
-          printf 'REGISTRY_HOST=%s\n' "${PUBLIC_REPO%%/*}" >> "${GITHUB_OUTPUT}"
-          printf 'SOURCE_REPO=%s\n'   "${PRIVATE_REPO}"    >> "${GITHUB_OUTPUT}"
-          printf 'TARGET_REPO=%s\n'   "${PUBLIC_REPO}"     >> "${GITHUB_OUTPUT}"
+          printf 'IMAGES=%s\n'        "${images[*]}"        >> "${GITHUB_OUTPUT}"
+          printf 'REGISTRY_HOST=%s\n' "${RELEASE_REPO%%/*}" >> "${GITHUB_OUTPUT}"
+          printf 'SOURCE_REPO=%s\n'   "${CI_REPO}"          >> "${GITHUB_OUTPUT}"
+          printf 'TARGET_REPO=%s\n'   "${RELEASE_REPO}"     >> "${GITHUB_OUTPUT}"
 
       - name: Find the digests that the tag's build pushed
         id: build
@@ -174,7 +173,7 @@ jobs:
         run: |
           set -euo pipefail
 
-          # Any workflow run for a semver tag can push to the private repo,
+          # Any workflow run for a semver tag can push to the CI repo,
           # even to a tag that has yet to be built, so take the digests from
           # the tag's own build. Require it to have succeeded, so that its
           # tests passed, unless the dispatcher allows them to have failed.
@@ -304,7 +303,7 @@ jobs:
           persist-credentials: false
 
       # Docker keeps one credential per registry host, so this account
-      # must be able to read the private repo and write the public one.
+      # must be able to read the CI repo and write the release one.
       - name: Log in to OSG Harbor
         uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f  # v4.6.0
         with:
@@ -343,7 +342,7 @@ jobs:
             fi
 
             # skopeo reads the credentials that docker/login-action saved.
-            # Harbor reports an image that is not yet in the public repo as
+            # Harbor reports an image that is not yet in the release repo as
             # "repository <project>/<image> not found".
             if ! tags=$(skopeo list-tags "docker://${TARGET_REPO}/${image}" 2> "${errors}"); then
               if ! grep -qF "repository ${TARGET_REPO#*/}/${image} not found" "${errors}"; then
@@ -396,7 +395,7 @@ jobs:
           for image in ${IMAGES}; do
             echo "::group::${image}"
 
-            # Every image is in the public repo by now, so a failure to list
+            # Every image is in the release repo by now, so a failure to list
             # its tags is fatal, lest the floating tags move to an older release.
             floating_tags=$(skopeo list-tags "docker://${TARGET_REPO}/${image}" \
               | jq -r '.Tags[]' \

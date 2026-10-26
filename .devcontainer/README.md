@@ -22,7 +22,7 @@ This directory contains the devcontainer configuration for developing Pelican us
 
 ## Container Details
 
-- **Base Image**: `hub.osg-htc.org/pelican_platform/pelican-dev:latest-itb`
+- **Base Image**: `hub.osg-htc.org/pelican-ci/pelican-dev:latest-itb`
 - **User**: `vscode` (non-root, created by the `common-utils` feature with passwordless `sudo`; the container no longer runs as `root` by default so that tools which refuse to run as root — such as `claude --dangerously-skip-permissions` — work out of the box)
 - **Additional test user**: `alice` (shipped by the base image for multi-user scenarios; switch with `su - alice`)
 - **Forwarded Ports**:
