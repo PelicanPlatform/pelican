@@ -32,6 +32,7 @@ import (
 	"net/url"
 	"strconv"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -104,6 +105,41 @@ func parseAdRetryAfter(value string) time.Duration {
 	return hint
 }
 
+// adPartiallyAcceptedError reports an advertisement the director accepted
+// while withholding some of its namespaces, because the registry has not
+// approved them yet. The server IS in the federation, so this is not a
+// failure: doAdvertise turns it into a warning rather than a critical status,
+// nothing retries on it, and the exported Advertise does not report it at all.
+type adPartiallyAcceptedError struct {
+	namespaces []string
+	// msg is the director's own message, which names the namespaces and says
+	// whom to contact about approval.
+	msg string
+}
+
+func (e *adPartiallyAcceptedError) Error() string {
+	if e.msg != "" {
+		return e.msg
+	}
+	return fmt.Sprintf("the director withheld %d namespace(s) pending administrator approval: %s",
+		len(e.namespaces), strings.Join(e.namespaces, ", "))
+}
+
+// withheldNamespacesFromResponse reads the namespaces a director left out of
+// an accepted advertisement, and its message, from the response body. An
+// older director answers with a plain SimpleApiResp, and a body that does not
+// decode says nothing either way; both yield no withheld namespaces.
+func withheldNamespacesFromResponse(body []byte) (withheld []string, msg string) {
+	resp := server_structs.AdvertiseResponse{}
+	if err := json.Unmarshal(body, &resp); err != nil {
+		return nil, ""
+	}
+	if len(resp.WithheldNamespaces) == 0 {
+		return nil, ""
+	}
+	return resp.WithheldNamespaces, resp.Msg
+}
+
 const (
 	// adRetryAttempts is how many extra attempts a retryable rejection buys.
 	// Small on purpose: this is here to ride out a director still starting up,
@@ -122,7 +158,7 @@ func doAdvertise(ctx context.Context, servers []server_structs.XRootDServer) {
 	log.Debugf("About to advertise %d XRootD servers", len(servers))
 	start := time.Now()
 
-	err := Advertise(ctx, servers)
+	partial, err := advertiseAll(ctx, servers)
 	// A director that answered "not yet" is worth asking again right away.
 	// Without this the next attempt is a whole advertisement cycle out, so a
 	// director that was starting up for a few seconds costs this server a
@@ -145,13 +181,18 @@ func doAdvertise(ctx context.Context, servers []server_structs.XRootDServer) {
 			log.Debugln("Advertisement retry abandoned: context cancelled")
 			return
 		}
-		err = Advertise(ctx, servers)
+		partial, err = advertiseAll(ctx, servers)
 	}
 
 	duration := time.Since(start)
 	if err != nil {
 		log.Warningf("XRootD server advertise failed (duration %s): %v", duration.String(), err)
 		metrics.SetComponentHealthStatus(metrics.OriginCache_Federation, metrics.StatusCritical, fmt.Sprintf("XRootD server failed to advertise to the director: %v", err))
+	} else if partial != nil {
+		// In the federation, but not with everything: the operator needs to
+		// see which namespaces are still waiting on approval in Registry.
+		log.Warningf("XRootD server advertised (duration %s), but the director withheld namespace(s) pending approval in Registry: %v", duration.String(), partial.namespaces)
+		metrics.SetComponentHealthStatus(metrics.OriginCache_Federation, metrics.StatusWarning, partial.Error())
 	} else {
 		log.Debugf("XRootD server advertise successful (duration %v)", duration.String())
 		metrics.SetComponentHealthStatus(metrics.OriginCache_Federation, metrics.StatusOK, "")
@@ -197,17 +238,42 @@ func LaunchPeriodicAdvertise(ctx context.Context, egrp *errgroup.Group, servers 
 }
 
 // Advertise ONCE the xrootd servers (origin and cache) to the director
+//
+// A nil error means every server is in the federation. An ad the director
+// accepted while withholding namespaces counts as accepted here, so callers
+// that gate on this (startup, the shutdown ad) are not failed by it. A caller
+// that also needs the withheld namespaces (today only doAdvertise) uses
+// advertiseAll, which returns them beside the error.
 func Advertise(ctx context.Context, servers []server_structs.XRootDServer) error {
-	var firstErr error
-	for _, server := range servers {
-		err := advertiseInternal(ctx, server)
-		if firstErr == nil {
-			firstErr = err
-		}
-	}
-	return firstErr
+	_, err := advertiseAll(ctx, servers)
+	return err
 }
 
+// advertiseAll advertises every server once and keeps "accepted, but some
+// namespaces were withheld" apart from failure: partial is set when at least
+// one server's ad came back with withheld namespaces, err when any server's
+// ad was not accepted at all. A real failure always wins over a partial.
+func advertiseAll(ctx context.Context, servers []server_structs.XRootDServer) (partial *adPartiallyAcceptedError, err error) {
+	for _, server := range servers {
+		adErr := advertiseInternal(ctx, server)
+		var p *adPartiallyAcceptedError
+		if errors.As(adErr, &p) {
+			if partial == nil {
+				partial = p
+			}
+			continue
+		}
+		if err == nil {
+			err = adErr
+		}
+	}
+	return partial, err
+}
+
+// advertiseInternal advertises one server to every known director. It returns
+// nil when at least one director accepted the ad outright, an
+// *adPartiallyAcceptedError when the ad was accepted with namespaces
+// withheld, and the failure otherwise.
 func advertiseInternal(ctx context.Context, server server_structs.XRootDServer) error {
 	metadata, err := server_utils.GetServerMetadata(ctx, server.GetServerType())
 	if err != nil {
@@ -248,6 +314,11 @@ func advertiseInternal(ctx context.Context, server server_structs.XRootDServer) 
 
 	egrp := &errgroup.Group{}
 	successCount := atomic.Int32{}
+	// The directors share one registry, so whichever answers last describes
+	// the same set of withheld namespaces (i.e. one goroutine per director
+	// inside the errgroup, any one of them can write the `partial` variable)
+	var partialMu sync.Mutex
+	var partial *adPartiallyAcceptedError
 	for _, directorAd := range server_utils.GetDirectorAds() {
 		adCopy := directorAd
 		egrp.Go(func() error {
@@ -318,6 +389,11 @@ func advertiseInternal(ctx context.Context, server server_structs.XRootDServer) 
 				}
 				return errors.Errorf("error during director advertisement: %v", respSimpleError.Msg)
 			}
+			if withheld, msg := withheldNamespacesFromResponse(respbody); len(withheld) > 0 {
+				partialMu.Lock()
+				partial = &adPartiallyAcceptedError{namespaces: withheld, msg: msg}
+				partialMu.Unlock()
+			}
 			successCount.Add(1)
 			return nil
 		})
@@ -325,6 +401,9 @@ func advertiseInternal(ctx context.Context, server server_structs.XRootDServer) 
 	// If at least one advertise succeeded, we're good
 	err = egrp.Wait()
 	if successCount.Load() > 0 {
+		if partial != nil {
+			return partial
+		}
 		return nil
 	}
 	return err
