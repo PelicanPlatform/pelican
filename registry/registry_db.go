@@ -231,6 +231,25 @@ func claimRegistration(id int, owner string) error {
 	})
 }
 
+// assignRegistrationOwner binds registration id to owner (a Pelican user ID)
+func assignRegistrationOwner(id int, owner string) error {
+	if owner == "" {
+		return errors.New("cannot assign a registration to an empty owner")
+	}
+	return database.ServerDatabase.Transaction(func(tx *gorm.DB) error {
+		ns := server_structs.Registration{}
+		if err := tx.First(&ns, "id = ?", id).Error; err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				return errors.Wrapf(errRegistrationNotFound, "registration with id %d", id)
+			}
+			return errors.Wrap(err, "error retrieving registration")
+		}
+		// database.SetRegistrationOwner also revokes the outstanding
+		// ownership-transfer invites the previous owner minted.
+		return database.SetRegistrationOwner(tx, &ns, owner)
+	})
+}
+
 func getRegistrationJwksById(id int) (jwk.Set, error) {
 	var result server_structs.Registration
 	err := database.ServerDatabase.Select("pubkey").Where("id = ?", id).Last(&result).Error

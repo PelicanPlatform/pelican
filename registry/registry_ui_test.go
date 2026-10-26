@@ -42,6 +42,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/pelicanplatform/pelican/config"
+	"github.com/pelicanplatform/pelican/database"
 	"github.com/pelicanplatform/pelican/param"
 	"github.com/pelicanplatform/pelican/server_structs"
 	"github.com/pelicanplatform/pelican/server_utils"
@@ -2023,6 +2024,198 @@ func TestUpdateNamespaceOwnerNeverFromBody(t *testing.T) {
 		got, err := getRegistrationById(id)
 		require.NoError(t, err)
 		assert.Equal(t, "u-mock-id", got.AdminMetadata.UserID, "an admin edit must not clear or take the owner")
+	})
+
+	// The one caller whose body user_id counts: a registry administrator may
+	// hand any registration to another active account (details in
+	// TestUpdateNamespaceAdminAssignsOwner).
+	t.Run("admin-edit-reassigns-owner", func(t *testing.T) {
+		resetMockRegistryDB(t)
+		require.NoError(t, database.ServerDatabase.Create(&database.User{
+			ID: "u-new-owner", Username: "newowner", Sub: "sub-new-owner", Issuer: "https://issuer.example", Status: database.UserStatusActive,
+		}).Error)
+		require.NoError(t, insertMockDBData([]server_structs.Registration{mockOwned()}))
+		id, err := getLastNamespaceId()
+		require.NoError(t, err)
+
+		body := mockOwned()
+		body.AdminMetadata.UserID = "u-new-owner"
+		w := putBody(t, newRouter("admin", "u-admin-id"), id, body)
+
+		require.Equal(t, http.StatusOK, w.Result().StatusCode, w.Body.String())
+		got, err := getRegistrationById(id)
+		require.NoError(t, err)
+		assert.Equal(t, "u-new-owner", got.AdminMetadata.UserID, "an admin edit reassigns the owner")
+	})
+}
+
+// TestUpdateNamespaceAdminAssignsOwner covers an administrator writing
+// admin_metadata.user_id, here while completing an auto-registration on the
+// operator's behalf: the owner must be an active Pelican account, an empty
+// value leaves the owner alone, nobody else's user_id counts, and a complete
+// form then leaves Incomplete for Pending (#3831).
+func TestUpdateNamespaceAdminAssignsOwner(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
+	server_utils.ResetTestState()
+	t.Cleanup(func() { server_utils.ResetTestState() })
+	_, cancel, egrp := test_utils.TestContext(context.Background(), t)
+	defer func() { require.NoError(t, egrp.Wait()) }()
+	defer cancel()
+
+	setupMockRegistryDB(t)
+	defer teardownMockRegistryDB(t)
+
+	mockInsts := []registrationFieldOption{{ID: "1000"}}
+	require.NoError(t, param.Registry_Institutions.Set(mockInsts))
+
+	_, _, storedJWKS, err := test_utils.GenerateJWK()
+	require.NoError(t, err)
+
+	newRouter := func(user, userId string) *gin.Engine {
+		router := gin.Default()
+		router.PUT("/namespaces/:id", func(ctx *gin.Context) {
+			ctx.Set("User", user)
+			ctx.Set("UserId", userId)
+			createUpdateNamespace(ctx, true)
+		})
+		return router
+	}
+
+	// An auto-registration as the registry records it: unowned, Incomplete,
+	// carrying only what the service itself could supply.
+	mockIncomplete := func() server_structs.Registration {
+		return server_structs.Registration{
+			Prefix: "/foo",
+			Pubkey: storedJWKS,
+			AdminMetadata: server_structs.AdminMetadata{
+				Description: "This is a namespace registration from Pelican CLI or an automated registration. Certain fields may not be populated",
+				Status:      server_structs.RegIncomplete,
+				SiteName:    "test-site-name",
+			},
+		}
+	}
+
+	// The admin's completed form: the missing institution plus the owner.
+	completedBy := func(owner string) server_structs.Registration {
+		body := mockIncomplete()
+		body.AdminMetadata.Institution = "1000"
+		body.AdminMetadata.UserID = owner
+		return body
+	}
+
+	seedUser := func(t *testing.T, id string, status database.UserStatus) {
+		require.NoError(t, database.ServerDatabase.Create(&database.User{
+			ID:       id,
+			Username: "user-" + id,
+			Sub:      "sub-" + id,
+			Issuer:   "https://issuer.example",
+			Status:   status,
+		}).Error)
+	}
+
+	putBody := func(t *testing.T, router *gin.Engine, id int, body server_structs.Registration) *httptest.ResponseRecorder {
+		payload, err := json.Marshal(body)
+		require.NoError(t, err)
+		w := httptest.NewRecorder()
+		req, _ := http.NewRequest("PUT", "/namespaces/"+strconv.Itoa(id), bytes.NewReader(payload))
+		router.ServeHTTP(w, req)
+		return w
+	}
+
+	// responseMsg returns the decoded msg of a SimpleApiResp body, so
+	// assertions read the text an admin sees rather than its JSON escaping.
+	responseMsg := func(t *testing.T, w *httptest.ResponseRecorder) string {
+		resp := server_structs.SimpleApiResp{}
+		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp), w.Body.String())
+		return resp.Msg
+	}
+
+	// The built-in "admin" username carries the server.admin scope
+	admin := newRouter("admin", "u-admin-id")
+
+	t.Run("admin-names-owner-and-promotes-to-pending", func(t *testing.T) {
+		resetMockRegistryDB(t)
+		seedUser(t, "u-operator", database.UserStatusActive)
+		require.NoError(t, insertMockDBData([]server_structs.Registration{mockIncomplete()}))
+		id, err := getLastNamespaceId()
+		require.NoError(t, err)
+
+		w := putBody(t, admin, id, completedBy("u-operator"))
+
+		require.Equal(t, http.StatusOK, w.Result().StatusCode, w.Body.String())
+		got, err := getRegistrationById(id)
+		require.NoError(t, err)
+		assert.Equal(t, "u-operator", got.AdminMetadata.UserID, "the named owner is bound to the registration")
+		assert.Equal(t, "1000", got.AdminMetadata.Institution, "the field edits apply alongside the owner")
+		assert.Equal(t, server_structs.RegPending, got.AdminMetadata.Status, "a complete, owned form enters the review queue")
+	})
+
+	t.Run("admin-edit-without-owner-stays-incomplete", func(t *testing.T) {
+		resetMockRegistryDB(t)
+		require.NoError(t, insertMockDBData([]server_structs.Registration{mockIncomplete()}))
+		id, err := getLastNamespaceId()
+		require.NoError(t, err)
+
+		w := putBody(t, admin, id, completedBy(""))
+
+		require.Equal(t, http.StatusOK, w.Result().StatusCode, w.Body.String())
+		got, err := getRegistrationById(id)
+		require.NoError(t, err)
+		assert.Equal(t, "", got.AdminMetadata.UserID)
+		assert.Equal(t, "1000", got.AdminMetadata.Institution, "corrections without an owner still save")
+		assert.Equal(t, server_structs.RegIncomplete, got.AdminMetadata.Status, "without an owner nothing is ready for review")
+	})
+
+	t.Run("unknown-owner-is-rejected-and-writes-nothing", func(t *testing.T) {
+		resetMockRegistryDB(t)
+		require.NoError(t, insertMockDBData([]server_structs.Registration{mockIncomplete()}))
+		id, err := getLastNamespaceId()
+		require.NoError(t, err)
+
+		w := putBody(t, admin, id, completedBy("u-nobody"))
+
+		require.Equal(t, http.StatusBadRequest, w.Result().StatusCode, w.Body.String())
+		assert.Contains(t, responseMsg(t, w), `no Pelican user account has the ID "u-nobody"`)
+		got, err := getRegistrationById(id)
+		require.NoError(t, err)
+		assert.Equal(t, "", got.AdminMetadata.UserID)
+		assert.Equal(t, "", got.AdminMetadata.Institution, "a rejected request must write nothing")
+		assert.Equal(t, server_structs.RegIncomplete, got.AdminMetadata.Status)
+	})
+
+	t.Run("inactive-owner-is-rejected", func(t *testing.T) {
+		resetMockRegistryDB(t)
+		seedUser(t, "u-gone", database.UserStatusInactive)
+		require.NoError(t, insertMockDBData([]server_structs.Registration{mockIncomplete()}))
+		id, err := getLastNamespaceId()
+		require.NoError(t, err)
+
+		w := putBody(t, admin, id, completedBy("u-gone"))
+
+		require.Equal(t, http.StatusBadRequest, w.Result().StatusCode, w.Body.String())
+		assert.Contains(t, responseMsg(t, w), `Pelican user account "u-gone" is inactive`)
+		got, err := getRegistrationById(id)
+		require.NoError(t, err)
+		assert.Equal(t, "", got.AdminMetadata.UserID)
+	})
+
+	t.Run("non-admin-cannot-name-owner", func(t *testing.T) {
+		resetMockRegistryDB(t)
+		// resetMockRegistryDB leaves the users table alone, hence a fresh ID
+		seedUser(t, "u-operator-2", database.UserStatusActive)
+		require.NoError(t, insertMockDBData([]server_structs.Registration{mockIncomplete()}))
+		id, err := getLastNamespaceId()
+		require.NoError(t, err)
+
+		// Neither the owner (there is none) nor a key-holder: the ordinary
+		// permission check answers before any owner handling.
+		w := putBody(t, newRouter("mockUser", "u-mock-id"), id, completedBy("u-operator-2"))
+
+		require.Equal(t, http.StatusForbidden, w.Result().StatusCode, w.Body.String())
+		got, err := getRegistrationById(id)
+		require.NoError(t, err)
+		assert.Equal(t, "", got.AdminMetadata.UserID)
+		assert.Equal(t, server_structs.RegIncomplete, got.AdminMetadata.Status)
 	})
 }
 
