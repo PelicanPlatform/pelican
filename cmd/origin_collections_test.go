@@ -21,7 +21,6 @@
 package main
 
 import (
-	"context"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -84,7 +83,7 @@ func TestCheckCollectionOrigin(t *testing.T) {
 	t.Cleanup(test_utils.SetupTestLogging(t))
 	server_utils.ResetTestState()
 	t.Cleanup(server_utils.ResetTestState)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	newServer := func(t *testing.T, status int) *httptest.Server {
 		ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -123,6 +122,8 @@ func TestCheckCollectionOrigin(t *testing.T) {
 	t.Run("nothing listening", func(t *testing.T) {
 		ts := newServer(t, http.StatusUnauthorized)
 		addr := ts.URL
+		// Stop the server before probing, so nothing answers at this URL.
+		// newServer closes it again at cleanup; closing twice is harmless.
 		ts.Close()
 		err := checkCollectionOrigin(ctx, addr)
 		require.Error(t, err)
