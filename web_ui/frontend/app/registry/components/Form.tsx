@@ -1,9 +1,10 @@
-import { Alert, Box, Button } from '@mui/material';
+import { Alert, Autocomplete, Box, Button, TextField } from '@mui/material';
 import React, {
   Dispatch,
   SetStateAction,
   useContext,
   useEffect,
+  useMemo,
   useState,
 } from 'react';
 import useSWR from 'swr';
@@ -18,7 +19,8 @@ import {
 } from '@/app/registry/components/util';
 import { CustomRegistrationFieldProps } from './CustomRegistrationField';
 import { alertOnError } from '@/helpers/util';
-import { optionsNamespaceRegistrationFields } from '@/helpers/api';
+import { optionsNamespaceRegistrationFields, UserService } from '@/helpers/api';
+import type { User as PelicanUser } from '@/helpers/api/User';
 import { AlertDispatchContext } from '@/components/AlertProvider';
 import { getUser } from '@/helpers/login';
 import { userOwnsNamespace } from '@/components/Namespace';
@@ -88,6 +90,22 @@ const Form = ({ namespace, onSubmit }: FormProps) => {
   const restrictedEdit =
     namespace?.admin_metadata?.status === 'Approved' && user?.role !== 'admin';
 
+  // A registry administrator may set or change the owner of any registration
+  // (the registry honours admin_metadata.user_id from an admin only), e.g. to
+  // complete an unowned auto-registration on the operator's behalf.
+  const adminAssignsOwner = namespace !== undefined && user?.role === 'admin';
+
+  const { data: users } = useSWR<PelicanUser[]>(
+    adminAssignsOwner ? 'listUsers' : null,
+    () => UserService.getAll()
+  );
+
+  const ownerUserId = getValue(formNamespace, ['admin_metadata', 'user_id']);
+  const owner = useMemo(
+    () => users?.find((u) => u.id === ownerUserId) ?? null,
+    [users, ownerUserId]
+  );
+
   // Auto-fill the security contact when the current user is the operator of
   // this registration and no contact has been set yet
   useEffect(() => {
@@ -137,6 +155,40 @@ const Form = ({ namespace, onSubmit }: FormProps) => {
           institution, and security contact; the remaining fields are locked and
           can only be changed by a registry administrator.
         </Alert>
+      )}
+      {adminAssignsOwner && (
+        <Box pb={2}>
+          <Alert severity={'info'} sx={{ mb: 2 }}>
+            As an administrator you can set or change the owner: the Pelican
+            account that operates the service. The change of owner revokes
+            outstanding ownership-transfer invites. An Incomplete registration with
+            an owner and every required field filled in enters the review queue
+            on submit.
+          </Alert>
+          <Autocomplete
+            fullWidth
+            size='small'
+            options={users || []}
+            value={owner}
+            getOptionLabel={(u) =>
+              u.displayName ? `${u.username} (${u.displayName})` : u.username
+            }
+            isOptionEqualToValue={(a, b) => a.id === b.id}
+            onChange={(e, value) =>
+              onChange('admin_metadata.user_id', value?.id, setFormNamespace)
+            }
+            renderInput={(params) => (
+              <TextField
+                {...params}
+                label={'Owner'}
+                variant={'outlined'}
+                helperText={
+                  'The Pelican user account that owns this registration'
+                }
+              />
+            )}
+          />
+        </Box>
       )}
       {fields &&
         fields.map((field, index) => {

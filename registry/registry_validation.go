@@ -27,10 +27,34 @@ import (
 	"github.com/lestrrat-go/jwx/v2/jwk"
 	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
+	"gorm.io/gorm"
 
+	"github.com/pelicanplatform/pelican/database"
 	"github.com/pelicanplatform/pelican/param"
 	"github.com/pelicanplatform/pelican/server_structs"
 )
+
+// errUnknownRegistrationOwner reports an owner ID that does not name an
+// active Pelican user account. Handlers map it to a 400; any other error
+// from validateRegistrationOwner is a lookup failure.
+var errUnknownRegistrationOwner = errors.New("owner is not an active Pelican user account")
+
+// validateRegistrationOwner checks that id names an active Pelican user
+// account before a registration is bound to it, so an administrator cannot
+// hand a registration to an account nobody can log in as.
+func validateRegistrationOwner(id string) error {
+	user, err := database.GetUserByID(database.ServerDatabase, id)
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return errors.Wrapf(errUnknownRegistrationOwner, "no Pelican user account has the ID %q", id)
+		}
+		return errors.Wrapf(err, "failed to look up Pelican user %q", id)
+	}
+	if user.Status != database.UserStatusActive {
+		return errors.Wrapf(errUnknownRegistrationOwner, "Pelican user account %q is %s", id, user.Status)
+	}
+	return nil
+}
 
 // This file has all custom validator logic for registry struct
 // data validation besides the ones already included in validator package
