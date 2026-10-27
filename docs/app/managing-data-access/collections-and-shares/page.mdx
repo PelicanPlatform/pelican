@@ -364,8 +364,8 @@ Reach for these when you are onboarding collections in bulk, or scripting the sa
 
 **The command line.**
 The `pelican-server origin collection` commands ship in the `pelican-server` binary.
-They find your origin by asking the Director (so [`Federation.DirectorUrl`](/parameters#Federation-DirectorUrl) has to be configured), then send you through a browser device-code approval to obtain a token — you do not need shell access on the origin host, but you do need a browser and an account on that origin.
-In a federation with more than one origin the commands target the first origin the Director returns, so prefer the web interface when several origins are registered.
+Run them on the origin host, and they talk to your origin named by [`Server.ExternalWebUrl`](/parameters#Server-ExternalWebUrl).
+They send you through a browser device-code approval to obtain a token, so you also need a browser and an account on that origin.
 Flags and syntax live in the generated [`pelican-server origin collection`](/commands-reference/pelican-server/origin/collection) reference.
 
 ```bash copy
