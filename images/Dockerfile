@@ -274,6 +274,10 @@ RUN --mount=type=bind,source=images/pelican.yaml,target=/context/pelican.yaml \
 
   printf '%s\n' "metadata_expire=1800" >> /etc/dnf/dnf.conf
 
+  # Apply security updates released since the pinned base image was built.
+
+  dnf upgrade -y --security
+
   # Install OSG's yum repositories (https://osg-htc.org/docs/common/yum/).
 
   dnf install -y \
