@@ -169,12 +169,18 @@ jobs:
         run: |
           ./scripts/generate_goreleaser.sh .goreleaser.in.yml .goreleaser.generated.yml
 
+      - name: Determine GoReleaser version
+        id: goreleaser-version
+        # images/Dockerfile pins the version, where Dependabot can update it;
+        # read the script for details.
+        run: ./.github/scripts/goreleaser/goreleaser_version.sh >> "$GITHUB_OUTPUT"
+
       - name: Run GoReleaser
         id: goreleaser
         uses: goreleaser/goreleaser-action@a4f02ab5355a589de60d917a659ce617ed19b3de  # v7.3.0
         with:
           distribution: goreleaser
-          version: "~> v2"
+          version: ${{ steps.goreleaser-version.outputs.version }}
           args: build --single-target --clean --snapshot --skip=before --config .goreleaser.generated.yml --id pelican --id pelican-server
 
       - name: Point the tests at the GoReleaser binaries
