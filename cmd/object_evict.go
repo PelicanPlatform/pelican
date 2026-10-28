@@ -96,21 +96,24 @@ func objectEvictMain(cmd *cobra.Command, args []string) error {
 		if handleCredentialPasswordError(err) {
 			os.Exit(1)
 		}
+		// The message and the exit code are separate lookups, not one
+		// if/else: a TransferErrors accumulator carries its own per-attempt
+		// message, while the classification that names the exit code can sit
+		// inside it.
 		errMsg := err.Error()
-		var pe error_codes.PelicanError
 		var te *client.TransferErrors
 		if errors.As(err, &te) {
 			errMsg = te.UserError()
-		}
-		if errors.Is(err, &pe) {
-			errMsg = pe.Error()
-			log.Errorln("Failure evicting " + source + ": " + errMsg)
-			os.Exit(pe.ExitCode())
+		} else if msg, ok := error_codes.Message(err); ok {
+			errMsg = msg
 		}
 		log.Errorln("Failure evicting " + source + ": " + errMsg)
 		if client.ShouldRetry(err) {
 			log.Errorln("Errors are retryable")
 			os.Exit(11)
+		}
+		if code, ok := error_codes.ExitCodeFor(err); ok {
+			os.Exit(code)
 		}
 		os.Exit(1)
 	}
