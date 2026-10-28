@@ -47,7 +47,7 @@ repos:
   # Check semantics.
   #
   - repo: https://github.com/golangci/golangci-lint
-    rev: v2.12.2
+    rev: v2.15.0
     hooks:
       # These can be some of the more time-consuming checks.
       # The "full" variant more closely matches the GitHub Actions.
@@ -88,7 +88,7 @@ repos:
         args: [--wrap, "no"]
         files: \.md$
   - repo: https://github.com/crate-ci/typos
-    rev: v1.43.4
+    rev: v1.51.1
     hooks:
       - id: typos
         # Prevent false positives from mangling files.
