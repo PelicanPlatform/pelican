@@ -20,7 +20,7 @@ import {
 import { CustomRegistrationFieldProps } from './CustomRegistrationField';
 import { alertOnError } from '@/helpers/util';
 import { optionsNamespaceRegistrationFields, UserService } from '@/helpers/api';
-import type { User as PelicanUser } from '@/helpers/api/User';
+import useServiceSWR from '@/hooks/useServiceSWR';
 import { AlertDispatchContext } from '@/components/AlertProvider';
 import { getUser } from '@/helpers/login';
 import { userOwnsNamespace } from '@/components/Namespace';
@@ -84,20 +84,25 @@ const Form = ({ namespace, onSubmit }: FormProps) => {
   );
 
   const { data: user } = useSWR('getUser', getUser);
+  const userIsAdmin = user?.role === 'admin';
 
   // A non-admin editing an Approved registration can only change the
   // descriptive fields; treat an unknown role as non-admin until it loads
   const restrictedEdit =
-    namespace?.admin_metadata?.status === 'Approved' && user?.role !== 'admin';
+    namespace?.admin_metadata?.status === 'Approved' && !userIsAdmin;
 
-  // A registry administrator may set or change the owner of any registration
-  // (the registry honours admin_metadata.user_id from an admin only), e.g. to
-  // complete an unowned auto-registration on the operator's behalf.
-  const adminAssignsOwner = namespace !== undefined && user?.role === 'admin';
+  // A registry administrator may set or change the owner of any existing
+  // registration (the registry honours admin_metadata.user_id from an admin
+  // on update only; a new registration is always owned by its creator), e.g.
+  // to complete an unowned auto-registration on the operator's behalf.
+  const adminUserAndExistingRegistration =
+    userIsAdmin && namespace !== undefined;
 
-  const { data: users } = useSWR<PelicanUser[]>(
-    adminAssignsOwner ? 'listUsers' : null,
-    () => UserService.getAll()
+  const { data: users } = useServiceSWR(
+    'Could not fetch users.',
+    adminUserAndExistingRegistration ? UserService : null,
+    'getAll',
+    []
   );
 
   const ownerUserId = getValue(formNamespace, ['admin_metadata', 'user_id']);
@@ -156,7 +161,7 @@ const Form = ({ namespace, onSubmit }: FormProps) => {
           can only be changed by a registry administrator.
         </Alert>
       )}
-      {adminAssignsOwner && (
+      {adminUserAndExistingRegistration && (
         <Box pb={2}>
           <Alert severity={'info'} sx={{ mb: 2 }}>
             As an administrator you can set or change the owner to any existing
