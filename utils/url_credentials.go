@@ -27,10 +27,16 @@ import (
 
 // secretURLParams are the URL query parameters that carry a secret in some
 // tool's or driver's spelling.  Matching is case-insensitive.
+//
+// "authz" is the bearer-token parameter: Pelican's director hands clients a
+// federation token as ?authz=, and dCache accepts a macaroon the same way --
+// which is what a cache tiering to dCache puts in the redirect URLs it mints.
+// Either one is a credential in its own right.
 var secretURLParams = map[string]bool{
 	"accesskey":         true,
 	"access_key":        true,
 	"accountkey":        true,
+	"authz":             true,
 	"awsaccesskeyid":    true,
 	"awssecretkey":      true,
 	"awssessiontoken":   true,

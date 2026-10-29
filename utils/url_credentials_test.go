@@ -38,6 +38,14 @@ func TestRedactURLCredentials(t *testing.T) {
 		assert.Contains(t, got, "region=us-east-1")
 	})
 
+	// A redirect URL a cache mints for a dCache target carries a macaroon as
+	// ?authz=; Pelican's own director-issued URLs carry a token the same way.
+	t.Run("RedactsAuthzKeepsRest", func(t *testing.T) {
+		got := RedactURLCredentials("https://dcache.example.org:2880/data/aa/bb/obj?authz=MDAxY2xvY2F0aW9uSECRET")
+		assert.NotContains(t, got, "SECRET")
+		assert.Equal(t, "https://dcache.example.org:2880/data/aa/bb/obj?authz=redacted", got)
+	})
+
 	t.Run("UnparsableIsFullyRedacted", func(t *testing.T) {
 		assert.Equal(t, "[unparsable blob URL redacted]", RedactURLCredentials("://::not-a-url::"))
 	})
@@ -48,6 +56,7 @@ func TestRedactURLCredentials(t *testing.T) {
 	for _, key := range []string{
 		"awssecretkey", "secretkey", "secret_access_key", "access_key", "awsaccesskeyid",
 		"password", "token", "sas_token", "accountkey", "awssessiontoken", "session_token",
+		"authz",        // Pelican's and dCache's bearer-token parameter
 		"AWSSecretKey", // matching is case-insensitive
 	} {
 		t.Run("Redacts_"+key, func(t *testing.T) {
@@ -71,6 +80,8 @@ func TestURLHasCredentials(t *testing.T) {
 		{"postgres://user:pw@db.example.org/pelican", true},
 		{"s3://bucket?awssecretkey=x", true},
 		{"azblob://container?sas_token=x", true},
+		{"https://dcache.example.org:2880/data/obj?authz=MDAxY2xvY2F0aW9u", true},
+		{"https://cache.example.org:8443/ns/obj?authz=Bearer%20eyJhbGciOi", true},
 		{"s3://bucket?region=us-east-1", false},
 		{"https://cache.example.org:8443", false},
 		{"/var/lib/pelican/keys/secret", false},
@@ -102,6 +113,7 @@ func TestCheckNoURLCredentials(t *testing.T) {
 		"s3://bucket?awssecretkey=SUPERSECRET",
 		"azblob://container?sas_token=SUPERSECRET",
 		"s3://bucket?region=us-east-1&Token=SUPERSECRET",
+		"https://dcache.example.org/data?authz=SUPERSECRET",
 	} {
 		err := CheckNoURLCredentials(bad)
 		if assert.Error(t, err, bad) {

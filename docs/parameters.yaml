@@ -3313,7 +3313,7 @@ description: |+
 
   Targets are object stores, reached through the same library the origin's object backends
   use: S3 and S3-compatible services (MinIO, Ceph RGW), Google Cloud Storage, and Azure Blob
-  Storage.
+  Storage; or a WebDAV service such as dCache.
 
   Each entry is an object.  Name the target either with a single provider URL:
 
@@ -3338,9 +3338,54 @@ description: |+
     chain is used.  They apply only to these S3 keys: setting them alongside
     **ProviderURL** is refused, since they would be silently ignored.
 
+  ...or, for a WebDAV service, with these keys (the object-store keys above may not be
+  combined with them):
+
+  - **WebDavUrl** (string): the URL of an existing WebDAV collection the cache stores
+    objects under (normally `https`; plain `http` is accepted but sends the token in
+    cleartext) — for dCache, a path on a WebDAV door, such as
+    `https://dcache.example.org:2880/pnfs/example.org/data/pelican`.  Collections below it
+    (the **Prefix** and the cache's fan-out directories) are created as needed.
+    Credentials must not be embedded in the URL.
+  - **TokenFile** (string, optional): a file holding the bearer token the cache presents.
+    The file is re-read for every request, so a token rotated in place is picked up
+    without a restart; an empty file is an error rather than a request for anonymous
+    access.  The token needs permission to read, write, create collections in,
+    delete from and list the collection.  For dCache, it must not carry `storage.*`
+    scopes (see below).
+  - **DisableMacaroons** (bool, optional, default false): never ask the service for
+    macaroons, so objects on the target are always proxied through the cache.
+
+  A WebDAV target redirects clients using dCache macaroons in place of pre-signed URLs.
+  The cache asks the door for a read-only macaroon covering the target's collection (a
+  `POST` with content type `application/macaroon-request`), valid for
+  ${Cache.TieringRedirectExpiry} plus ten minutes, and requests a fresh one every minute in
+  the background.  For each redirect it then restricts that macaroon itself, without
+  contacting dCache — to downloading the one object, until ${Cache.TieringRedirectExpiry}
+  from now — and sends the client to the object's URL with the macaroon as the `authz`
+  query parameter.  When the cache holds no macaroon that outlasts a redirect (the door
+  stopped issuing them, or the token expired), it proxies the object instead.  A door that
+  refuses the first macaroon request outright — macaroons are disabled, the service is not
+  dCache (a macaroon carrying caveats dCache does not issue, as XRootD's do, is refused), or
+  dCache will not issue one for the token — leaves the target proxy-only until the cache
+  restarts, with a warning in the log.  WebDAV keeps no object versions, so a redirected
+  client reads whatever the target currently holds; proxied reads are pinned to the entity
+  tag recorded at upload, as they are for buckets without versioning.
+
+  The cache's token must not carry `storage.*` scopes (`storage.read:`, `storage.modify:`
+  and similar): dCache does not issue macaroons for such a token, whatever paths its scopes
+  name, and the target then serves by proxying, with a warning in the log that says so.  Use
+  a token without `storage.*` scopes that the door maps to a dCache user owning the
+  target's directory.  dCache also issues macaroons only over `https`.  Minted URLs carry
+  an expiry computed from the cache's clock and checked against the door's, so the two
+  clocks must agree to well within ${Cache.TieringRedirectExpiry}, as they must for
+  pre-signed URLs.  [Tiering a Cache to dCache](/operating-a-federation/cache/dcache-tiering)
+  describes the configuration a dCache site needs.
+
   The remaining keys apply to every target:
 
-  - **Prefix** (string, optional): a key prefix under which objects are stored.
+  - **Prefix** (string, optional): a key prefix under which objects are stored (for a
+    WebDAV target, a path below **WebDavUrl**).
   - **MaxSize** (string, required): maximum bytes of cache data stored on the target
     (e.g. "5TB").  Unlike directory targets it cannot be auto-detected.
   - **HighWaterMarkPercentage** / **LowWaterMarkPercentage** (int, optional): eviction
@@ -3365,6 +3410,10 @@ description: |+
         MaxSize: 10TB
         AccessKeyfile: /etc/pelican/s3-access
         SecretKeyfile: /etc/pelican/s3-secret
+      - WebDavUrl: https://dcache.example.org:2880/pnfs/example.org/data/pelican
+        Prefix: cache
+        MaxSize: 50TB
+        TokenFile: /etc/pelican/dcache.token
   ```
 
   **The cache assumes exclusive ownership of the target (or of the configured
@@ -3410,12 +3459,20 @@ description: |+
   that fails to upload five times while its target passes this check is left on local
   storage until the cache restarts.
 
+  Before redirecting any client to a target, and again with every liveness check, the cache
+  mints a redirect URL for the identity object and fetches it the way a client would, with
+  no credential but the URL's own.  While that fails — the storage interprets the URL
+  differently than the cache expects, or the cache has no credential to mint it from — the
+  target's objects are proxied through the cache instead, the `tiering-storage` health
+  component reports a warning naming the target and the failure, and a single warning is
+  logged; another is logged when redirects work again.
+
   Tiering is monitored through the `pelican_cache_tiering_*` Prometheus metrics, labelled by
   target: uploads and their bytes and duration by result, objects given up on, the upload
   queue's depth and drops, uploads deferred for lack of room, reads by how they were
   served, objects found changed on a target, removals by the consistency sweep and when it
   last completed, whether each target passed its latest liveness check, and whether each
-  target can issue redirect URLs.
+  target's objects are currently served by redirect.
 
   This setting only has effect when `${Cache.EnableV2}` is true; the cache logs a
   warning and ignores tiering targets otherwise.  It applies to the cache server only:
@@ -3442,7 +3499,8 @@ description: |+
   instead.
 
   Not every target can issue such a URL.  The cache asks each one at startup and proxies
-  for any that cannot, so this setting is only needed to override a target that can.
+  for any that cannot, so this setting is only needed to override a target that can.  With
+  it set, the cache neither asks nor tests any target's redirect URLs.
 
   Where the URL is a pre-signed one, it is self-authenticating and never carries the
   client's Pelican bearer token.  Spec-compliant HTTP clients (including Pelican's own
@@ -3470,7 +3528,9 @@ components: ["cache"]
 name: Cache.TieringRedirectExpiry
 description: |+
   The lifetime of the URLs handed to clients when serving an object directly from a
-  tiering storage target (see ${Cache.TieringDisableRedirect}).
+  tiering storage target (see ${Cache.TieringDisableRedirect}).  For a WebDAV (dCache)
+  target this is also the lifetime of the macaroon each URL carries, and the macaroon the
+  cache requests from the door is valid for ten minutes longer.
 type: duration
 default: 5m
 components: ["cache"]

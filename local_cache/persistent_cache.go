@@ -1027,12 +1027,20 @@ func (pc *PersistentCache) Close() error {
 		pc.consistency.Stop()
 	}
 
-	// 5. Stop the storage manager (TTL cache eviction goroutine).
+	// 5. Stop the tiering uploader and wait for it: the storage manager
+	//    closes the tiering targets next, and an upload or probe still
+	//    running would fail against a closed backend.
+	if pc.tierUploader != nil {
+		pc.tierUploader.Stop()
+	}
+
+	// 6. Stop the storage manager (TTL cache eviction goroutine) and close
+	//    the tiering targets.
 	if pc.storage != nil {
 		pc.storage.Close()
 	}
 
-	// 6. Close database.
+	// 7. Close database.
 	if pc.db != nil {
 		if err := pc.db.Close(); err != nil {
 			log.Warnf("Error closing cache database: %v", err)

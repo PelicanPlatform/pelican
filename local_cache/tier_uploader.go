@@ -71,6 +71,11 @@ type tierUploader struct {
 	queue chan InstanceHash
 	ctx   context.Context
 
+	// cancel stops the uploader's goroutines, and running counts those
+	// still running; see Stop.
+	cancel  context.CancelFunc
+	running sync.WaitGroup
+
 	// inflight guards against two workers tiering the same object at once
 	// (completion notifications can fire more than once per object).
 	inflightMu sync.Mutex
@@ -163,39 +168,48 @@ func (u *tierUploader) releaseLoop(ctx context.Context) {
 // or unreachable target must not hold up the cache.  Serving does not wait
 // for it; an object's metadata names wherever its authoritative copy is.
 func (u *tierUploader) Start(ctx context.Context, egrp *errgroup.Group) error {
+	ctx, u.cancel = context.WithCancel(ctx)
 	u.ctx = ctx
-	egrp.Go(func() error {
-		u.probeLoop(ctx)
-		return nil
-	})
-	egrp.Go(func() error {
+	u.spawn(egrp, func() { u.probeLoop(ctx) })
+	u.spawn(egrp, func() {
 		if err := u.recover(ctx); err != nil && ctx.Err() == nil {
 			log.Warnf("Tiering recovery did not finish; the next rescan retries what it left: %v", err)
 		}
 		if ctx.Err() != nil {
-			return nil
+			return
 		}
 		for i := 0; i < tierUploadWorkers; i++ {
-			egrp.Go(func() error {
-				u.workerLoop(ctx)
-				return nil
-			})
+			u.spawn(egrp, func() { u.workerLoop(ctx) })
 		}
-		egrp.Go(func() error {
-			u.backfillScan(ctx)
-			return nil
-		})
-		egrp.Go(func() error {
-			u.rescanLoop(ctx)
-			return nil
-		})
-		egrp.Go(func() error {
-			u.releaseLoop(ctx)
-			return nil
-		})
-		return nil
+		u.spawn(egrp, func() { u.backfillScan(ctx) })
+		u.spawn(egrp, func() { u.rescanLoop(ctx) })
+		u.spawn(egrp, func() { u.releaseLoop(ctx) })
 	})
 	return nil
+}
+
+// spawn runs fn on egrp, counted in running.  The goroutines that start the
+// workers are themselves counted until they have, so running cannot reach
+// zero while one is still to be added.
+func (u *tierUploader) spawn(egrp *errgroup.Group, fn func()) {
+	u.running.Add(1)
+	egrp.Go(func() error {
+		defer u.running.Done()
+		fn()
+		return nil
+	})
+}
+
+// Stop ends the uploader's goroutines -- abandoning the uploads in flight,
+// whose intents recovery settles on the next start -- and returns once they
+// have exited.  The cache stops it before closing the tiering targets, so no
+// upload or probe is left talking to a closed backend.  It may be called more
+// than once, and before Start.
+func (u *tierUploader) Stop() {
+	if u.cancel != nil {
+		u.cancel()
+	}
+	u.running.Wait()
 }
 
 // forEachIntent calls fn for every recorded upload intent, a page at a time,
@@ -559,6 +573,11 @@ func (u *tierUploader) processObject(ctx context.Context, instanceHash InstanceH
 // taken the target out of rotation.  Pass a nil target for failures that did
 // not involve one.
 func (u *tierUploader) noteUploadFailure(ctx context.Context, hash InstanceHash, target *tierTarget) {
+	if ctx.Err() != nil {
+		// Stopped, not failed: the attempt says nothing about the object
+		// or the target.
+		return
+	}
 	if target != nil && target.probe(ctx) != nil {
 		return
 	}
