@@ -344,6 +344,7 @@ func (ac *authConfig) getAcls(token string) (newAcls acls, tokenTrusted bool, er
 		// public-reads grant above only covers reads).
 		if tokenTrusted && conf.Issuer != nil && (!conf.Caps.PublicReads || conf.Caps.Writes) {
 			for _, resource := range resources {
+				resource.SciTokenScope2WlcgScope()
 				if (resource.Authorization == token_scopes.Wlcg_Storage_Create || resource.Authorization == token_scopes.Wlcg_Storage_Modify) && !conf.Caps.Writes {
 					continue
 				}

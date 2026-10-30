@@ -61,6 +61,18 @@ func (rc ResourceScope) String() string {
 	return rc.Authorization.String() + ":" + rc.Resource
 }
 
+// SciTokenScope2WlcgScope translates SciToken scope to equivalent
+// WLCG token scope. The search space is small: read == storage.read and
+// write == storage.modify
+func (rc *ResourceScope) SciTokenScope2WlcgScope() {
+	switch rc.Authorization {
+	case Scitokens_Read:
+		rc.Authorization = Wlcg_Storage_Read
+	case Scitokens_Write:
+		rc.Authorization = Wlcg_Storage_Modify
+	}
+}
+
 func (rc ResourceScope) Contains(other ResourceScope) bool {
 	// Check if authorizations match exactly
 	authMatches := rc.Authorization == other.Authorization

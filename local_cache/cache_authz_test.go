@@ -22,12 +22,17 @@ import (
 	"context"
 	"net/url"
 	"testing"
+	"time"
 
+	"github.com/jellydator/ttlcache/v3"
+	"github.com/lestrrat-go/jwx/v2/jwk"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"golang.org/x/sync/errgroup"
 
 	"github.com/pelicanplatform/pelican/server_structs"
+	"github.com/pelicanplatform/pelican/test_utils"
+	"github.com/pelicanplatform/pelican/token"
 	"github.com/pelicanplatform/pelican/token_scopes"
 )
 
@@ -368,5 +373,118 @@ func TestNsAdsAuthzEqual(t *testing.T) {
 	t.Run("BothEmpty", func(t *testing.T) {
 		assert.True(t, nsAdsAuthzEqual(nil, nil))
 		assert.True(t, nsAdsAuthzEqual([]server_structs.NamespaceAd{}, []server_structs.NamespaceAd{}))
+	})
+}
+
+// setupSciTokenAuthConfig configures ac with one private namespace,
+// /private, that allows token-based reads and writes from
+// issuer, and trusts a freshly generated signing key for that
+// issuer.  It returns the private key so the caller can sign tokens.
+func setupSciTokenAuthConfig(t *testing.T, ac *authConfig, issuer string) jwk.Key {
+	privKey, pubKeySet, _, err := test_utils.GenerateJWK()
+	require.NoError(t, err)
+
+	// Pre-populate the issuer key cache so getResourceScopes never tries
+	// to look up the JWKS over the network.
+	if ac.issuerKeys == nil {
+		ac.issuerKeys = ttlcache.New[string, authConfigItem]()
+	}
+	ac.issuerKeys.Set(issuer, authConfigItem{set: pubKeySet}, ttlcache.NoTTL)
+
+	issuerURL, err := url.Parse(issuer)
+	require.NoError(t, err)
+	nsAds := []server_structs.NamespaceAd{
+		{
+			Path: "/private",
+			Caps: server_structs.Capabilities{Reads: true, Writes: true},
+			Issuer: []server_structs.TokenIssuer{
+				{
+					IssuerUrl: *issuerURL,
+					BasePaths: []string{"/private"},
+				},
+			},
+		},
+	}
+	require.NoError(t, ac.updateConfig(nsAds))
+	return privKey
+}
+
+// createSciToken signs a SciTokens 2.0 token from issuer
+// carrying the given scope on the root of the namespace.
+func createSciToken(t *testing.T, privKey jwk.Key, issuer string, scope token_scopes.TokenScope) string {
+	tc := token.NewScitoken()
+	tc.Issuer = issuer
+	tc.Lifetime = time.Minute
+	tc.Subject = "test-user"
+	tc.AddAudienceAny()
+	tc.AddResourceScopes(token_scopes.ResourceScope{Authorization: scope, Resource: "/"})
+	tok, err := tc.CreateTokenWithKey(privKey)
+	require.NoError(t, err)
+	return tok
+}
+
+// TestGetAcls_SciTokenScope2WlcgScope verifies that getAcls translates the
+// SciTokens scopes of a trusted token into the equivalent WLCG scopes, so
+// that no SciTokens scope ever reaches the ACL.  The rest of the cache only
+// understands WLCG scopes.
+func TestGetAcls_SciTokenScope2WlcgScope(t *testing.T) {
+	ac := &authConfig{}
+	issuer := "https://issuer.example.com"
+	privKey := setupSciTokenAuthConfig(t, ac, issuer)
+
+	tests := []struct {
+		name     string
+		scope    token_scopes.TokenScope
+		expected acls
+	}{
+		{
+			name:     "Read-becomes-storage.read",
+			scope:    token_scopes.Scitokens_Read,
+			expected: acls{{Authorization: token_scopes.Wlcg_Storage_Read, Resource: "/private"}},
+		},
+		{
+			name:     "Write-becomes-storage.modify",
+			scope:    token_scopes.Scitokens_Write,
+			expected: acls{{Authorization: token_scopes.Wlcg_Storage_Modify, Resource: "/private"}},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			newAcls, trusted, err := ac.getAcls(createSciToken(t, privKey, issuer, tt.scope))
+			require.NoError(t, err)
+			require.True(t, trusted, "token signed by the trusted issuer should be trusted")
+			assert.Equal(t, tt.expected, newAcls)
+			for _, acl := range newAcls {
+				assert.NotEqual(t, token_scopes.Scitokens_Read, acl.Authorization, "SciTokens scope leaked into the ACL")
+				assert.NotEqual(t, token_scopes.Scitokens_Write, acl.Authorization, "SciTokens scope leaked into the ACL")
+			}
+		})
+	}
+}
+
+// TestAuthorize_SciTokenScope2WlcgScope verifies end to end that a SciToken
+// with read or write scope is granted the matching access to a private
+// namespace.
+func TestAuthorize_SciTokenScope2WlcgScope(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	egrp, ctx := errgroup.WithContext(ctx)
+	t.Cleanup(func() {
+		cancel()
+		_ = egrp.Wait()
+	})
+
+	ac := newAuthConfig(ctx, egrp)
+	issuer := "https://issuer.example.com"
+	privKey := setupSciTokenAuthConfig(t, ac, issuer)
+
+	t.Run("Read-token-can-read", func(t *testing.T) {
+		ok, reason := ac.authorize(token_scopes.Wlcg_Storage_Read, "/private/file", createSciToken(t, privKey, issuer, token_scopes.Scitokens_Read))
+		assert.True(t, ok, "read should be granted, got reason: %s", reason)
+	})
+
+	t.Run("Write-token-can-write", func(t *testing.T) {
+		ok, reason := ac.authorize(token_scopes.Wlcg_Storage_Modify, "/private/file", createSciToken(t, privKey, issuer, token_scopes.Scitokens_Write))
+		assert.True(t, ok, "write should be granted, got reason: %s", reason)
 	})
 }
