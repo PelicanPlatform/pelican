@@ -29,6 +29,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/spf13/cobra"
+	"github.com/spf13/pflag"
+	"github.com/spf13/viper"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -388,6 +391,152 @@ func TestInferRemoteObjectName(t *testing.T) {
 			_, err := inferRemoteObjectName(destURL, localSource)
 			require.Error(t, err, "a source with no object name to infer must be refused")
 			assert.Contains(t, err.Error(), "cannot infer a remote object name")
+		})
+	}
+}
+
+// TestGetChecksumOptions is a table-driven unit test for the function
+// getChecksumOptions(). Note that getChecksumOptions has 2 inputs: one
+// is its parameter requireChecksum, the other is a global variable
+// param.Client_DefaultChecksumAlgo. This test is a well-scoped unit test
+// so it only needs to mint those values instead of caring about how they
+// are populated.
+func TestGetChecksumOptions(t *testing.T) {
+	// Clean up to ensure no global states leak in/out
+	server_utils.ResetTestState()
+	t.Cleanup(server_utils.ResetTestState)
+
+	// The table (three special cases hard-encoded first)
+	type testcase struct {
+		name          string                  // Name of the subtest
+		algoName      string                  // Name of the algo provided in the config yaml file
+		reqChksum     bool                    // Is `--require-checksum` provided or not
+		expectOptions []client.TransferOption // Expected result
+		expectErr     bool                    // Expected error
+	}
+	testcases := []testcase{
+		{"no algo provided", "", false, []client.TransferOption{}, false},
+		{"bogus", "bogus", false, nil, true},
+		{"--require-checksum only", "", true, []client.TransferOption{client.WithRequireChecksum()}, false},
+	}
+
+	// Then fill in the table with all valid checksum algorithms
+	for _, reqChksum := range []bool{true, false} {
+		for _, checksumTypeHttpDigest := range client.KnownChecksumTypesAsHttpDigest() {
+			checksumType := client.ChecksumFromHttpDigest(checksumTypeHttpDigest)
+			tt := testcase{
+				fmt.Sprintf("%s is provided and --require-checksum is %v", checksumTypeHttpDigest, reqChksum),
+				checksumTypeHttpDigest,
+				reqChksum,
+				[]client.TransferOption{client.WithRequireChecksum(), client.WithRequestChecksums([]client.ChecksumType{checksumType})},
+				false,
+			}
+			testcases = append(testcases, tt)
+		}
+	}
+
+	// Run tests in loop
+	for _, testcase := range testcases {
+		t.Run(testcase.name, func(t *testing.T) {
+			require.NoError(t, param.Client_DefaultChecksumAlgo.Set(testcase.algoName))
+			options, err := getChecksumOptions(testcase.reqChksum)
+			if testcase.expectErr {
+				require.ErrorContains(t, err, "Valid algorithms are")
+			} else {
+				require.NoError(t, err)
+			}
+			assert.ElementsMatch(t, testcase.expectOptions, options, "TransferOption slice does not match")
+		})
+	}
+}
+
+// TestPutMainBindPFlags ensures that `--checksum-algorithm` is correctly bound to `Client.DefaultChecksumAlgo` config
+func TestPutMainBindPFlags(t *testing.T) {
+	server_utils.ResetTestState() // This reset pflags bind by viper
+	t.Cleanup(server_utils.ResetTestState)
+
+	// We need to re-bind the pflags with a helper function
+	putMainBindPFlags(putCmd.Flags())
+	require.NoError(t, viper.BindPFlag("config", rootCmd.PersistentFlags().Lookup("config")))
+
+	// We swap the putMain with a stub to only test the helper, not other stuff in putMain
+	// The goal is to test when config file and CLI flag is ready, helper can read the correct value
+	var gotChecksumAlgo string
+	savedRun := putCmd.Run
+	putCmd.Run = func(cmd *cobra.Command, args []string) {
+		require.NoError(t, config.InitClient()) // config is read here
+		gotChecksumAlgo = param.Client_DefaultChecksumAlgo.GetString()
+	}
+	t.Cleanup(func() { putCmd.Run = savedRun })
+
+	// Setup the path to temp pelican.yaml once and use it in all sub-tests
+	cfgPath := filepath.Join(t.TempDir(), "p.yaml")
+
+	type testcase struct {
+		name     string // name of the sub-test
+		cfgAlgo  string // checksum algorithm name in the temp pelican.yaml file, empty means no --config pelican.yaml is provided
+		flagAlgo string // checksum algorithm name provided in CLI flag --checksum-algorithm, empty means not provided
+		want     string // expected result
+	}
+
+	// Fill in the table of testcases
+	testcases := make([]testcase, 0)
+	algos := append(client.KnownChecksumTypesAsHttpDigest(), "")
+	for _, algo4flag := range algos {
+		for _, algo4yaml := range algos {
+			// Construct test name and expected result
+			var testname string
+			var want string
+			switch {
+			case algo4flag == "" && algo4yaml != "":
+				testname = "yaml only: " + algo4yaml
+				want = algo4yaml
+			case algo4flag != "" && algo4yaml == "":
+				testname = "CLI flag only: " + algo4flag
+				want = algo4flag
+			case algo4flag != "" && algo4yaml != "":
+				testname = "yaml: " + algo4yaml + ", CLI flag: " + algo4flag
+				want = algo4flag
+			default: // both are empty, skip the case entirely
+				continue
+			}
+
+			// Construct testcase and append
+			testcase := testcase{testname, algo4yaml, algo4flag, want}
+			testcases = append(testcases, testcase)
+		}
+	}
+
+	for _, tt := range testcases {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Cleanup(func() {
+				rootCmd.SetArgs(nil)
+				putCmd.SetContext(nil)
+				for _, fl := range []*pflag.Flag{putCmd.Flags().Lookup("checksum-algorithm"), rootCmd.PersistentFlags().Lookup("config")} {
+					require.NoError(t, fl.Value.Set(fl.DefValue))
+					fl.Changed = false
+				}
+			})
+
+			// Construct CLI arguments and create pelican.yaml file if needed
+			args := make([]string, 0)
+			args = append(args, "object", "put")
+			if tt.cfgAlgo != "" {
+				args = append(args, "--config", cfgPath)
+				require.NoError(t, os.WriteFile(cfgPath, []byte("Client:\n  DefaultChecksumAlgo: "+tt.cfgAlgo+"\n"), 0644))
+			}
+			if tt.flagAlgo != "" {
+				args = append(args, "--checksum-algorithm", tt.flagAlgo)
+			}
+			if tt.cfgAlgo == "" && tt.flagAlgo == "" {
+				require.Fail(t, "Checksum is provided by neither config yaml nor CLI flag.")
+			}
+			args = append(args, "dummy_src", "pelican://foo/bar")
+
+			// Drive the test
+			rootCmd.SetArgs(args)
+			require.NoError(t, rootCmd.Execute())
+			assert.Equal(t, tt.want, gotChecksumAlgo)
 		})
 	}
 }
