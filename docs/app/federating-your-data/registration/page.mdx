@@ -24,7 +24,7 @@ To register a prefix manually in advance, see [Federation Namespace Prefix Regis
 
 * **Transition Rules:** Claiming and submitting an `Incomplete` registration moves it to `Pending`. An administrator then moves it to `Approved` or `Denied`.
 * **Re-submitting:** Denial is non-final. Editing and resubmitting a `Denied` registration returns it to `Pending`.
-* **Trust Boundary:** Approval is the primary trust boundary. The Director only routes traffic to `Approved` services. Once approved, the owner can still update the description, institution, and security contact; the prefix, public key, site name, custom fields, and ownership can only be altered by an administrator (ownership through a transfer invite).
+* **Trust Boundary:** Approval is the primary trust boundary. The Director only routes traffic to `Approved` services. Once approved, the owner can still update the description, institution, and security contact; the prefix, public key, site name, custom fields, and ownership can only be altered by an administrator (ownership through the edit form's Owner field or a transfer invite).
 
 ## How Services Register
 
@@ -84,5 +84,5 @@ In Pelican 26.0+, ownership is bound to your Registry **User ID** rather than lo
 Administrators manage registrations via the Registry web UI (see [Serving a Pelican Registry](../operating-a-federation/registry.mdx)):
 
 * **Review Queue:** The dashboard lists **Pending Registrations** (complete forms awaiting your decision) above **Incomplete Registrations** (the server admin has not claimed or completed the form yet; nothing to review). Both lists offer deny and edit; approve is offered on `Pending` and `Denied` entries.
-* **Editing & Decisions:** You can edit registration fields before approving or denying a submission, even for unowned entries. Editing an Incomplete registration does not assign ownership, and it remains Incomplete until explicitly claimed. When denying a submission, you can update the description field to provide actionable feedback for the server admin before they resubmit.
+* **Editing & Decisions:** You can edit registration fields before approving or denying a submission, even for unowned entries. Editing an Incomplete registration without choosing an owner does not assign ownership, and it remains Incomplete until it is claimed or an owner is assigned. When denying a submission, you can update the description field to provide actionable feedback for the server admin before they resubmit.
 * **Transfer Invites:** You can generate an ownership-transfer link to reassign any approved registration to another active Pelican user account.

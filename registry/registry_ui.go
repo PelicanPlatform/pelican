@@ -583,10 +583,35 @@ func createUpdateNamespace(ctx *gin.Context, isUpdate bool) {
 	} else { // Update
 		existingStatus := existingNs.AdminMetadata.Status
 
-		// Ownership can never be set or changed through the request body.
-		// The tokenized-claim leg below overrides this for the one transition
-		// it explicitly authorizes: unowned -> caller via claimRegistration.
+		// Ownership is never set or changed through the request body, with two
+		// exceptions, each written through database.SetRegistrationOwner rather
+		// than the field update: a registry administrator may set or change the
+		// owner of any registration, and the tokenized-claim leg below binds an
+		// unowned registration to the key-holder.
+		adminAssignedOwner := ""
+		if isAdmin && ns.AdminMetadata.UserID != existingNs.AdminMetadata.UserID {
+			adminAssignedOwner = ns.AdminMetadata.UserID
+		}
 		ns.AdminMetadata.UserID = existingNs.AdminMetadata.UserID
+		// an empty adminAssignedOwner leaves the owner alone
+		if adminAssignedOwner != "" {
+			if err := validateRegistrationOwner(adminAssignedOwner); err != nil {
+				if errors.Is(err, errUnknownRegistrationOwner) {
+					ctx.JSON(http.StatusBadRequest, server_structs.SimpleApiResp{
+						Status: server_structs.RespFailed,
+						Msg:    fmt.Sprintf("Failed to assign the registration to a new owner: %v", err)})
+					return
+				}
+				log.Errorf("Failed to assign new owner %q to registration %d: %v", adminAssignedOwner, ns.ID, err)
+				ctx.JSON(http.StatusInternalServerError, server_structs.SimpleApiResp{
+					Status: server_structs.RespFailed,
+					Msg:    "Failed to assign the registration to a new owner: new owner lookup failed"})
+				return
+			}
+			// New owner is in memory by now. Next, the required-field validation below
+			// sees the owner; the row is written once the rest of the request validates.
+			ns.AdminMetadata.UserID = adminAssignedOwner
+		}
 
 		// Then check if the user has privilege to update
 		belongsTo, ok := resolveRegistrationOwnership(ctx, ns.ID, userId, isAdmin)
@@ -721,6 +746,28 @@ func createUpdateNamespace(ctx *gin.Context, isUpdate bool) {
 			}
 		}
 
+		if adminAssignedOwner != "" {
+			// updateRegistration deliberately never writes ownership, so the
+			// owner goes through its own primitive first.
+			if err := assignRegistrationOwner(ns.ID, adminAssignedOwner); err != nil {
+				log.Errorf("Failed to assign owner %q to registration %d: %v", adminAssignedOwner, ns.ID, err)
+				ctx.JSON(http.StatusInternalServerError, server_structs.SimpleApiResp{
+					Status: server_structs.RespFailed,
+					Msg:    "Failed to assign the registration owner"})
+				return
+			}
+			// The owner write advanced the row's UpdatedAt; re-read so the
+			// write below checks against the row as it is now.
+			existingNs, err = getRegistrationById(ns.ID)
+			if err != nil {
+				log.Errorf("Failed to re-read registration %d after assigning its owner: %v", ns.ID, err)
+				ctx.JSON(http.StatusInternalServerError, server_structs.SimpleApiResp{
+					Status: server_structs.RespFailed,
+					Msg:    "Error retrieving namespace"})
+				return
+			}
+		}
+
 		// If the user has privilege to update, go ahead
 		if err := updateRegistration(&ns, ownerEditOfApproved, existingNs.AdminMetadata.UpdatedAt); err != nil {
 			if errors.Is(err, errRegistrationModified) {
@@ -740,7 +787,8 @@ func createUpdateNamespace(ctx *gin.Context, isUpdate bool) {
 		// registration into the admin review queue. The only way an update
 		// reaches this point while still failing validation is the admin
 		// UserID bypass above: an admin correcting an unowned registration
-		// leaves it Incomplete until someone claims it. Denial is likewise not
+		// without naming its owner leaves it Incomplete until the operator
+		// claims it or an admin assigns the owner. Denial is likewise not
 		// final: editing a Denied registration (e.g. to fix the problem that
 		// led to the denial) resubmits it as Pending for another round of review.
 		if existingStatus == server_structs.RegIncomplete || existingStatus == server_structs.RegDenied {
