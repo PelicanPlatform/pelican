@@ -75,7 +75,7 @@ var (
 	LotmanLotExists     func(lotName string, errMsg *[]byte) int32
 	LotmanIsRoot        func(lotName string, errMsg *[]byte) int32
 	LotmanSetContextStr func(contextKey string, contextValue string, errMsg *[]byte) int32
-	LotmanGetContextStr func(key string, output *[]byte, errMsg *[]byte) int32
+	LotmanGetContextStr func(key string, output *unsafe.Pointer, errMsg *[]byte) int32
 	LotmanSetContextInt func(contextKey string, contextValue int32, errMsg *[]byte) int32
 	LotmanGetContextInt func(key string, output *int32, errMsg *[]byte) int32
 	// Functions that would normally take a char *** as an argument take an *unsafe.Pointer instead because
@@ -2355,6 +2355,18 @@ func GetAvailableCapacity(parentLotName string, startTimeMs, endTimeMs int64) (*
 		return nil, errors.Wrapf(err, "error unmarshalling available-capacity response %q", string(out))
 	}
 	return &ac, nil
+}
+
+// GetContextStr returns the string-valued lotman context variable stored under key.
+func GetContextStr(key string) (string, error) {
+	errMsg := make([]byte, 2048)
+	var output unsafe.Pointer
+	ret := LotmanGetContextStr(key, &output, &errMsg)
+	if ret != 0 {
+		trimBuf(&errMsg)
+		return "", errors.Errorf("error getting lotman context string %s: %s", key, string(errMsg))
+	}
+	return string(takeCString(&output)), nil
 }
 
 // SetContextInt sets an integer-valued lotman context variable (e.g. db_timeout).

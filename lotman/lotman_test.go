@@ -1007,15 +1007,9 @@ func TestStrictHierarchyContextSet(t *testing.T) {
 		{"admin_override", "false"},
 	}
 	for _, c := range cases {
-		out := make([]byte, 256)
-		errMsg := make([]byte, 2048)
-		ret := LotmanGetContextStr(c.key, &out, &errMsg)
-		if ret != 0 {
-			trimBuf(&errMsg)
-			t.Fatalf("LotmanGetContextStr(%s) failed: %s", c.key, string(errMsg))
-		}
-		trimBuf(&out)
-		assert.Equal(t, c.want, string(out), "context flag %s should be %q", c.key, c.want)
+		got, err := GetContextStr(c.key)
+		require.NoErrorf(t, err, "GetContextStr(%s)", c.key)
+		assert.Equal(t, c.want, got, "context flag %s should be %q", c.key, c.want)
 	}
 }
 
