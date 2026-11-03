@@ -94,7 +94,7 @@ var (
 	// by the renewal scheduler to enumerate just the lots that touch a given
 	// namespace path during the planning window, replacing the O(all lots)
 	// listAllLotsFull walk.
-	LotmanGetLotsForPath func(path string, recursive bool, timeLoMs int64, timeHiMs int64, includeReclaimed bool, output *[]byte, errMsg *[]byte) int32
+	LotmanGetLotsForPath func(path string, recursive bool, timeLoMs int64, timeHiMs int64, includeReclaimed bool, output *unsafe.Pointer, errMsg *[]byte) int32
 	// past_exp/past_del signatures gained a leading `int64 query_time` in lotman
 	// PR #52 to let callers reason about future or past states of the ledger
 	// (preview which lots will be expired/deletable by some timestamp). Pass
@@ -122,10 +122,10 @@ var (
 	LotmanUpdateLotUsageByDir func(updateJSON string, deltaMode bool, queryTimeMs int64, errMsg *[]byte) int32
 
 	// Functions returning a single JSON document via char **
-	LotmanGetPolicyAttributes  func(requestJSON string, output *[]byte, errMsg *[]byte) int32
-	LotmanGetLotDirs           func(lotName string, recursive bool, output *[]byte, errMsg *[]byte) int32
-	LotmanGetLotUsage          func(requestJSON string, output *[]byte, errMsg *[]byte) int32
-	LotmanGetAvailableCapacity func(parentLotName string, startTimeMs int64, endTimeMs int64, output *[]byte, errMsg *[]byte) int32
+	LotmanGetPolicyAttributes  func(requestJSON string, output *unsafe.Pointer, errMsg *[]byte) int32
+	LotmanGetLotDirs           func(lotName string, recursive bool, output *unsafe.Pointer, errMsg *[]byte) int32
+	LotmanGetLotUsage          func(requestJSON string, output *unsafe.Pointer, errMsg *[]byte) int32
+	LotmanGetAvailableCapacity func(parentLotName string, startTimeMs int64, endTimeMs int64, output *unsafe.Pointer, errMsg *[]byte) int32
 
 	// Lot deletion preserving children (vs. recursive delete)
 	LotmanRemoveLot func(lotName string, assignLTBRParentsToOrphans bool, assignLTBRParentsToNonOrphans bool, assignPolicyToChildren bool, overridePolicy bool, errMsg *[]byte) int32
@@ -2097,10 +2097,7 @@ func GetLotsFromDir(dir string, recursive bool, queryTimeMs int64) ([]string, er
 // namespace path during its planning window, which lets it scope work to
 // O(active subtree size) instead of O(total lot rows).
 func GetLotsForPath(path string, recursive bool, timeLoMs, timeHiMs int64, includeReclaimed bool) ([]Lot, error) {
-	// 64 KiB is generous; a typical query returns 2-5 lots × ~1 KiB each.
-	// trimBuf scans for the trailing null terminator so an oversized buffer
-	// is harmless.
-	output := make([]byte, 65536)
+	var output unsafe.Pointer
 	errMsg := make([]byte, 2048)
 	callerMutex.Lock()
 	defer callerMutex.Unlock()
@@ -2109,9 +2106,8 @@ func GetLotsForPath(path string, recursive bool, timeLoMs, timeHiMs int64, inclu
 		trimBuf(&errMsg)
 		return nil, errors.Errorf("error getting lots for path %s in window [%d, %d): %s", path, timeLoMs, timeHiMs, string(errMsg))
 	}
-	trimBuf(&output)
 	var lots []Lot
-	if err := json.Unmarshal(output, &lots); err != nil {
+	if err := json.Unmarshal(takeCString(&output), &lots); err != nil {
 		return nil, errors.Wrapf(err, "error unmarshalling lots-for-path JSON for %s", path)
 	}
 	return lots, nil
@@ -2278,7 +2274,7 @@ func GetPolicyAttributes(req PolicyAttrsRequest) (*RestrictiveMPA, error) {
 		return nil, errors.Wrap(err, "error marshalling policy-attributes request")
 	}
 	errMsg := make([]byte, 2048)
-	output := make([]byte, 4096)
+	var output unsafe.Pointer
 	callerMutex.Lock()
 	defer callerMutex.Unlock()
 	ret := LotmanGetPolicyAttributes(string(reqJSON), &output, &errMsg)
@@ -2286,10 +2282,10 @@ func GetPolicyAttributes(req PolicyAttrsRequest) (*RestrictiveMPA, error) {
 		trimBuf(&errMsg)
 		return nil, errors.Errorf("error getting policy attributes for %s: %s", req.LotName, string(errMsg))
 	}
-	trimBuf(&output)
+	out := takeCString(&output)
 	var rmpa RestrictiveMPA
-	if err := json.Unmarshal(output, &rmpa); err != nil {
-		return nil, errors.Wrapf(err, "error unmarshalling policy-attributes response %q", string(output))
+	if err := json.Unmarshal(out, &rmpa); err != nil {
+		return nil, errors.Wrapf(err, "error unmarshalling policy-attributes response %q", string(out))
 	}
 	return &rmpa, nil
 }
@@ -2298,7 +2294,7 @@ func GetPolicyAttributes(req PolicyAttrsRequest) (*RestrictiveMPA, error) {
 // paths owned by descendant lots are also included.
 func GetLotDirs(lotName string, recursive bool) ([]LotPath, error) {
 	errMsg := make([]byte, 2048)
-	output := make([]byte, 4096)
+	var output unsafe.Pointer
 	callerMutex.Lock()
 	defer callerMutex.Unlock()
 	ret := LotmanGetLotDirs(lotName, recursive, &output, &errMsg)
@@ -2306,10 +2302,10 @@ func GetLotDirs(lotName string, recursive bool) ([]LotPath, error) {
 		trimBuf(&errMsg)
 		return nil, errors.Errorf("error getting paths for %s: %s", lotName, string(errMsg))
 	}
-	trimBuf(&output)
+	out := takeCString(&output)
 	var paths []LotPath
-	if err := json.Unmarshal(output, &paths); err != nil {
-		return nil, errors.Wrapf(err, "error unmarshalling lot-dirs response %q", string(output))
+	if err := json.Unmarshal(out, &paths); err != nil {
+		return nil, errors.Wrapf(err, "error unmarshalling lot-dirs response %q", string(out))
 	}
 	return paths, nil
 }
@@ -2322,7 +2318,7 @@ func GetLotUsage(req UsageRequest) (*LotUsage, error) {
 		return nil, errors.Wrap(err, "error marshalling usage request")
 	}
 	errMsg := make([]byte, 2048)
-	output := make([]byte, 4096)
+	var output unsafe.Pointer
 	callerMutex.Lock()
 	defer callerMutex.Unlock()
 	ret := LotmanGetLotUsage(string(reqJSON), &output, &errMsg)
@@ -2330,10 +2326,10 @@ func GetLotUsage(req UsageRequest) (*LotUsage, error) {
 		trimBuf(&errMsg)
 		return nil, errors.Errorf("error getting usage for %s: %s", req.LotName, string(errMsg))
 	}
-	trimBuf(&output)
+	out := takeCString(&output)
 	var usage LotUsage
-	if err := json.Unmarshal(output, &usage); err != nil {
-		return nil, errors.Wrapf(err, "error unmarshalling usage response %q", string(output))
+	if err := json.Unmarshal(out, &usage); err != nil {
+		return nil, errors.Wrapf(err, "error unmarshalling usage response %q", string(out))
 	}
 	return &usage, nil
 }
@@ -2345,7 +2341,7 @@ func GetLotUsage(req UsageRequest) (*LotUsage, error) {
 // when strict_hierarchy is enabled.
 func GetAvailableCapacity(parentLotName string, startTimeMs, endTimeMs int64) (*AvailableCapacity, error) {
 	errMsg := make([]byte, 2048)
-	output := make([]byte, 4096)
+	var output unsafe.Pointer
 	callerMutex.Lock()
 	defer callerMutex.Unlock()
 	ret := LotmanGetAvailableCapacity(parentLotName, startTimeMs, endTimeMs, &output, &errMsg)
@@ -2353,10 +2349,10 @@ func GetAvailableCapacity(parentLotName string, startTimeMs, endTimeMs int64) (*
 		trimBuf(&errMsg)
 		return nil, errors.Errorf("error getting available capacity for %s: %s", parentLotName, string(errMsg))
 	}
-	trimBuf(&output)
+	out := takeCString(&output)
 	var ac AvailableCapacity
-	if err := json.Unmarshal(output, &ac); err != nil {
-		return nil, errors.Wrapf(err, "error unmarshalling available-capacity response %q", string(output))
+	if err := json.Unmarshal(out, &ac); err != nil {
+		return nil, errors.Wrapf(err, "error unmarshalling available-capacity response %q", string(out))
 	}
 	return &ac, nil
 }
