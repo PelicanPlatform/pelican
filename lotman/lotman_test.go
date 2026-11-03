@@ -1117,3 +1117,27 @@ func TestInitLotmanNestedNamespaces(t *testing.T) {
 	require.NotNil(t, a.MPA.MaxNumObjects)
 	assert.Equal(t, int64(-1), a.MPA.MaxNumObjects.Value)
 }
+
+// TestGetLotManyChildren reads back a root lot whose JSON is longer than
+// 4 KiB. Every top-level namespace is a direct child of root, and each
+// child name is a 36-character UUID, so ~100 namespaces is enough.
+func TestGetLotManyChildren(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
+	server_utils.ResetTestState()
+	server := getMockDiscoveryHost()
+	require.NoError(t, param.Federation_DiscoveryUrl.Set(server.URL))
+
+	const numNamespaces = 150
+	paths := make([]string, 0, numNamespaces)
+	for i := 0; i < numNamespaces; i++ {
+		paths = append(paths, fmt.Sprintf("/ns-%03d", i))
+	}
+	success, cleanup := setupLotmanFromConf(t, false, "LotmanManyChildren", server.URL, makeAds(paths...), withoutCacheDataLocations())
+	defer cleanup()
+	require.True(t, success)
+
+	lot, err := GetLot("root", false)
+	require.NoError(t, err)
+	require.NotNil(t, lot.Children)
+	require.Len(t, *lot.Children, numNamespaces)
+}
