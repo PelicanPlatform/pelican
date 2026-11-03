@@ -287,7 +287,7 @@ func (ac *authConfig) getResourceScopes(tokenStr string) (scopes []token_scopes.
 		return
 	}
 
-	scopes = token_scopes.ParseResourceScopeString(tok)
+	scopes = token_scopes.GrantedScopesInWlcg(tok)
 
 	return
 }

@@ -29,6 +29,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/jellydator/ttlcache/v3"
 	"github.com/lestrrat-go/jwx/v2/jwa"
 	"github.com/lestrrat-go/jwx/v2/jwk"
 	"github.com/lestrrat-go/jwx/v2/jwt"
@@ -670,5 +671,58 @@ func BenchmarkPathPrefixCheck(b *testing.B) {
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		_ = hasPathPrefix("/foo/bar/baz/qux/file.txt", "/foo/bar")
+	}
+}
+
+// TestGetResourceScopes verifies that getResourceScopes translates the
+// SciTokens scopes of a trusted token into the equivalent WLCG scopes,
+// while at the same time, WLCG token scope stays.
+func TestGetResourceScopes(t *testing.T) {
+	issuer := "https://issuer.example.com"
+	key := generateTestKey(t)
+	pubKey, err := key.PublicKey()
+	require.NoError(t, err)
+	keySet := jwk.NewSet()
+	require.NoError(t, keySet.AddKey(pubKey))
+
+	ac := &authConfig{}
+	ac.issuers.Store(&map[string]bool{issuer: true})
+	ac.issuerKeys = ttlcache.New[string, authConfigItem]()
+	ac.issuerKeys.Set(issuer, authConfigItem{set: keySet}, ttlcache.NoTTL)
+
+	tests := []struct {
+		name      string
+		scope     string
+		wantScope []token_scopes.ResourceScope
+	}{
+		{
+			"Read-becomes-storage.read",
+			"read:/foo",
+			[]token_scopes.ResourceScope{{Authorization: token_scopes.Wlcg_Storage_Read, Resource: "/foo"}},
+		},
+		{
+			"Write-becomes-storage.modify",
+			"write:/foo",
+			[]token_scopes.ResourceScope{{Authorization: token_scopes.Wlcg_Storage_Modify, Resource: "/foo"}},
+		},
+		{
+			"storage.read-stays",
+			"storage.read:/foo",
+			[]token_scopes.ResourceScope{{Authorization: token_scopes.Wlcg_Storage_Read, Resource: "/foo"}},
+		},
+		{
+			"storage.modify-stays",
+			"storage.modify:/foo",
+			[]token_scopes.ResourceScope{{Authorization: token_scopes.Wlcg_Storage_Modify, Resource: "/foo"}},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			tok := createTestToken(t, key, issuer, "test-user", nil, tt.scope)
+			scopes, gotIssuer, err := ac.getResourceScopes(tok)
+			require.NoError(t, err)
+			assert.Equal(t, issuer, gotIssuer)
+			assert.ElementsMatch(t, tt.wantScope, scopes)
+		})
 	}
 }
