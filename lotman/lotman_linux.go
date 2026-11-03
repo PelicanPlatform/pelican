@@ -60,9 +60,11 @@ var (
 	// Lotman func signatures we'll bind to the underlying C headers
 	LotmanVersion func() string
 	// Strings in go are immutable, so they're actually passed to the underlying SO as `const`. To get dynamic
-	// output, we need to pass a pointer to a byte array
+	// output, we need to pass a pointer to a byte array. The exception is `char **output`: those getters
+	// hand back a string they allocate with strdup, so they take an *unsafe.Pointer that takeCString
+	// copies out of and frees. A *[]byte there would have its data pointer overwritten and its length ignored.
 	LotmanAddLot              func(lotJSON string, errMsg *[]byte) int32
-	LotmanGetLotJSON          func(lotName string, recursive bool, output *[]byte, errMsg *[]byte) int32
+	LotmanGetLotJSON          func(lotName string, recursive bool, output *unsafe.Pointer, errMsg *[]byte) int32
 	LotmanAddToLot            func(additionsJSON string, errMsg *[]byte) int32
 	LotmanRemoveLotParents    func(removalsJSON string, errMsg *[]byte) int32
 	LotmanRemoveLotPaths      func(removalsJSON string, errMsg *[]byte) int32
@@ -130,6 +132,8 @@ var (
 
 	// Free a char ** allocated by lotman.
 	LotmanFreeStringList func(strList unsafe.Pointer)
+	// libc free, paired with the strdup behind lotman's `char **output` getters
+	cFree func(p unsafe.Pointer)
 )
 
 type (
@@ -376,6 +380,23 @@ func trimBuf(buf *[]byte) {
 	if nullIndex != -1 {
 		*buf = (*buf)[:nullIndex]
 	}
+}
+
+// takeCString copies the NUL-terminated C string at *p into Go memory, frees
+// the C allocation and clears *p. A nil *p yields nil.
+func takeCString(p *unsafe.Pointer) []byte {
+	if *p == nil {
+		return nil
+	}
+	n := 0
+	for *(*byte)(unsafe.Add(*p, n)) != 0 {
+		n++
+	}
+	out := make([]byte, n)
+	copy(out, unsafe.Slice((*byte)(*p), n))
+	cFree(*p)
+	*p = nil
+	return out
 }
 
 // Use the detected runtime to predict the location of the LotMan library.
@@ -1415,6 +1436,9 @@ func InitLotman(adsFromFed []server_structs.NamespaceAd) bool {
 	purego.RegisterLibFunc(&LotmanGetAvailableCapacity, lotmanLib, "lotman_get_available_capacity")
 	purego.RegisterLibFunc(&LotmanRemoveLot, lotmanLib, "lotman_remove_lot")
 	purego.RegisterLibFunc(&LotmanFreeStringList, lotmanLib, "lotman_free_string_list")
+	// dlsym on the lotman handle also searches the libc it links against, so
+	// this is the free that matches lotman's strdup.
+	purego.RegisterLibFunc(&cFree, lotmanLib, "free")
 
 	// Create the lot home dir (where lotman's sqlite db lives) and set the lot_home context
 	lotHome := param.Lotman_LotHome.GetString()
@@ -1607,20 +1631,18 @@ func CreateLot(newLot *Lot, caller string) error {
 // dedicated_GB = 2.0 but its parent lot "bar" has dedicated_GB = 1.0, then calling this
 // with recursive = true will indicate the restricting value and the lot it comes from.
 func GetLot(lotName string, recursive bool) (*Lot, error) {
-	// Haven't given much thought to these buff sizes yet
-	outputBuf := make([]byte, 4096)
+	var output unsafe.Pointer
 	errMsg := make([]byte, 2048)
 
 	callerMutex.Lock()
 	defer callerMutex.Unlock()
-	ret := LotmanGetLotJSON(lotName, recursive, &outputBuf, &errMsg)
+	ret := LotmanGetLotJSON(lotName, recursive, &output, &errMsg)
 	if ret != 0 {
 		trimBuf(&errMsg)
 		return nil, errors.Errorf("error getting lot JSON: %s", string(errMsg))
 	}
-	trimBuf(&outputBuf)
 	var lot Lot
-	err := json.Unmarshal(outputBuf, &lot)
+	err := json.Unmarshal(takeCString(&output), &lot)
 	if err != nil {
 		return nil, errors.Wrap(err, "error unmarshalling lot JSON")
 	}
