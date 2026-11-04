@@ -626,6 +626,12 @@ func configureEmbeddedIssuer(ctx context.Context, egrp *errgroup.Group, engine *
 		return errors.Wrap(err, "failed to register local issuer")
 	}
 
+	// Refuse to start with a malformed Issuer.TokenExchangeTrustedIssuers
+	// rather than failing on the first exchange that consults it.
+	if err := issuer.ValidateExternalTokenIssuers(); err != nil {
+		return errors.Wrap(err, "invalid Issuer.TokenExchangeTrustedIssuers")
+	}
+
 	// Apply a non-aborting middleware to the issuer route group so that
 	// handlers which inspect ctx.GetString("User") (e.g., device-verify)
 	// will see the identity extracted from the login cookie.  Unlike

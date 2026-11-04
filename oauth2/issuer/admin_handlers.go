@@ -351,6 +351,11 @@ const tokenExchangeGrantType = "urn:ietf:params:oauth:grant-type:token-exchange"
 // server) and receives a new access token, potentially with narrower scopes
 // or a different audience.
 //
+// A subject_token minted by an issuer listed in
+// Issuer.TokenExchangeTrustedIssuers is instead handed to
+// handleExternalTokenExchange, which maps it to a Pelican account and computes
+// the scopes from Pelican's own policy.
+//
 // This grant type is only available to clients whose grant_types include
 // "urn:ietf:params:oauth:grant-type:token-exchange".
 func handleTokenExchange(ctx *gin.Context, provider *OIDCProvider) {
@@ -409,6 +414,18 @@ func handleTokenExchange(ctx *gin.Context, provider *OIDCProvider) {
 	if subjectTokenType == "" {
 		subjectTokenType = "urn:ietf:params:oauth:token-type:access_token"
 	}
+
+	// A subject_token minted by an operator-trusted external issuer (a
+	// Keycloak realm, say) is verified against that issuer's keys and mapped
+	// to a Pelican account; see external_exchange_handler.go. Everything
+	// else continues down the same-issuer path below.
+	if entry, err := externalIssuerForSubjectToken(subjectToken); err != nil {
+		log.WithError(err).Error("Embedded issuer: Issuer.TokenExchangeTrustedIssuers is invalid; tokens from external issuers cannot be exchanged")
+	} else if entry != nil {
+		handleExternalTokenExchange(ctx, provider, dc, entry, subjectToken, subjectTokenType)
+		return
+	}
+
 	if subjectTokenType != "urn:ietf:params:oauth:token-type:access_token" {
 		ctx.JSON(http.StatusBadRequest, gin.H{
 			"error":             "invalid_request",

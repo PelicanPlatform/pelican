@@ -197,6 +197,7 @@ type Config struct {
 		RefreshTokenGracePeriod time.Duration `mapstructure:"refreshtokengraceperiod" yaml:"RefreshTokenGracePeriod"`
 		RefreshTokenLifetime time.Duration `mapstructure:"refreshtokenlifetime" yaml:"RefreshTokenLifetime"`
 		ScitokensServerLocation string `mapstructure:"scitokensserverlocation" yaml:"ScitokensServerLocation"`
+		TokenExchangeTrustedIssuers any `mapstructure:"tokenexchangetrustedissuers" yaml:"TokenExchangeTrustedIssuers"`
 		TomcatLocation string `mapstructure:"tomcatlocation" yaml:"TomcatLocation"`
 		UserStripDomain bool `mapstructure:"userstripdomain" yaml:"UserStripDomain"`
 	} `mapstructure:"issuer" yaml:"Issuer"`
@@ -801,6 +802,7 @@ type configWithType struct {
 		RefreshTokenGracePeriod struct { Type string; Value time.Duration }
 		RefreshTokenLifetime struct { Type string; Value time.Duration }
 		ScitokensServerLocation struct { Type string; Value string }
+		TokenExchangeTrustedIssuers struct { Type string; Value any }
 		TomcatLocation struct { Type string; Value string }
 		UserStripDomain struct { Type string; Value bool }
 	}

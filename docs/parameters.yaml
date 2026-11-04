@@ -5336,6 +5336,92 @@ type: object
 default: []
 components: ["origin"]
 ---
+name: Issuer.TokenExchangeTrustedIssuers
+description: |+
+  External OIDC issuers whose tokens the embedded issuer accepts as the `subject_token` of an
+  RFC 8693 token exchange, for example a Keycloak realm whose users run JupyterLab sessions that
+  need Pelican transfer tokens.
+
+  The external token only proves who the user is. Its issuer and subject must match an identity
+  already linked to a Pelican account (the user signed in to this server's web interface through
+  that identity provider, or an administrator linked it), and the account must be active and have
+  accepted the current acceptable use policy. The scopes of the exchanged token are computed from
+  `Issuer.AuthorizationTemplates` and collection ACLs exactly as for a browser login, then narrowed
+  to the requested `scope`, which is required. The exchanged token names the presenting client in an
+  `act` claim.
+
+  Each entry is an object with these keys:
+
+  - `Issuer` (required): must equal the token's `iss` claim exactly. Signing keys are found through
+    OIDC discovery and refreshed when the issuer rotates them.
+  - `Audiences` (required): at least one must appear in the token's `aud` claim. With Keycloak, give
+    the application's client an audience mapper for a client representing this server, and retarget
+    the user's token with Keycloak's standard token exchange using that `audience`.
+  - `AllowedClients` (required): IDs of this issuer's clients (see
+    `pelican-server origin issuer client create`) that may present tokens from `Issuer`. They also
+    need the `urn:ietf:params:oauth:grant-type:token-exchange` grant type.
+  - `SubjectClaim`: the claim identifying the user. Defaults to `sub`.
+  - `IdentityIssuer`: the issuer whose identities `SubjectClaim` carries. Defaults to `Issuer`. Set it
+    when the external issuer is a broker relaying the identity of an upstream provider this server also
+    signs users in with, such as a Keycloak realm brokering CILogon for an origin whose web login uses
+    CILogon: the account is then found by that provider's subject, as recorded at login. This trusts
+    the broker to vouch for the provider's identities, so `SubjectClaim` must name the relayed claim,
+    `RequiredClaims` must tie the token to a login through the provider (Keycloak's
+    `identity_provider` session note, for example), and `AssertGroups` is not allowed.
+    The broker must set the relayed claim at every login, not only the first; with Keycloak, that
+    means a User Session Note Mapper on the identity provider with sync mode Force.
+  - `RequiredClaims`: a list of `claim`/`value` pairs the token must carry, such as the `azp` of the
+    client the token was issued to.
+  - `AssertGroups`: treat the token's group claim as current group membership, mirrored as at login.
+    Allowed only for the issuer users sign in with (`OIDC.Issuer`) while `Issuer.GroupSource` is
+    `oidc`; otherwise groups come from Pelican's records alone. A token without the claim leaves the
+    mirrored memberships untouched.
+  - `GroupClaim`: the group claim. Defaults to `Issuer.OIDCGroupClaim`.
+  - `SubjectTokenTypes`: accepted `subject_token_type` values. Defaults to
+    `urn:ietf:params:oauth:token-type:access_token` and `urn:ietf:params:oauth:token-type:jwt`;
+    `urn:ietf:params:oauth:token-type:id_token` may also be listed.
+  - `MaxTokenAge`: refuse tokens issued longer ago than this duration.
+  - `SingleUse`: refuse a token whose `jti` was already exchanged at this namespace's issuer, and
+    tokens without a `jti`.
+  - `AllowRefreshTokens`: let clients holding the `refresh_token` grant receive a refresh token when
+    they request `offline_access`. A refreshed token keeps the scopes granted at exchange time, while
+    a new exchange re-evaluates the user's current access, so re-exchanging is preferred.
+
+  Example:
+
+  ```yaml
+  Issuer:
+    TokenExchangeTrustedIssuers:
+      - Issuer: https://keycloak.example.org/realms/ndp
+        Audiences: ["pelican-origin"]
+        AllowedClients: ["<client ID printed by pelican-server origin issuer client create>"]
+        RequiredClaims:
+          - claim: azp
+            value: ndp-jupyterhub
+        AssertGroups: true
+        SingleUse: true
+  ```
+
+  A Keycloak realm brokering CILogon, for an origin whose own web login uses CILogon:
+
+  ```yaml
+  Issuer:
+    TokenExchangeTrustedIssuers:
+      - Issuer: https://keycloak.example.org/realms/ndp
+        IdentityIssuer: https://cilogon.org
+        SubjectClaim: upstream_sub
+        Audiences: ["pelican-origin"]
+        AllowedClients: ["<client ID printed by pelican-server origin issuer client create>"]
+        RequiredClaims:
+          - claim: azp
+            value: ndp-jupyterhub
+          - claim: identity_provider
+            value: cilogon
+  ```
+type: object
+default: []
+components: ["origin"]
+---
 name: Issuer.RedirectUris
 description: |+
   The list of redirect URIs for Issuer Clients to use in the Authorization Code Flow. Used to enable the use of a

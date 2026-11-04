@@ -256,6 +256,7 @@ var runtimeConfigurableMap = map[string]bool{
 	"Issuer.RefreshTokenGracePeriod": false,
 	"Issuer.RefreshTokenLifetime": false,
 	"Issuer.ScitokensServerLocation": false,
+	"Issuer.TokenExchangeTrustedIssuers": false,
 	"Issuer.TomcatLocation": false,
 	"Issuer.UserStripDomain": false,
 	"IssuerKey": false,
@@ -1593,6 +1594,7 @@ var allParameterNames = []string{
 	"Issuer.RefreshTokenGracePeriod",
 	"Issuer.RefreshTokenLifetime",
 	"Issuer.ScitokensServerLocation",
+	"Issuer.TokenExchangeTrustedIssuers",
 	"Issuer.TomcatLocation",
 	"Issuer.UserStripDomain",
 	"IssuerKey",
@@ -2513,6 +2515,7 @@ var (
 	GeoIPOverrides = ObjectParam{"GeoIPOverrides"}
 	Issuer_AuthorizationTemplates = ObjectParam{"Issuer.AuthorizationTemplates"}
 	Issuer_OIDCAuthenticationRequirements = ObjectParam{"Issuer.OIDCAuthenticationRequirements"}
+	Issuer_TokenExchangeTrustedIssuers = ObjectParam{"Issuer.TokenExchangeTrustedIssuers"}
 	LocalCache_StorageDirs = ObjectParam{"LocalCache.StorageDirs"}
 	Lotman_PolicyDefinitions = ObjectParam{"Lotman.PolicyDefinitions"}
 	Origin_Exports = ObjectParam{"Origin.Exports"}
@@ -3063,6 +3066,7 @@ func init() {
 		"GeoIPOverrides": GeoIPOverrides,
 		"Issuer.AuthorizationTemplates": Issuer_AuthorizationTemplates,
 		"Issuer.OIDCAuthenticationRequirements": Issuer_OIDCAuthenticationRequirements,
+		"Issuer.TokenExchangeTrustedIssuers": Issuer_TokenExchangeTrustedIssuers,
 		"LocalCache.StorageDirs": LocalCache_StorageDirs,
 		"Lotman.PolicyDefinitions": Lotman_PolicyDefinitions,
 		"Origin.Exports": Origin_Exports,
