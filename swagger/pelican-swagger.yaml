@@ -4879,21 +4879,20 @@ paths:
             $ref: "#/definitions/ErrorModelV2"
   /origin_ui/exports/prefixes:
     get:
-      summary: Slim FederationPrefix list — namespaces the origin exports
+      summary: Public-info slice of the origin's exports
       description: >-
-        `Authentication Required`. Returns just the
-        `FederationPrefix` of each configured export, with no storage
-        paths, S3 credentials, Globus IDs, or registry edit-URL
-        tokens. Reachable by any authenticated caller — the prefixes
-        themselves are advertised to the registry, so listing them
-        leaks nothing the federation can't already see.
+        `Authentication Required`. Returns, for each configured export,
+        its `FederationPrefix` and whether it allows public reads, plus
+        the origin's data URL (`Origin.Url`). It includes no storage
+        paths, S3 credentials, Globus IDs, or registry edit-URL tokens.
+        Reachable by any authenticated caller, not only admins: all of
+        this is already advertised to the federation.
 
 
-        Drives the collection-onboarding form's prefix dropdown so a
-        collection-admin (who isn't a system admin and so can't reach
-        the full /origin_ui/exports response) can still pick an
-        exported prefix. Callers who need the full export details
-        (storage, credentials) should use /origin_ui/exports.
+        Drives the collection-onboarding form's prefix dropdown and the
+        web object browser, both of which non-admin users reach. Callers
+        who need the full export details (storage, credentials) should
+        use /origin_ui/exports.
       tags:
         - "origin_ui"
       produces:
@@ -4909,6 +4908,20 @@ paths:
                 items:
                   type: string
                 description: FederationPrefix strings, in declaration order.
+              exports:
+                type: array
+                description: One entry per export, in declaration order.
+                items:
+                  type: object
+                  properties:
+                    federationPrefix:
+                      type: string
+                    publicRead:
+                      type: boolean
+                      description: Whether the export can be read without a token.
+              originUrl:
+                type: string
+                description: The origin's data endpoint (`Origin.Url`).
         "401":
           description: Authentication required to perform this action
           schema:

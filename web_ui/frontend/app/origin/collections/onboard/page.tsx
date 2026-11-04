@@ -85,22 +85,8 @@ import type { User as ApiUser } from '@/helpers/api/User/types';
 import type { Group as ApiGroup } from '@/helpers/api/Group/types';
 import { getUser } from '@/helpers/login';
 import { hasScope } from '@/index';
-// Slim "just the FederationPrefix list" endpoint — see
-// origin/exports.go's handleExportPrefixes. We can't reuse the
-// /origin_ui/exports endpoint here because it's gated to system
-// admins (it returns storage credentials and registry edit-URL
-// tokens); collection-admins running this form would 403 and the
-// dropdown would be empty, leading to the misleading "no exports
-// configured" warning.
-const fetchExportPrefixes = async (): Promise<string[]> => {
-  const r = await fetch('/api/v1.0/origin_ui/exports/prefixes');
-  if (!r.ok) {
-    throw new Error(`Failed to fetch export prefixes: ${r.statusText}`);
-  }
-  const json = await r.json();
-  return Array.isArray(json?.prefixes) ? json.prefixes : [];
-};
-
+import { OriginExportService } from '@/helpers/api/OriginExport';
+import useServiceSWR from '@/hooks/useServiceSWR';
 // Per-row source: either we're creating a brand-new group, or the
 // admin is re-using one that already exists (and is visible to them
 // via /groups, which the backend filters by membership/admin/owner
@@ -295,18 +281,15 @@ const OnboardForm: React.FC = () => {
   // the form. Uses /origin_ui/exports/prefixes — a public-info slice
   // of the full exports endpoint — so a collection-admin (not a
   // system admin) can also drive this form.
-  const { data: exportPrefixesData } = useSWR(
-    'origin/exports/prefixes',
-    () =>
-      alertOnError(
-        fetchExportPrefixes,
-        'Failed to load origin exports',
-        dispatch
-      ),
+  const { data: exportPrefixesData } = useServiceSWR(
+    'Failed to load origin exports',
+    OriginExportService,
+    'getPrefixes',
+    [],
     { revalidateOnFocus: false }
   );
   const exportPrefixes = useMemo<string[]>(
-    () => exportPrefixesData ?? [],
+    () => exportPrefixesData?.prefixes ?? [],
     [exportPrefixesData]
   );
 
