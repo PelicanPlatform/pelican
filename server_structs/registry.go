@@ -20,6 +20,8 @@ package server_structs
 
 import (
 	"crypto/rand"
+	"net/url"
+	"slices"
 	"strings"
 	"time"
 
@@ -62,6 +64,72 @@ type Registration struct {
 	Identity      string                 `json:"identity" post:"exclude"`
 	AdminMetadata AdminMetadata          `json:"admin_metadata" gorm:"serializer:json"`
 	CustomFields  map[string]interface{} `json:"custom_fields" gorm:"serializer:json"`
+	// AuthState, when set on an approved namespace registration, is sent to
+	// director in place of an origin ad while no origin for the prefix is
+	// online. nil (SQL NULL) keeps today's behavior: the namespace exists in the
+	// federation only while an origin advertises it.
+	AuthState *NamespaceAuthState `json:"auth_state" gorm:"column:auth_state;serializer:json"`
+}
+
+type NamespaceAuthState struct {
+	Capabilities    Capabilities          `json:"capabilities"`
+	TokenGeneration []TokenGenResponse    `json:"tokenGeneration"`
+	TokenIssuer     []TokenIssuerResponse `json:"tokenIssuer"`
+}
+
+// ToNamespaceAd builds a NamespaceAd for prefix from the stored auth state.
+// It returns an error if the auth state is nil or an issuer fails ParseIssuerUrl.
+func (st *NamespaceAuthState) ToNamespaceAd(prefix string) (NamespaceAd, error) {
+	if st == nil {
+		return NamespaceAd{}, errors.New("namespace registration has no auth state")
+	}
+	ad := NamespaceAd{
+		Path: prefix,
+		Caps: st.Capabilities,
+	}
+	for _, gen := range st.TokenGeneration {
+		issuer, err := ParseIssuerUrl(gen.CredentialIssuer)
+		if err != nil {
+			return NamespaceAd{}, errors.Wrapf(err, "invalid token generation issuer for %s", prefix)
+		}
+		ad.Generation = append(ad.Generation, TokenGen{
+			Strategy:         gen.Strategy,
+			VaultServer:      gen.VaultServer,
+			MaxScopeDepth:    gen.MaxScopeDepth,
+			CredentialIssuer: issuer,
+		})
+	}
+	for _, iss := range st.TokenIssuer {
+		issuer, err := ParseIssuerUrl(iss.IssuerUrl)
+		if err != nil {
+			return NamespaceAd{}, errors.Wrapf(err, "invalid token issuer for %s", prefix)
+		}
+		ad.Issuer = append(ad.Issuer, TokenIssuer{
+			IssuerUrl:       issuer,
+			BasePaths:       slices.Clone(iss.BasePaths),
+			RestrictedPaths: slices.Clone(iss.RestrictedPaths),
+		})
+	}
+	return ad, nil
+}
+
+// ParseIssuerUrl parses a token issuer and requires an absolute https URL:
+// the issuer's keys are fetched from it and tokens are matched against it,
+// so a relative, empty, or plaintext issuer can never authorize a request.
+// The registry applies it when an auth state is submitted and ToNamespaceAd
+// when one is read back, so both sides agree on what an issuer is.
+func ParseIssuerUrl(raw string) (url.URL, error) {
+	if raw == "" {
+		return url.URL{}, errors.New("issuer is empty")
+	}
+	parsed, err := url.Parse(raw)
+	if err != nil {
+		return url.URL{}, errors.Wrapf(err, "issuer %q is not a valid url", raw)
+	}
+	if parsed.Scheme != "https" || parsed.Host == "" {
+		return url.URL{}, errors.Errorf("issuer %q must be an absolute https url", raw)
+	}
+	return *parsed, nil
 }
 
 type (
