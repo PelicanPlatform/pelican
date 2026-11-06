@@ -121,9 +121,9 @@ func ParseResourceScopes(scopes []string) []ResourceScope {
 	return result
 }
 
-// GrantedScopesInWlcg gets a list of scopes granted by the token in WLCG format
+// GrantedScopes gets a list of scopes granted by the token
 // If any scope is written in SciToken format, translate it to WLCG token format
-func GrantedScopesInWlcg(tok jwt.Token) []ResourceScope {
+func GrantedScopes(tok jwt.Token) []ResourceScope {
 	scopeAny, ok := tok.Get("scope")
 	if !ok {
 		return []ResourceScope{}
@@ -134,12 +134,6 @@ func GrantedScopesInWlcg(tok jwt.Token) []ResourceScope {
 	}
 	scopes := ParseResourceScopes(strings.Split(scopeString, " "))
 
-	// TODO: implement abstraction for action
-	// The local cache authz logic currently use WLCG token scope
-	// to describe actions. This is not ideal. Ideally, action should be
-	// independent of token types. But luckily, all SciToken scopes can be
-	// translated to WLCG token scopes equivalently. This is a quick fix
-	// and we should implement an abstraction for actions in the future.
 	for i, scope := range scopes {
 		switch scope.Authorization {
 		case Scitokens_Read:

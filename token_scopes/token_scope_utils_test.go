@@ -127,32 +127,32 @@ func TestResourceScopes(t *testing.T) {
 	}
 }
 
-func TestGrantedScopesInWlcg(t *testing.T) {
+func TestGrantedScopes(t *testing.T) {
 	tok := jwt.New()
 
 	require.NoError(t, tok.Set("scope", "blah"))
-	assert.Equal(t, []ResourceScope{{Authorization: TokenScope("blah"), Resource: "/"}}, GrantedScopesInWlcg(tok))
+	assert.Equal(t, []ResourceScope{{Authorization: TokenScope("blah"), Resource: "/"}}, GrantedScopes(tok))
 
 	require.NoError(t, tok.Set("scope", 5))
-	assert.Equal(t, []ResourceScope{}, GrantedScopesInWlcg(tok))
+	assert.Equal(t, []ResourceScope{}, GrantedScopes(tok))
 
 	require.NoError(t, tok.Set("scope", "foo bar"))
-	assert.Equal(t, []ResourceScope{{Authorization: TokenScope("foo"), Resource: "/"}, {Authorization: TokenScope("bar"), Resource: "/"}}, GrantedScopesInWlcg(tok))
+	assert.Equal(t, []ResourceScope{{Authorization: TokenScope("foo"), Resource: "/"}, {Authorization: TokenScope("bar"), Resource: "/"}}, GrantedScopes(tok))
 
 	require.NoError(t, tok.Set("scope", "storage.create:/foo"))
-	assert.Equal(t, []ResourceScope{{Authorization: Wlcg_Storage_Create, Resource: "/foo"}}, GrantedScopesInWlcg(tok))
+	assert.Equal(t, []ResourceScope{{Authorization: Wlcg_Storage_Create, Resource: "/foo"}}, GrantedScopes(tok))
 
 	// SciToken format is translated to equivalent WLCG token format
 	require.NoError(t, tok.Set("scope", "read:/foo"))
-	assert.Equal(t, []ResourceScope{{Authorization: Wlcg_Storage_Read, Resource: "/foo"}}, GrantedScopesInWlcg(tok))
+	assert.Equal(t, []ResourceScope{{Authorization: Wlcg_Storage_Read, Resource: "/foo"}}, GrantedScopes(tok))
 
 	require.NoError(t, tok.Set("scope", "write:/foo"))
-	assert.Equal(t, []ResourceScope{{Authorization: Wlcg_Storage_Modify, Resource: "/foo"}}, GrantedScopesInWlcg(tok))
+	assert.Equal(t, []ResourceScope{{Authorization: Wlcg_Storage_Modify, Resource: "/foo"}}, GrantedScopes(tok))
 
 	// Other token formats, e.g., Lotman, are untouched
 	require.NoError(t, tok.Set("scope", "lot.read:/foo"))
-	assert.Equal(t, []ResourceScope{{Authorization: Lot_Read, Resource: "/foo"}}, GrantedScopesInWlcg(tok))
+	assert.Equal(t, []ResourceScope{{Authorization: Lot_Read, Resource: "/foo"}}, GrantedScopes(tok))
 
 	require.NoError(t, tok.Set("scope", "lot.modify:/foo"))
-	assert.Equal(t, []ResourceScope{{Authorization: Lot_Modify, Resource: "/foo"}}, GrantedScopesInWlcg(tok))
+	assert.Equal(t, []ResourceScope{{Authorization: Lot_Modify, Resource: "/foo"}}, GrantedScopes(tok))
 }
