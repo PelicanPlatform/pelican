@@ -52,6 +52,7 @@ type (
 )
 
 // HealthStatusEnum are stored as Prometheus values and internal struct
+// If these values or their order are changed, be sure to update docs/public/origin-dashboard-template.json
 const (
 	StatusShuttingDown HealthStatusEnum = iota + 1
 	StatusCritical
