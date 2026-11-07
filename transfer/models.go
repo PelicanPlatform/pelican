@@ -20,8 +20,6 @@ package transfer
 
 import (
 	"time"
-
-	"github.com/pelicanplatform/pelican/client_agent"
 )
 
 // TransferCredential represents a stored credential in the database.
@@ -91,52 +89,20 @@ func (TransferJob) TableName() string {
 }
 
 // API request/response types
+//
+// The files in cmd/ that are built into the client binary must not import
+// this package, because doing so would link in the transfer server
+// and everything it imports. Types and constants that those files
+// use directly belong in server_structs/transfer.go instead.
+// Where those files send or read one of the types in this package, they use
+// untyped maps keyed by the JSON field names. Renaming a field
+// can therefore break one of those files without breaking the build.
 
 // CredentialCreateRequest is the request body for creating a credential.
 type CredentialCreateRequest struct {
 	Name        string `json:"name" binding:"required"`
 	AccessToken string `json:"access_token" binding:"required"`
 	TokenIssuer string `json:"token_issuer,omitempty"`
-}
-
-// CredentialResponse is the public view of a credential (no secrets).
-type CredentialResponse struct {
-	ID             string     `json:"id"`
-	Name           string     `json:"name"`
-	CredentialType string     `json:"credential_type"`
-	TokenIssuer    string     `json:"token_issuer,omitempty"`
-	TokenExpiry    *time.Time `json:"token_expiry,omitempty"`
-	LastUsedAt     *time.Time `json:"last_used_at,omitempty"`
-	CreatedAt      time.Time  `json:"created_at"`
-	UpdatedAt      time.Time  `json:"updated_at"`
-}
-
-// The OAuth2 grant types a registered client can be selected for.
-//
-// findOAuthClientForGrant matches a stored client by comparing these strings
-// against the whitespace-separated grant_types recorded on the row, so the
-// value a client is registered with has to match the value the lookup asks
-// for exactly.  They are constants rather than literals at each site because a
-// client registered with a near-miss spelling is not rejected anywhere -- it
-// simply never matches, and the bootstrap fails later with "no OAuth client
-// configured for this issuer".
-const (
-	GrantTypeTokenExchange     = "urn:ietf:params:oauth:grant-type:token-exchange"
-	GrantTypeAuthorizationCode = "authorization_code"
-)
-
-// SupportedGrantTypes lists the grants a client may be registered for, in the
-// order they are preferred when more than one is available.
-var SupportedGrantTypes = []string{GrantTypeAuthorizationCode, GrantTypeTokenExchange}
-
-// OAuthClientCreateRequest is the request body for creating an OAuth2 client.
-type OAuthClientCreateRequest struct {
-	Name         string `json:"name" binding:"required"`
-	IssuerURL    string `json:"issuer_url" binding:"required"`
-	ClientID     string `json:"client_id" binding:"required"`
-	ClientSecret string `json:"client_secret" binding:"required"`
-	GrantTypes   string `json:"grant_types,omitempty"`
-	Scopes       string `json:"scopes,omitempty"`
 }
 
 // OAuthClientResponse is the public view of an OAuth2 client (no secrets).
@@ -179,40 +145,6 @@ type TransferJobResponse struct {
 	Status    string         `json:"status"`
 	CreatedAt time.Time      `json:"created_at"`
 	Transfers []TransferItem `json:"transfers"`
-}
-
-// TransferJobStatus represents the full status of a transfer job.
-//
-// Progress is the job's live byte and transfer counts, reusing the shape the
-// client agent already publishes for its own jobs so that a reader of either
-// API sees the same field names. It is a pointer, and absent from the JSON,
-// precisely when the server cannot know: a job that has been evicted from the
-// transfer manager's memory is reconstructed from its durable record, which
-// carries no byte counts. A present Progress with zero bytes means no bytes
-// have moved yet; an absent one means nobody can say.
-type TransferJobStatus struct {
-	JobID              string                    `json:"job_id"`
-	Status             string                    `json:"status"`
-	CreatedAt          time.Time                 `json:"created_at"`
-	CompletedAt        *time.Time                `json:"completed_at,omitempty"`
-	SourceCredentialID string                    `json:"source_credential_id,omitempty"`
-	DestCredentialID   string                    `json:"dest_credential_id,omitempty"`
-	Progress           *client_agent.JobProgress `json:"progress,omitempty"`
-	Error              string                    `json:"error,omitempty"`
-}
-
-// TransferJobListResponse is a paginated list of transfer jobs.
-type TransferJobListResponse struct {
-	Jobs   []TransferJobStatus `json:"jobs"`
-	Total  int                 `json:"total"`
-	Limit  int                 `json:"limit"`
-	Offset int                 `json:"offset"`
-}
-
-// ErrorResponse is a standard error response.
-type ErrorResponse struct {
-	Code  string `json:"code"`
-	Error string `json:"error"`
 }
 
 // ownerIdentity represents the authenticated user, resolved to a users table ID.
