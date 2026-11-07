@@ -6,6 +6,26 @@ title: pelican plugin stage
 
 Run pelican CLI to stage files as a HTCSS shadow plugin
 
+### Synopsis
+
+Copy files from a locally mounted origin to a "shadow origin". The files
+to copy are given as arguments or, with --hook, by the TransferInput
+attribute of a job ClassAd read from standard input. In hook mode, the
+command then prints a new TransferInput that refers to the shadow copies.
+Inputs that are not in the local origin are left unchanged.
+
+Each shadow copy is given a unique name derived from the local file's
+name and metadata. A file that is modified locally gets a new name, so
+it can change without causing cache consistency issues.
+
+Terminology:
+- Origin prefix: Where the local origin exports its files in the OSDF
+  namespace. Example: osdf://osg-connect/protected
+- Mount prefix: Where the files under the origin prefix are mounted in
+  the local filesystem. Example: /mnt/cephfs/protected
+- Shadow prefix: Where the shadow copies are uploaded in the OSDF
+  namespace. Example: osdf://osg-connect-shadow/protected
+
 ```
 pelican plugin stage [flags]
 ```
