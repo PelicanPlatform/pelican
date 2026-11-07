@@ -1,0 +1,177 @@
+---
+name: Check Client Binary
+
+# Keep the client binary free of server code and other bloat.
+#
+# To run a check locally, pass its name to the script. For example:
+#
+#   GOOS=linux GOARCH=amd64 .github/scripts/client-binary/check_client_binary.py reflect
+
+on:
+  push:
+    branches:
+      - "main"
+      - "v[0-9]+.[0-9]+.*"
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  check-build-config:
+    name: Check build config
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+
+      - name: Check that the checks build the client as GoReleaser does
+        run: .github/scripts/client-binary/check_client_binary.py config
+
+  check-client-deps:
+    name: Check dependencies
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+
+      - name: Set Go version
+        # Determine the string to use in setup-go's "go-version" input.
+        id: go-version
+        run: |
+          version=$(grep -E '^go[[:space:]]*[0-9]+\.[0-9]+' go.mod | grep -oE '[0-9]+\.[0-9]+')
+          echo "version=${version}.x" >> "$GITHUB_OUTPUT"
+
+      - name: Set up Go
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e  # v7.0.0
+        with:
+          go-version: "${{ steps.go-version.outputs.version }}"
+          check-latest: true
+          cache: false
+
+      - name: Check the client's dependencies on this module's packages
+        run: .github/scripts/client-binary/check_client_binary.py deps
+
+  check-client-reflect:
+    name: Check for reflection (${{ matrix.goos }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        goos: [linux, darwin, windows]
+    env:
+      GOOS: ${{ matrix.goos }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+
+      - name: Set Go version
+        # Determine the string to use in setup-go's "go-version" input.
+        id: go-version
+        run: |
+          version=$(grep -E '^go[[:space:]]*[0-9]+\.[0-9]+' go.mod | grep -oE '[0-9]+\.[0-9]+')
+          echo "version=${version}.x" >> "$GITHUB_OUTPUT"
+
+      - name: Set up Go
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e  # v7.0.0
+        with:
+          go-version: "${{ steps.go-version.outputs.version }}"
+          check-latest: true
+          cache: false
+
+      - name: Check for calling methods by name via reflection
+        run: .github/scripts/client-binary/check_client_binary.py reflect
+
+  check-client-size:
+    name: Check size (${{ matrix.goos }})
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: read  # the job reads the pull request's labels
+    strategy:
+      fail-fast: false
+      matrix:
+        goos: [linux, darwin, windows]
+    env:
+      GOOS: ${{ matrix.goos }}
+      # The most that the binary may grow, relative to the reference commit.
+      MAX_GROWTH_PERCENT: 5
+      # For a pull request with this label, the job only warns
+      # about too much growth. check_client_binary.py names the label
+      # in its error message.
+      GROWTH_LABEL: client-growth-expected
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+
+      - name: Set Go version
+        # Determine the string to use in setup-go's "go-version" input.
+        id: go-version
+        run: |
+          version=$(grep -E '^go[[:space:]]*[0-9]+\.[0-9]+' go.mod | grep -oE '[0-9]+\.[0-9]+')
+          echo "version=${version}.x" >> "$GITHUB_OUTPUT"
+
+      - name: Set up Go
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e  # v7.0.0
+        with:
+          go-version: "${{ steps.go-version.outputs.version }}"
+          check-latest: true
+          cache: false
+
+      - name: Compare the binary's size with the reference commit's
+        env:
+          # All zeros for a push that creates a branch.
+          BEFORE: ${{ github.event.before }}
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: |
+          case "$GITHUB_EVENT_NAME" in
+            pull_request)
+              # HEAD is GitHub's test merge commit. Its first parent
+              # is the base-branch commit that GitHub merged
+              # the pull request into. Compare with that commit,
+              # not with pull_request.base.sha, which can be older.
+              # The shallow clone lacks HEAD^1, so read the parent
+              # from the commit object.
+              reference=$(git cat-file -p HEAD | awk '/^parent /{print $2; exit}')
+              ;;
+            push)
+              reference=$BEFORE
+              ;;
+            *)
+              reference=""
+              ;;
+          esac
+          if [[ ! "$reference" =~ [1-9a-f] ]]; then
+            echo "::notice::There is no reference commit to compare with."
+            exit 0
+          fi
+          if ! git fetch --no-tags --depth=1 origin "$reference"; then
+            if [[ "$GITHUB_EVENT_NAME" == "push" ]]; then
+              # A force-push can remove the commit that it replaced.
+              echo "::warning::Cannot fetch the reference commit, $reference."
+              exit 0
+            fi
+            echo "::error::Cannot fetch the reference commit, $reference."
+            exit 1
+          fi
+          args=(--reference "$reference" --max-growth-percent "$MAX_GROWTH_PERCENT")
+          case "$GITHUB_EVENT_NAME" in
+            pull_request)
+              # Read the labels from the API, not from the event. A re-run reuses
+              # the event, so the event would lack a label added since.
+              # If the API call fails, the job fails rather than ignoring
+              # the label.
+              labels=$(gh api "repos/$GITHUB_REPOSITORY/pulls/$PR_NUMBER" --jq '.labels[].name')
+              if grep -Fqx "$GROWTH_LABEL" <<< "$labels"; then
+                echo "::notice::The pull request has the $GROWTH_LABEL label, so too much growth only warns."
+                args+=(--warn-only)
+              fi
+              ;;
+            push)
+              # The corresponding pull request already reported the growth.
+              args+=(--warn-only)
+              ;;
+          esac
+          .github/scripts/client-binary/check_client_binary.py size "${args[@]}"
