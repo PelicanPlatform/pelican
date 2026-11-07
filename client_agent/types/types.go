@@ -67,3 +67,18 @@ type HistoricalJob struct {
 	BytesTransferred   int64
 	TotalBytes         int64
 }
+
+// JobProgress tracks overall job progress.
+//
+// It is defined in this package so that server_structs can use it.
+// Defining it in client_agent would create an import cycle,
+// because client_agent imports server_structs.
+type JobProgress struct {
+	BytesTransferred   int64   `json:"bytes_transferred"`
+	TotalBytes         int64   `json:"total_bytes"`
+	Percentage         float64 `json:"percentage"`
+	TransferRateMbps   float64 `json:"transfer_rate_mbps"`
+	TransfersCompleted int     `json:"transfers_completed"`
+	TransfersTotal     int     `json:"transfers_total"`
+	TransfersFailed    int     `json:"transfers_failed"`
+}

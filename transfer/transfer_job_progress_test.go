@@ -32,6 +32,7 @@ import (
 	"github.com/pelicanplatform/pelican/client_agent"
 	"github.com/pelicanplatform/pelican/database"
 	"github.com/pelicanplatform/pelican/param"
+	"github.com/pelicanplatform/pelican/server_structs"
 	"github.com/pelicanplatform/pelican/test_utils"
 )
 
@@ -59,7 +60,7 @@ func TestTransferJobStatusCarriesProgressForLiveJob(t *testing.T) {
 	t.Run("get", func(t *testing.T) {
 		w := doRequest(t, engine, "GET", "/api/v1.0/transfer/jobs/"+created.JobID, nil, tok)
 		require.Equal(t, http.StatusOK, w.Code, "Body: %s", w.Body.String())
-		var status TransferJobStatus
+		var status server_structs.TransferJobStatus
 		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &status))
 		require.NotNil(t, status.Progress, "a job still in memory must report progress")
 		assert.Equal(t, 1, status.Progress.TransfersTotal)
@@ -69,7 +70,7 @@ func TestTransferJobStatusCarriesProgressForLiveJob(t *testing.T) {
 	t.Run("list", func(t *testing.T) {
 		w := doRequest(t, engine, "GET", "/api/v1.0/transfer/jobs", nil, tok)
 		require.Equal(t, http.StatusOK, w.Code, "Body: %s", w.Body.String())
-		var listResp TransferJobListResponse
+		var listResp server_structs.TransferJobListResponse
 		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &listResp))
 		require.NotEmpty(t, listResp.Jobs)
 		for _, job := range listResp.Jobs {
@@ -113,7 +114,7 @@ func TestTransferJobStatusOmitsProgressForEvictedJob(t *testing.T) {
 	t.Run("get", func(t *testing.T) {
 		w := doRequest(t, engine, "GET", "/api/v1.0/transfer/jobs/evicted-job", nil, tok)
 		require.Equal(t, http.StatusOK, w.Code, "Body: %s", w.Body.String())
-		var status TransferJobStatus
+		var status server_structs.TransferJobStatus
 		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &status))
 		assert.Nil(t, status.Progress, "an evicted job must not invent byte counts")
 		// The field has to be genuinely absent, not a zeroed object.
@@ -125,7 +126,7 @@ func TestTransferJobStatusOmitsProgressForEvictedJob(t *testing.T) {
 	t.Run("list", func(t *testing.T) {
 		w := doRequest(t, engine, "GET", "/api/v1.0/transfer/jobs", nil, tok)
 		require.Equal(t, http.StatusOK, w.Code, "Body: %s", w.Body.String())
-		var listResp TransferJobListResponse
+		var listResp server_structs.TransferJobListResponse
 		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &listResp))
 		require.NotEmpty(t, listResp.Jobs)
 		for _, job := range listResp.Jobs {

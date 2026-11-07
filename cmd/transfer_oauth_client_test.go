@@ -29,7 +29,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/pelicanplatform/pelican/transfer"
+	"github.com/pelicanplatform/pelican/server_structs"
 )
 
 // TestBuildOAuthClientCreateRequestSendsGrantTypes is the regression test for
@@ -45,7 +45,7 @@ import (
 // because the struct carrying the value is not the part that was broken.
 func TestBuildOAuthClientCreateRequestSendsGrantTypes(t *testing.T) {
 	req, err := buildOAuthClientCreateRequest("example", "https://issuer.example.com",
-		"client-id", "client-secret", transfer.GrantTypeTokenExchange, "")
+		"client-id", "client-secret", server_structs.TransferGrantTypeTokenExchange, "")
 	require.NoError(t, err)
 
 	body, err := json.Marshal(req)
@@ -55,7 +55,7 @@ func TestBuildOAuthClientCreateRequestSendsGrantTypes(t *testing.T) {
 	require.NoError(t, json.Unmarshal(body, &wire))
 
 	require.Contains(t, wire, "grant_types", "the request must carry grant_types or the client can never be selected")
-	assert.Equal(t, transfer.GrantTypeTokenExchange, wire["grant_types"])
+	assert.Equal(t, server_structs.TransferGrantTypeTokenExchange, wire["grant_types"])
 	assert.Equal(t, "example", wire["name"])
 	assert.Equal(t, "https://issuer.example.com", wire["issuer_url"])
 	assert.Equal(t, "client-id", wire["client_id"])
@@ -68,8 +68,8 @@ func TestBuildOAuthClientCreateRequestSendsGrantTypes(t *testing.T) {
 // something the OAuth specs do not name, which would otherwise show up as
 // clients that silently never match.
 func TestBuildOAuthClientCreateRequestGrantTypeSpelling(t *testing.T) {
-	assert.Equal(t, "urn:ietf:params:oauth:grant-type:token-exchange", transfer.GrantTypeTokenExchange)
-	assert.Equal(t, "authorization_code", transfer.GrantTypeAuthorizationCode)
+	assert.Equal(t, "urn:ietf:params:oauth:grant-type:token-exchange", server_structs.TransferGrantTypeTokenExchange)
+	assert.Equal(t, "authorization_code", server_structs.TransferGrantTypeAuthorizationCode)
 }
 
 func TestBuildOAuthClientCreateRequest(t *testing.T) {
@@ -78,18 +78,18 @@ func TestBuildOAuthClientCreateRequest(t *testing.T) {
 		// `origin issuer client create`; the server matches on
 		// strings.Fields, so they have to go out whitespace-separated.
 		req, err := buildOAuthClientCreateRequest("n", "https://i.example.com", "id", "secret",
-			transfer.GrantTypeAuthorizationCode+", "+transfer.GrantTypeTokenExchange, "")
+			server_structs.TransferGrantTypeAuthorizationCode+", "+server_structs.TransferGrantTypeTokenExchange, "")
 		require.NoError(t, err)
 		assert.Equal(t,
-			transfer.GrantTypeAuthorizationCode+" "+transfer.GrantTypeTokenExchange,
+			server_structs.TransferGrantTypeAuthorizationCode+" "+server_structs.TransferGrantTypeTokenExchange,
 			req.GrantTypes)
-		assert.Equal(t, []string{transfer.GrantTypeAuthorizationCode, transfer.GrantTypeTokenExchange},
+		assert.Equal(t, []string{server_structs.TransferGrantTypeAuthorizationCode, server_structs.TransferGrantTypeTokenExchange},
 			strings.Fields(req.GrantTypes), "the server splits this field on whitespace")
 	})
 
 	t.Run("joins scopes with whitespace", func(t *testing.T) {
 		req, err := buildOAuthClientCreateRequest("n", "https://i.example.com", "id", "secret",
-			transfer.GrantTypeTokenExchange, "storage.read:/, storage.modify:/")
+			server_structs.TransferGrantTypeTokenExchange, "storage.read:/, storage.modify:/")
 		require.NoError(t, err)
 		assert.Equal(t, "storage.read:/ storage.modify:/", req.Scopes)
 	})
@@ -98,7 +98,7 @@ func TestBuildOAuthClientCreateRequest(t *testing.T) {
 		// An empty Scopes is how a client says "usable for any scope";
 		// findOAuthClientForGrant keeps such clients as fallbacks.
 		req, err := buildOAuthClientCreateRequest("n", "https://i.example.com", "id", "secret",
-			transfer.GrantTypeTokenExchange, "")
+			server_structs.TransferGrantTypeTokenExchange, "")
 		require.NoError(t, err)
 		assert.Empty(t, req.Scopes)
 	})
@@ -110,7 +110,7 @@ func TestBuildOAuthClientCreateRequest(t *testing.T) {
 			"client_credentials", "")
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "unsupported grant type")
-		assert.Contains(t, err.Error(), transfer.GrantTypeTokenExchange,
+		assert.Contains(t, err.Error(), server_structs.TransferGrantTypeTokenExchange,
 			"the error should name the values that are accepted")
 	})
 

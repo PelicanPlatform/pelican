@@ -20,6 +20,8 @@ package client_agent
 
 import (
 	"time"
+
+	"github.com/pelicanplatform/pelican/client_agent/types"
 )
 
 // TransferRequest represents a single transfer operation within a job
@@ -73,16 +75,8 @@ type JobStatus struct {
 	Error       string           `json:"error,omitempty"`
 }
 
-// JobProgress tracks overall job progress
-type JobProgress struct {
-	BytesTransferred   int64   `json:"bytes_transferred"`
-	TotalBytes         int64   `json:"total_bytes"`
-	Percentage         float64 `json:"percentage"`
-	TransferRateMbps   float64 `json:"transfer_rate_mbps"`
-	TransfersCompleted int     `json:"transfers_completed"`
-	TransfersTotal     int     `json:"transfers_total"`
-	TransfersFailed    int     `json:"transfers_failed"`
-}
+// JobProgress tracks overall job progress.
+type JobProgress = types.JobProgress
 
 // TransferStatus represents detailed status of a single transfer
 type TransferStatus struct {

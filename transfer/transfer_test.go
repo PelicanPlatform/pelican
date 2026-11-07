@@ -204,7 +204,7 @@ func TestCredentialCRUD(t *testing.T) {
 		}
 		w := doRequest(t, engine, "POST", "/api/v1.0/transfer/credentials", creq, tok)
 		assert.Equal(t, http.StatusCreated, w.Code, "Body: %s", w.Body.String())
-		var resp CredentialResponse
+		var resp server_structs.TransferCredentialResponse
 		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
 		assert.NotEmpty(t, resp.ID)
 		assert.Equal(t, "my-cred", resp.Name)
@@ -216,7 +216,7 @@ func TestCredentialCRUD(t *testing.T) {
 	t.Run("ListCredentials", func(t *testing.T) {
 		w := doRequest(t, engine, "GET", "/api/v1.0/transfer/credentials", nil, tok)
 		assert.Equal(t, http.StatusOK, w.Code)
-		var resp []CredentialResponse
+		var resp []server_structs.TransferCredentialResponse
 		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
 		assert.Len(t, resp, 1)
 		assert.Equal(t, credID, resp[0].ID)
@@ -225,7 +225,7 @@ func TestCredentialCRUD(t *testing.T) {
 	t.Run("GetCredential", func(t *testing.T) {
 		w := doRequest(t, engine, "GET", "/api/v1.0/transfer/credentials/"+credID, nil, tok)
 		assert.Equal(t, http.StatusOK, w.Code)
-		var resp CredentialResponse
+		var resp server_structs.TransferCredentialResponse
 		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
 		assert.Equal(t, credID, resp.ID)
 		assert.Equal(t, "my-cred", resp.Name)
@@ -264,14 +264,14 @@ func TestCredentialOwnershipIsolation(t *testing.T) {
 	}
 	w := doRequest(t, engine, "POST", "/api/v1.0/transfer/credentials", creq, tokAlice)
 	require.Equal(t, http.StatusCreated, w.Code)
-	var resp CredentialResponse
+	var resp server_structs.TransferCredentialResponse
 	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
 	aliceCredID := resp.ID
 
 	t.Run("BobCannotSeeAliceCredentials", func(t *testing.T) {
 		w := doRequest(t, engine, "GET", "/api/v1.0/transfer/credentials", nil, tokBob)
 		assert.Equal(t, http.StatusOK, w.Code)
-		var creds []CredentialResponse
+		var creds []server_structs.TransferCredentialResponse
 		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &creds))
 		assert.Empty(t, creds)
 	})
@@ -369,7 +369,7 @@ func TestOAuthClientCRUD(t *testing.T) {
 	var clientID string
 
 	t.Run("CreateOAuthClient", func(t *testing.T) {
-		creq := OAuthClientCreateRequest{
+		creq := server_structs.TransferOAuthClientCreateRequest{
 			Name:         "my-oauth-client",
 			IssuerURL:    "https://accounts.example.com",
 			ClientID:     "client-id-123",
@@ -412,7 +412,7 @@ func TestOAuthClientDisabledByDefault(t *testing.T) {
 	require.NoError(t, param.Set(param.Transfer_EnableOAuth2Clients, false))
 
 	t.Run("CreateRejectedWhenDisabled", func(t *testing.T) {
-		creq := OAuthClientCreateRequest{
+		creq := server_structs.TransferOAuthClientCreateRequest{
 			Name:         "test-client",
 			IssuerURL:    "https://example.com",
 			ClientID:     "id",
@@ -467,7 +467,7 @@ func TestTransferJobSubmission(t *testing.T) {
 		}
 		w := doRequest(t, engine, "POST", "/api/v1.0/transfer/credentials", creq, tok)
 		require.Equal(t, http.StatusCreated, w.Code)
-		var credResp CredentialResponse
+		var credResp server_structs.TransferCredentialResponse
 		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &credResp))
 
 		jreq := TransferJobCreateRequest{
@@ -523,7 +523,7 @@ func TestTransferJobOwnershipIsolation(t *testing.T) {
 	t.Run("BobCannotSeeAliceJobs", func(t *testing.T) {
 		w := doRequest(t, engine, "GET", "/api/v1.0/transfer/jobs", nil, tokBob)
 		assert.Equal(t, http.StatusOK, w.Code)
-		var listResp TransferJobListResponse
+		var listResp server_structs.TransferJobListResponse
 		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &listResp))
 		assert.Equal(t, 0, listResp.Total)
 	})
@@ -541,7 +541,7 @@ func TestTransferJobOwnershipIsolation(t *testing.T) {
 	t.Run("AliceCanSeeOwnJob", func(t *testing.T) {
 		w := doRequest(t, engine, "GET", "/api/v1.0/transfer/jobs/"+aliceJobID, nil, tokAlice)
 		assert.Equal(t, http.StatusOK, w.Code)
-		var status TransferJobStatus
+		var status server_structs.TransferJobStatus
 		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &status))
 		assert.Equal(t, aliceJobID, status.JobID)
 	})
@@ -559,7 +559,7 @@ func TestCredentialEncryptionRoundTrip(t *testing.T) {
 	w := doRequest(t, engine, "POST", "/api/v1.0/transfer/credentials", creq, tok)
 	require.Equal(t, http.StatusCreated, w.Code)
 
-	var resp CredentialResponse
+	var resp server_structs.TransferCredentialResponse
 	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
 
 	var storedCred TransferCredential
