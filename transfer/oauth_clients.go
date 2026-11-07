@@ -28,6 +28,7 @@ import (
 	"gorm.io/gorm"
 
 	"github.com/pelicanplatform/pelican/param"
+	"github.com/pelicanplatform/pelican/server_structs"
 	"github.com/pelicanplatform/pelican/web_ui"
 )
 
@@ -35,7 +36,7 @@ import (
 func handleCreateOAuthClient(db *gorm.DB) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		if !param.Transfer_EnableOAuth2Clients.GetBool() {
-			c.JSON(http.StatusForbidden, ErrorResponse{
+			c.JSON(http.StatusForbidden, server_structs.TransferErrorResponse{
 				Code:  "DISABLED",
 				Error: "OAuth2 client management is disabled",
 			})
@@ -44,7 +45,7 @@ func handleCreateOAuthClient(db *gorm.DB) gin.HandlerFunc {
 
 		owner, err := getOwner(c)
 		if err != nil {
-			c.JSON(http.StatusInternalServerError, ErrorResponse{
+			c.JSON(http.StatusInternalServerError, server_structs.TransferErrorResponse{
 				Code:  "INTERNAL",
 				Error: "Failed to determine request owner",
 			})
@@ -53,7 +54,7 @@ func handleCreateOAuthClient(db *gorm.DB) gin.HandlerFunc {
 
 		var req OAuthClientCreateRequest
 		if err := c.ShouldBindJSON(&req); err != nil {
-			c.JSON(http.StatusBadRequest, ErrorResponse{
+			c.JSON(http.StatusBadRequest, server_structs.TransferErrorResponse{
 				Code:  "INVALID_REQUEST",
 				Error: "Invalid request body: " + err.Error(),
 			})
@@ -63,7 +64,7 @@ func handleCreateOAuthClient(db *gorm.DB) gin.HandlerFunc {
 		encClientID, err := encryptSecret(req.ClientID, owner.UserID, fieldClientID)
 		if err != nil {
 			log.Errorf("Failed to encrypt client ID: %v", err)
-			c.JSON(http.StatusInternalServerError, ErrorResponse{
+			c.JSON(http.StatusInternalServerError, server_structs.TransferErrorResponse{
 				Code:  "INTERNAL",
 				Error: "Failed to encrypt client credentials",
 			})
@@ -73,7 +74,7 @@ func handleCreateOAuthClient(db *gorm.DB) gin.HandlerFunc {
 		encClientSecret, err := encryptSecret(req.ClientSecret, owner.UserID, fieldClientSecret)
 		if err != nil {
 			log.Errorf("Failed to encrypt client secret: %v", err)
-			c.JSON(http.StatusInternalServerError, ErrorResponse{
+			c.JSON(http.StatusInternalServerError, server_structs.TransferErrorResponse{
 				Code:  "INTERNAL",
 				Error: "Failed to encrypt client credentials",
 			})
@@ -109,14 +110,14 @@ func handleCreateOAuthClient(db *gorm.DB) gin.HandlerFunc {
 
 		if err := db.Create(&client).Error; err != nil {
 			if isDuplicateKeyError(err) {
-				c.JSON(http.StatusConflict, ErrorResponse{
+				c.JSON(http.StatusConflict, server_structs.TransferErrorResponse{
 					Code:  "CONFLICT",
 					Error: "An OAuth2 client with this name already exists",
 				})
 				return
 			}
 			log.Errorf("Failed to create OAuth2 client: %v", err)
-			c.JSON(http.StatusInternalServerError, ErrorResponse{
+			c.JSON(http.StatusInternalServerError, server_structs.TransferErrorResponse{
 				Code:  "INTERNAL",
 				Error: "Failed to store OAuth2 client",
 			})
@@ -131,7 +132,7 @@ func handleCreateOAuthClient(db *gorm.DB) gin.HandlerFunc {
 func handleListOAuthClients(db *gorm.DB) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		if !param.Transfer_EnableOAuth2Clients.GetBool() {
-			c.JSON(http.StatusForbidden, ErrorResponse{
+			c.JSON(http.StatusForbidden, server_structs.TransferErrorResponse{
 				Code:  "DISABLED",
 				Error: "OAuth2 client management is disabled",
 			})
@@ -140,7 +141,7 @@ func handleListOAuthClients(db *gorm.DB) gin.HandlerFunc {
 
 		owner, err := getOwner(c)
 		if err != nil {
-			c.JSON(http.StatusInternalServerError, ErrorResponse{
+			c.JSON(http.StatusInternalServerError, server_structs.TransferErrorResponse{
 				Code:  "INTERNAL",
 				Error: "Failed to determine request owner",
 			})
@@ -152,7 +153,7 @@ func handleListOAuthClients(db *gorm.DB) gin.HandlerFunc {
 			Order("created_at DESC").
 			Find(&clients).Error; err != nil {
 			log.Errorf("Failed to list OAuth2 clients: %v", err)
-			c.JSON(http.StatusInternalServerError, ErrorResponse{
+			c.JSON(http.StatusInternalServerError, server_structs.TransferErrorResponse{
 				Code:  "INTERNAL",
 				Error: "Failed to retrieve OAuth2 clients",
 			})
@@ -172,7 +173,7 @@ func handleListOAuthClients(db *gorm.DB) gin.HandlerFunc {
 func handleDeleteOAuthClient(db *gorm.DB) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		if !param.Transfer_EnableOAuth2Clients.GetBool() {
-			c.JSON(http.StatusForbidden, ErrorResponse{
+			c.JSON(http.StatusForbidden, server_structs.TransferErrorResponse{
 				Code:  "DISABLED",
 				Error: "OAuth2 client management is disabled",
 			})
@@ -181,7 +182,7 @@ func handleDeleteOAuthClient(db *gorm.DB) gin.HandlerFunc {
 
 		owner, err := getOwner(c)
 		if err != nil {
-			c.JSON(http.StatusInternalServerError, ErrorResponse{
+			c.JSON(http.StatusInternalServerError, server_structs.TransferErrorResponse{
 				Code:  "INTERNAL",
 				Error: "Failed to determine request owner",
 			})
@@ -194,7 +195,7 @@ func handleDeleteOAuthClient(db *gorm.DB) gin.HandlerFunc {
 
 		if result.Error != nil {
 			log.Errorf("Failed to delete OAuth2 client: %v", result.Error)
-			c.JSON(http.StatusInternalServerError, ErrorResponse{
+			c.JSON(http.StatusInternalServerError, server_structs.TransferErrorResponse{
 				Code:  "INTERNAL",
 				Error: "Failed to delete OAuth2 client",
 			})
@@ -202,7 +203,7 @@ func handleDeleteOAuthClient(db *gorm.DB) gin.HandlerFunc {
 		}
 
 		if result.RowsAffected == 0 {
-			c.JSON(http.StatusNotFound, ErrorResponse{
+			c.JSON(http.StatusNotFound, server_structs.TransferErrorResponse{
 				Code:  "NOT_FOUND",
 				Error: "OAuth2 client not found",
 			})

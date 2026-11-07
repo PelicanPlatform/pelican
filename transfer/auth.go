@@ -31,6 +31,7 @@ import (
 
 	"github.com/pelicanplatform/pelican/database"
 	"github.com/pelicanplatform/pelican/param"
+	"github.com/pelicanplatform/pelican/server_structs"
 	"github.com/pelicanplatform/pelican/token"
 	"github.com/pelicanplatform/pelican/token_scopes"
 )
@@ -96,7 +97,7 @@ func TransferAuthMiddleware(db *gorm.DB) gin.HandlerFunc {
 
 			if !ok {
 				log.Debugf("Transfer auth failed: %v", err)
-				c.AbortWithStatusJSON(status, ErrorResponse{
+				c.AbortWithStatusJSON(status, server_structs.TransferErrorResponse{
 					Code:  "UNAUTHORIZED",
 					Error: "Authentication required: valid token with pelican.transfer scope needed",
 				})
@@ -105,7 +106,7 @@ func TransferAuthMiddleware(db *gorm.DB) gin.HandlerFunc {
 		}
 
 		if result.Token == nil {
-			c.AbortWithStatusJSON(http.StatusInternalServerError, ErrorResponse{
+			c.AbortWithStatusJSON(http.StatusInternalServerError, server_structs.TransferErrorResponse{
 				Code:  "INTERNAL",
 				Error: "Token verification succeeded but parsed token is unavailable",
 			})
@@ -115,7 +116,7 @@ func TransferAuthMiddleware(db *gorm.DB) gin.HandlerFunc {
 		issuer := result.Token.Issuer()
 		subject := result.Token.Subject()
 		if issuer == "" || subject == "" {
-			c.AbortWithStatusJSON(http.StatusForbidden, ErrorResponse{
+			c.AbortWithStatusJSON(http.StatusForbidden, server_structs.TransferErrorResponse{
 				Code:  "INVALID_TOKEN",
 				Error: "Token must contain both issuer and subject claims",
 			})
@@ -136,7 +137,7 @@ func TransferAuthMiddleware(db *gorm.DB) gin.HandlerFunc {
 		// not have those issuers mint pelican.transfer broadly. See the design doc.
 		if enabledGroups := param.Transfer_EnabledGroups.GetStringSlice(); len(enabledGroups) > 0 && result.Source == token.Cookie {
 			if !groupsOverlap(tokenGroups(result.Token), enabledGroups) {
-				c.AbortWithStatusJSON(http.StatusForbidden, ErrorResponse{
+				c.AbortWithStatusJSON(http.StatusForbidden, server_structs.TransferErrorResponse{
 					Code:  "FORBIDDEN",
 					Error: "User is not a member of any permitted transfer group",
 				})
@@ -150,7 +151,7 @@ func TransferAuthMiddleware(db *gorm.DB) gin.HandlerFunc {
 		user, err := database.GetOrCreateUser(db, subject, subject, issuer, database.CreatorSelf())
 		if err != nil {
 			log.Errorf("Failed to resolve user (sub=%s, iss=%s): %v", subject, issuer, err)
-			c.AbortWithStatusJSON(http.StatusInternalServerError, ErrorResponse{
+			c.AbortWithStatusJSON(http.StatusInternalServerError, server_structs.TransferErrorResponse{
 				Code:  "INTERNAL",
 				Error: "Failed to resolve user identity",
 			})

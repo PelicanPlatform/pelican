@@ -2,7 +2,7 @@
 
 /***************************************************************
  *
- * Copyright (C) 2025, Pelican Project, Morgridge Institute for Research
+ * Copyright (C) 2026, Pelican Project, Morgridge Institute for Research
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you
  * may not use this file except in compliance with the License.  You may
@@ -36,7 +36,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/pelicanplatform/pelican/config"
-	"github.com/pelicanplatform/pelican/transfer"
+	"github.com/pelicanplatform/pelican/server_structs"
 )
 
 var (
@@ -146,7 +146,7 @@ func doTransferRequest(ctx context.Context, httpClient *http.Client, method, url
 
 	if resp.StatusCode >= 300 {
 		// Try to parse a structured error from the server.
-		var errResp transfer.ErrorResponse
+		var errResp server_structs.TransferErrorResponse
 		if json.Unmarshal(respBody, &errResp) == nil && errResp.Error != "" {
 			return nil, resp.StatusCode, fmt.Errorf("server error %d (%s): %s", resp.StatusCode, errResp.Code, errResp.Error)
 		}
@@ -207,13 +207,13 @@ func credentialAddMain(cmd *cobra.Command, args []string) error {
 	if outputJSON {
 		fmt.Println(string(respBody))
 	} else {
-		var result map[string]interface{}
-		if err := json.Unmarshal(respBody, &result); err != nil {
+		var cred server_structs.TransferCredentialResponse
+		if err := json.Unmarshal(respBody, &cred); err != nil {
 			log.Warnln("Failed to parse response:", err)
 			fmt.Println(string(respBody))
 			return nil
 		}
-		fmt.Printf("Credential created: %s (id: %s)\n", result["name"], result["id"])
+		fmt.Printf("Credential created: %s (id: %s)\n", cred.Name, cred.ID)
 	}
 
 	return nil
@@ -236,7 +236,7 @@ func credentialListMain(cmd *cobra.Command, args []string) error {
 		return nil
 	}
 
-	var creds []map[string]interface{}
+	var creds []server_structs.TransferCredentialResponse
 	if err := json.Unmarshal(respBody, &creds); err != nil {
 		return errors.Wrap(err, "failed to parse response")
 	}
@@ -249,15 +249,8 @@ func credentialListMain(cmd *cobra.Command, args []string) error {
 	w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
 	fmt.Fprintln(w, "ID\tNAME\tTYPE\tISSUER\tCREATED")
 	for _, c := range creds {
-		id, _ := c["id"].(string)
-		name, _ := c["name"].(string)
-		ctype, _ := c["credential_type"].(string)
-		issuer, _ := c["token_issuer"].(string)
-		created, _ := c["created_at"].(string)
-		if len(created) > 19 {
-			created = created[:19]
-		}
-		fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\n", id, name, ctype, issuer, created)
+		created := c.CreatedAt.Format("2006-01-02T15:04:05")
+		fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\n", c.ID, c.Name, c.CredentialType, c.TokenIssuer, created)
 	}
 	w.Flush()
 
