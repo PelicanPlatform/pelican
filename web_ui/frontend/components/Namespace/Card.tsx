@@ -6,6 +6,7 @@ import {
   Avatar,
   Box,
   Button,
+  Chip,
   Dialog,
   DialogActions,
   DialogContent,
@@ -97,6 +98,19 @@ export const Card = ({ namespace, authenticated, onUpdate }: CardProps) => {
           <NamespaceTitle namespace={namespace} />
           <Box display={'flex'} flexDirection={'row'}>
             <Box my={'auto'} display={'flex'}>
+              {namespace.auth_state && (
+                <Tooltip
+                  title={
+                    'Carries an auth state: the director advertises this namespace while no origin for it is online'
+                  }
+                >
+                  <Chip
+                    size={'small'}
+                    label={'Auth state'}
+                    sx={{ my: 'auto', mr: 2 }}
+                  />
+                </Tooltip>
+              )}
               {userOwnsNamespace(authenticated, namespace) && (
                 <Box sx={{ borderRight: 'solid 1px #ececec', mr: 1 }}>
                   <Tooltip title={'Created By You'}>

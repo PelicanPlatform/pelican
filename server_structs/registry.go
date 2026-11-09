@@ -68,7 +68,7 @@ type Registration struct {
 	// director in place of an origin ad while no origin for the prefix is
 	// online. nil (SQL NULL) keeps today's behavior: the namespace exists in the
 	// federation only while an origin advertises it.
-	AuthState *NamespaceAuthState `json:"auth_state" gorm:"column:auth_state;serializer:json"`
+	AuthState *NamespaceAuthState `json:"auth_state" gorm:"column:auth_state;serializer:json" description:"Advertise this namespace while no origin for it is online"`
 }
 
 type NamespaceAuthState struct {

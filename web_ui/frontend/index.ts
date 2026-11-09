@@ -1,5 +1,5 @@
 import { NamespaceAdminMetadata } from '@/components/Namespace';
-import { Capabilities } from '@/types';
+import { Capabilities, NamespaceAuthState } from '@/types';
 
 export interface User {
   authenticated: boolean;
@@ -81,6 +81,7 @@ export interface RegistryNamespace {
   type: 'origin' | 'cache' | 'namespace';
   admin_metadata: NamespaceAdminMetadata;
   custom_fields?: Record<string, any>;
+  auth_state?: NamespaceAuthState | null; // Set when the registry advertises the namespace itself; null or absent otherwise
 }
 
 export interface Institution {

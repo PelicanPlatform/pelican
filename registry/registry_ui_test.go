@@ -2778,6 +2778,19 @@ func TestPopulateRegistrationFields(t *testing.T) {
 	t.Cleanup(test_utils.SetupTestLogging(t))
 	result := populateRegistrationFields("", server_structs.Registration{})
 	assert.NotEqual(t, 0, len(result))
+
+	// The optional auth state is offered to the form as one structured field
+	var authState *registrationField
+	for i := range result {
+		if result[i].Name == "auth_state" {
+			authState = &result[i]
+		}
+	}
+	require.NotNil(t, authState)
+	assert.Equal(t, AuthState, authState.Type)
+	assert.Equal(t, "Auth State", authState.DisplayedName)
+	assert.False(t, authState.Required)
+	assert.NotEmpty(t, authState.Description)
 }
 
 func TestDeleteNamespaceDeletesServerWhenSingleService(t *testing.T) {

@@ -76,11 +76,12 @@ type (
 var registrationFields []registrationField // A list of available registration fields
 
 const (
-	String   registrationFieldType = "string"
-	Int      registrationFieldType = "int"
-	Boolean  registrationFieldType = "bool"
-	Enum     registrationFieldType = "enum"
-	DateTime registrationFieldType = "datetime"
+	String    registrationFieldType = "string"
+	Int       registrationFieldType = "int"
+	Boolean   registrationFieldType = "bool"
+	Enum      registrationFieldType = "enum"
+	DateTime  registrationFieldType = "datetime"
+	AuthState registrationFieldType = "auth_state"
 )
 
 func init() {
@@ -169,6 +170,13 @@ func populateRegistrationFields(prefix string, data interface{}) []registrationF
 					existing_prefix = prefix + "."
 				}
 				fields = append(fields, populateRegistrationFields(existing_prefix+"admin_metadata", server_structs.AdminMetadata{})...)
+			}
+		case reflect.Pointer:
+			// The auth state is optional (nil means none) and is edited as one
+			// structured field rather than being flattened like AdminMetadata
+			if field.Type.Elem() == reflect.TypeOf(server_structs.NamespaceAuthState{}) {
+				regField.Type = AuthState
+				fields = append(fields, regField)
 			}
 		}
 
