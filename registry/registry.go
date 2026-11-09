@@ -978,6 +978,9 @@ func wildcardHandler(ctx *gin.Context) {
 
 		ctx.JSON(http.StatusOK, nsCfg)
 		return
+	} else if path == "/namespaces/advertised" {
+		getAdvertisedNamespacesHandler(ctx)
+		return
 	} else if strings.HasSuffix(path, "/caches/allowedPrefixes") {
 		getAllowedPrefixesForCachesHandler(ctx)
 		return
@@ -1248,6 +1251,24 @@ func checkStatusHandler(ctx *gin.Context) {
 		}
 	}
 	ctx.JSON(http.StatusOK, server_structs.CheckNamespaceCompleteRes{Results: results})
+}
+
+// getAdvertisedNamespacesHandler serves the namespace advertisements the
+// registry holds for approved registrations with an auth state, so a director
+// can advertise a namespace while no origin for it is online. Public; the
+// response is the same NamespaceAd list an origin sends in its advertisement.
+//
+// GET /api/v1.0/registry/namespaces/advertised
+func getAdvertisedNamespacesHandler(ctx *gin.Context) {
+	ads, err := getAdvertisedNamespaceAds()
+	if err != nil {
+		log.Errorf("Failed to list the advertised namespaces: %v", err)
+		ctx.JSON(http.StatusInternalServerError, server_structs.SimpleApiResp{
+			Status: server_structs.RespFailed,
+			Msg:    "server encountered an error listing the advertised namespaces"})
+		return
+	}
+	ctx.JSON(http.StatusOK, ads)
 }
 
 // getAllowedPrefixesForCachesHandler is the handler function for the

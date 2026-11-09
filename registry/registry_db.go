@@ -554,6 +554,37 @@ func getAllowedPrefixesForCaches() (map[string][]string, error) {
 	return allowedPrefixesForCachesMap, nil
 }
 
+// getAdvertisedNamespaceAds returns a NamespaceAd for every approved namespace
+// registration that carries an auth state, in prefix order.
+func getAdvertisedNamespaceAds() ([]server_structs.NamespaceAd, error) {
+	var registrations []server_structs.Registration
+	err := database.ServerDatabase.
+		Where("auth_state IS NOT NULL").
+		Order("prefix ASC").
+		Find(&registrations).Error
+	if err != nil {
+		return nil, errors.Wrap(err, "failed to query the registrations with an auth state")
+	}
+
+	ads := make([]server_structs.NamespaceAd, 0, len(registrations))
+	for _, reg := range registrations {
+		if reg.AdminMetadata.Status != server_structs.RegApproved {
+			continue
+		}
+		if server_structs.IsOriginNS(reg.Prefix) || server_structs.IsCacheNS(reg.Prefix) {
+			continue
+		}
+		ad, err := reg.AuthState.ToNamespaceAd(reg.Prefix)
+		// one bad row does not take every other namespace out of the federation
+		if err != nil {
+			log.Warningf("Not advertising namespace %s from Registry: its stored auth state is invalid: %v", reg.Prefix, err)
+			continue
+		}
+		ads = append(ads, ad)
+	}
+	return ads, nil
+}
+
 // Get a collection of registrations by filtering against various non-default registration fields
 // excluding Registration.ID, Registration.Identity, Registration.Pubkey, and various dates
 //

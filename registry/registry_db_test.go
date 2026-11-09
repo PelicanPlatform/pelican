@@ -920,6 +920,70 @@ func TestGetAllowedPrefixesForCaches(t *testing.T) {
 	assert.ElementsMatch(t, cache3CustomFields["AllowedPrefixes"], actualPrefixes)
 }
 
+func TestGetAdvertisedNamespaceAds(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
+	setupMockRegistryDB(t)
+	defer teardownMockRegistryDB(t)
+
+	t.Run("empty-db-gives-an-empty-list", func(t *testing.T) {
+		resetMockRegistryDB(t)
+		ads, err := getAdvertisedNamespaceAds()
+		require.NoError(t, err)
+		require.NotNil(t, ads)
+		assert.Empty(t, ads)
+	})
+
+	t.Run("only-approved-namespaces-with-an-auth-state-are-advertised", func(t *testing.T) {
+		resetMockRegistryDB(t)
+
+		approved := mockNamespace("/foo", "pubkey", "", server_structs.AdminMetadata{Status: server_structs.RegApproved})
+		approved.AuthState = mockAuthState()
+
+		// Inserted in reverse prefix order to show the listing is sorted
+		alsoApproved := mockNamespace("/bar", "pubkey", "", server_structs.AdminMetadata{Status: server_structs.RegApproved})
+		alsoApproved.AuthState = &server_structs.NamespaceAuthState{
+			Capabilities: server_structs.Capabilities{PublicReads: true, Reads: true},
+		}
+
+		pending := mockNamespace("/pending", "pubkey", "", server_structs.AdminMetadata{Status: server_structs.RegPending})
+		pending.AuthState = mockAuthState()
+
+		noState := mockNamespace("/no-state", "pubkey", "", server_structs.AdminMetadata{Status: server_structs.RegApproved})
+
+		// A server registration never gets an auth state through the API; one
+		// written directly to the database must still not be advertised
+		origin := mockNamespace("/origins/example.org", "pubkey", "", server_structs.AdminMetadata{Status: server_structs.RegApproved})
+		origin.AuthState = mockAuthState()
+
+		// A stored auth state that no longer converts is skipped, not fatal
+		broken := mockNamespace("/broken", "pubkey", "", server_structs.AdminMetadata{Status: server_structs.RegApproved})
+		broken.AuthState = &server_structs.NamespaceAuthState{
+			Capabilities: server_structs.Capabilities{Reads: true},
+			TokenIssuer:  []server_structs.TokenIssuerResponse{{IssuerUrl: "not a url", BasePaths: []string{"/broken"}}},
+		}
+
+		require.NoError(t, insertMockDBData([]server_structs.Registration{approved, alsoApproved, pending, noState, origin, broken}))
+
+		ads, err := getAdvertisedNamespaceAds()
+		require.NoError(t, err)
+		require.Len(t, ads, 2)
+
+		assert.Equal(t, "/bar", ads[0].Path)
+		assert.True(t, ads[0].Caps.PublicReads)
+		assert.Empty(t, ads[0].Generation)
+		assert.Empty(t, ads[0].Issuer)
+
+		assert.Equal(t, "/foo", ads[1].Path)
+		assert.Equal(t, server_structs.Capabilities{Reads: true, Listings: true}, ads[1].Caps)
+		require.Len(t, ads[1].Generation, 1)
+		assert.Equal(t, server_structs.OAuthStrategy, ads[1].Generation[0].Strategy)
+		assert.Equal(t, "https://issuer.example.org", ads[1].Generation[0].CredentialIssuer.String())
+		require.Len(t, ads[1].Issuer, 1)
+		assert.Equal(t, "https://issuer.example.org", ads[1].Issuer[0].IssuerUrl.String())
+		assert.Equal(t, []string{"/foo"}, ads[1].Issuer[0].BasePaths)
+	})
+}
+
 func TestGetNamespaceJwksByPrefix(t *testing.T) {
 	t.Cleanup(test_utils.SetupTestLogging(t))
 	setupMockRegistryDB(t)
