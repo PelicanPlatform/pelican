@@ -1,0 +1,165 @@
+import { Callout } from 'nextra/components'
+
+# Upgrade Instructions
+
+This document provides instructions for upgrading to newer versions of the Pelican services.
+
+## General
+
+### Backing Up Your Database
+
+We recommended that you back up your Pelican service's database before an upgrade.
+Use one of the following sets of instructions to create the backup, depending on whether you're using a container-based installation or a non-container-based installation.
+
+#### Non-Container Installation
+
+For a non-container-based installation, you can use the `sqlite3` command to safely create a backup of your database.
+First, ensure that the command is available and in PATH.
+If not, install it using your package manager.
+For example, on an RPM-based distributions, run:
+
+```console
+yum install -y sqlite
+```
+
+Then, run the following command to get the location of the database file:
+
+```console
+pelican-server config get server.dblocation
+```
+
+(Note: the default location is `/var/lib/pelican/pelican.sqlite`)
+
+Then, use the following command to make a backup to a file named `pelicanbackup.sqlite`:
+
+```bash copy
+sqlite3 /var/lib/pelican/pelican.sqlite ".backup 'pelicanbackup.sqlite'"
+```
+
+(Replace `/var/lib/pelican/pelican.sqlite` with the location of the database, if it's different.)
+
+To restore the backup, shut down the `pelican-cache` service (for a cache) or the `pelican-origin` service (for an origin), and overwrite the database with the backup file using the following:
+
+```bash copy
+systemctl stop pelican-cache
+mv -f pelicanbackup.sqlite /var/lib/pelican/pelican.sqlite
+```
+
+Or
+
+```bash copy
+systemctl stop pelican-origin
+mv -f pelicanbackup.sqlite /var/lib/pelican/pelican.sqlite
+```
+
+(Replace `/var/lib/pelican/pelican.sqlite` with the location of the database, if it's different.)
+
+
+#### Container Installation
+
+For a container installation, you can use the `sqlite3` command that is installed into the container to safely create a backup of your database.
+
+<Callout type="info">
+The examples are for a service installed via Docker.
+If you are using Podman, Kubernetes, or some other container runtime, adjust the commands accordingly.
+</Callout>
+
+Replace `<CONTAINER>` below with the name of the container that is running your Pelican service.
+If you do not know the name of your container, run `docker ps -a` to get a list of your containers.
+
+```bash copy
+docker exec <CONTAINER> sqlite3 /var/lib/pelican/pelican.sqlite \
+  ".backup '/tmp/pelican-backup.sqlite'"
+
+docker cp <CONTAINER>:/tmp/pelican-backup.sqlite ./pelican-backup.sqlite
+
+docker exec <CONTAINER> rm -f /tmp/pelican-backup.sqlite
+```
+
+To restore from the backup, shut down the service, then overwrite the database inside the container:
+
+```bash copy
+docker stop <CONTAINER>
+
+docker cp ./pelican-backup.sqlite <CONTAINER>:/var/lib/pelican/pelican.sqlite
+
+docker start <CONTAINER>
+```
+
+
+## Version-Specific Notes
+
+### Version 26.0
+
+<Callout type="warning">
+If you are upgrading from 7.26 or earlier, see also the notes for [version 7.27](#version-7.27).
+</Callout>
+
+**All servers and clients**
+
+- **Removed old environmental variable support:**
+  If you use environment variables that start with `OSDF_` or `STASH_`, replace the `OSDF_` or `STASH_` prefix with `PELICAN_`.
+ Configuration via environment variables starting with `OSDF_` and `STASH_` is dropped.
+
+
+**Origins**
+
+- **Removed OA4MP issuer:**
+  If you set `Origin.IssuerMode` to `oa4mp` in your configuration, you must change it to `embedded`.
+  Support for the OA4MP issuer has been removed and replaced with a token issuer built into the Pelican server.
+
+For additional upgrade information, see the [release notes for 26.0](https://github.com/PelicanPlatform/pelican/releases#release-v26.0.0).
+
+Again, if upgrading from 7.26 or earlier, also see the
+[release notes for 7.27](https://github.com/PelicanPlatform/pelican/releases#release-v7.27.1).
+
+### Version 7.27
+
+**All servers**
+
+- **Database:** [Back up your database](#backing-up-your-database) before upgrading.
+The database schema has changed and, if you need to downgrade, you will need to restore the database from backup.
+
+- **API Keys:**
+  If you use API keys, you may need to re-create some of them.
+  After upgrading, check the server logs for the name of the key and the string "Re-mint it."
+  Then, recreate those API keys using the [instructions for the pelican-server apikey command](https://docs.pelicanplatform.org/commands-reference/pelican-server/apikey/generate).
+
+- **Username Changes:** If you use OIDC for web UI access, and use the `Server.UIAdminUsers`, `Server.UserAdminUsers`, or `Server.CollectionAdminUsers` options, you will need to change the listed usernames to Pelican usernames by running a migration helper script.
+
+  Download the [migration helper script](https://gist.github.com/h2zh/7b73dcec439d40bc48074a26625a022a) before upgrading the software.
+
+  **For Non-Container Installations**
+
+  Run the migration helper script as `root`:
+
+  ```bash copy
+  python3 uiadminusers_v727_migration_helper.py
+  ```
+
+  Then, follow the instructions that it prints out to change your configuration as needed.
+  Make a backup of your previous configuration, in case you need to downgrade.
+
+  **For Container Installation**
+
+  Copy the migration helper script into the running container:
+
+  ```bash copy
+  docker cp uiadminusers_v727_migration_helper.py <CONTAINER>:/tmp/uiadminusers_v727_migration_helper.py
+  ```
+
+  Then, run the migration helper script inside the container:
+  ```bash copy
+  docker exec -it <CONTAINER> python3 /tmp/uiadminusers_v727_migration_helper.py
+  ```
+
+  Then, follow the instructions that it prints out to change your configuration as needed.
+  Make a backup of your previous configuration, in case you need to downgrade.
+
+<Callout type="info">
+We recommend using admin groups instead of users ([Server.AdminGroups](https://docs.pelicanplatform.org/parameters#Server-AdminGroups)) to simplify access management going forward.
+</Callout>
+
+
+For additional upgrade information, see the
+[release notes for 7.27](https://github.com/PelicanPlatform/pelican/releases#release-v7.27.1).
