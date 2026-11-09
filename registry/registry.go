@@ -372,6 +372,8 @@ func keySignChallengeCommit(ctx *gin.Context, data *registrationData) (bool, map
 		return false, nil, sysErr
 	}
 
+	// AuthState stays nil: a registration made through the CLI or a server's
+	// auto-registration carries no auth state, which is set through the web UI
 	var ns server_structs.Registration
 	ns.Prefix = data.Prefix
 

@@ -406,6 +406,7 @@ func TestUpdateNamespaceOwnerEditPinsToRowInTransaction(t *testing.T) {
 	edit, err := getRegistrationById(id)
 	require.NoError(t, err)
 	edit.AdminMetadata.Description = "new description"
+	edit.AuthState = &server_structs.NamespaceAuthState{Capabilities: server_structs.Capabilities{Reads: true}}
 
 	// ...and before it writes, the server pushes a rotated key for the prefix
 	require.NoError(t, setRegistrationPubKey("/foo", rotatedKey))
@@ -415,6 +416,7 @@ func TestUpdateNamespaceOwnerEditPinsToRowInTransaction(t *testing.T) {
 	got, err := getRegistrationById(id)
 	require.NoError(t, err)
 	assert.Equal(t, "new description", got.AdminMetadata.Description, "the owner's edit lands")
+	assert.Equal(t, edit.AuthState, got.AuthState, "the owner's auth state lands")
 	assert.Equal(t, rotatedKey, got.Pubkey, "the key rotated in between is not reverted by the owner's stale copy")
 	assert.Equal(t, "owner", got.AdminMetadata.UserID)
 	assert.Equal(t, server_structs.RegApproved, got.AdminMetadata.Status)
@@ -637,6 +639,41 @@ func TestGetNamespacesByFilter(t *testing.T) {
 		require.NoError(t, err)
 		assert.NotEmpty(t, gotCaches, "Should return non-empty result for cachePrefix")
 		assert.True(t, compareNamespaces(mockNssWithCaches, gotCaches, true))
+	})
+
+	t.Run("auth-state-is-loaded", func(t *testing.T) {
+		// The list query names its columns, so a column added to the table is
+		// invisible to every listing until it is named here too.
+		resetMockRegistryDB(t)
+		authState := &server_structs.NamespaceAuthState{
+			Capabilities: server_structs.Capabilities{Reads: true, Listings: true},
+			TokenIssuer: []server_structs.TokenIssuerResponse{{
+				IssuerUrl: "https://issuer.example.org",
+				BasePaths: []string{"/with-auth-state"},
+			}},
+		}
+		err := insertMockDBData([]server_structs.Registration{
+			{
+				Prefix:        "/with-auth-state",
+				AuthState:     authState,
+				AdminMetadata: server_structs.AdminMetadata{Description: "has one", Status: server_structs.RegApproved},
+			},
+			{
+				Prefix:        "/without-auth-state",
+				AdminMetadata: server_structs.AdminMetadata{Description: "has none", Status: server_structs.RegApproved},
+			},
+		})
+		require.NoError(t, err)
+
+		got, err := getRegistrationsByFilter(server_structs.Registration{}, prefixForNamespace, false)
+		require.NoError(t, err)
+		require.Len(t, got, 2)
+		byPrefix := map[string]server_structs.Registration{}
+		for _, reg := range got {
+			byPrefix[reg.Prefix] = reg
+		}
+		assert.Equal(t, authState, byPrefix["/with-auth-state"].AuthState, "the listing carries the stored auth state")
+		assert.Nil(t, byPrefix["/without-auth-state"].AuthState, "a row without one lists nil")
 	})
 
 	t.Run("filter-by-admin-metadata", func(t *testing.T) {
