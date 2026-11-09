@@ -58,7 +58,6 @@ func validateRegistrationOwner(id string) error {
 
 // This file has all custom validator logic for registry struct
 // data validation besides the ones already included in validator package
-
 func validatePrefix(nspath string) (string, error) {
 	if len(nspath) == 0 {
 		return "", errors.New("Path prefix may not be empty")
@@ -346,4 +345,119 @@ func validateCustomFields(customFields map[string]interface{}) (bool, error) {
 		}
 	}
 	return true, nil
+}
+
+// maxAuthStateBytes mirrors the CHECK constraint on registrations.auth_state
+// (database/registry_migrations/20261106120000_add_auth_state_to_registrations.sql),
+// so an oversized auth state is refused with a 400 before it reaches the database.
+const maxAuthStateBytes = 8192
+
+// validateAuthState checks the auth state submitted for the namespace
+// registered at prefix and normalizes it in place, so that what the registry
+// stores is what an origin exporting the same namespace would advertise
+// (server_utils/origin.go, the export-to-NamespaceAd conversion):
+//
+//   - a nil state is valid and means "advertise only while an origin is online";
+//   - origin and cache registrations never carry one;
+//   - PublicRead implies Read, as it does for an origin export. A PublicRead
+//     namespace may still list token issuers, as an origin that allows public
+//     reads and authenticated writes does; caches ignore the issuers of a
+//     public namespace (xrootd.GenerateCacheIssuers), so they are harmless;
+//   - an all-zero tokenGeneration entry is dropped, since an origin ad always
+//     carries one even when the export has no issuer and the director UI shows
+//     it as such; a non-zero entry needs the OAuth2 strategy, the only one
+//     the Pelican client implements (client.AcquireToken refuses Vault), an
+//     empty vaultServer, and an issuer that passes
+//     server_structs.ParseIssuerUrl;
+//   - each token issuer passes ParseIssuerUrl and has at least one base path;
+//     base paths are normalized by validatePrefix like the prefix itself and
+//     must equal or lie under prefix, so the owner of a prefix can never grant
+//     an issuer scope outside it; restricted paths are normalized the same way
+//     and must lie under one of the issuer's base paths;
+//   - the serialized state fits the auth_state column.
+//
+// prefix must already have passed validatePrefix.
+func validateAuthState(prefix string, st *server_structs.NamespaceAuthState) error {
+	if st == nil {
+		return nil
+	}
+	if server_structs.IsOriginNS(prefix) || server_structs.IsCacheNS(prefix) {
+		return errors.New("auth state can only be set on a namespace registration, not on an origin or cache registration")
+	}
+
+	if st.Capabilities.PublicReads {
+		st.Capabilities.Reads = true
+	}
+
+	gens := st.TokenGeneration[:0]
+	for i, gen := range st.TokenGeneration {
+		if gen == (server_structs.TokenGenResponse{}) {
+			continue
+		}
+		if gen.Strategy != server_structs.OAuthStrategy {
+			return errors.Errorf("tokenGeneration[%d]: unsupported strategy %q; only %q is supported", i, gen.Strategy, server_structs.OAuthStrategy)
+		}
+		if gen.VaultServer != "" {
+			return errors.Errorf("tokenGeneration[%d]: vaultServer must be empty; the %q strategy does not use one", i, server_structs.OAuthStrategy)
+		}
+		if _, err := server_structs.ParseIssuerUrl(gen.CredentialIssuer); err != nil {
+			return errors.Wrapf(err, "tokenGeneration[%d]", i)
+		}
+		gens = append(gens, gen)
+	}
+	st.TokenGeneration = gens
+
+	for i, iss := range st.TokenIssuer {
+		if _, err := server_structs.ParseIssuerUrl(iss.IssuerUrl); err != nil {
+			return errors.Wrapf(err, "tokenIssuer[%d]", i)
+		}
+		if len(iss.BasePaths) == 0 {
+			return errors.Errorf("tokenIssuer[%d]: issuer %s needs at least one base path", i, iss.IssuerUrl)
+		}
+		for j, bp := range iss.BasePaths {
+			cleaned, err := validatePrefix(bp)
+			if err != nil {
+				return errors.Wrapf(err, "tokenIssuer[%d].basePaths[%d]", i, j)
+			}
+			if !pathIsWithin(cleaned, prefix) {
+				return errors.Errorf("tokenIssuer[%d].basePaths[%d]: base path %q is outside the registered prefix %s", i, j, bp, prefix)
+			}
+			iss.BasePaths[j] = cleaned
+		}
+		for j, rp := range iss.RestrictedPaths {
+			cleaned, err := validatePrefix(rp)
+			if err != nil {
+				return errors.Wrapf(err, "tokenIssuer[%d].restrictedPaths[%d]", i, j)
+			}
+			within := false
+			for _, bp := range iss.BasePaths {
+				if pathIsWithin(cleaned, bp) {
+					within = true
+					break
+				}
+			}
+			if !within {
+				return errors.Errorf("tokenIssuer[%d].restrictedPaths[%d]: restricted path %q is not under any base path of issuer %s", i, j, rp, iss.IssuerUrl)
+			}
+			iss.RestrictedPaths[j] = cleaned
+		}
+	}
+
+	serialized, err := json.Marshal(st)
+	if err != nil {
+		return errors.Wrap(err, "failed to serialize the auth state")
+	}
+	if len(serialized) > maxAuthStateBytes {
+		return errors.Errorf("auth state is %d bytes when serialized; the limit is %d", len(serialized), maxAuthStateBytes)
+	}
+	return nil
+}
+
+// pathIsWithin reports whether the normalized absolute path p equals root or
+// lies under it as a whole path component, so /foobar is not within /foo.
+func pathIsWithin(p, root string) bool {
+	if root == "/" {
+		return true
+	}
+	return p == root || strings.HasPrefix(p, root+"/")
 }

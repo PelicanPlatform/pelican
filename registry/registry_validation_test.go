@@ -19,6 +19,8 @@
 package registry
 
 import (
+	"encoding/json"
+	"fmt"
 	"testing"
 
 	"github.com/jellydator/ttlcache/v3"
@@ -359,5 +361,362 @@ func TestValidatePrefix(t *testing.T) {
 		got, err = validatePrefix("/caches/192.168.5.21")
 		require.NoError(t, err)
 		assert.Equal(t, "/caches/192.168.5.21", got)
+	})
+}
+
+func TestValidateAuthState(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
+
+	const exampleIssuer = "https://issuer.example.org"
+	readOnly := server_structs.Capabilities{Reads: true}
+	public := server_structs.Capabilities{PublicReads: true}
+	oauth := func(issuer string) server_structs.TokenGenResponse {
+		return server_structs.TokenGenResponse{Strategy: server_structs.OAuthStrategy, MaxScopeDepth: 3, CredentialIssuer: issuer}
+	}
+	issuer := func(url string, basePaths []string, restricted []string) server_structs.TokenIssuerResponse {
+		return server_structs.TokenIssuerResponse{IssuerUrl: url, BasePaths: basePaths, RestrictedPaths: restricted}
+	}
+	// manyRestrictedPaths builds a read-only state whose issuer lists n
+	// restricted paths, to drive the serialized size past or under the limit.
+	manyRestrictedPaths := func(n int) *server_structs.NamespaceAuthState {
+		paths := make([]string, n)
+		for i := range paths {
+			paths[i] = fmt.Sprintf("/foo/bar/restricted-path-number-%04d", i)
+		}
+		return &server_structs.NamespaceAuthState{
+			Capabilities: readOnly,
+			TokenIssuer:  []server_structs.TokenIssuerResponse{issuer(exampleIssuer, []string{"/foo"}, paths)},
+		}
+	}
+
+	tests := []struct {
+		name    string
+		prefix  string
+		state   *server_structs.NamespaceAuthState
+		wantErr string                             // substring of the error; empty means the state is valid
+		want    *server_structs.NamespaceAuthState // normalized state, when it differs from the input
+	}{
+		{
+			name:   "nil-state-is-valid",
+			prefix: "/foo",
+		},
+		{
+			name:   "nil-state-is-valid-on-an-origin-registration",
+			prefix: "/origins/example.org",
+		},
+		{
+			name:    "rejects-an-origin-registration",
+			prefix:  "/origins/example.org",
+			state:   &server_structs.NamespaceAuthState{Capabilities: public},
+			wantErr: "not on an origin or cache registration",
+		},
+		{
+			name:    "rejects-a-cache-registration",
+			prefix:  "/caches/example.org",
+			state:   &server_structs.NamespaceAuthState{Capabilities: public},
+			wantErr: "not on an origin or cache registration",
+		},
+		{
+			name:   "public-read-implies-read",
+			prefix: "/foo",
+			state:  &server_structs.NamespaceAuthState{Capabilities: public},
+			want:   &server_structs.NamespaceAuthState{Capabilities: server_structs.Capabilities{PublicReads: true, Reads: true}},
+		},
+		{
+			// An origin that allows public reads and authenticated writes
+			// advertises exactly this; caches ignore the issuers of a public
+			// namespace, so the state is accepted.
+			name:   "public-read-with-token-issuers-is-accepted",
+			prefix: "/foo",
+			state: &server_structs.NamespaceAuthState{
+				Capabilities:    server_structs.Capabilities{PublicReads: true, Writes: true},
+				TokenGeneration: []server_structs.TokenGenResponse{oauth(exampleIssuer)},
+				TokenIssuer:     []server_structs.TokenIssuerResponse{issuer(exampleIssuer, []string{"/foo"}, nil)},
+			},
+			want: &server_structs.NamespaceAuthState{
+				Capabilities:    server_structs.Capabilities{PublicReads: true, Reads: true, Writes: true},
+				TokenGeneration: []server_structs.TokenGenResponse{oauth(exampleIssuer)},
+				TokenIssuer:     []server_structs.TokenIssuerResponse{issuer(exampleIssuer, []string{"/foo"}, nil)},
+			},
+		},
+		{
+			name:   "read-with-issuers-is-accepted-unchanged",
+			prefix: "/foo",
+			state: &server_structs.NamespaceAuthState{
+				Capabilities:    readOnly,
+				TokenGeneration: []server_structs.TokenGenResponse{oauth(exampleIssuer)},
+				TokenIssuer:     []server_structs.TokenIssuerResponse{issuer(exampleIssuer, []string{"/foo"}, []string{"/foo/bar"})},
+			},
+		},
+		{
+			name:   "zero-token-generation-entry-is-dropped",
+			prefix: "/foo",
+			state: &server_structs.NamespaceAuthState{
+				Capabilities:    public,
+				TokenGeneration: []server_structs.TokenGenResponse{{}},
+			},
+			want: &server_structs.NamespaceAuthState{
+				Capabilities:    server_structs.Capabilities{PublicReads: true, Reads: true},
+				TokenGeneration: []server_structs.TokenGenResponse{},
+			},
+		},
+		{
+			name:   "zero-token-generation-entry-is-dropped-beside-a-real-one",
+			prefix: "/foo",
+			state: &server_structs.NamespaceAuthState{
+				Capabilities:    readOnly,
+				TokenGeneration: []server_structs.TokenGenResponse{{}, oauth(exampleIssuer)},
+			},
+			want: &server_structs.NamespaceAuthState{
+				Capabilities:    readOnly,
+				TokenGeneration: []server_structs.TokenGenResponse{oauth(exampleIssuer)},
+			},
+		},
+		{
+			name:   "unknown-token-generation-strategy",
+			prefix: "/foo",
+			state: &server_structs.NamespaceAuthState{
+				Capabilities:    readOnly,
+				TokenGeneration: []server_structs.TokenGenResponse{{Strategy: "oauth2", CredentialIssuer: exampleIssuer}},
+			},
+			wantErr: `tokenGeneration[0]: unsupported strategy "oauth2"`,
+		},
+		{
+			name:   "token-generation-entry-with-an-issuer-but-no-strategy",
+			prefix: "/foo",
+			state: &server_structs.NamespaceAuthState{
+				Capabilities:    readOnly,
+				TokenGeneration: []server_structs.TokenGenResponse{{CredentialIssuer: exampleIssuer}},
+			},
+			wantErr: `tokenGeneration[0]: unsupported strategy ""`,
+		},
+		{
+			name:   "vault-strategy-is-rejected",
+			prefix: "/foo",
+			state: &server_structs.NamespaceAuthState{
+				Capabilities:    readOnly,
+				TokenGeneration: []server_structs.TokenGenResponse{{Strategy: server_structs.VaultStrategy, VaultServer: "vault.example.org", CredentialIssuer: exampleIssuer}},
+			},
+			wantErr: `tokenGeneration[0]: unsupported strategy "Vault"`,
+		},
+		{
+			name:   "vault-server-is-rejected-with-oauth2",
+			prefix: "/foo",
+			state: &server_structs.NamespaceAuthState{
+				Capabilities:    readOnly,
+				TokenGeneration: []server_structs.TokenGenResponse{{Strategy: server_structs.OAuthStrategy, VaultServer: "vault.example.org", CredentialIssuer: exampleIssuer}},
+			},
+			wantErr: `tokenGeneration[0]: vaultServer must be empty`,
+		},
+		{
+			name:   "token-generation-issuer-must-be-https",
+			prefix: "/foo",
+			state: &server_structs.NamespaceAuthState{
+				Capabilities:    readOnly,
+				TokenGeneration: []server_structs.TokenGenResponse{oauth("http://issuer.example.org")},
+			},
+			wantErr: `tokenGeneration[0]: issuer "http://issuer.example.org" must be an absolute https url`,
+		},
+		{
+			name:   "token-generation-issuer-must-be-absolute",
+			prefix: "/foo",
+			state: &server_structs.NamespaceAuthState{
+				Capabilities:    readOnly,
+				TokenGeneration: []server_structs.TokenGenResponse{oauth("issuer.example.org")},
+			},
+			wantErr: `must be an absolute https url`,
+		},
+		{
+			name:   "token-issuer-must-be-https",
+			prefix: "/foo",
+			state: &server_structs.NamespaceAuthState{
+				Capabilities: readOnly,
+				TokenIssuer:  []server_structs.TokenIssuerResponse{issuer("http://issuer.example.org", []string{"/foo"}, nil)},
+			},
+			wantErr: `tokenIssuer[0]: issuer "http://issuer.example.org" must be an absolute https url`,
+		},
+		{
+			name:   "token-issuer-must-not-be-empty",
+			prefix: "/foo",
+			state: &server_structs.NamespaceAuthState{
+				Capabilities: readOnly,
+				TokenIssuer:  []server_structs.TokenIssuerResponse{issuer("", []string{"/foo"}, nil)},
+			},
+			wantErr: "tokenIssuer[0]: issuer is empty",
+		},
+		{
+			name:   "token-issuer-needs-a-base-path",
+			prefix: "/foo",
+			state: &server_structs.NamespaceAuthState{
+				Capabilities: readOnly,
+				TokenIssuer:  []server_structs.TokenIssuerResponse{issuer(exampleIssuer, nil, nil)},
+			},
+			wantErr: "needs at least one base path",
+		},
+		{
+			name:   "base-path-must-be-absolute",
+			prefix: "/foo",
+			state: &server_structs.NamespaceAuthState{
+				Capabilities: readOnly,
+				TokenIssuer:  []server_structs.TokenIssuerResponse{issuer(exampleIssuer, []string{"foo"}, nil)},
+			},
+			wantErr: "tokenIssuer[0].basePaths[0]: Path prefix must be absolute",
+		},
+		{
+			name:   "base-path-outside-the-prefix",
+			prefix: "/foo",
+			state: &server_structs.NamespaceAuthState{
+				Capabilities: readOnly,
+				TokenIssuer:  []server_structs.TokenIssuerResponse{issuer(exampleIssuer, []string{"/foo", "/other"}, nil)},
+			},
+			wantErr: `tokenIssuer[0].basePaths[1]: base path "/other" is outside the registered prefix /foo`,
+		},
+		{
+			name:   "base-path-sharing-a-string-prefix-is-still-outside",
+			prefix: "/foo",
+			state: &server_structs.NamespaceAuthState{
+				Capabilities: readOnly,
+				TokenIssuer:  []server_structs.TokenIssuerResponse{issuer(exampleIssuer, []string{"/foox"}, nil)},
+			},
+			wantErr: `base path "/foox" is outside the registered prefix /foo`,
+		},
+		{
+			name:   "base-path-above-the-prefix-is-outside",
+			prefix: "/foo/bar",
+			state: &server_structs.NamespaceAuthState{
+				Capabilities: readOnly,
+				TokenIssuer:  []server_structs.TokenIssuerResponse{issuer(exampleIssuer, []string{"/foo"}, nil)},
+			},
+			wantErr: `base path "/foo" is outside the registered prefix /foo/bar`,
+		},
+		{
+			name:   "base-path-with-a-dot-dot-component-is-rejected",
+			prefix: "/foo",
+			state: &server_structs.NamespaceAuthState{
+				Capabilities: readOnly,
+				TokenIssuer:  []server_structs.TokenIssuerResponse{issuer(exampleIssuer, []string{"/foo/../etc"}, nil)},
+			},
+			wantErr: "tokenIssuer[0].basePaths[0]: Path component cannot be '..'",
+		},
+		{
+			name:   "base-path-with-a-dot-component-is-rejected",
+			prefix: "/foo",
+			state: &server_structs.NamespaceAuthState{
+				Capabilities: readOnly,
+				TokenIssuer:  []server_structs.TokenIssuerResponse{issuer(exampleIssuer, []string{"/foo/./bar"}, nil)},
+			},
+			wantErr: "tokenIssuer[0].basePaths[0]: Path component cannot be '.'",
+		},
+		{
+			name:   "empty-base-path-is-rejected",
+			prefix: "/foo",
+			state: &server_structs.NamespaceAuthState{
+				Capabilities: readOnly,
+				TokenIssuer:  []server_structs.TokenIssuerResponse{issuer(exampleIssuer, []string{""}, nil)},
+			},
+			wantErr: "tokenIssuer[0].basePaths[0]: Path prefix may not be empty",
+		},
+		{
+			name:   "base-paths-are-normalized-like-a-prefix",
+			prefix: "/foo",
+			state: &server_structs.NamespaceAuthState{
+				Capabilities: readOnly,
+				TokenIssuer:  []server_structs.TokenIssuerResponse{issuer(exampleIssuer, []string{"/foo/bar/", "/foo//baz/x"}, nil)},
+			},
+			want: &server_structs.NamespaceAuthState{
+				Capabilities: readOnly,
+				TokenIssuer:  []server_structs.TokenIssuerResponse{issuer(exampleIssuer, []string{"/foo/bar", "/foo/baz/x"}, nil)},
+			},
+		},
+		{
+			name:   "restricted-path-must-be-absolute",
+			prefix: "/foo",
+			state: &server_structs.NamespaceAuthState{
+				Capabilities: readOnly,
+				TokenIssuer:  []server_structs.TokenIssuerResponse{issuer(exampleIssuer, []string{"/foo"}, []string{"foo/bar"})},
+			},
+			wantErr: "tokenIssuer[0].restrictedPaths[0]: Path prefix must be absolute",
+		},
+		{
+			name:   "restricted-path-outside-every-base-path",
+			prefix: "/foo",
+			state: &server_structs.NamespaceAuthState{
+				Capabilities: readOnly,
+				TokenIssuer:  []server_structs.TokenIssuerResponse{issuer(exampleIssuer, []string{"/foo/bar"}, []string{"/foo/baz"})},
+			},
+			wantErr: `tokenIssuer[0].restrictedPaths[0]: restricted path "/foo/baz" is not under any base path of issuer https://issuer.example.org`,
+		},
+		{
+			name:   "restricted-path-equal-to-a-base-path-is-accepted",
+			prefix: "/foo",
+			state: &server_structs.NamespaceAuthState{
+				Capabilities: readOnly,
+				TokenIssuer:  []server_structs.TokenIssuerResponse{issuer(exampleIssuer, []string{"/foo/bar"}, []string{"/foo/bar"})},
+			},
+		},
+		{
+			name:   "restricted-paths-are-normalized-like-a-prefix",
+			prefix: "/foo",
+			state: &server_structs.NamespaceAuthState{
+				Capabilities: readOnly,
+				TokenIssuer:  []server_structs.TokenIssuerResponse{issuer(exampleIssuer, []string{"/foo"}, []string{"/foo/bar/"})},
+			},
+			want: &server_structs.NamespaceAuthState{
+				Capabilities: readOnly,
+				TokenIssuer:  []server_structs.TokenIssuerResponse{issuer(exampleIssuer, []string{"/foo"}, []string{"/foo/bar"})},
+			},
+		},
+		{
+			name:   "state-under-the-size-limit-is-accepted",
+			prefix: "/foo",
+			state:  manyRestrictedPaths(150),
+		},
+		{
+			name:    "state-over-the-size-limit-is-rejected",
+			prefix:  "/foo",
+			state:   manyRestrictedPaths(250),
+			wantErr: "the limit is 8192",
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			var before *server_structs.NamespaceAuthState
+			if tc.state != nil {
+				raw, err := json.Marshal(tc.state)
+				require.NoError(t, err)
+				before = &server_structs.NamespaceAuthState{}
+				require.NoError(t, json.Unmarshal(raw, before))
+			}
+
+			err := validateAuthState(tc.prefix, tc.state)
+			if tc.wantErr != "" {
+				require.Error(t, err)
+				assert.Contains(t, err.Error(), tc.wantErr)
+				return
+			}
+			require.NoError(t, err)
+
+			if tc.state == nil {
+				return
+			}
+			serialized, err := json.Marshal(tc.state)
+			require.NoError(t, err)
+			assert.LessOrEqual(t, len(serialized), maxAuthStateBytes)
+			if tc.want != nil {
+				assert.Equal(t, tc.want, tc.state)
+			} else {
+				assert.Equal(t, before, tc.state, "a valid state that needs no normalization must come back unchanged")
+			}
+		})
+	}
+
+	t.Run("size-limit-cases-bracket-the-limit", func(t *testing.T) {
+		under, err := json.Marshal(manyRestrictedPaths(150))
+		require.NoError(t, err)
+		over, err := json.Marshal(manyRestrictedPaths(250))
+		require.NoError(t, err)
+		assert.LessOrEqual(t, len(under), maxAuthStateBytes)
+		assert.Greater(t, len(over), maxAuthStateBytes)
 	})
 }
