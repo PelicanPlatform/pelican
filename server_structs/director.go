@@ -68,6 +68,7 @@ type (
 		Generation   []TokenGen    `json:"token-generation"`
 		Issuer       []TokenIssuer `json:"token-issuer"`
 		FromTopology bool          `json:"from-topology"`
+		FromRegistry bool          `json:"from-registry"`
 	}
 
 	// Downtime represents a server downtime event
