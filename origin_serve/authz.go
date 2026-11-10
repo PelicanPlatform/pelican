@@ -332,7 +332,7 @@ func (ac *authConfig) getResourceScopes(tokenStr string) (scopes []token_scopes.
 		}
 	}
 
-	scopes = token_scopes.ParseResourceScopeString(tok)
+	scopes = token_scopes.GrantedScopes(tok)
 
 	return
 }
