@@ -63,6 +63,7 @@ BUILTIN_ADMIN = "admin"
 
 DUPLICATE_ISSUE = "issue #3824"
 DUPLICATE_FIX = "PR #3828"
+DUPLICATE_FIX_RELEASE = "v7.27.1"
 
 # Index created by the last of v7.27's users-table migrations
 # (20260812000000_global_unique_username.sql); the server's own
@@ -375,8 +376,8 @@ def print_cleanup(
             f"({DUPLICATE_ISSUE}: the global-unique-username migration fails)."
         )
     print(
-        f"  The pending fix ({DUPLICATE_FIX}) keeps one row per username and soft-deletes "
-        "the others, which re-enroll as new users at their next login."
+        f"  The fix in {DUPLICATE_FIX_RELEASE} ({DUPLICATE_FIX}) keeps one row per username and "
+        "soft-deletes the others, which re-enroll as new users at their next login."
     )
     if local_issuer:
         print(f"  Predicted outcome, preferring rows on Server.ExternalWebUrl {local_issuer!r}:")
@@ -394,13 +395,13 @@ def print_cleanup(
         if kept is None:
             print(
                 "    no row has sub 'admin', so v7.27.0 cannot create its built-in admin "
-                "(password login fails); the pending fix creates a fresh row"
+                f"(password login fails); {DUPLICATE_FIX_RELEASE} and later create a fresh row"
             )
         elif local_issuer and kept["issuer"] != local_issuer:
             print(
                 "    the kept row is not on the current Server.ExternalWebUrl, so v7.27.0 cannot "
-                f"create its built-in admin there (password login fails); the pending fix moves "
-                f"the row to {local_issuer!r}"
+                "create its built-in admin there (password login fails); "
+                f"{DUPLICATE_FIX_RELEASE} and later move the row to {local_issuer!r}"
             )
     print(
         "  To resolve by hand before upgrading to v7.27.0: delete placeholder rows, rename the other "
@@ -679,7 +680,7 @@ def main() -> int:
     if cleanup:
         print(
             "Resolve the user rows listed above before upgrading to v7.27.0, "
-            f"or upgrade to a release that includes {DUPLICATE_FIX}."
+            f"or upgrade straight to {DUPLICATE_FIX_RELEASE} or later, which includes {DUPLICATE_FIX}."
         )
         print()
 
