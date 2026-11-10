@@ -702,103 +702,134 @@ func defaultChecksumTypesForService(host string) []ChecksumType {
 	return []ChecksumType{AlgDefault}
 }
 
+// testChecksumBytesWithLog test the equality of 2 checksum in bytes with logging
+// One checksum is provided by client, the other is provided by server
+func testChecksumBytesWithLog(
+	fields log.Fields,
+	checksumType ChecksumType,
+	clientChecksum, serverChecksum []byte,
+) (test bool, err error) {
+	// Compare, any mismatch is an error
+	if !bytes.Equal(clientChecksum, serverChecksum) {
+		log.WithFields(fields).Errorf(
+			"Checksum type %s mismatch, client=%s, server=%s",
+			HttpDigestFromChecksum(checksumType),
+			checksumValueToHttpDigest(checksumType, clientChecksum),
+			checksumValueToHttpDigest(checksumType, serverChecksum),
+		)
+		mismatchErr := &ChecksumMismatchError{
+			Info: ChecksumInfo{
+				Algorithm: checksumType,
+				Value:     clientChecksum,
+			},
+			ServerValue: serverChecksum,
+		}
+		return false, error_codes.NewTransfer_ChecksumMismatchError(mismatchErr)
+	}
+
+	log.WithFields(fields).Debugf(
+		"Checksum type %s matches: %s",
+		HttpDigestFromChecksum(checksumType),
+		checksumValueToHttpDigest(checksumType, clientChecksum),
+	)
+
+	return true, nil
+}
+
 // verifyTransferChecksums compares server-provided checksums against locally-computed ones.
 //
-// It tries to match any server-provided checksum against the computed values. If the match
-// is for a type the client didn't explicitly request (e.g., the server returned MD5 when
-// CRC32C was requested), a warning is logged about the fallback. Returns whether verification
-// succeeded and any error (e.g., checksum mismatch or missing required checksum).
-// quietFallbacks names algorithms whose use in place of the requested ones
-// should not be reported as a surprise: the caller expressed no preference
-// and this service is already known to provide these digests. It affects
-// logging only -- verification itself is unchanged, as is the set of
-// algorithms reported back to the caller in ClientChecksums.
+// This function follows the rules:
+//  1. All user requested checksum will be attempted. A missing checksum type results in a warning once for each type
+//     All subsequent warning for that type will be printed to debug level log.
+//  2. If none of user requested type can be compared, fallback to whatever type server provides.
+//     All server provided types will be attempted.
+//  3. Any mismatch will result in error
+//  4. If neither user requested types nor server provided types can be compared:
+//     a. If user requires checksums, return with false + missing checksum error
+//     b. Otherwise, check is inconclusive, return with false + no error
+//
+// This function first attempts all user requested checksum types, then fallback to server provided types
+// if none of the attempts succeed. If none of the server provided types can be verified, verification fails and
+// missing checksum error may be returned if user requires checksums.
 func verifyTransferChecksums(
-	allComputed map[ChecksumType][]byte,
+	clientChecksums map[ChecksumType][]byte,
+	serverChecksums map[ChecksumType][]byte,
 	requestedTypes []ChecksumType,
-	quietFallbacks []ChecksumType,
-	serverChecksums []ChecksumInfo,
 	requireChecksum bool,
 	fields log.Fields,
 ) (verified bool, err error) {
-	if len(serverChecksums) == 0 {
-		if requireChecksum {
-			log.WithFields(fields).Errorln(
-				"Client requires checksum verification but server provided no checksums")
-			return false, error_codes.NewTransfer_ChecksumMissingError(ErrServerChecksumMissing)
-		}
-		log.WithFields(fields).Debugln("Server did not provide any checksum values to compare")
-		return false, nil
-	}
+	// At least one checksum should be compared
+	checkedAtLeastOnce := false
 
-	requestedSet := make(map[ChecksumType]bool, len(requestedTypes))
-	for _, t := range requestedTypes {
-		requestedSet[t] = true
-	}
-	quietSet := make(map[ChecksumType]bool, len(quietFallbacks))
-	for _, t := range quietFallbacks {
-		quietSet[t] = true
-	}
+	// Loop over all user request types first
+	for _, requestedType := range requestedTypes {
+		// Extract client-computed hash and server-computed hash
+		clientChecksum, clientOk := clientChecksums[requestedType]
+		serverChecksum, serverOk := serverChecksums[requestedType]
 
-	for _, serverCk := range serverChecksums {
-		clientVal, ok := allComputed[serverCk.Algorithm]
-		if !ok {
-			continue
-		}
-		if !bytes.Equal(serverCk.Value, clientVal) {
-			mismatchErr := &ChecksumMismatchError{
-				Info: ChecksumInfo{
-					Algorithm: serverCk.Algorithm,
-					Value:     clientVal,
-				},
-				ServerValue: serverCk.Value,
-			}
-			return false, error_codes.NewTransfer_ChecksumMismatchError(mismatchErr)
-		}
-		if !requestedSet[serverCk.Algorithm] {
-			if quietSet[serverCk.Algorithm] {
-				// Not what we asked for, but what this service is known to
-				// provide, and the caller expressed no preference.
-				log.WithFields(fields).Debugf("Checksum %s matches: %s",
-					HttpDigestFromChecksum(serverCk.Algorithm),
-					checksumValueToHttpDigest(serverCk.Algorithm, serverCk.Value))
-				return true, nil
-			}
-			// This fires for every transfer against a server that lacks the
-			// requested digest (e.g. an origin that only computes MD5 when
-			// CRC32C was requested) -- warn once per process per algorithm,
-			// then drop to debug so bulk workloads aren't flooded.
-			if _, seen := checksumFallbacksSeen.LoadOrStore(serverCk.Algorithm, struct{}{}); !seen {
+		// If not comparable due to missing from either side, warn just once
+		if !clientOk || !serverOk {
+			if _, seen := checksumFallbacksSeen.LoadOrStore(requestedType, struct{}{}); !seen {
 				log.WithFields(fields).Warnf(
-					"Requested checksum type(s) not provided by server; verified transfer using %s instead"+
-						" (subsequent fallbacks will be logged at debug level)",
-					HttpDigestFromChecksum(serverCk.Algorithm))
+					"Requested checksum type %s is not provided by either server or client"+
+						" (subsequent missing on the same checksum type will be logged at debug level)",
+					HttpDigestFromChecksum(requestedType),
+				)
 			} else {
 				log.WithFields(fields).Debugf(
-					"Requested checksum type(s) not provided by server; verified transfer using %s instead",
-					HttpDigestFromChecksum(serverCk.Algorithm))
+					"Requested checksum type %s is not provided by either server or client",
+					HttpDigestFromChecksum(requestedType),
+				)
 			}
-		} else {
-			log.WithFields(fields).Debugf("Checksum %s matches: %s",
-				HttpDigestFromChecksum(serverCk.Algorithm),
-				checksumValueToHttpDigest(serverCk.Algorithm, serverCk.Value))
+
+			// Try next user requested checksum type
+			continue
 		}
+
+		// Compare, any mismatch is an error
+		if res, e := testChecksumBytesWithLog(fields, requestedType, clientChecksum, serverChecksum); res {
+			// match
+			checkedAtLeastOnce = true
+		} else {
+			// mismatch
+			return false, e
+		}
+	}
+
+	// We have looped over all user requested checksum types at this point
+	// If we failed to compare all of them, compare whatever server provides.
+	// No warnings should be generated here because user does not requested
+	// these types.
+	if checkedAtLeastOnce {
 		return true, nil
 	}
 
-	// No server checksum matched any computed algorithm
-	if requireChecksum {
+	for checksumType, serverChecksum := range serverChecksums {
+		if clientChecksum, ok := clientChecksums[checksumType]; ok {
+			// Compare, any mismatch is an error
+			if res, e := testChecksumBytesWithLog(fields, checksumType, clientChecksum, serverChecksum); res {
+				// match
+				checkedAtLeastOnce = true
+			} else {
+				// mismatch
+				return false, e
+			}
+		}
+	}
+
+	// At this points, we have tried with all user requested types + server provided types
+	if checkedAtLeastOnce {
+		return true, nil
+	} else if requireChecksum {
+		// None of checksum is able to be compared, but user require at least one should be compared
 		log.WithFields(fields).Errorln(
-			"Client requires checksum verification but server returned only unsupported algorithms")
+			"Client requires checksum verification but neither user requested nor server provided checksum types can be verified.")
 		return false, error_codes.NewTransfer_ChecksumMissingError(ErrServerChecksumMissing)
+	} else {
+		// If none of the checksum type is able to be compared, checksum verification is inconclusive.
+		// Though this is not a mismatch/missing error, but we don't want any file to pass without any check
+		return false, nil
 	}
-	for _, checksumInfo := range serverChecksums {
-		log.WithFields(fields).Debugf(
-			"Server provided checksum %s=%s but algorithm not computable by client",
-			HttpDigestFromChecksum(checksumInfo.Algorithm),
-			checksumValueToHttpDigest(checksumInfo.Algorithm, checksumInfo.Value))
-	}
-	return false, nil
 }
 
 // Reset the memory-cached copy of the HTCondor job ad
@@ -4104,7 +4135,6 @@ func downloadObject(transfer *transferFile) (transferResults TransferResults, er
 			// entries from a failed prestage API call, or len(transferUrls),
 			// which is pre-allocated and may contain nil entries for unattempted URLs.
 			gotChecksum := false
-			checksumHost := ""
 			// Iterate through the various sources to fetch the checksums, starting with the successful one.
 			for idx := 0; idx < downloadAttemptCount; idx++ {
 				url := transferUrls[downloadAttemptCount-idx-1]
@@ -4120,7 +4150,6 @@ func downloadObject(transfer *transferFile) (transferResults TransferResults, er
 				if checksums, err := fetchChecksum(ctx, KnownChecksumTypes(), url, tokenContents, transfer.project); err == nil {
 					transferResults.ServerChecksums = checksums
 					gotChecksum = true
-					checksumHost = url.Host
 					rememberServiceDigests(url.Host, checksums)
 				}
 			}
@@ -4129,24 +4158,22 @@ func downloadObject(transfer *transferFile) (transferResults TransferResults, er
 			}
 
 			// Build map of all computed checksums for verification
-			allComputed := make(map[ChecksumType][]byte, len(allHashTypes))
+			allClientComputed := make(map[ChecksumType][]byte, len(allHashTypes))
 			for idx, t := range KnownChecksumTypes() {
-				allComputed[t] = allHashes[idx].(hash.Hash).Sum(nil)
+				allClientComputed[t] = allHashes[idx].(hash.Hash).Sum(nil)
+			}
+
+			// Build map of all server provided checksums for verification
+			allServerProvided := make(map[ChecksumType][]byte, len(transferResults.ServerChecksums))
+			for _, serverChecksumInfo := range transferResults.ServerChecksums {
+				allServerProvided[serverChecksumInfo.Algorithm] = serverChecksumInfo.Value
 			}
 
 			// Populate ClientChecksums with the originally-requested types for backward compatibility
 			requestedTypes := transfer.requestedChecksums
-			var quietFallbacks []ChecksumType
-			if len(requestedTypes) == 0 {
-				requestedTypes = []ChecksumType{AlgDefault}
-				// The caller asked for nothing in particular, so a digest
-				// this service is known to provide is not a surprise worth
-				// warning about.
-				quietFallbacks = defaultChecksumTypesForService(checksumHost)
-			}
 			transferResults.ClientChecksums = make([]ChecksumInfo, 0, len(requestedTypes))
 			for _, t := range requestedTypes {
-				if val, ok := allComputed[t]; ok {
+				if val, ok := allClientComputed[t]; ok {
 					transferResults.ClientChecksums = append(transferResults.ClientChecksums, ChecksumInfo{
 						Algorithm: t,
 						Value:     val,
@@ -4161,7 +4188,7 @@ func downloadObject(transfer *transferFile) (transferResults TransferResults, er
 				"job": transfer.job.ID(),
 			}
 			if _, verifyErr := verifyTransferChecksums(
-				allComputed, requestedTypes, quietFallbacks, transferResults.ServerChecksums,
+				allClientComputed, allServerProvided, requestedTypes,
 				transfer.requireChecksum, fields,
 			); verifyErr != nil {
 				transferResults.Error = verifyErr
@@ -4250,7 +4277,9 @@ func fetchChecksum(ctx context.Context, types []ChecksumType, url *url.URL, toke
 	if val, found := getJobId(ctx); found {
 		request.Header.Set("X-Pelican-JobId", val)
 	}
-	request.Header.Set("Want-Digest", wantDigestValue(types))
+	wantDigests := wantDigestValue(types)
+	request.Header.Set("Want-Digest", wantDigests)
+	log.Debugf("Want-Digest: %v.\n", wantDigests)
 	client := config.GetClient()
 	response, err := client.Do(request)
 	if err != nil {
@@ -5737,7 +5766,9 @@ Loop:
 		log.Debugf("Successful upload of %d bytes", uploaded)
 
 		// Fetch the checksums from the server, requesting all known types
-		result, err := fetchChecksum(putContext, KnownChecksumTypes(), dest, tokenContents, transfer.job.project)
+		requestedTypes := transfer.requestedChecksums
+		rankedTypes := rankedChecksumTypes(requestedTypes)
+		result, err := fetchChecksum(putContext, rankedTypes, dest, tokenContents, transfer.job.project)
 		if err != nil {
 			if transfer.requireChecksum {
 				log.Errorln("Error fetching checksum:", err)
@@ -5752,24 +5783,20 @@ Loop:
 		}
 
 		// Build map of all computed checksums for verification
-		allComputed := make(map[ChecksumType][]byte, len(allHashTypes))
+		allClientComputed := make(map[ChecksumType][]byte, len(allHashTypes))
 		for idx, t := range allHashTypes {
-			allComputed[t] = allHashes[idx].(hash.Hash).Sum(nil)
+			allClientComputed[t] = allHashes[idx].(hash.Hash).Sum(nil)
 		}
 
-		// Populate ClientChecksums with the originally-requested types for backward compatibility
-		requestedTypes := transfer.requestedChecksums
-		var quietFallbacks []ChecksumType
-		if len(requestedTypes) == 0 {
-			requestedTypes = []ChecksumType{AlgDefault}
-			// The caller asked for nothing in particular, so a digest this
-			// service is known to provide is not a surprise worth warning
-			// about.
-			quietFallbacks = defaultChecksumTypesForService(dest.Host)
+		// Build map of all server provided checksums for verification
+		allServerProvided := make(map[ChecksumType][]byte, len(transferResult.ServerChecksums))
+		for _, serverChecksumInfo := range transferResult.ServerChecksums {
+			allServerProvided[serverChecksumInfo.Algorithm] = serverChecksumInfo.Value
 		}
+
 		transferResult.ClientChecksums = make([]ChecksumInfo, 0, len(requestedTypes))
 		for _, t := range requestedTypes {
-			if val, ok := allComputed[t]; ok {
+			if val, ok := allClientComputed[t]; ok {
 				transferResult.ClientChecksums = append(transferResult.ClientChecksums, ChecksumInfo{
 					Algorithm: t,
 					Value:     val,
@@ -5783,7 +5810,7 @@ Loop:
 			"job": transfer.job.ID(),
 		}
 		if _, verifyErr := verifyTransferChecksums(
-			allComputed, requestedTypes, quietFallbacks, transferResult.ServerChecksums,
+			allClientComputed, allServerProvided, requestedTypes,
 			transfer.requireChecksum, fields,
 		); verifyErr != nil {
 			transferResult.Error = verifyErr
@@ -5796,6 +5823,25 @@ Loop:
 	// Note: the top-level `err` (second return value) is only for cases where no
 	// transfers were attempted.  If we got here, it must be nil.
 	return transferResult, nil
+}
+
+// rankedChecksumTypes accepts a list of preferred checksum types, ranked from
+// most to least (i.e., the most preferred checksum type is `preferred[0]`). Then,
+// it append other checksum types to the list, so the returned list has preferred
+// types + unspecified types. There is no guarantee on the order of unspecified part.
+func rankedChecksumTypes(preferred []ChecksumType) []ChecksumType {
+	log.Debugf("Preferred checksum is %v.\n", wantDigestValue(preferred))
+	allKnownTypes := KnownChecksumTypes()
+	result := make([]ChecksumType, 0, len(preferred))
+	result = append(result, preferred...)
+	for _, t := range allKnownTypes {
+		if !slices.Contains(result, t) {
+			result = append(result, t)
+		}
+	}
+	log.Debugf("Resulting checksum list: %v.\n", wantDigestValue(result))
+
+	return result
 }
 
 // Actually perform the HTTP PUT request to the server.
