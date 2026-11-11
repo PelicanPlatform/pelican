@@ -217,7 +217,8 @@ func registerDirectorAd(appCtx context.Context, egrp *errgroup.Group, ctx *gin.C
 		if fAd.AdType == server_structs.OriginType.String() {
 			sType = server_structs.OriginType
 		}
-		finishRegisterServeAd(appCtx, ctx, fAd.ServiceAd, sType)
+		// A forwarded ad was already filtered by the peer that received it.
+		finishRegisterServeAd(appCtx, ctx, fAd.ServiceAd, sType, nil)
 		if ctx.IsAborted() {
 			return
 		}

@@ -896,3 +896,13 @@ func getInstanceID() (string, int64) {
 
 	return instanceID, startTime
 }
+
+// AdvertiseResponse is the director's answer to an accepted origin or cache
+// advertisement. WithheldNamespaces lists the namespaces the director left
+// out of the recorded ad because the registry has not approved them yet;
+// the rest of the ad is live. Older directors answer with a plain
+// SimpleApiResp, which decodes into this with the list empty.
+type AdvertiseResponse struct {
+	SimpleApiResp
+	WithheldNamespaces []string `json:"withheldNamespaces,omitempty"`
+}

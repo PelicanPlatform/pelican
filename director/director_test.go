@@ -173,11 +173,14 @@ func TestDirectorRegistration(t *testing.T) {
 			err = json.Unmarshal(reqBody, &reqJson)
 			require.NoError(t, err)
 			// we expect the registration to use "test" for namespace, /caches/test for cache, and /origins/test for origin
-			if reqJson.Prefix != "test" && reqJson.Prefix != "/caches/test" && reqJson.Prefix != "/origins/test" {
+			if reqJson.Prefix != "test" && reqJson.Prefix != "/caches/test" && reqJson.Prefix != "/origins/test" && reqJson.Prefix != "/foo/unapproved" {
 				w.WriteHeader(http.StatusNotFound)
 				return
 			}
-			res := server_structs.CheckNamespaceStatusRes{Approved: true}
+			// A registered namespace the administrator has not approved yet.
+			// (Unknown prefixes get a 404 above, which the director treats as
+			// a legacy registry and approves, so an explicit "no" is needed.)
+			res := server_structs.CheckNamespaceStatusRes{Approved: reqJson.Prefix != "/foo/unapproved"}
 			resByte, err := json.Marshal(res)
 			if err != nil {
 				http.Error(w, "marshal error", http.StatusInternalServerError)
@@ -325,6 +328,91 @@ func TestDirectorRegistration(t *testing.T) {
 		assert.Equal(t, getAd.Name, ad.Name)
 		require.Len(t, getAd.NamespaceAds, 1)
 		assert.Equal(t, getAd.NamespaceAds[0].Path, "/foo/bar")
+		teardown()
+	})
+
+	// An origin whose namespaces are not all approved yet is still accepted:
+	// the unapproved namespace is withheld from the recorded ad and named in
+	// the response, so the approved ones go live without waiting (#3831).
+	t.Run("unapproved-namespace-is-withheld-not-rejected", func(t *testing.T) {
+		c, r, w := setupContext()
+		pKey, token, _ := generateToken()
+		publicKey, err := jwk.PublicKeyOf(pKey)
+		require.NoError(t, err)
+
+		setupJwksCache(t, "/origins/test", publicKey)
+		setupJwksCache(t, "/foo/bar", publicKey)
+
+		isurl := url.URL{}
+		isurl.Path = ts.URL
+
+		ad := server_structs.OriginAdvertise{
+			RegistryPrefix: "/origins/test",
+			BrokerURL:      "https://broker-url.org",
+			DataURL:        "https://or-url.org",
+			Namespaces: []server_structs.NamespaceAd{
+				{Path: "/foo/bar", Issuer: []server_structs.TokenIssuer{{IssuerUrl: isurl}}},
+				{Path: "/foo/unapproved", Issuer: []server_structs.TokenIssuer{{IssuerUrl: isurl}}},
+			},
+		}
+		ad.Initialize("test")
+		jsonad, err := json.Marshal(ad)
+		require.NoError(t, err)
+
+		setupRequest(c, r, jsonad, token, server_structs.OriginType)
+		r.ServeHTTP(w, c.Request)
+
+		require.Equal(t, http.StatusOK, w.Result().StatusCode, w.Body.String())
+		resp := server_structs.AdvertiseResponse{}
+		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+		assert.Equal(t, server_structs.RespOK, resp.Status)
+		assert.Equal(t, []string{"/foo/unapproved"}, resp.WithheldNamespaces)
+		assert.Contains(t, resp.Msg, "/foo/unapproved", "the message names the withheld namespace")
+
+		get := serverAds.Get("https://or-url.org")
+		require.NotNil(t, get, "the origin must be recorded despite the withheld namespace")
+		require.Len(t, get.Value().NamespaceAds, 1, "only the approved namespace is recorded")
+		assert.Equal(t, "/foo/bar", get.Value().NamespaceAds[0].Path)
+		teardown()
+	})
+
+	// With nothing approved yet the origin is still recorded, serving no
+	// namespace until an administrator acts; its own registration is what
+	// admits it to the federation.
+	t.Run("origin-with-only-unapproved-namespaces-is-recorded-without-them", func(t *testing.T) {
+		c, r, w := setupContext()
+		pKey, token, _ := generateToken()
+		publicKey, err := jwk.PublicKeyOf(pKey)
+		require.NoError(t, err)
+
+		setupJwksCache(t, "/origins/test", publicKey)
+
+		isurl := url.URL{}
+		isurl.Path = ts.URL
+
+		ad := server_structs.OriginAdvertise{
+			RegistryPrefix: "/origins/test",
+			BrokerURL:      "https://broker-url.org",
+			DataURL:        "https://or-url.org",
+			Namespaces: []server_structs.NamespaceAd{
+				{Path: "/foo/unapproved", Issuer: []server_structs.TokenIssuer{{IssuerUrl: isurl}}},
+			},
+		}
+		ad.Initialize("test")
+		jsonad, err := json.Marshal(ad)
+		require.NoError(t, err)
+
+		setupRequest(c, r, jsonad, token, server_structs.OriginType)
+		r.ServeHTTP(w, c.Request)
+
+		require.Equal(t, http.StatusOK, w.Result().StatusCode, w.Body.String())
+		resp := server_structs.AdvertiseResponse{}
+		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+		assert.Equal(t, []string{"/foo/unapproved"}, resp.WithheldNamespaces)
+
+		get := serverAds.Get("https://or-url.org")
+		require.NotNil(t, get, "the origin must be recorded")
+		assert.Empty(t, get.Value().NamespaceAds)
 		teardown()
 	})
 
