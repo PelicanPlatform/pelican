@@ -4,9 +4,6 @@ on:
   pull_request:
     branches:
       - main
-  push:
-    branches-ignore:
-      - main
 
 permissions:
   contents: read
@@ -18,16 +15,17 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
         with:
+          # The default ref is the PR's merge commit, which always has main
+          # as a parent. Check the PR branch itself instead.
+          ref: ${{ github.event.pull_request.head.sha }}
           fetch-depth: 0  # Fetch all history to check ancestry
 
       - name: Check if branch is rebased on main
         run: |
-          # Fetch the latest main branch
+          # Fetch the latest main branch.
           git fetch origin main:main
 
-          # Check if main is an ancestor of the current branch
-          # This will exit with code 0 if main is an ancestor (branch is rebased)
-          # and exit with code 1 if main is not an ancestor (branch needs rebase)
+          # Check whether main is an ancestor of the current branch.
           if ! git merge-base --is-ancestor origin/main HEAD; then
             echo "Error: This branch is not rebased on main."
             echo "Please rebase your branch on main before merging."
