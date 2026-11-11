@@ -518,7 +518,7 @@ Xrootd:
 	t.Cleanup(func() {
 		cancel()
 		select {
-		case <-exitCh:
+		case _ = <-exitCh:
 		case <-time.After(5 * time.Second):
 			t.Log("Timed out waiting for origin2 process to exit during cleanup")
 		}
