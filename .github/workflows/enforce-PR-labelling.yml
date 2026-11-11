@@ -2,9 +2,9 @@ name: PR Validation
 
 on:
   pull_request:
-    # one limitation here is that there's no trigger to re-run any time we "connect" or "disconnect" an issue
+    # One limitation here is that there's no trigger to re-run
+    # any time we "connect" or "disconnect" an issue.
     types: [opened, edited, labeled, unlabeled, synchronize]
-  workflow_dispatch:
 
 permissions:
   contents: read
@@ -30,6 +30,9 @@ jobs:
 
       - name: Validate PR is linked to an issue
         id: check_linked_issues
+        # Dependabot's PRs are routine dependency updates with no issue
+        # to link.
+        if: github.event.pull_request.user.login != 'dependabot[bot]'
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |

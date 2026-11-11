@@ -4,10 +4,11 @@
 # - Security updates, where Dependabot offers them, take priority.
 #   Each one opens its own PR as soon as an advisory is published,
 #   with no cooldown and no grouping.
+#   Only the default branch gets security updates.
 # - A version update is withheld until the release has been public
 #   for 7 days, which buys time for a malicious release to be noticed.
 # - Version updates that clear the cooldown are batched
-#   into a single weekly PR per ecosystem.
+#   into a single weekly PR per ecosystem and target branch.
 
 version: 2
 
@@ -27,6 +28,21 @@ updates:
       # BASE_OS in images/Dockerfile is tied to the major version.
       - dependency-name: "almalinux"
         update-types: ["version-update:semver-major"]
+  - package-ecosystem: "docker"
+    directory: "/images"
+    schedule:
+      interval: "weekly"
+    cooldown:
+      default-days: 7
+    groups:
+      docker:
+        applies-to: version-updates
+        patterns: ["*"]
+    ignore:
+      # BASE_OS in images/Dockerfile is tied to the major version.
+      - dependency-name: "almalinux"
+        update-types: ["version-update:semver-major"]
+    target-branch: "v26.0.x"
 
   # Keep the SHA-pinned actions in .github/workflows/ from going stale.
   - package-ecosystem: "github-actions"
@@ -39,8 +55,21 @@ updates:
       github-actions:
         applies-to: version-updates
         patterns: ["*"]
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    cooldown:
+      default-days: 7
+    groups:
+      github-actions:
+        applies-to: version-updates
+        patterns: ["*"]
+    target-branch: "v26.0.x"
 
   # Keep the Go module dependencies in go.mod from going stale.
+  # Release branches get only bug fixes, and bumping a Go module changes
+  # Pelican's own code, so only the default branch gets these updates.
   - package-ecosystem: "gomod"
     directory: "/"
     schedule:
@@ -63,3 +92,14 @@ updates:
       pre-commit:
         applies-to: version-updates
         patterns: ["*"]
+  - package-ecosystem: "pre-commit"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    cooldown:
+      default-days: 7
+    groups:
+      pre-commit:
+        applies-to: version-updates
+        patterns: ["*"]
+    target-branch: "v26.0.x"
