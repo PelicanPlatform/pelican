@@ -590,7 +590,7 @@ func (c *SSHConnection) StopHelper(ctx context.Context) error {
 
 		// Wait a bit more for SIGTERM
 		select {
-		case <-done:
+		case _ = <-done:
 			sshLog.Info("Helper process stopped after SIGTERM")
 		case <-time.After(2 * time.Second):
 			// SIGTERM didn't work, try SIGKILL
@@ -614,7 +614,7 @@ func (c *SSHConnection) StopHelper(ctx context.Context) error {
 			}
 
 			select {
-			case <-done:
+			case _ = <-done:
 				sshLog.Info("Helper process stopped after SIGKILL")
 			case <-time.After(5 * time.Second):
 				// Last-resort wait so we don't nil helperIO out from
@@ -624,7 +624,7 @@ func (c *SSHConnection) StopHelper(ctx context.Context) error {
 				// cleanly avoids spurious "stdin closed" errors in logs.
 				sshLog.Warn("Helper errgroup did not finish after SIGKILL; waiting briefly before forcing cleanup")
 				select {
-				case <-done:
+				case _ = <-done:
 				case <-time.After(2 * time.Second):
 					sshLog.Warn("Helper errgroup did not finish; goroutines may leak")
 				}
