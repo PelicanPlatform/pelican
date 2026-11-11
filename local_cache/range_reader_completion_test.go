@@ -164,7 +164,7 @@ func TestRangeReader_WaitForCompletion_FullReadHonorsContextCancel(t *testing.T)
 
 	// Confirm it's actually blocked before cancellation.
 	select {
-	case <-done:
+	case _ = <-done:
 		t.Fatal("full-read WaitForCompletion returned before context cancel")
 	case <-time.After(50 * time.Millisecond):
 	}

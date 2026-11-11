@@ -138,7 +138,7 @@ func startStandaloneOrigin(t *testing.T, ctx context.Context, serverPath string)
 			_ = cmd.Process.Kill()
 		}
 		select {
-		case <-exited:
+		case _ = <-exited:
 		case <-time.After(10 * time.Second):
 			t.Log("timed out waiting for the standalone origin to exit")
 		}

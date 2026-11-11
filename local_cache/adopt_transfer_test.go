@@ -327,7 +327,7 @@ func TestAdoptedTransferRecordsNoChecksumsForADeletedObject(t *testing.T) {
 		h.inner.StopEarly()
 		require.NoError(t, h.env.storage.Delete(h.env.hash))
 	})
-	<-h.exitErr
+	_ = <-h.exitErr
 	h.wg.Wait()
 	meta, err := h.env.db.GetMetadata(h.env.hash)
 	require.NoError(t, err)
@@ -367,7 +367,7 @@ func endAfterRefetch(t *testing.T, result *client.TransferResults) (*adoptHarnes
 			pc.endAdoptedDownload(dl, h.dw.diskFence(), h.state, err)
 		}
 	})
-	<-h.exitErr
+	_ = <-h.exitErr
 	h.wg.Wait()
 	require.NotNil(t, successor)
 	return h, successor

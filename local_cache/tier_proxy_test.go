@@ -238,7 +238,7 @@ func TestTierProxiedReadOfAGoneClientEndsItsRequest(t *testing.T) {
 	require.True(t, env.pc.storage.IsObjectPinned(hash), "a proxied read pins its object")
 
 	cancel()
-	<-errCh
+	_ = <-errCh
 	require.Eventually(t, func() bool {
 		return env.backend.stalled.Load() == 0 && !env.pc.storage.IsObjectPinned(hash)
 	}, 10*time.Second, 10*time.Millisecond, "the read of a client that has gone should end")

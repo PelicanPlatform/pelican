@@ -4944,7 +4944,7 @@ func downloadHTTP(ctx context.Context, te *TransferEngine, callback TransferCall
 		// Wait for the copy goroutine to finish
 		// We can ignore the error from the done channel as the final check on `downloaded`
 		// bytes vs totalSize will catch any read errors
-		<-done
+		_ = <-done
 
 		// Now that the goroutine is done, get the final byte count
 		finalDownloaded := pw.BytesComplete()
