@@ -133,24 +133,31 @@ export default function CodeInput({
   };
 
   return (
-    <Grid container spacing={1}>
+    <Grid container spacing={1} justifyContent={'center'}>
       {Array.from(Array(length).keys()).map((index) => {
         return (
-          <Grid key={index} textAlign={'center'}>
+          <Grid key={index}>
             <TextField
-              inputProps={{
-                sx: {
-                  width: { xs: '30px', md: '50px' },
-                  borderWidth: '3px',
-                  fontSize: { xs: '1.8rem', md: '3rem' },
-                  textAlign: 'center',
-                  padding: '.5rem',
-                  backgroundColor: 'secondary.main',
-                },
-                maxLength: 1,
-                ref: (el: HTMLInputElement) => (inputRefs.current[index] = el),
+              variant={'outlined'}
+              inputRef={(el: HTMLInputElement) => {
+                inputRefs.current[index] = el;
               }}
-              variant='outlined'
+              slotProps={{
+                htmlInput: {
+                  maxLength: 1,
+                  inputMode: 'numeric',
+                  'aria-label': `Digit ${index + 1} of ${length}`,
+                  sx: {
+                    width: { xs: 36, sm: 48 },
+                    px: 0,
+                    py: 1.25,
+                    fontSize: { xs: '1.5rem', sm: '1.9rem' },
+                    fontWeight: 600,
+                    textAlign: 'center',
+                  },
+                },
+              }}
+              sx={{ '& .MuiOutlinedInput-root': { borderRadius: 2 } }}
               onKeyDown={(e) => onKeyDown(e, index)}
               onChange={(e) => onChange(e, index)}
               onPaste={(e) => onPaste(e, index)}

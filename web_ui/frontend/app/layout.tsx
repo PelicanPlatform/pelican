@@ -19,6 +19,7 @@
 import { LocalizationProvider } from '@/clientComponents';
 import { ThemeProviderClient } from '@/components/ThemeProvider';
 import { AlertProvider } from '@/components/AlertProvider';
+import { ActiveServiceProvider } from '@/components/layout/Navigation/ActiveServiceProvider';
 import './globals.css';
 import { Metadata } from 'next';
 
@@ -40,7 +41,14 @@ export default function RootLayout({
       <ThemeProviderClient>
         <LocalizationProvider>
           <AlertProvider>
-            <body>{children}</body>
+            <body>
+              {/*
+                Above every module layout so it outlives them: the point is to
+                remember which module you left when a server-wide page mounts
+                its own Navigation.
+              */}
+              <ActiveServiceProvider>{children}</ActiveServiceProvider>
+            </body>
           </AlertProvider>
         </LocalizationProvider>
       </ThemeProviderClient>

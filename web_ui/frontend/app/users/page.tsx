@@ -1,9 +1,5 @@
 import SettingHeader from '@/app/settings/components/SettingHeader';
-import View from '@/app/settings/users/view';
-
-export const metadata = {
-  title: 'Users',
-};
+import View from '@/app/users/view';
 
 const Page = () => {
   return (

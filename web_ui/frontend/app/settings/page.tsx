@@ -24,7 +24,7 @@ import { useRouter } from 'next/navigation';
 import useSWR from 'swr';
 
 import SettingHeader from '@/app/settings/components/SettingHeader';
-import { RestartBox } from '@/app/config/components';
+import { RestartBox } from '@/app/settings/config/components';
 import AuthenticatedContent from '@/components/layout/AuthenticatedContent';
 import NavigationConfig, { SettingsShellScopes } from '@/app/navigation';
 import { getUser } from '@/helpers/login';

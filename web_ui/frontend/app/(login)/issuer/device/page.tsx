@@ -24,6 +24,7 @@ import {
   Button,
   Chip,
   CircularProgress,
+  Stack,
   TextField,
   Typography,
 } from '@mui/material';
@@ -31,6 +32,7 @@ import { useSearchParams, useRouter } from 'next/navigation';
 import { Suspense, useCallback, useEffect, useRef, useState } from 'react';
 
 import { isLoggedIn } from '@/helpers/login';
+import AuthPanel from '../../components/AuthPanel';
 
 type DeviceStatus = 'idle' | 'loading' | 'approved' | 'denied' | 'error';
 
@@ -179,127 +181,117 @@ function DeviceVerifyInner() {
   };
 
   if (checkingAuth) {
-    return (
-      <Box display='flex' justifyContent='center' mt={8}>
-        <CircularProgress />
-      </Box>
-    );
+    return <CircularProgress />;
   }
 
   if (status === 'approved') {
     return (
-      <Box m='auto' mt='15vh' maxWidth={480} textAlign='center'>
-        <Typography variant='h4' gutterBottom>
-          Device Authorized
-        </Typography>
-        <Alert severity='success' sx={{ mt: 2 }}>
+      <AuthPanel title={'Device Authorized'}>
+        <Alert severity='success'>
           User Code Accepted — you may close this window and return to your
           device.
         </Alert>
-      </Box>
+      </AuthPanel>
     );
   }
 
   if (status === 'denied') {
     return (
-      <Box m='auto' mt='15vh' maxWidth={480} textAlign='center'>
-        <Typography variant='h4' gutterBottom>
-          Authorization Denied
-        </Typography>
-        <Alert severity='info' sx={{ mt: 2 }}>
+      <AuthPanel title={'Authorization Denied'}>
+        <Alert severity='info'>
           The device authorization request was denied. You may close this
           window.
         </Alert>
-      </Box>
+      </AuthPanel>
     );
   }
 
   return (
-    <Box m='auto' mt='15vh' maxWidth={480}>
-      <Typography variant='h4' gutterBottom textAlign='center'>
-        Device Authorization
-      </Typography>
-      <Typography variant='body1' sx={{ mb: 3 }} textAlign='center'>
-        {clientName
+    <AuthPanel
+      title={'Device Authorization'}
+      description={
+        clientName
           ? `"${clientName}" is requesting access to your account.`
-          : 'Enter the code displayed on your device to authorize access.'}
-      </Typography>
-
-      {scopes.length > 0 && (
-        <Box sx={{ mb: 3 }}>
-          <Typography variant='subtitle2' gutterBottom>
-            Requested permissions:
-          </Typography>
-          <Box display='flex' flexWrap='wrap' gap={1}>
-            {scopes.map((scope) => (
-              <Chip key={scope} label={scope} variant='outlined' />
-            ))}
+          : 'Enter the code displayed on your device to authorize access.'
+      }
+      maxWidth={480}
+    >
+      <Stack spacing={3}>
+        {scopes.length > 0 && (
+          <Box>
+            <Typography variant='subtitle2' gutterBottom>
+              Requested permissions:
+            </Typography>
+            <Box display='flex' flexWrap='wrap' gap={1}>
+              {scopes.map((scope) => (
+                <Chip key={scope} label={scope} variant='outlined' />
+              ))}
+            </Box>
           </Box>
-        </Box>
-      )}
+        )}
 
-      {status === 'error' && (
-        <Alert severity='error' sx={{ mb: 2 }}>
-          {errorMsg}
-        </Alert>
-      )}
+        {status === 'error' && <Alert severity='error'>{errorMsg}</Alert>}
 
-      <Box component='form' onSubmit={(e) => e.preventDefault()}>
-        <TextField
-          label='User Code'
-          placeholder='XXXX-XXXX'
-          value={formatCode(rawCode)}
-          onChange={(e) => setRawCode(normalizeCode(e.target.value))}
-          fullWidth
-          inputProps={{
-            maxLength: 9,
-            style: {
-              textAlign: 'center',
-              fontSize: '1.5rem',
-              letterSpacing: '0.2em',
-            },
-          }}
-          sx={{ mb: 3 }}
-          autoFocus={!initialCode}
-        />
-        <Box display='flex' gap={2} justifyContent='center'>
-          <Button
-            variant='contained'
-            color='primary'
-            size='large'
-            onClick={() => submitAction('approve')}
-            disabled={status === 'loading' || !codeComplete}
-          >
-            {status === 'loading' ? (
-              <CircularProgress size={24} />
-            ) : (
-              'Authorize'
-            )}
-          </Button>
-          <Button
-            variant='outlined'
-            color='error'
-            size='large'
-            onClick={() => submitAction('deny')}
-            disabled={status === 'loading' || !codeComplete}
-          >
-            Deny
-          </Button>
-        </Box>
-      </Box>
-    </Box>
+        <Stack
+          component='form'
+          spacing={3}
+          onSubmit={(e: React.FormEvent) => e.preventDefault()}
+        >
+          <TextField
+            label='User Code'
+            placeholder='XXXX-XXXX'
+            value={formatCode(rawCode)}
+            onChange={(e) => setRawCode(normalizeCode(e.target.value))}
+            fullWidth
+            slotProps={{
+              htmlInput: {
+                maxLength: 9,
+                autoCapitalize: 'characters',
+                spellCheck: false,
+                style: {
+                  textAlign: 'center',
+                  fontSize: '1.5rem',
+                  letterSpacing: '0.2em',
+                },
+              },
+            }}
+            autoFocus={!initialCode}
+          />
+          <Stack direction='row' spacing={1.5}>
+            <Button
+              variant='outlined'
+              color='error'
+              size='large'
+              fullWidth
+              onClick={() => submitAction('deny')}
+              disabled={status === 'loading' || !codeComplete}
+            >
+              Deny
+            </Button>
+            <Button
+              variant='contained'
+              color='primary'
+              size='large'
+              fullWidth
+              onClick={() => submitAction('approve')}
+              disabled={status === 'loading' || !codeComplete}
+            >
+              {status === 'loading' ? (
+                <CircularProgress size={24} />
+              ) : (
+                'Authorize'
+              )}
+            </Button>
+          </Stack>
+        </Stack>
+      </Stack>
+    </AuthPanel>
   );
 }
 
 export default function DeviceVerifyPage() {
   return (
-    <Suspense
-      fallback={
-        <Box display='flex' justifyContent='center' mt={8}>
-          <CircularProgress />
-        </Box>
-      }
-    >
+    <Suspense fallback={<CircularProgress />}>
       <DeviceVerifyInner />
     </Suspense>
   );

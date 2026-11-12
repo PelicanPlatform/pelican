@@ -138,7 +138,7 @@ const Page = () => {
   const { data: who } = useSWR('getUser', getUser);
   const canCreate =
     who?.role === 'admin' || hasScope(who, 'server.collection_admin');
-  // Mirrors the page-level gate on /settings/users/edit/: only callers
+  // Mirrors the page-level gate on /users/edit/: only callers
   // with server.user_admin (or admin, which implies it) can land
   // there without a 403. We use the same predicate the user-management
   // pages do so the owner pill only links to a destination the caller
@@ -355,14 +355,14 @@ const CollectionCard: React.FC<{
               {/*
                 Owner pill links to the user's edit page when the
                 caller holds server.user_admin (the gate on
-                /settings/users/edit/) AND we have an ownerCard ID to
+                /users/edit/) AND we have an ownerCard ID to
                 route by. Non-admin callers see the same chip without
                 navigation — preventing dead links into a page that
                 would just 403.
               */}
               {canEditUsers && c.ownerCard?.id ? (
                 <Link
-                  href={`/settings/users/edit/?id=${encodeURIComponent(c.ownerCard.id)}`}
+                  href={`/users/edit/?id=${encodeURIComponent(c.ownerCard.id)}`}
                   // The card body has its own onClick (toggle expand);
                   // stop propagation so a click on the pill navigates
                   // instead of also collapsing/expanding the row.

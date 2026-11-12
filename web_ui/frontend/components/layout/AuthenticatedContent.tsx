@@ -46,7 +46,7 @@ interface AuthenticatedContentProps {
   allowedRoles?: User['role'][];
   // anyScopes lets a surface admit holders of EITHER any role in
   // allowedRoles OR any scope in this list. Used so e.g.
-  // /settings/users/ can be reached by a non-system-admin who holds
+  // /users/ can be reached by a non-system-admin who holds
   // server.user_admin via group membership. If both allowedRoles and
   // anyScopes are set, EITHER clears the gate (logical OR).
   anyScopes?: string[];

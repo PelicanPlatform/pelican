@@ -18,15 +18,7 @@
 
 'use client';
 
-import {
-  Alert,
-  Box,
-  Button,
-  Grid,
-  IconButton,
-  Snackbar,
-  Typography,
-} from '@mui/material';
+import { Alert, Box, Button, Grid, Snackbar, Typography } from '@mui/material';
 import React, { useCallback, useContext, useMemo, useState } from 'react';
 import { Download } from '@mui/icons-material';
 import useSWR from 'swr';
@@ -47,8 +39,7 @@ import {
   ConfigDisplay,
   RestartBox,
   TableOfContents,
-} from '@/app/config/components';
-import AuthenticatedContent from '@/components/layout/AuthenticatedContent';
+} from '@/app/settings/config/components';
 import { getConfig } from '@/helpers/api';
 import { AlertDispatchContext } from '@/components/AlertProvider';
 
@@ -90,29 +81,36 @@ function Config({ metadata }: { metadata: ParameterMetadataRecord }) {
   }, [serverConfig, patch]);
 
   return (
-    <AuthenticatedContent redirect={true} trustThenValidate={true}>
-      <Box display={'flex'} flexDirection={'row'}>
-        <Typography variant={'h4'} component={'h2'} mb={1}>
-          Configuration
-          {serverConfig && (
-            <Box ml={2} display={'inline'}>
-              <DownloadButton
-                Button={IconButton}
-                mimeType={'text/yaml'}
-                data={yaml.dump(stripNulls(structuredClone(data)))}
-              >
-                <Download />
-              </DownloadButton>
-            </Box>
-          )}
-        </Typography>
+    <>
+      <Typography variant={'h4'} component={'h2'} mb={1}>
+        Configuration
+      </Typography>
+      {/*
+        The page's actions, as a row of matching outlined buttons under the
+        title. Restart used to be a row of its own that the form pulled back
+        up over with a negative margin, and download was a bare icon beside
+        the title.
+      */}
+      <Box display={'flex'} flexWrap={'wrap'} gap={1} mb={2}>
+        {/*
+          Gated on the response itself: serverConfig is flattened from
+          `data || {}`, so it is never empty-handed and a check on it
+          offered a download of nothing before the config arrived.
+        */}
+        {data && (
+          <DownloadButton
+            Button={Button}
+            variant={'outlined'}
+            endIcon={<Download />}
+            mimeType={'text/yaml'}
+            data={yaml.dump(stripNulls(structuredClone(data)))}
+          >
+            Download
+          </DownloadButton>
+        )}
+        <RestartBox />
       </Box>
-      <Grid container>
-        <Grid>
-          <RestartBox />
-        </Grid>
-      </Grid>
-      <Grid container spacing={2} sx={{ mt: -5 }}>
+      <Grid container spacing={2}>
         <Grid
           size={{
             xs: 12,
@@ -186,7 +184,7 @@ function Config({ metadata }: { metadata: ParameterMetadataRecord }) {
           </Box>
         </Grid>
       </Grid>
-    </AuthenticatedContent>
+    </>
   );
 }
 

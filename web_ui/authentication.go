@@ -80,7 +80,7 @@ type (
 		// (DB user_scopes ∪ DB group_scopes via membership ∪
 		// config-derived grants ∪ admin implications). Used by
 		// the frontend to gate UI surfaces below the granularity of
-		// Role: e.g. /settings/users/ is reachable by anyone with
+		// Role: e.g. /users/ is reachable by anyone with
 		// server.user_admin (which is a subset of server.admin),
 		// and the navbar toggles its visibility off scopes rather
 		// than role membership. Empty for unauthenticated callers.
@@ -1401,7 +1401,7 @@ func whoamiHandler(ctx *gin.Context) {
 		}
 
 		// Effective user-grantable scopes (DB grants + config-derived +
-		// implications) — used by the frontend to gate /settings/users
+		// implications) — used by the frontend to gate /users/
 		// for user-admins, render scope chips on the profile page, etc.
 		effective := EffectiveScopesForIdentity(identity)
 		if len(effective) > 0 {
