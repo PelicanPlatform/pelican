@@ -1,5 +1,12 @@
 import React from 'react';
-import { Box, IconButton, List, ListItem, Skeleton } from '@mui/material';
+import {
+  Box,
+  Divider,
+  IconButton,
+  List,
+  ListItem,
+  Skeleton,
+} from '@mui/material';
 import {
   Api,
   BugReport,
@@ -11,6 +18,7 @@ import {
 import {
   NavigationEntry,
   NavigationProps,
+  StaticNavigationItemProps,
   isNavigationGroup,
 } from '@/components/layout/Navigation/index';
 import { evaluateOrReturn } from '@/helpers/util';
@@ -27,7 +35,7 @@ import {
 } from '@/components/layout/Navigation/AppBar/NavigationItem';
 import { getVersionNumber } from '@/components/layout/Navigation/Sidebar/AboutMenu';
 
-const helpMenu: NavigationEntry[] = [
+const helpMenu: StaticNavigationItemProps[] = [
   {
     icon: <Help />,
     title: 'Help',
@@ -107,9 +115,9 @@ const BurgerMenu: React.FC<BurgerMenuProps> = ({
             <Box sx={{ flexGrow: 1, display: { xs: 'flex', md: 'none' } }}>
               <IconButton
                 size='large'
-                aria-label='account of current user'
-                aria-controls='menu-appbar'
-                aria-haspopup='true'
+                // Was "account of current user", copied from an account
+                // control; this one closes the menu.
+                aria-label='Close navigation menu'
                 onClick={onClose}
               >
                 <Close />
@@ -142,52 +150,72 @@ const BurgerMenu: React.FC<BurgerMenuProps> = ({
               <br />
               Platform
             </Typography>
-            <Box sx={{ flexGrow: 0 }}>
-              <UserMenu
-                menuOptions={{
-                  anchorOrigin: {
-                    vertical: 'bottom',
-                    horizontal: 'left',
-                  },
-                  transformOrigin: {
-                    vertical: 'top',
-                    horizontal: 'right',
-                  },
-                }}
-              />
-            </Box>
           </Toolbar>
         </Container>
       </AppBar>
-      {pending ? (
-        <MenuSkeleton rows={countRows([...config, ...helpMenu])} />
-      ) : (
-        <List component='nav' aria-label={'Primary'}>
-          {[...config, ...helpMenu].map((entry) =>
-            isNavigationGroup(entry) ? (
-              <NavigationGroup
-                key={entry.group}
-                group={entry}
-                authenticated={authenticated}
-                role={role}
-                scopes={scopes}
-                exportType={exportType}
-                onClose={onClose}
-              />
-            ) : (
-              <NavigationItem
-                key={evaluateOrReturn(entry.title)}
-                config={entry}
-                authenticated={authenticated}
-                role={role}
-                scopes={scopes}
-                exportType={exportType}
-                onClose={onClose}
-              />
-            )
-          )}
+      <Box component={'nav'} aria-label={'Primary'}>
+        {pending ? (
+          <MenuSkeleton rows={countRows(config)} />
+        ) : (
+          <List>
+            {config.map((entry) =>
+              isNavigationGroup(entry) ? (
+                <NavigationGroup
+                  key={entry.group}
+                  group={entry}
+                  authenticated={authenticated}
+                  role={role}
+                  scopes={scopes}
+                  exportType={exportType}
+                  onClose={onClose}
+                />
+              ) : (
+                <NavigationItem
+                  key={evaluateOrReturn(entry.title)}
+                  config={entry}
+                  authenticated={authenticated}
+                  role={role}
+                  scopes={scopes}
+                  exportType={exportType}
+                  onClose={onClose}
+                />
+              )
+            )}
+          </List>
+        )}
+        {/*
+          The desktop rail's footer: account, then help, under a rule. Help
+          used to be appended to the destination list, so on a module ending
+          in a group (every one, now that Server closes each rail) it read as
+          that group's last entry. The account row replaces the icon that sat
+          in this drawer's toolbar, so the drawer has the same row -- red for
+          an admin -- as the rail.
+        */}
+        <Divider sx={{ mx: 2 }} />
+        <List>
+          <UserMenu
+            variant={'drawer'}
+            menuOptions={{
+              // The rail opens its menu to the right of the row, which on a
+              // phone is off the screen. Open it upward from the row instead.
+              anchorOrigin: { vertical: 'top', horizontal: 'left' },
+              transformOrigin: { vertical: 'bottom', horizontal: 'left' },
+              sx: {},
+            }}
+          />
+          {helpMenu.map((entry) => (
+            <NavigationItem
+              key={evaluateOrReturn(entry.title)}
+              config={entry}
+              authenticated={authenticated}
+              role={role}
+              scopes={scopes}
+              exportType={exportType}
+              onClose={onClose}
+            />
+          ))}
         </List>
-      )}
+      </Box>
     </Box>
   );
 };

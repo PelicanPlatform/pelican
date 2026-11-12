@@ -12,6 +12,7 @@ import {
 import Link from 'next/link';
 
 import {
+  NAV_DANGER_SX,
   NAV_SELECTED_SX,
   useRailMetrics,
   useRailCollapsed,
@@ -110,11 +111,7 @@ export const RailItemButton = forwardRef<HTMLDivElement, RailItemButtonProps>(
         borderRadius: 100,
         color: 'text.secondary',
         ...NAV_SELECTED_SX,
-        ...(danger && {
-          bgcolor: 'error.main',
-          color: 'error.contrastText',
-          '&:hover': { bgcolor: 'error.dark' },
-        }),
+        ...(danger && NAV_DANGER_SX),
       },
       ...props,
     };

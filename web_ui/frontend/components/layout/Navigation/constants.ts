@@ -45,6 +45,17 @@ export const NAV_SELECTED_SX = {
 } as const;
 
 /**
+ * Marks the account row of a privileged session: filled red, white text. The
+ * rail and the phone drawer both draw an account row, and an admin must be
+ * unmistakable on either, so they share this rather than each picking a red.
+ */
+export const NAV_DANGER_SX = {
+  bgcolor: 'error.main',
+  color: 'error.contrastText',
+  '&:hover': { bgcolor: 'error.dark' },
+} as const;
+
+/**
  * The heading above a named cluster of destinations, shared by the rail and
  * the phone drawer for the same reason as NAV_SELECTED_SX.
  */
