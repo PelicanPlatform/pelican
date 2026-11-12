@@ -73,8 +73,8 @@ func TestGetUserCollectionScopes_DBMembership(t *testing.T) {
 		"DB-stored membership in alpha-writers must produce storage.read at token-mint time")
 	assert.Contains(t, scopes, "storage.modify:/data/alpha",
 		"write ACL must extend to storage.modify on the data plane")
-	assert.Contains(t, scopes, "collection.read:c-alpha")
-	assert.Contains(t, scopes, "collection.modify:c-alpha")
+	assert.Contains(t, scopes, "collection.read:/c-alpha")
+	assert.Contains(t, scopes, "collection.modify:/c-alpha")
 	// matchedGroups feeds wlcg.groups on the minted token; the
 	// DB-derived group's NAME (not slug) is what consumers compare.
 	assert.Contains(t, matched, "alpha-writers",
