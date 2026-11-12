@@ -38,6 +38,7 @@ import (
 	"github.com/pelicanplatform/pelican/client_agent"
 	"github.com/pelicanplatform/pelican/config"
 	"github.com/pelicanplatform/pelican/oauth2/issuer"
+	"github.com/pelicanplatform/pelican/server_structs"
 )
 
 // handlePing handles GET /api/v1.0/transfer/ping
@@ -60,7 +61,7 @@ func handleCreateTransferJob(db *gorm.DB, tm *client_agent.TransferManager) gin.
 	return func(c *gin.Context) {
 		owner, err := getOwner(c)
 		if err != nil {
-			c.JSON(http.StatusInternalServerError, ErrorResponse{
+			c.JSON(http.StatusInternalServerError, server_structs.TransferErrorResponse{
 				Code:  "INTERNAL",
 				Error: "Failed to determine request owner",
 			})
@@ -69,7 +70,7 @@ func handleCreateTransferJob(db *gorm.DB, tm *client_agent.TransferManager) gin.
 
 		var req TransferJobCreateRequest
 		if err := c.ShouldBindJSON(&req); err != nil {
-			c.JSON(http.StatusBadRequest, ErrorResponse{
+			c.JSON(http.StatusBadRequest, server_structs.TransferErrorResponse{
 				Code:  "INVALID_REQUEST",
 				Error: "Invalid request body: " + err.Error(),
 			})
@@ -81,7 +82,7 @@ func handleCreateTransferJob(db *gorm.DB, tm *client_agent.TransferManager) gin.
 		if len(allowedPrefixes) > 0 {
 			for _, t := range req.Transfers {
 				if !transferMatchesPrefixes(t, allowedPrefixes) {
-					c.JSON(http.StatusForbidden, ErrorResponse{
+					c.JSON(http.StatusForbidden, server_structs.TransferErrorResponse{
 						Code:  "PATH_NOT_ALLOWED",
 						Error: "Transfer source or destination must be under one of the origin's exported namespaces",
 					})
@@ -97,7 +98,7 @@ func handleCreateTransferJob(db *gorm.DB, tm *client_agent.TransferManager) gin.
 		// checked here.
 		if err := validateTransferEndpointsSSRF(c.Request.Context(), req.Transfers); err != nil {
 			log.Warnf("Rejecting transfer job on SSRF policy: %v", err)
-			c.JSON(http.StatusForbidden, ErrorResponse{
+			c.JSON(http.StatusForbidden, server_structs.TransferErrorResponse{
 				Code:  "ENDPOINT_NOT_ALLOWED",
 				Error: "Transfer endpoint is not permitted",
 			})
@@ -108,7 +109,7 @@ func handleCreateTransferJob(db *gorm.DB, tm *client_agent.TransferManager) gin.
 		options, err := buildTransferOptionsWithCredentials(db, owner, req)
 		if err != nil {
 			log.Errorf("Failed to build transfer options: %v", err)
-			c.JSON(http.StatusBadRequest, ErrorResponse{
+			c.JSON(http.StatusBadRequest, server_structs.TransferErrorResponse{
 				Code:  "INVALID_REQUEST",
 				Error: "Failed to resolve credentials: " + err.Error(),
 			})
@@ -155,7 +156,7 @@ func handleCreateTransferJob(db *gorm.DB, tm *client_agent.TransferManager) gin.
 		}
 		if err := db.Create(&dbJob).Error; err != nil {
 			log.Errorf("Failed to persist transfer job: %v", err)
-			c.JSON(http.StatusInternalServerError, ErrorResponse{
+			c.JSON(http.StatusInternalServerError, server_structs.TransferErrorResponse{
 				Code:  "INTERNAL",
 				Error: "Failed to record transfer job",
 			})
@@ -175,13 +176,13 @@ func handleCreateTransferJob(db *gorm.DB, tm *client_agent.TransferManager) gin.
 				"updated_at":   time.Now(),
 			})
 			if errors.Is(err, client_agent.ErrTooManyJobs) {
-				c.JSON(http.StatusTooManyRequests, ErrorResponse{
+				c.JSON(http.StatusTooManyRequests, server_structs.TransferErrorResponse{
 					Code:  "TOO_MANY_JOBS",
 					Error: err.Error(),
 				})
 				return
 			}
-			c.JSON(http.StatusInternalServerError, ErrorResponse{
+			c.JSON(http.StatusInternalServerError, server_structs.TransferErrorResponse{
 				Code:  "INTERNAL",
 				Error: "Failed to create transfer job: " + err.Error(),
 			})
@@ -224,7 +225,10 @@ func handleTransferJobEvents(db *gorm.DB, tm *client_agent.TransferManager) gin.
 	return func(c *gin.Context) {
 		owner, err := getOwner(c)
 		if err != nil {
-			c.JSON(http.StatusInternalServerError, ErrorResponse{Code: "INTERNAL", Error: "Failed to determine request owner"})
+			c.JSON(http.StatusInternalServerError, server_structs.TransferErrorResponse{
+				Code:  "INTERNAL",
+				Error: "Failed to determine request owner",
+			})
 			return
 		}
 		jobID := c.Param("job_id")
@@ -234,9 +238,15 @@ func handleTransferJobEvents(db *gorm.DB, tm *client_agent.TransferManager) gin.
 		var dbJob TransferJob
 		if err := db.Where("id = ? AND user_id = ?", jobID, owner.UserID).First(&dbJob).Error; err != nil {
 			if errors.Is(err, gorm.ErrRecordNotFound) {
-				c.JSON(http.StatusNotFound, ErrorResponse{Code: "NOT_FOUND", Error: "Transfer job not found"})
+				c.JSON(http.StatusNotFound, server_structs.TransferErrorResponse{
+					Code:  "NOT_FOUND",
+					Error: "Transfer job not found",
+				})
 			} else {
-				c.JSON(http.StatusInternalServerError, ErrorResponse{Code: "INTERNAL", Error: "Failed to load transfer job"})
+				c.JSON(http.StatusInternalServerError, server_structs.TransferErrorResponse{
+					Code:  "INTERNAL",
+					Error: "Failed to load transfer job",
+				})
 			}
 			return
 		}
@@ -249,7 +259,7 @@ func handleGetTransferJob(db *gorm.DB, tm *client_agent.TransferManager) gin.Han
 	return func(c *gin.Context) {
 		owner, err := getOwner(c)
 		if err != nil {
-			c.JSON(http.StatusInternalServerError, ErrorResponse{
+			c.JSON(http.StatusInternalServerError, server_structs.TransferErrorResponse{
 				Code:  "INTERNAL",
 				Error: "Failed to determine request owner",
 			})
@@ -263,12 +273,12 @@ func handleGetTransferJob(db *gorm.DB, tm *client_agent.TransferManager) gin.Han
 		if err := db.Where("id = ? AND user_id = ?",
 			jobID, owner.UserID).First(&dbJob).Error; err != nil {
 			if errors.Is(err, gorm.ErrRecordNotFound) {
-				c.JSON(http.StatusNotFound, ErrorResponse{
+				c.JSON(http.StatusNotFound, server_structs.TransferErrorResponse{
 					Code:  "NOT_FOUND",
 					Error: "Transfer job not found",
 				})
 			} else {
-				c.JSON(http.StatusInternalServerError, ErrorResponse{
+				c.JSON(http.StatusInternalServerError, server_structs.TransferErrorResponse{
 					Code:  "INTERNAL",
 					Error: "Failed to retrieve transfer job",
 				})
@@ -324,7 +334,7 @@ func handleListTransferJobs(db *gorm.DB, tm *client_agent.TransferManager) gin.H
 	return func(c *gin.Context) {
 		owner, err := getOwner(c)
 		if err != nil {
-			c.JSON(http.StatusInternalServerError, ErrorResponse{
+			c.JSON(http.StatusInternalServerError, server_structs.TransferErrorResponse{
 				Code:  "INTERNAL",
 				Error: "Failed to determine request owner",
 			})
@@ -356,7 +366,7 @@ func handleListTransferJobs(db *gorm.DB, tm *client_agent.TransferManager) gin.H
 		var jobs []TransferJob
 		if err := query.Order("transfer_jobs.created_at DESC").Limit(limit).Offset(offset).Find(&jobs).Error; err != nil {
 			log.Errorf("Failed to list transfer jobs: %v", err)
-			c.JSON(http.StatusInternalServerError, ErrorResponse{
+			c.JSON(http.StatusInternalServerError, server_structs.TransferErrorResponse{
 				Code:  "INTERNAL",
 				Error: "Failed to retrieve transfer jobs",
 			})
@@ -402,7 +412,7 @@ func handleCancelTransferJob(db *gorm.DB, tm *client_agent.TransferManager) gin.
 	return func(c *gin.Context) {
 		owner, err := getOwner(c)
 		if err != nil {
-			c.JSON(http.StatusInternalServerError, ErrorResponse{
+			c.JSON(http.StatusInternalServerError, server_structs.TransferErrorResponse{
 				Code:  "INTERNAL",
 				Error: "Failed to determine request owner",
 			})
@@ -416,12 +426,12 @@ func handleCancelTransferJob(db *gorm.DB, tm *client_agent.TransferManager) gin.
 		if err := db.Where("id = ? AND user_id = ?",
 			jobID, owner.UserID).First(&dbJob).Error; err != nil {
 			if errors.Is(err, gorm.ErrRecordNotFound) {
-				c.JSON(http.StatusNotFound, ErrorResponse{
+				c.JSON(http.StatusNotFound, server_structs.TransferErrorResponse{
 					Code:  "NOT_FOUND",
 					Error: "Transfer job not found",
 				})
 			} else {
-				c.JSON(http.StatusInternalServerError, ErrorResponse{
+				c.JSON(http.StatusInternalServerError, server_structs.TransferErrorResponse{
 					Code:  "INTERNAL",
 					Error: "Failed to retrieve transfer job",
 				})
@@ -445,7 +455,7 @@ func handleCancelTransferJob(db *gorm.DB, tm *client_agent.TransferManager) gin.
 				})
 				return
 			}
-			c.JSON(http.StatusInternalServerError, ErrorResponse{
+			c.JSON(http.StatusInternalServerError, server_structs.TransferErrorResponse{
 				Code:  "INTERNAL",
 				Error: "Failed to cancel job: " + err.Error(),
 			})

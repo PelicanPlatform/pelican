@@ -923,9 +923,13 @@ description: |+
   should result in trying `cache1`, then `cache2`, and finally any caches discovered by the Director (if needed).
 
   When set via the `PELICAN_CLIENT_PREFERREDCACHES` environment variable, caches can be space-separated or comma-separated, e.g.:
-  `PELICAN_CLIENT_PREFERREDCACHES="https://cache1.com:8443 https://cache2.com:8443 +"`
+  ```bash
+  PELICAN_CLIENT_PREFERREDCACHES="https://cache1.com:8443 https://cache2.com:8443 +"
+  ```
   or
-  `PELICAN_CLIENT_PREFERREDCACHES="https://cache1.com:8443,https://cache2.com:8443,+"`
+  ```bash
+  PELICAN_CLIENT_PREFERREDCACHES="https://cache1.com:8443,https://cache2.com:8443,+"
+  ```
 
   Surrounding quotes (both single and double) are automatically trimmed from the entire value and from individual elements.
 type: stringSlice
@@ -1143,24 +1147,24 @@ description: |+
       not read past 1 MiB, and if it is ever unreadable or unparsable the
       last version that loaded successfully continues to be served.
 
-    Example:
+  Example:
 
-    ```yaml
-    Origin:
-      Exports:
-        - StoragePrefix: /home/foo/bar
-          FederationPrefix: /demo/project
-          Capabilities: ["Reads", "PublicReads", "Writes", "Listings", "DirectReads"]
-          SentinelLocation: demoproject_origin_A
-          IssuerUrls: ["https://issuer1.example.com", "https://issuer2.example.com"]
-          AuthorizationTemplates:
-            - actions: ["read", "modify"]
-              prefix: /home/$USER
-            - actions: ["read"]
-              prefix: /data/$GROUP
-              groups: ["/physics"]
-          IssuerJwks: /etc/pelican/extra-keys/ns.jwks
-    ```
+  ```yaml
+  Origin:
+    Exports:
+      - StoragePrefix: /home/foo/bar
+        FederationPrefix: /demo/project
+        Capabilities: ["Reads", "PublicReads", "Writes", "Listings", "DirectReads"]
+        SentinelLocation: demoproject_origin_A
+        IssuerUrls: ["https://issuer1.example.com", "https://issuer2.example.com"]
+        AuthorizationTemplates:
+          - actions: ["read", "modify"]
+            prefix: /home/$USER
+          - actions: ["read"]
+            prefix: /data/$GROUP
+            groups: ["/physics"]
+        IssuerJwks: /etc/pelican/extra-keys/ns.jwks
+  ```
 
   If Origin.StorageType == "s3", the following additional fields are available:
   - S3Bucket: [OPTIONAL] See `Origin.S3Bucket` for details
@@ -1449,6 +1453,7 @@ description: |+
   This further requires that no exports include the `DirectReads` capability, and attempting to configure both will result in an error.
 
   >WARNING: This currently breaks the Origin's ability to receive PUT requests, as caches are not yet able to proxy writes.
+  >
   >WARNING: Enabling this option may also restrict which caches in a federation can serve the origin, unless all caches are running pelican
   v7.15.0 or newer.
 type: bool
@@ -3185,7 +3190,7 @@ components: ["cache"]
 name: Cache.FilesMaxSize
 description: |+
   A value that sets the maximum cumulative size of files that can be stored in the cache's data directories (specified
-  by `Cache.StorageLocation` and `Cache.DataLocations). When either this value or `Cache.HighWaterMark` is exceeded, the
+  by `Cache.StorageLocation` and `Cache.DataLocations`). When either this value or `Cache.HighWaterMark` is exceeded, the
   cache will begin purging files until it reaches the `Cache.FilesNominal` value. If the cache's disk usage is still in
   excess of the `Cache.LowWaterMark`, the cache will continue purging files until it reaches the `Cache.FilesBase` value.
 
@@ -4353,7 +4358,7 @@ description: |+
   Where the id field will be stored in registry database and must be unique, and name field will be displayed in UI as the option.
 
   Note that Pelican will cache the response of the url in a TTL cache with default refresh time of 15 minutes.
-  Also note that `Registry.Institutions`` will take precedence over this value if both are set.
+  Also note that `Registry.Institutions` will take precedence over this value if both are set.
 type: url
 default: none
 components: ["registry"]
@@ -5466,9 +5471,11 @@ description: |+
   The default is selected from the OAuth flavor (`Issuer.GroupSource`): `https://cilogon.org` for CILogon,
   or `https://github.com` when `Issuer.GroupSource` is `github`.
 
-  For CILogon, it's https://cilogon.org
-  For Globus, it's https://auth.globus.org
-  For GitHub OAuth2, it's https://github.com
+  For CILogon, it's `https://cilogon.org`.
+
+  For Globus, it's `https://auth.globus.org`.
+
+  For GitHub OAuth2, it's `https://github.com`.
 type: url
 default: none
 components: ["registry", "origin", "cache", "director"]
@@ -5876,6 +5883,7 @@ description: |+
   This parameter is equivalent to the Prometheus `storage.tsdb.retention.size` flag. For more information, see [Prometheus Storage Documentation](https://prometheus.io/docs/prometheus/latest/storage/).
 
   Units supported: B, KB, MB, GB, TB, PB, EB
+
   Ex: "512MB"
 type: string
 default: "0B"
@@ -6066,7 +6074,7 @@ components: ["origin"]
 ---
 name: Shoveler.OutputDestinations
 description: |+
-  A list of <IP:Port> destinations to forward XRootD monitoring packet to.
+  A list of `IP:Port` destinations to forward XRootD monitoring packet to.
 type: stringSlice
 default: []
 components: ["origin", "cache"]
@@ -6101,7 +6109,7 @@ description: |+
     - All: "172.0.0.4"
   ```
 
-  If a packet comes in with the private ip address of 192.168.0.4, the packet origin will be changed to 172.0.0.4
+  If a packet comes in with the private ip address of 192.168.0.4, the packet origin will be changed to 172.0.0.4.
   The port is always preserved.
 
   One-to-one mapping:
@@ -6277,7 +6285,7 @@ description: |+
       - LotName ... <additional lots>
   ```
 
-  Additional example configurations can be found in lotman/resources/lots-config.yaml
+  Additional example configurations can be found in `lotman/resources/lots-config.yaml`.
   For more information about LotMan configuration, see:
   [https://github.com/pelicanplatform/lotman](https://github.com/pelicanplatform/lotman)
 type: object

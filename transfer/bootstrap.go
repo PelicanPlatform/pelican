@@ -39,14 +39,8 @@ import (
 	"github.com/pelicanplatform/pelican/config"
 	pelican_oauth2 "github.com/pelicanplatform/pelican/oauth2"
 	"github.com/pelicanplatform/pelican/param"
+	"github.com/pelicanplatform/pelican/server_structs"
 )
-
-// AuthMethodsResponse describes what credential acquisition flows the transfer
-// server supports for a given issuer.
-type AuthMethodsResponse struct {
-	Issuer  string   `json:"issuer"`
-	Methods []string `json:"methods"`
-}
 
 // TokenExchangeBootstrapRequest is the body for bootstrapping a credential
 // via the RFC 8693 token-exchange flow.
@@ -73,23 +67,6 @@ type AuthCodeBootstrapRequest struct {
 	// Scopes is an optional space-separated list of scopes to request.
 	// If empty, defaults to "offline_access".
 	Scopes string `json:"scopes,omitempty"`
-}
-
-// AuthCodeBootstrapResponse is returned when a new auth-code session is created.
-type AuthCodeBootstrapResponse struct {
-	// SessionID is a unique identifier for this bootstrap session.
-	SessionID string `json:"session_id"`
-	// AuthorizationURL is the URL the user should visit to authorize.
-	AuthorizationURL string `json:"authorization_url"`
-}
-
-// AuthCodeBootstrapStatus is returned when polling for an auth-code session.
-type AuthCodeBootstrapStatus struct {
-	SessionID    string              `json:"session_id"`
-	Status       string              `json:"status"` // "pending", "complete", "error"
-	CredentialID string              `json:"credential_id,omitempty"`
-	Error        string              `json:"error,omitempty"`
-	Credential   *CredentialResponse `json:"credential,omitempty"`
 }
 
 // bootstrapSession tracks an in-flight authorization-code bootstrap session.
@@ -372,7 +349,7 @@ func handleGetAuthMethods(db *gorm.DB) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		owner, err := getOwner(c)
 		if err != nil {
-			c.JSON(http.StatusInternalServerError, ErrorResponse{
+			c.JSON(http.StatusInternalServerError, server_structs.TransferErrorResponse{
 				Code:  "INTERNAL",
 				Error: "Failed to determine request owner",
 			})
@@ -381,7 +358,7 @@ func handleGetAuthMethods(db *gorm.DB) gin.HandlerFunc {
 
 		issuerURL := c.Query("issuer")
 		if issuerURL == "" {
-			c.JSON(http.StatusBadRequest, ErrorResponse{
+			c.JSON(http.StatusBadRequest, server_structs.TransferErrorResponse{
 				Code:  "INVALID_REQUEST",
 				Error: "issuer query parameter is required",
 			})
@@ -399,14 +376,14 @@ func handleGetAuthMethods(db *gorm.DB) gin.HandlerFunc {
 		if err := db.Model(&TransferOAuthClient{}).
 			Where("issuer_url = ? AND (admin_configured = ? OR user_id = ?)", issuerURL, true, owner.UserID).
 			Count(&clientCount).Error; err != nil {
-			c.JSON(http.StatusInternalServerError, ErrorResponse{
+			c.JSON(http.StatusInternalServerError, server_structs.TransferErrorResponse{
 				Code:  "INTERNAL",
 				Error: "Failed to look up OAuth clients",
 			})
 			return
 		}
 		if clientCount == 0 {
-			c.JSON(http.StatusOK, AuthMethodsResponse{
+			c.JSON(http.StatusOK, server_structs.TransferAuthMethodsResponse{
 				Issuer:  issuerURL,
 				Methods: []string{},
 			})
@@ -417,7 +394,7 @@ func handleGetAuthMethods(db *gorm.DB) gin.HandlerFunc {
 		issuerMeta, err := globalIssuerCache.get(issuerURL)
 		if err != nil {
 			log.Debugf("Failed to get issuer metadata for %s: %v", issuerURL, err)
-			c.JSON(http.StatusBadGateway, ErrorResponse{
+			c.JSON(http.StatusBadGateway, server_structs.TransferErrorResponse{
 				Code:  "ISSUER_UNREACHABLE",
 				Error: "Failed to retrieve issuer metadata: " + err.Error(),
 			})
@@ -451,7 +428,7 @@ func handleGetAuthMethods(db *gorm.DB) gin.HandlerFunc {
 			methods = append(methods, "device_code")
 		}
 
-		c.JSON(http.StatusOK, AuthMethodsResponse{
+		c.JSON(http.StatusOK, server_structs.TransferAuthMethodsResponse{
 			Issuer:  issuerURL,
 			Methods: methods,
 		})
@@ -466,7 +443,7 @@ func handleTokenExchangeBootstrap(db *gorm.DB) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		owner, err := getOwner(c)
 		if err != nil {
-			c.JSON(http.StatusInternalServerError, ErrorResponse{
+			c.JSON(http.StatusInternalServerError, server_structs.TransferErrorResponse{
 				Code:  "INTERNAL",
 				Error: "Failed to determine request owner",
 			})
@@ -475,7 +452,7 @@ func handleTokenExchangeBootstrap(db *gorm.DB) gin.HandlerFunc {
 
 		var req TokenExchangeBootstrapRequest
 		if err := c.ShouldBindJSON(&req); err != nil {
-			c.JSON(http.StatusBadRequest, ErrorResponse{
+			c.JSON(http.StatusBadRequest, server_structs.TransferErrorResponse{
 				Code:  "INVALID_REQUEST",
 				Error: "Invalid request body: " + err.Error(),
 			})
@@ -488,12 +465,12 @@ func handleTokenExchangeBootstrap(db *gorm.DB) gin.HandlerFunc {
 		oauthClient, err := findOAuthClientForGrant(db, req.IssuerURL, owner.UserID, "urn:ietf:params:oauth:grant-type:token-exchange", requestedScopes)
 		if err != nil {
 			if errors.Is(err, gorm.ErrRecordNotFound) {
-				c.JSON(http.StatusBadRequest, ErrorResponse{
+				c.JSON(http.StatusBadRequest, server_structs.TransferErrorResponse{
 					Code:  "NO_OAUTH_CLIENT",
 					Error: "No OAuth client registered for issuer: " + req.IssuerURL,
 				})
 			} else {
-				c.JSON(http.StatusInternalServerError, ErrorResponse{
+				c.JSON(http.StatusInternalServerError, server_structs.TransferErrorResponse{
 					Code:  "INTERNAL",
 					Error: "Failed to look up OAuth client",
 				})
@@ -504,7 +481,7 @@ func handleTokenExchangeBootstrap(db *gorm.DB) gin.HandlerFunc {
 		// Decrypt the client credentials
 		clientID, err := decryptSecret(oauthClient.EncryptedClientID, oauthClient.UserID, fieldClientID)
 		if err != nil {
-			c.JSON(http.StatusInternalServerError, ErrorResponse{
+			c.JSON(http.StatusInternalServerError, server_structs.TransferErrorResponse{
 				Code:  "INTERNAL",
 				Error: "Failed to decrypt client credentials",
 			})
@@ -512,7 +489,7 @@ func handleTokenExchangeBootstrap(db *gorm.DB) gin.HandlerFunc {
 		}
 		clientSecret, err := decryptSecret(oauthClient.EncryptedClientSecret, oauthClient.UserID, fieldClientSecret)
 		if err != nil {
-			c.JSON(http.StatusInternalServerError, ErrorResponse{
+			c.JSON(http.StatusInternalServerError, server_structs.TransferErrorResponse{
 				Code:  "INTERNAL",
 				Error: "Failed to decrypt client credentials",
 			})
@@ -522,7 +499,7 @@ func handleTokenExchangeBootstrap(db *gorm.DB) gin.HandlerFunc {
 		// Get the issuer token endpoint
 		issuerMeta, err := globalIssuerCache.get(req.IssuerURL)
 		if err != nil {
-			c.JSON(http.StatusBadGateway, ErrorResponse{
+			c.JSON(http.StatusBadGateway, server_structs.TransferErrorResponse{
 				Code:  "ISSUER_UNREACHABLE",
 				Error: "Failed to retrieve issuer metadata",
 			})
@@ -537,7 +514,7 @@ func handleTokenExchangeBootstrap(db *gorm.DB) gin.HandlerFunc {
 		exchangedToken, err := performTokenExchange(tokenExchangeCtx, issuerMeta.TokenURL, clientID, clientSecret, req.SubjectToken, req.Scopes)
 		if err != nil {
 			log.Errorf("Token exchange failed for issuer %s: %v", req.IssuerURL, err)
-			c.JSON(http.StatusBadGateway, ErrorResponse{
+			c.JSON(http.StatusBadGateway, server_structs.TransferErrorResponse{
 				Code:  "TOKEN_EXCHANGE_FAILED",
 				Error: "Token exchange with issuer failed: " + err.Error(),
 			})
@@ -554,7 +531,7 @@ func handleTokenExchangeBootstrap(db *gorm.DB) gin.HandlerFunc {
 		cred, err := createCredentialFromToken(db, owner, req.Name, req.IssuerURL,
 			exchangedToken.AccessToken, exchangedToken.RefreshToken, credScopes, exchangedToken.Expiry)
 		if err != nil {
-			c.JSON(http.StatusInternalServerError, ErrorResponse{
+			c.JSON(http.StatusInternalServerError, server_structs.TransferErrorResponse{
 				Code:  "INTERNAL",
 				Error: "Failed to store credential: " + err.Error(),
 			})
@@ -574,7 +551,7 @@ func handleAuthCodeBootstrapStart(db *gorm.DB) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		owner, err := getOwner(c)
 		if err != nil {
-			c.JSON(http.StatusInternalServerError, ErrorResponse{
+			c.JSON(http.StatusInternalServerError, server_structs.TransferErrorResponse{
 				Code:  "INTERNAL",
 				Error: "Failed to determine request owner",
 			})
@@ -583,7 +560,7 @@ func handleAuthCodeBootstrapStart(db *gorm.DB) gin.HandlerFunc {
 
 		var req AuthCodeBootstrapRequest
 		if err := c.ShouldBindJSON(&req); err != nil {
-			c.JSON(http.StatusBadRequest, ErrorResponse{
+			c.JSON(http.StatusBadRequest, server_structs.TransferErrorResponse{
 				Code:  "INVALID_REQUEST",
 				Error: "Invalid request body: " + err.Error(),
 			})
@@ -595,12 +572,12 @@ func handleAuthCodeBootstrapStart(db *gorm.DB) gin.HandlerFunc {
 		oauthClient, err := findOAuthClientForGrant(db, req.IssuerURL, owner.UserID, "authorization_code", requestedScopes)
 		if err != nil {
 			if errors.Is(err, gorm.ErrRecordNotFound) {
-				c.JSON(http.StatusBadRequest, ErrorResponse{
+				c.JSON(http.StatusBadRequest, server_structs.TransferErrorResponse{
 					Code:  "NO_OAUTH_CLIENT",
 					Error: "No OAuth client registered for issuer: " + req.IssuerURL,
 				})
 			} else {
-				c.JSON(http.StatusInternalServerError, ErrorResponse{
+				c.JSON(http.StatusInternalServerError, server_structs.TransferErrorResponse{
 					Code:  "INTERNAL",
 					Error: "Failed to look up OAuth client",
 				})
@@ -610,7 +587,7 @@ func handleAuthCodeBootstrapStart(db *gorm.DB) gin.HandlerFunc {
 
 		clientID, err := decryptSecret(oauthClient.EncryptedClientID, oauthClient.UserID, fieldClientID)
 		if err != nil {
-			c.JSON(http.StatusInternalServerError, ErrorResponse{
+			c.JSON(http.StatusInternalServerError, server_structs.TransferErrorResponse{
 				Code:  "INTERNAL",
 				Error: "Failed to decrypt client credentials",
 			})
@@ -619,7 +596,7 @@ func handleAuthCodeBootstrapStart(db *gorm.DB) gin.HandlerFunc {
 
 		issuerMeta, err := globalIssuerCache.get(req.IssuerURL)
 		if err != nil {
-			c.JSON(http.StatusBadGateway, ErrorResponse{
+			c.JSON(http.StatusBadGateway, server_structs.TransferErrorResponse{
 				Code:  "ISSUER_UNREACHABLE",
 				Error: "Failed to retrieve issuer metadata",
 			})
@@ -628,7 +605,7 @@ func handleAuthCodeBootstrapStart(db *gorm.DB) gin.HandlerFunc {
 
 		state, err := generateState()
 		if err != nil {
-			c.JSON(http.StatusInternalServerError, ErrorResponse{
+			c.JSON(http.StatusInternalServerError, server_structs.TransferErrorResponse{
 				Code:  "INTERNAL",
 				Error: "Failed to generate CSRF state",
 			})
@@ -637,7 +614,7 @@ func handleAuthCodeBootstrapStart(db *gorm.DB) gin.HandlerFunc {
 
 		startCode, err := generateStartCode()
 		if err != nil {
-			c.JSON(http.StatusInternalServerError, ErrorResponse{
+			c.JSON(http.StatusInternalServerError, server_structs.TransferErrorResponse{
 				Code:  "INTERNAL",
 				Error: "Failed to generate start code",
 			})
@@ -657,7 +634,7 @@ func handleAuthCodeBootstrapStart(db *gorm.DB) gin.HandlerFunc {
 
 		authURL, err := url.Parse(issuerMeta.AuthURL)
 		if err != nil {
-			c.JSON(http.StatusBadGateway, ErrorResponse{
+			c.JSON(http.StatusBadGateway, server_structs.TransferErrorResponse{
 				Code:  "ISSUER_UNREACHABLE",
 				Error: "Invalid authorization endpoint in issuer metadata",
 			})
@@ -692,7 +669,7 @@ func handleAuthCodeBootstrapStart(db *gorm.DB) gin.HandlerFunc {
 		// the terminal and does NOT contain the session ID.
 		shortURL := serverBase + SharedCallbackPath + "/start/" + startCode
 
-		c.JSON(http.StatusOK, AuthCodeBootstrapResponse{
+		c.JSON(http.StatusOK, server_structs.TransferAuthCodeBootstrapResponse{
 			SessionID:        sessionID,
 			AuthorizationURL: shortURL,
 		})
@@ -887,7 +864,7 @@ func handleAuthCodeBootstrapPoll(db *gorm.DB) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		owner, err := getOwner(c)
 		if err != nil {
-			c.JSON(http.StatusInternalServerError, ErrorResponse{
+			c.JSON(http.StatusInternalServerError, server_structs.TransferErrorResponse{
 				Code:  "INTERNAL",
 				Error: "Failed to determine request owner",
 			})
@@ -897,7 +874,7 @@ func handleAuthCodeBootstrapPoll(db *gorm.DB) gin.HandlerFunc {
 		sessionID := c.Param("session_id")
 		sess, ok := globalBootstrapStore.get(sessionID)
 		if !ok {
-			c.JSON(http.StatusNotFound, ErrorResponse{
+			c.JSON(http.StatusNotFound, server_structs.TransferErrorResponse{
 				Code:  "NOT_FOUND",
 				Error: "Bootstrap session not found or expired",
 			})
@@ -906,7 +883,7 @@ func handleAuthCodeBootstrapPoll(db *gorm.DB) gin.HandlerFunc {
 
 		// Verify ownership
 		if sess.Owner.UserID != owner.UserID {
-			c.JSON(http.StatusNotFound, ErrorResponse{
+			c.JSON(http.StatusNotFound, server_structs.TransferErrorResponse{
 				Code:  "NOT_FOUND",
 				Error: "Bootstrap session not found",
 			})
@@ -914,7 +891,7 @@ func handleAuthCodeBootstrapPoll(db *gorm.DB) gin.HandlerFunc {
 		}
 
 		status, credID, errMsg := sess.result()
-		resp := AuthCodeBootstrapStatus{
+		resp := server_structs.TransferAuthCodeBootstrapStatus{
 			SessionID: sessionID,
 			Status:    status,
 			Error:     errMsg,

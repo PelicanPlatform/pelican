@@ -61,6 +61,24 @@ repos:
       - id: shellcheck
         # Require that only the most serious problems be addressed.
         args: [--severity=warning]
+  - repo: local
+    hooks:
+      - id: check-client-binary-deps
+        name: check the client binary for unlisted dependencies on this module
+        language: system
+        entry: .github/scripts/client-binary/check_client_binary.py deps
+        pass_filenames: false
+        files: (\.go|(^|/)go\.(mod|sum))$|^\.github/scripts/client-binary/
+        exclude: _test\.go$
+        stages: [pre-push, manual]
+      - id: check-client-binary-reflect
+        name: check the client binary for calling methods by name via reflection
+        language: system
+        entry: .github/scripts/client-binary/check_client_binary.py reflect
+        pass_filenames: false
+        files: (\.go|(^|/)go\.(mod|sum))$|^\.github/scripts/client-binary/
+        exclude: _test\.go$
+        stages: [pre-push, manual]
   #
   # Standardize formatting.
   #

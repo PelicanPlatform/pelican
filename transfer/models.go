@@ -89,24 +89,21 @@ func (TransferJob) TableName() string {
 }
 
 // API request/response types
+//
+// The transfer commands in cmd/transfer_*.go are also built
+// into the client binary, so they must not import this package: doing so
+// would link in the transfer server and everything it imports.
+// Types that those commands use directly belong
+// in server_structs/transfer.go instead. Where they send or read
+// one of the types in this package, they use untyped maps keyed
+// by the JSON field names, so renaming a field breaks them without breaking
+// the build.
 
 // CredentialCreateRequest is the request body for creating a credential.
 type CredentialCreateRequest struct {
 	Name        string `json:"name" binding:"required"`
 	AccessToken string `json:"access_token" binding:"required"`
 	TokenIssuer string `json:"token_issuer,omitempty"`
-}
-
-// CredentialResponse is the public view of a credential (no secrets).
-type CredentialResponse struct {
-	ID             string     `json:"id"`
-	Name           string     `json:"name"`
-	CredentialType string     `json:"credential_type"`
-	TokenIssuer    string     `json:"token_issuer,omitempty"`
-	TokenExpiry    *time.Time `json:"token_expiry,omitempty"`
-	LastUsedAt     *time.Time `json:"last_used_at,omitempty"`
-	CreatedAt      time.Time  `json:"created_at"`
-	UpdatedAt      time.Time  `json:"updated_at"`
 }
 
 // OAuthClientCreateRequest is the request body for creating an OAuth2 client.
@@ -178,12 +175,6 @@ type TransferJobListResponse struct {
 	Total  int                 `json:"total"`
 	Limit  int                 `json:"limit"`
 	Offset int                 `json:"offset"`
-}
-
-// ErrorResponse is a standard error response.
-type ErrorResponse struct {
-	Code  string `json:"code"`
-	Error string `json:"error"`
 }
 
 // ownerIdentity represents the authenticated user, resolved to a users table ID.

@@ -45,7 +45,24 @@ func init() {
 	stageCmd := &cobra.Command{
 		Use:   "stage",
 		Short: "Run pelican CLI to stage files as a HTCSS shadow plugin",
-		Run:   stagePluginMain,
+		Long: `Copy files from a locally mounted origin to a "shadow origin". The files
+to copy are given as arguments or, with --hook, by the TransferInput
+attribute of a job ClassAd read from standard input. In hook mode, the
+command then prints a new TransferInput that refers to the shadow copies.
+Inputs that are not in the local origin are left unchanged.
+
+Each shadow copy is given a unique name derived from the local file's
+name and metadata. A file that is modified locally gets a new name, so
+it can change without causing cache consistency issues.
+
+Terminology:
+- Origin prefix: Where the local origin exports its files in the OSDF
+  namespace. Example: osdf://osg-connect/protected
+- Mount prefix: Where the files under the origin prefix are mounted in
+  the local filesystem. Example: /mnt/cephfs/protected
+- Shadow prefix: Where the shadow copies are uploaded in the OSDF
+  namespace. Example: osdf://osg-connect-shadow/protected`,
+		Run: stagePluginMain,
 	}
 	stageCmd.Flags().StringP("token", "t", "", "Token file to use for reading and/or writing")
 	if err := viper.BindPFlag("Plugin.Token", stageCmd.Flags().Lookup("token")); err != nil {
@@ -67,24 +84,6 @@ func init() {
 	if err := viper.BindPFlag("StagePlugin.ShadowOriginPrefix", stageCmd.Flags().Lookup("shadow-prefix")); err != nil {
 		panic(err)
 	}
-
-	usage := stageCmd.HelpTemplate() + `This utility parses a job ClassAd and, for each "osdf://" URL found in
-the input files that is in a locally-mounted origin, copies the file
-over to a "shadow origin".  The files in the shadow origin are given a
-unique based on their last modification time; this means that local
-files can be modified without causing cache consistency issues.
-
-Terminology:
-- Origin prefix: Where in the OSDF namespace the origin exports its
-  files.  Example: osdf://osg-connect/protected
-- Mount prefix: The location in the locally-mounted filesystem that
-  correspondings to the files in the origin prefix. Example:
-  /mnt/cephfs/protected
-- Shadow prefix: Where in the OSDF namespace the resulting files should
-  be uploaded.  Example: osdf://osg-connect-shadow/protected
-`
-
-	stageCmd.SetHelpTemplate(usage)
 
 	stageCmd.CompletionOptions.DisableDefaultCmd = true
 	rootPluginCmd.AddCommand(stageCmd)

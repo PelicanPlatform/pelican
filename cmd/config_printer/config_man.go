@@ -1,6 +1,6 @@
 /***************************************************************
  *
- * Copyright (C) 2024, Pelican Project, Morgridge Institute for Research
+ * Copyright (C) 2026, Pelican Project, Morgridge Institute for Research
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you
  * may not use this file except in compliance with the License.  You may
@@ -20,9 +20,9 @@ package config_printer
 
 import (
 	"fmt"
+	"os"
 	"strings"
 
-	"github.com/charmbracelet/glamour"
 	"github.com/fatih/color"
 	"github.com/spf13/cobra"
 
@@ -66,7 +66,10 @@ func configMan(cmd *cobra.Command, args []string) {
 
 	fmt.Printf("%s %s\n", labelColor.Sprint("Modules:"), formatValue(matchedParam.Components))
 
-	fmt.Printf("%s\n\n", labelColor.Sprint("Description:"))
-	renderedDescription, _ := glamour.Render(matchedParam.Description, "dark")
-	fmt.Println(renderedDescription)
+	// Blank lines separate the description from its label
+	// and from whatever follows, such as the shell's prompt.
+	fmt.Println(labelColor.Sprint("Description:"))
+	fmt.Println()
+	renderMarkdown(os.Stdout, matchedParam.Description)
+	fmt.Println()
 }

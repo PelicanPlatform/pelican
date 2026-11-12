@@ -33,6 +33,7 @@ import (
 	"gorm.io/gorm"
 
 	"github.com/pelicanplatform/pelican/config"
+	"github.com/pelicanplatform/pelican/server_structs"
 )
 
 // handleCreateCredential handles POST /api/v1.0/transfer/credentials
@@ -40,7 +41,7 @@ func handleCreateCredential(db *gorm.DB) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		owner, err := getOwner(c)
 		if err != nil {
-			c.JSON(http.StatusInternalServerError, ErrorResponse{
+			c.JSON(http.StatusInternalServerError, server_structs.TransferErrorResponse{
 				Code:  "INTERNAL",
 				Error: "Failed to determine request owner",
 			})
@@ -49,7 +50,7 @@ func handleCreateCredential(db *gorm.DB) gin.HandlerFunc {
 
 		var req CredentialCreateRequest
 		if err := c.ShouldBindJSON(&req); err != nil {
-			c.JSON(http.StatusBadRequest, ErrorResponse{
+			c.JSON(http.StatusBadRequest, server_structs.TransferErrorResponse{
 				Code:  "INVALID_REQUEST",
 				Error: "Invalid request body: " + err.Error(),
 			})
@@ -59,7 +60,7 @@ func handleCreateCredential(db *gorm.DB) gin.HandlerFunc {
 		encAccessToken, err := encryptSecret(req.AccessToken, owner.UserID, fieldCredAccessToken)
 		if err != nil {
 			log.Errorf("Failed to encrypt access token: %v", err)
-			c.JSON(http.StatusInternalServerError, ErrorResponse{
+			c.JSON(http.StatusInternalServerError, server_structs.TransferErrorResponse{
 				Code:  "INTERNAL",
 				Error: "Failed to encrypt credential",
 			})
@@ -79,14 +80,14 @@ func handleCreateCredential(db *gorm.DB) gin.HandlerFunc {
 
 		if err := db.Create(&cred).Error; err != nil {
 			if errors.Is(err, gorm.ErrDuplicatedKey) || strings.Contains(err.Error(), "UNIQUE constraint failed") {
-				c.JSON(http.StatusConflict, ErrorResponse{
+				c.JSON(http.StatusConflict, server_structs.TransferErrorResponse{
 					Code:  "CONFLICT",
 					Error: "A credential with this name already exists",
 				})
 				return
 			}
 			log.Errorf("Failed to create credential: %v", err)
-			c.JSON(http.StatusInternalServerError, ErrorResponse{
+			c.JSON(http.StatusInternalServerError, server_structs.TransferErrorResponse{
 				Code:  "INTERNAL",
 				Error: "Failed to store credential",
 			})
@@ -102,7 +103,7 @@ func handleListCredentials(db *gorm.DB) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		owner, err := getOwner(c)
 		if err != nil {
-			c.JSON(http.StatusInternalServerError, ErrorResponse{
+			c.JSON(http.StatusInternalServerError, server_structs.TransferErrorResponse{
 				Code:  "INTERNAL",
 				Error: "Failed to determine request owner",
 			})
@@ -114,14 +115,14 @@ func handleListCredentials(db *gorm.DB) gin.HandlerFunc {
 			Order("created_at DESC").
 			Find(&creds).Error; err != nil {
 			log.Errorf("Failed to list credentials: %v", err)
-			c.JSON(http.StatusInternalServerError, ErrorResponse{
+			c.JSON(http.StatusInternalServerError, server_structs.TransferErrorResponse{
 				Code:  "INTERNAL",
 				Error: "Failed to retrieve credentials",
 			})
 			return
 		}
 
-		resp := make([]CredentialResponse, len(creds))
+		resp := make([]server_structs.TransferCredentialResponse, len(creds))
 		for i, cred := range creds {
 			resp[i] = *credentialToResponse(&cred)
 		}
@@ -135,7 +136,7 @@ func handleGetCredential(db *gorm.DB) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		owner, err := getOwner(c)
 		if err != nil {
-			c.JSON(http.StatusInternalServerError, ErrorResponse{
+			c.JSON(http.StatusInternalServerError, server_structs.TransferErrorResponse{
 				Code:  "INTERNAL",
 				Error: "Failed to determine request owner",
 			})
@@ -146,12 +147,12 @@ func handleGetCredential(db *gorm.DB) gin.HandlerFunc {
 		cred, err := getOwnedCredential(db, credID, owner)
 		if err != nil {
 			if errors.Is(err, gorm.ErrRecordNotFound) {
-				c.JSON(http.StatusNotFound, ErrorResponse{
+				c.JSON(http.StatusNotFound, server_structs.TransferErrorResponse{
 					Code:  "NOT_FOUND",
 					Error: "Credential not found",
 				})
 			} else {
-				c.JSON(http.StatusInternalServerError, ErrorResponse{
+				c.JSON(http.StatusInternalServerError, server_structs.TransferErrorResponse{
 					Code:  "INTERNAL",
 					Error: "Failed to retrieve credential",
 				})
@@ -168,7 +169,7 @@ func handleDeleteCredential(db *gorm.DB) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		owner, err := getOwner(c)
 		if err != nil {
-			c.JSON(http.StatusInternalServerError, ErrorResponse{
+			c.JSON(http.StatusInternalServerError, server_structs.TransferErrorResponse{
 				Code:  "INTERNAL",
 				Error: "Failed to determine request owner",
 			})
@@ -181,7 +182,7 @@ func handleDeleteCredential(db *gorm.DB) gin.HandlerFunc {
 
 		if result.Error != nil {
 			log.Errorf("Failed to delete credential: %v", result.Error)
-			c.JSON(http.StatusInternalServerError, ErrorResponse{
+			c.JSON(http.StatusInternalServerError, server_structs.TransferErrorResponse{
 				Code:  "INTERNAL",
 				Error: "Failed to delete credential",
 			})
@@ -189,7 +190,7 @@ func handleDeleteCredential(db *gorm.DB) gin.HandlerFunc {
 		}
 
 		if result.RowsAffected == 0 {
-			c.JSON(http.StatusNotFound, ErrorResponse{
+			c.JSON(http.StatusNotFound, server_structs.TransferErrorResponse{
 				Code:  "NOT_FOUND",
 				Error: "Credential not found",
 			})
@@ -441,8 +442,8 @@ func (p *credentialTokenProvider) Get() (string, error) {
 }
 
 // credentialToResponse converts a credential model to the API response format
-func credentialToResponse(cred *TransferCredential) *CredentialResponse {
-	return &CredentialResponse{
+func credentialToResponse(cred *TransferCredential) *server_structs.TransferCredentialResponse {
+	return &server_structs.TransferCredentialResponse{
 		ID:             cred.ID,
 		Name:           cred.Name,
 		CredentialType: cred.CredentialType,

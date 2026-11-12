@@ -1,0 +1,33 @@
+# Packages from this module that the client binary may depend on.
+#
+# Each line is the package's import path, relative to the module root,
+# github.com/pelicanplatform/pelican.
+#
+# Before adding a package, make sure that the client should depend on it.
+# A Go program links the initialization code of every package that
+# it imports, so importing a server package for one small type can pull in
+# a large share of the server.
+
+byte_rate
+client
+client_agent
+client_agent/apiclient
+client_agent/store
+client_agent/types
+cmd
+cmd/config_printer
+config
+database/utils
+docs
+error_codes
+logging
+oauth2
+param
+pelican_url
+registry/registry_client
+server_structs
+token
+token_scopes
+utils
+utils/registry_jwks
+version
