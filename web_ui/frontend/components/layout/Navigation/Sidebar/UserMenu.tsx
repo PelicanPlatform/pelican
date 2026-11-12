@@ -126,10 +126,13 @@ const UserMenu = ({ menuOptions, variant = 'icon' }: UserMenuProps) => {
           // the only place it appeared before.
           label={user.displayName || user.user || 'Account'}
           // AccountCircle for every role: AdminPanelSettings now belongs to
-          // the Administration destination, and the red session banner plus
-          // the "Administrator" line in this menu already make a privileged
-          // session unmistakable.
+          // the Administration destination. The privileged-session signal is
+          // the row itself instead: it turns red for an admin. This replaces
+          // the red "Administrator session" strip that used to sit across the
+          // top of the page, which operators asked for after deleting a user
+          // from the wrong browser tab.
           icon={<AccountCircle />}
+          danger={user.role === 'admin'}
           onClick={() => setMenuOpen(!menuOpen)}
           aria-haspopup={'menu'}
           aria-expanded={menuOpen}

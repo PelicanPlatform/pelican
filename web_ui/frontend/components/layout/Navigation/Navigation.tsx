@@ -5,6 +5,7 @@ import {
   NavigationShellProvider,
   StaticNavigationItemProps,
   isNavigationGroup,
+  useActiveService,
 } from '@/components/layout/Navigation/index';
 import useSWR from 'swr';
 import { getExportData } from '@/components/DataExportTable';
@@ -64,7 +65,29 @@ const Navigation = ({
     getServerInfo
   );
   const servers = serverInfo?.servers;
-  const runsOrigin = !!servers?.includes('origin');
+  const { service: lastService, resolved: lastServiceResolved } =
+    useActiveService();
+
+  // Server-wide pages (Settings, Groups, Users, Profile) belong to no module,
+  // so they borrow the rail of the module the caller came from. Failing that --
+  // a fresh tab opened straight onto one, or a remembered module this process
+  // no longer runs -- the first module it does run. There used to be a
+  // separate "shared" rail listing every module instead, which on a
+  // multi-module server swapped the caller's familiar rail for an unrelated
+  // one the moment they opened Settings.
+  if (sharedPage) {
+    const service =
+      lastService && servers?.includes(lastService)
+        ? lastService
+        : servers?.[0];
+    config = service ? NavigationConfig[service] : [];
+  }
+
+  // Computed from the rail actually shown rather than from `servers`, so a
+  // shared page borrowing the cache rail doesn't fetch origin exports just
+  // because the process also runs an origin.
+  const showsOriginRail =
+    !!servers?.includes('origin') && config === NavigationConfig['origin'];
 
   // /origin_ui/exports is admin-gated server-side (it returns storage
   // credentials and registry edit-URL tokens), so non-admins would
@@ -75,7 +98,7 @@ const Navigation = ({
   // cache, or transfer server the request could only ever fail -- and
   // `resolved` below would hold the whole rail in skeleton while it did.
   const { data: exports, error: exportsError } = useSWR(
-    user?.role === 'admin' && runsOrigin ? 'getDataExport' : null,
+    user?.role === 'admin' && showsOriginRail ? 'getDataExport' : null,
     getExportData,
     { errorRetryCount: 0 }
   );
@@ -94,26 +117,19 @@ const Navigation = ({
   // /servers has named an origin, so a fetch-state reading of it is
   // momentarily "idle" before it is "loading", and the rail would flash its
   // full list in between. The wait applies only where the fetch does: an
-  // admin on a server with no origin module has nothing to wait for.
+  // admin on a rail other than the origin's has nothing to wait for.
+  //
+  // A shared page also waits for the remembered module, which is read from
+  // session storage after mount; without that it would draw the fallback
+  // module's rail and then swap to the right one.
   const resolved =
     (user !== undefined || userError !== undefined) &&
     (serverInfo !== undefined || serverInfoError !== undefined) &&
+    (!sharedPage || lastServiceResolved) &&
     (user?.role !== 'admin' ||
-      !runsOrigin ||
+      !showsOriginRail ||
       exports !== undefined ||
       exportsError !== undefined);
-
-  // Handle navigation for shared pages
-  // Best we can do is sending them to root if there are many running servers
-  // If there is just one then we can render that navigation
-  if (sharedPage) {
-    const multipleServersActive = servers && servers.length > 1;
-    if (multipleServersActive) {
-      config = NavigationConfig['shared'];
-    } else {
-      config = NavigationConfig[servers ? servers[0] : 'shared'];
-    }
-  }
 
   // Drop items whose only audience is a Director or Registry when this server
   // belongs to no federation. Filtering here (rather than inside each

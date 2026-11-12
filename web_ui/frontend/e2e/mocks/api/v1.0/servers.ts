@@ -28,7 +28,10 @@ export type ServerModule =
   | 'transfer';
 
 export interface ServerInfoOptions {
-  /** Which modules this process runs; drives the shared (`sharedPage`) rail. */
+  /**
+   * Which modules this process runs. A `sharedPage` route borrows the rail of
+   * the module the caller came from, falling back to the first one listed.
+   */
   servers?: ServerModule[];
   /** True when the Origin belongs to no federation; hides federationOnly items. */
   standaloneOrigin?: boolean;
@@ -37,8 +40,8 @@ export interface ServerInfoOptions {
 /**
  * Intercepts GET /api/v1.0/servers, which `getServerInfo` reads.
  *
- * Worth pinning in any navigation test for two reasons. It decides which rail
- * the `sharedPage` routes (/settings/, /groups/, /users/) render, and its
+ * Worth pinning in any navigation test for two reasons. It bounds which rail
+ * the `sharedPage` routes (/settings/, /groups/, /users/) can borrow, and its
  * `standaloneOrigin` flag is what prunes `federationOnly` entries -- so
  * whether the Origin's Downtime row exists at all depends on this response.
  *
