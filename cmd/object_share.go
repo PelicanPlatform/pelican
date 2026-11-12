@@ -48,6 +48,9 @@ func init() {
 
 func shareMain(cmd *cobra.Command, args []string) error {
 
+	// Set up signal handlers to flush logs on SIGTERM
+	client.SetupSignalHandlers()
+
 	err := config.InitClient()
 	if err != nil {
 		return errors.Wrap(err, "Failed to initialize the client")

@@ -201,6 +201,9 @@ func getChecksumOptions(requireChecksum bool) ([]client.TransferOption, error) {
 func putMain(cmd *cobra.Command, args []string) {
 	ctx := cmd.Context()
 
+	// Set up signal handlers to flush logs on SIGTERM
+	client.SetupSignalHandlers()
+
 	err := config.InitClient()
 	if err != nil {
 		log.Errorln(err)
