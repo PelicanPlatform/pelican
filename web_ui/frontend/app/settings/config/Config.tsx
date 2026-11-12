@@ -48,7 +48,6 @@ import {
   RestartBox,
   TableOfContents,
 } from '@/app/settings/config/components';
-import AuthenticatedContent from '@/components/layout/AuthenticatedContent';
 import { getConfig } from '@/helpers/api';
 import { AlertDispatchContext } from '@/components/AlertProvider';
 
@@ -90,9 +89,21 @@ function Config({ metadata }: { metadata: ParameterMetadataRecord }) {
   }, [serverConfig, patch]);
 
   return (
-    <AuthenticatedContent redirect={true} trustThenValidate={true}>
-      <Box display={'flex'} flexDirection={'row'}>
-        <Typography variant={'h4'} component={'h2'} mb={1}>
+    <>
+      {/*
+        Restart sits in the heading row. It used to be a row of its own that
+        the form below pulled back up over with a negative margin, so the
+        button overlapped the first fields.
+      */}
+      <Box
+        display={'flex'}
+        flexWrap={'wrap'}
+        alignItems={'center'}
+        justifyContent={'space-between'}
+        gap={1}
+        mb={2}
+      >
+        <Typography variant={'h4'} component={'h2'}>
           Configuration
           {serverConfig && (
             <Box ml={2} display={'inline'}>
@@ -106,13 +117,9 @@ function Config({ metadata }: { metadata: ParameterMetadataRecord }) {
             </Box>
           )}
         </Typography>
+        <RestartBox />
       </Box>
-      <Grid container>
-        <Grid>
-          <RestartBox />
-        </Grid>
-      </Grid>
-      <Grid container spacing={2} sx={{ mt: -5 }}>
+      <Grid container spacing={2}>
         <Grid
           size={{
             xs: 12,
@@ -186,7 +193,7 @@ function Config({ metadata }: { metadata: ParameterMetadataRecord }) {
           </Box>
         </Grid>
       </Grid>
-    </AuthenticatedContent>
+    </>
   );
 }
 

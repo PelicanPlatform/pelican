@@ -19,6 +19,7 @@ export {
 } from './NavigationShellProvider';
 
 export {
+  NAV_DANGER_SX,
   NAV_GROUP_SUBHEADER_SX,
   NAV_SELECTED_SX,
   RAIL_WIDTH,
