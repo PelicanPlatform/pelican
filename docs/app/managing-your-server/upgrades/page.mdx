@@ -47,7 +47,7 @@ docker start <CONTAINER>
 #### Non-Container Installation
 
 For a non-container-based installation, you can use the `sqlite3` command to safely create a backup of your database.
-First, ensure that the command is available and in PATH.
+First, ensure that the command is available and in your PATH.
 If not, install it using your package manager.
 For example, on an RPM-based distributions, run:
 
@@ -111,8 +111,11 @@ If you are upgrading from 7.26 or earlier, see also the notes for [version 7.27]
 
 For additional upgrade information, see the [release notes for 26.0](https://github.com/PelicanPlatform/pelican/releases#release-v26.0.0).
 
+<Callout type="warning">
 Again, if upgrading from 7.26 or earlier, also see the
 [release notes for 7.27](https://github.com/PelicanPlatform/pelican/releases#release-v7.27.1).
+</Callout>
+
 
 ### Version 7.27
 
@@ -131,6 +134,11 @@ The database schema has changed and, if you need to downgrade, you will need to 
   Download the [migration helper script](https://raw.githubusercontent.com/PelicanPlatform/pelican/refs/heads/main/scripts/uiadminusers_v727_migration_helper.py) before upgrading the software.
 
   **For Container Installation**
+
+  <Callout type="info">
+  The examples are for a service installed via Docker.
+  If you are using Podman, Kubernetes, or some other container runtime, adjust the commands accordingly.
+  </Callout>
 
   Copy the migration helper script into the running container:
 
