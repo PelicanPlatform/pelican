@@ -26,6 +26,12 @@ export type RailItemButtonProps = {
   active?: boolean;
   /** Shown at the end of the row while the rail is expanded, e.g. a disclosure chevron. */
   trailing?: ReactNode;
+  /**
+   * Fills the row with the error colour and white text. Reserved for marking
+   * a privileged session on the account row, so it can't be mistaken for an
+   * ordinary one at a glance.
+   */
+  danger?: boolean;
   id?: string;
   onClick?: () => void;
   'aria-haspopup'?: 'menu';
@@ -45,7 +51,7 @@ export type RailItemButtonProps = {
  */
 export const RailItemButton = forwardRef<HTMLDivElement, RailItemButtonProps>(
   function RailItemButton(
-    { label, icon, href, active, trailing, ...props },
+    { label, icon, href, active, trailing, danger, ...props },
     ref
   ) {
     const railCollapsed = useRailCollapsed();
@@ -104,6 +110,11 @@ export const RailItemButton = forwardRef<HTMLDivElement, RailItemButtonProps>(
         borderRadius: 100,
         color: 'text.secondary',
         ...NAV_SELECTED_SX,
+        ...(danger && {
+          bgcolor: 'error.main',
+          color: 'error.contrastText',
+          '&:hover': { bgcolor: 'error.dark' },
+        }),
       },
       ...props,
     };

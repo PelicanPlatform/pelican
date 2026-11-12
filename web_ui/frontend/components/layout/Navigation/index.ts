@@ -7,6 +7,12 @@ export { useRailCollapsed } from './useRailCollapsed';
 export { SubNavigation } from './SubNavigation';
 
 export {
+  ActiveServiceProvider,
+  serviceFromPathname,
+  useActiveService,
+} from './ActiveServiceProvider';
+
+export {
   NavigationShellProvider,
   useNavigationShell,
   useRailMetrics,

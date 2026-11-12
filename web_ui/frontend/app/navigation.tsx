@@ -3,8 +3,6 @@ import {
   Add,
   AdminPanelSettings,
   Api,
-  AppRegistration,
-  AssistantDirection,
   Block,
   Bookmarks,
   Cached,
@@ -194,8 +192,8 @@ const NavigationConfig: NavigationConfiguration = {
           icon: <TripOrigin />,
         },
         {
-          // Matches the glyph the shared rail uses for Cache. The same
-          // concept had two icons one menu apart.
+          // `Cached` is the cache's glyph wherever it appears; this used to
+          // be `Storage`, so the same concept had two icons.
           title: 'Cache',
           href: '/registry/cache/register/',
           icon: <Cached />,
@@ -416,18 +414,9 @@ const NavigationConfig: NavigationConfiguration = {
     Access,
     Server,
   ],
-  shared: [
-    { title: 'Origin', href: '/origin/', icon: <TripOrigin /> },
-    { title: 'Director', href: '/director/', icon: <AssistantDirection /> },
-    { title: 'Registry', href: '/registry/', icon: <AppRegistration /> },
-    { title: 'Cache', href: '/cache/', icon: <Cached /> },
-    // The shared nav is what /settings/ (and every other server-level
-    // page) sees when the process runs multiple server modules. Without
-    // an Administration entry here, once a caller lands on a server-level
-    // page there's no primary-nav path back into /settings/.
-    Access,
-    Server,
-  ],
+  // There is no rail of its own for server-wide pages (Settings, Groups,
+  // Users, Profile): they borrow the rail of the module the caller came from.
+  // See ActiveServiceProvider.
 };
 
 export default NavigationConfig;

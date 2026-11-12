@@ -4,7 +4,7 @@ import { ExportRes } from '@/components/DataExportTable';
 import { ServerType, User } from '@/index';
 
 export type NavigationConfiguration = {
-  [key in ServerType | 'shared' | 'settings']: NavigationEntry[];
+  [key in ServerType | 'settings']: NavigationEntry[];
 };
 
 /**
