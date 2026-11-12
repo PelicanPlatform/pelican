@@ -24,7 +24,6 @@ import (
 	"bytes"
 	"context"
 	_ "embed"
-	"encoding/json"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -197,18 +196,8 @@ func TestLotmanInit(t *testing.T) {
 		require.True(t, success)
 
 		// Now that we've initialized (without config) test that we have default/root
-		defaultOutput := make([]byte, 4096)
-		errMsg := make([]byte, 2048)
-
-		ret := LotmanGetLotJSON("default", false, &defaultOutput, &errMsg)
-		if ret != 0 {
-			trimBuf(&errMsg)
-			t.Fatalf("Error getting lot JSON: %s", string(errMsg))
-		}
-		trimBuf(&defaultOutput)
-		var defaultLot Lot
-		err := json.Unmarshal(defaultOutput, &defaultLot)
-		require.NoError(t, err, fmt.Sprintf("Error unmarshalling default lot JSON: %s", string(defaultOutput)))
+		defaultLot, err := GetLot("default", false)
+		require.NoError(t, err)
 		require.Equal(t, "default", defaultLot.LotName)
 		require.Equal(t, server.URL, defaultLot.Owner)
 		require.Equal(t, "default", defaultLot.Parents[0])
@@ -219,16 +208,8 @@ func TestLotmanInit(t *testing.T) {
 		require.Equal(t, float64(0), *(defaultLot.MPA.OpportunisticGB))
 		require.Equal(t, int64(0), defaultLot.MPA.MaxNumObjects.Value)
 
-		rootOutput := make([]byte, 4096)
-		ret = LotmanGetLotJSON("root", false, &rootOutput, &errMsg)
-		if ret != 0 {
-			trimBuf(&errMsg)
-			t.Fatalf("Error getting lot JSON: %s", string(errMsg))
-		}
-		trimBuf(&rootOutput)
-		var rootLot Lot
-		err = json.Unmarshal(rootOutput, &rootLot)
-		require.NoError(t, err, fmt.Sprintf("Error unmarshalling root lot JSON: %s", string(rootOutput)))
+		rootLot, err := GetLot("root", false)
+		require.NoError(t, err)
 		require.Equal(t, "root", rootLot.LotName)
 		require.Equal(t, server.URL, rootLot.Owner)
 		require.Equal(t, "root", rootLot.Parents[0])
@@ -253,34 +234,16 @@ func TestLotmanInitFromConfig(t *testing.T) {
 	require.True(t, success)
 
 	// Lotman is initialized, let's check that it has the information it should based on the config
-	defaultOutput := make([]byte, 4096)
-	errMsg := make([]byte, 2048)
-
 	// Check for default lot
-	ret := LotmanGetLotJSON("default", false, &defaultOutput, &errMsg)
-	if ret != 0 {
-		trimBuf(&errMsg)
-		t.Fatalf("Error getting lot JSON: %s", string(errMsg))
-	}
-	trimBuf(&defaultOutput)
-	var defaultLot Lot
-	err := json.Unmarshal(defaultOutput, &defaultLot)
-	require.NoError(t, err, fmt.Sprintf("Error unmarshalling default lot JSON: %s", string(defaultOutput)))
+	defaultLot, err := GetLot("default", false)
+	require.NoError(t, err)
 	require.Equal(t, "default", defaultLot.LotName)
 	require.Equal(t, server.URL, defaultLot.Owner)
 	require.Equal(t, "default", defaultLot.Parents[0])
 
 	// Now root
-	rootOutput := make([]byte, 4096)
-	ret = LotmanGetLotJSON("root", false, &rootOutput, &errMsg)
-	if ret != 0 {
-		trimBuf(&errMsg)
-		t.Fatalf("Error getting lot JSON: %s", string(errMsg))
-	}
-	trimBuf(&rootOutput)
-	var rootLot Lot
-	err = json.Unmarshal(rootOutput, &rootLot)
-	require.NoError(t, err, fmt.Sprintf("Error unmarshalling root lot JSON: %s", string(rootOutput)))
+	rootLot, err := GetLot("root", false)
+	require.NoError(t, err)
 	require.Equal(t, "root", rootLot.LotName)
 	require.Equal(t, server.URL, rootLot.Owner)
 	require.Equal(t, "root", rootLot.Parents[0])
@@ -288,16 +251,8 @@ func TestLotmanInitFromConfig(t *testing.T) {
 	require.False(t, rootLot.Paths[0].Recursive)
 
 	// Now test-1
-	test1Output := make([]byte, 4096)
-	ret = LotmanGetLotJSON("test-1", false, &test1Output, &errMsg)
-	if ret != 0 {
-		trimBuf(&errMsg)
-		t.Fatalf("Error getting lot JSON: %s", string(errMsg))
-	}
-	trimBuf(&test1Output)
-	var test1Lot Lot
-	err = json.Unmarshal(test1Output, &test1Lot)
-	require.NoError(t, err, fmt.Sprintf("Error unmarshalling test-1 lot JSON: %s", string(test1Output)))
+	test1Lot, err := GetLot("test-1", false)
+	require.NoError(t, err)
 	require.Equal(t, "test-1", test1Lot.LotName)
 	require.Equal(t, "https://different-fake-federation.com", test1Lot.Owner)
 	require.Equal(t, "root", test1Lot.Parents[0])
@@ -308,16 +263,8 @@ func TestLotmanInitFromConfig(t *testing.T) {
 	require.False(t, test1Lot.Paths[0].Recursive)
 
 	// Finally test-2
-	test2Output := make([]byte, 4096)
-	ret = LotmanGetLotJSON("test-2", false, &test2Output, &errMsg)
-	if ret != 0 {
-		trimBuf(&errMsg)
-		t.Fatalf("Error getting lot JSON: %s", string(errMsg))
-	}
-	trimBuf(&test2Output)
-	var test2Lot Lot
-	err = json.Unmarshal(test2Output, &test2Lot)
-	require.NoError(t, err, fmt.Sprintf("Error unmarshalling test-2 lot JSON: %s", string(test2Output)))
+	test2Lot, err := GetLot("test-2", false)
+	require.NoError(t, err)
 	require.Equal(t, "test-2", test2Lot.LotName)
 	require.Equal(t, "https://another-fake-federation.com", test2Lot.Owner)
 	require.Equal(t, "test-1", test2Lot.Parents[0])
@@ -1060,15 +1007,9 @@ func TestStrictHierarchyContextSet(t *testing.T) {
 		{"admin_override", "false"},
 	}
 	for _, c := range cases {
-		out := make([]byte, 256)
-		errMsg := make([]byte, 2048)
-		ret := LotmanGetContextStr(c.key, &out, &errMsg)
-		if ret != 0 {
-			trimBuf(&errMsg)
-			t.Fatalf("LotmanGetContextStr(%s) failed: %s", c.key, string(errMsg))
-		}
-		trimBuf(&out)
-		assert.Equal(t, c.want, string(out), "context flag %s should be %q", c.key, c.want)
+		got, err := GetContextStr(c.key)
+		require.NoErrorf(t, err, "GetContextStr(%s)", c.key)
+		assert.Equal(t, c.want, got, "context flag %s should be %q", c.key, c.want)
 	}
 }
 
@@ -1124,17 +1065,9 @@ func TestInitLotmanNestedNamespaces(t *testing.T) {
 	}
 
 	getLot := func(name string) Lot {
-		buf := make([]byte, 8192)
-		errBuf := make([]byte, 2048)
-		ret := LotmanGetLotJSON(name, false, &buf, &errBuf)
-		if ret != 0 {
-			trimBuf(&errBuf)
-			t.Fatalf("get lot %q failed: %s", name, string(errBuf))
-		}
-		trimBuf(&buf)
-		var l Lot
-		require.NoErrorf(t, json.Unmarshal(buf, &l), "unmarshal %q: %s", name, string(buf))
-		return l
+		l, err := GetLot(name, false)
+		require.NoErrorf(t, err, "get lot %q", name)
+		return *l
 	}
 
 	aName := nameForPath("/a")
@@ -1177,4 +1110,28 @@ func TestInitLotmanNestedNamespaces(t *testing.T) {
 	assert.Equal(t, float64(-1), *a.MPA.OpportunisticGB)
 	require.NotNil(t, a.MPA.MaxNumObjects)
 	assert.Equal(t, int64(-1), a.MPA.MaxNumObjects.Value)
+}
+
+// TestGetLotManyChildren reads back a root lot whose JSON is longer than
+// 4 KiB. Every top-level namespace is a direct child of root, and each
+// child name is a 36-character UUID, so ~100 namespaces is enough.
+func TestGetLotManyChildren(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
+	server_utils.ResetTestState()
+	server := getMockDiscoveryHost()
+	require.NoError(t, param.Federation_DiscoveryUrl.Set(server.URL))
+
+	const numNamespaces = 150
+	paths := make([]string, 0, numNamespaces)
+	for i := 0; i < numNamespaces; i++ {
+		paths = append(paths, fmt.Sprintf("/ns-%03d", i))
+	}
+	success, cleanup := setupLotmanFromConf(t, false, "LotmanManyChildren", server.URL, makeAds(paths...), withoutCacheDataLocations())
+	defer cleanup()
+	require.True(t, success)
+
+	lot, err := GetLot("root", false)
+	require.NoError(t, err)
+	require.NotNil(t, lot.Children)
+	require.Len(t, *lot.Children, numNamespaces)
 }
