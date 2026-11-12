@@ -24,11 +24,17 @@ import ObjectModal from './ObjectModal';
 
 interface ListCardProps {
   value: string;
+  readOnly?: boolean;
   handleDelete: () => void;
   handleEdit: () => void;
 }
 
-const ListCard = ({ value, handleDelete, handleEdit }: ListCardProps) => {
+const ListCard = ({
+  value,
+  readOnly,
+  handleDelete,
+  handleEdit,
+}: ListCardProps) => {
   const [open, setOpen] = React.useState<boolean>(false);
 
   let confirmDelete = (() => {
@@ -130,23 +136,25 @@ const ListCard = ({ value, handleDelete, handleEdit }: ListCardProps) => {
         >
           {value}
         </Box>
-        <Box>
-          <IconButton size={'small'} onClick={handleEdit}>
-            <Edit />
-          </IconButton>
-          <IconButton
-            size={'small'}
-            onClick={() => {
-              if (confirmDelete) {
-                handleDelete();
-              } else {
-                setOpen(true);
-              }
-            }}
-          >
-            <Delete />
-          </IconButton>
-        </Box>
+        {!readOnly && (
+          <Box>
+            <IconButton size={'small'} onClick={handleEdit}>
+              <Edit />
+            </IconButton>
+            <IconButton
+              size={'small'}
+              onClick={() => {
+                if (confirmDelete) {
+                  handleDelete();
+                } else {
+                  setOpen(true);
+                }
+              }}
+            >
+              <Delete />
+            </IconButton>
+          </Box>
+        )}
       </Box>
     </>
   );
@@ -156,9 +164,10 @@ interface ObjectCardProps {
   name: string;
   onClick: () => void;
   updated?: boolean;
+  readOnly?: boolean;
 }
 
-const ObjectCard = ({ name, updated, onClick }: ObjectCardProps) => {
+const ObjectCard = ({ name, updated, readOnly, onClick }: ObjectCardProps) => {
   return (
     <Box
       sx={{
@@ -167,15 +176,15 @@ const ObjectCard = ({ name, updated, onClick }: ObjectCardProps) => {
         padding: '0.1rem 0.5rem',
         display: 'flex',
         justifyContent: 'space-between',
-        cursor: 'pointer',
+        cursor: readOnly ? 'default' : 'pointer',
         borderWidth: updated ? '2px' : '1px',
         borderStyle: 'solid',
         borderColor: updated ? 'primary.main' : '#c4c4c4',
         '&:hover': {
-          borderColor: 'black',
+          borderColor: readOnly ? undefined : 'black',
         },
       }}
-      onClick={onClick}
+      onClick={readOnly ? undefined : onClick}
     >
       <Box
         sx={{
@@ -190,9 +199,11 @@ const ObjectCard = ({ name, updated, onClick }: ObjectCardProps) => {
       >
         {name}
       </Box>
-      <IconButton>
-        <Add />
-      </IconButton>
+      {!readOnly && (
+        <IconButton>
+          <Add />
+        </IconButton>
+      )}
     </Box>
   );
 };
@@ -216,6 +227,7 @@ export type ObjectFieldProps<T> = {
   value: T[] | null;
   keyGetter: (v: T) => string;
   focused?: boolean;
+  readOnly?: boolean;
   onChange: (localValue: T[]) => void;
 };
 
@@ -226,6 +238,7 @@ export function ObjectField<T>({
   keyGetter,
   onChange,
   focused,
+  readOnly,
 }: ObjectFieldProps<T>) {
   const [open, setOpen] = React.useState<boolean>(false);
   const [error, setError] = React.useState<string | undefined>(undefined);
@@ -279,6 +292,7 @@ export function ObjectField<T>({
             setOpen(true);
           }}
           updated={focused}
+          readOnly={readOnly}
         />
       </Box>
       <Box>
@@ -354,6 +368,7 @@ export function ObjectField<T>({
               <ListCard
                 key={keyGetter(val)}
                 value={keyGetter(val)}
+                readOnly={readOnly}
                 handleDelete={() => {
                   const newValue = validValue.filter(
                     (v) => keyGetter(v) != keyGetter(val)

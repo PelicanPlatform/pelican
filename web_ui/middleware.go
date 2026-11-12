@@ -82,6 +82,24 @@ func ReadOnlyMiddleware(ctx *gin.Context) {
 	ctx.Next()
 }
 
+// ConfigReadOnlyMiddleware blocks unsafe ( state changing ) requests to the
+// configuration API when Server.ConfigReadOnly is enabled. Unlike
+// ReadOnlyMiddleware, which freezes the whole web UI, this only freezes the
+// server's configuration, so a server whose config is managed externally
+// (Puppet, Ansible, a container image) cannot drift via the web UI while the
+// rest of its admin surface keeps working.
+func ConfigReadOnlyMiddleware(ctx *gin.Context) {
+	if param.Server_ConfigReadOnly.GetBool() && !slices.Contains(safeMethods, ctx.Request.Method) {
+		ctx.JSON(http.StatusForbidden, server_structs.SimpleApiResp{
+			Status: server_structs.RespFailed,
+			Msg:    "The server configuration is read-only: Server.ConfigReadOnly is enabled, so the configuration API will reject HTTP requests outside of GET, HEAD, OPTIONS, TRACE, and PROPFIND",
+		})
+		ctx.Abort()
+		return
+	}
+	ctx.Next()
+}
+
 func loginRateLimitMiddleware(limit int) gin.HandlerFunc {
 	if limit <= 0 {
 		log.Warning("Invalid rate limit. Value is less than 1. Fallback to 1")
