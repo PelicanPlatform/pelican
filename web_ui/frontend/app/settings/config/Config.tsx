@@ -18,15 +18,7 @@
 
 'use client';
 
-import {
-  Alert,
-  Box,
-  Button,
-  Grid,
-  IconButton,
-  Snackbar,
-  Typography,
-} from '@mui/material';
+import { Alert, Box, Button, Grid, Snackbar, Typography } from '@mui/material';
 import React, { useCallback, useContext, useMemo, useState } from 'react';
 import { Download } from '@mui/icons-material';
 import useSWR from 'swr';
@@ -90,33 +82,32 @@ function Config({ metadata }: { metadata: ParameterMetadataRecord }) {
 
   return (
     <>
+      <Typography variant={'h4'} component={'h2'} mb={1}>
+        Configuration
+      </Typography>
       {/*
-        Restart sits in the heading row. It used to be a row of its own that
-        the form below pulled back up over with a negative margin, so the
-        button overlapped the first fields.
+        The page's actions, as a row of matching outlined buttons under the
+        title. Restart used to be a row of its own that the form pulled back
+        up over with a negative margin, and download was a bare icon beside
+        the title.
       */}
-      <Box
-        display={'flex'}
-        flexWrap={'wrap'}
-        alignItems={'center'}
-        justifyContent={'space-between'}
-        gap={1}
-        mb={2}
-      >
-        <Typography variant={'h4'} component={'h2'}>
-          Configuration
-          {serverConfig && (
-            <Box ml={2} display={'inline'}>
-              <DownloadButton
-                Button={IconButton}
-                mimeType={'text/yaml'}
-                data={yaml.dump(stripNulls(structuredClone(data)))}
-              >
-                <Download />
-              </DownloadButton>
-            </Box>
-          )}
-        </Typography>
+      <Box display={'flex'} flexWrap={'wrap'} gap={1} mb={2}>
+        {/*
+          Gated on the response itself: serverConfig is flattened from
+          `data || {}`, so it is never empty-handed and a check on it
+          offered a download of nothing before the config arrived.
+        */}
+        {data && (
+          <DownloadButton
+            Button={Button}
+            variant={'outlined'}
+            endIcon={<Download />}
+            mimeType={'text/yaml'}
+            data={yaml.dump(stripNulls(structuredClone(data)))}
+          >
+            Download
+          </DownloadButton>
+        )}
         <RestartBox />
       </Box>
       <Grid container spacing={2}>
