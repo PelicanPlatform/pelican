@@ -88,7 +88,7 @@ repos:
         args: [--wrap, "no"]
         files: \.md$
   - repo: https://github.com/crate-ci/typos
-    rev: v1.51.1
+    rev: v1.52.0
     hooks:
       - id: typos
         # Prevent false positives from mangling files.

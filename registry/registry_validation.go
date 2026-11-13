@@ -92,7 +92,7 @@ func validatePrefix(nspath string) (string, error) {
 	if result == "/" || len(result) == 0 {
 		return "", errors.New("Cannot register the prefix '/'")
 	}
-	// Check cache/origin prefxies
+	// Check cache/origin prefixes
 	if strings.TrimPrefix(nspath, server_structs.OriginPrefix.String()) == "" {
 		return "", errors.New("Origin prefix is missing hostname")
 	}
