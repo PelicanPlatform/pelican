@@ -20,8 +20,10 @@ package ssh_posixv2
 
 import (
 	"bufio"
+	"bytes"
 	"context"
 	"fmt"
+	"io"
 	"net"
 	"os"
 	"path/filepath"
@@ -81,9 +83,11 @@ func sshDialContext(ctx context.Context, network, addr string, config *ssh.Clien
 	}
 }
 
-// buildSSHAuthMethods constructs the list of SSH auth methods from the configuration
-func (c *SSHConnection) buildSSHAuthMethods(ctx context.Context) ([]ssh.AuthMethod, error) {
+// buildSSHAuthMethods constructs the list of SSH auth methods from the configuration.
+// The caller must call the returned cleanup function once it is done authenticating.
+func (c *SSHConnection) buildSSHAuthMethods(ctx context.Context) ([]ssh.AuthMethod, func(), error) {
 	var authMethods []ssh.AuthMethod
+	var closers []io.Closer
 
 	// Determine challenge timeout
 	challengeTimeout := c.config.ChallengeTimeout
@@ -111,12 +115,13 @@ func (c *SSHConnection) buildSSHAuthMethods(ctx context.Context) ([]ssh.AuthMeth
 			authMethods = append(authMethods, auth)
 
 		case AuthMethodAgent:
-			auth, err := c.buildAgentAuth(ctx)
+			auth, agentConn, err := c.buildAgentAuth(ctx)
 			if err != nil {
 				sshLog.Warnf("Failed to build SSH agent auth: %v", err)
 				continue
 			}
 			authMethods = append(authMethods, auth)
+			closers = append(closers, agentConn)
 
 		case AuthMethodKeyboardInteractive:
 			auth := c.buildKeyboardInteractiveAuth(ctx, challengeTimeout)
@@ -128,10 +133,14 @@ func (c *SSHConnection) buildSSHAuthMethods(ctx context.Context) ([]ssh.AuthMeth
 	}
 
 	if len(authMethods) == 0 {
-		return nil, errors.New("no valid SSH authentication methods configured")
+		return nil, nil, errors.New("no valid SSH authentication methods configured")
 	}
 
-	return authMethods, nil
+	return authMethods, func() {
+		for _, closer := range closers {
+			closer.Close()
+		}
+	}, nil
 }
 
 // buildPasswordAuth reads the password from a file and creates an auth method
@@ -286,12 +295,13 @@ func getAgentSocket() (string, error) {
 	return socket, nil
 }
 
-// buildAgentAuth connects to the SSH agent and creates an auth method
-// The ctx parameter allows context-aware dialing and cancellation
-func (c *SSHConnection) buildAgentAuth(ctx context.Context) (ssh.AuthMethod, error) {
+// buildAgentAuth connects to the SSH agent and creates an auth method.
+// The ctx parameter allows context-aware dialing and cancellation.
+// The caller must close the returned agent connection once it is done authenticating.
+func (c *SSHConnection) buildAgentAuth(ctx context.Context) (ssh.AuthMethod, io.Closer, error) {
 	socket, err := getAgentSocket()
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 
 	sshLog.Debugf("Connecting to SSH agent at %s", socket)
@@ -300,7 +310,7 @@ func (c *SSHConnection) buildAgentAuth(ctx context.Context) (ssh.AuthMethod, err
 	var d net.Dialer
 	conn, err := d.DialContext(ctx, "unix", socket)
 	if err != nil {
-		return nil, errors.Wrap(err, "failed to connect to SSH agent")
+		return nil, nil, errors.Wrap(err, "failed to connect to SSH agent")
 	}
 
 	sshLog.Debugf("Connected to SSH agent, creating agent client")
@@ -310,7 +320,7 @@ func (c *SSHConnection) buildAgentAuth(ctx context.Context) (ssh.AuthMethod, err
 	keys, err := agentClient.List()
 	if err != nil {
 		conn.Close()
-		return nil, errors.Wrap(err, "failed to list SSH agent keys")
+		return nil, nil, errors.Wrap(err, "failed to list SSH agent keys")
 	}
 	sshLog.Debugf("SSH agent has %d key(s) available", len(keys))
 	for i, key := range keys {
@@ -329,7 +339,7 @@ func (c *SSHConnection) buildAgentAuth(ctx context.Context) (ssh.AuthMethod, err
 		}
 		sshLog.Debugf("Got %d signer(s) from SSH agent", len(signers))
 		return signers, nil
-	}), nil
+	}), conn, nil
 }
 
 // buildKeyboardInteractiveAuth creates a keyboard-interactive auth method
@@ -547,9 +557,54 @@ func (c *SSHConnection) buildHostKeyCallback() (ssh.HostKeyCallback, error) {
 	return func(hostname string, remote net.Addr, key ssh.PublicKey) error {
 		sshLog.Debugf("Verifying host key for %s (key type: %s)", hostname, key.Type())
 		err := callback(hostname, remote, key)
+		// Like OpenSSH, if a host certificate fails verification, such as when
+		// known_hosts has no @cert-authority line for its CA, verify its plain key
+		// instead, unless its CA is revoked. Unlike OpenSSH, knownhosts also
+		// compares the plain key with the @cert-authority lines for the host,
+		// so if there are any, a plain key that known_hosts does not list
+		// is rejected as a mismatch, not treated as unknown.
+		var certErr error
+		if cert, ok := key.(*ssh.Certificate); ok && err != nil {
+			var revokedErr *knownhosts.RevokedError
+			if caErr := callback(hostname, remote, cert.SignatureKey); errors.As(caErr, &revokedErr) {
+				sshLog.Errorf("SSH host certificate for %s is signed by a CA revoked by %s:%d. CA fingerprint: %s",
+					hostname, revokedErr.Revoked.Filename, revokedErr.Revoked.Line, ssh.FingerprintSHA256(cert.SignatureKey))
+				return errors.Wrapf(caErr, "SSH host key verification failed for %s: certificate authority is revoked", hostname)
+			}
+			sshLog.Debugf("Host certificate for %s failed verification (%v); verifying its plain key", hostname, err)
+			certErr = err
+			key = cert.Key
+			err = callback(hostname, remote, key)
+			if err != nil {
+				sshLog.Warnf("SSH host certificate for %s failed verification: %v", hostname, certErr)
+				err = fmt.Errorf("%w (host certificate failed verification: %w)", err, certErr)
+			}
+		}
 		if err != nil {
+			// Only a KeyError means that the host key is unknown or has changed.
+			// Any other error, such as for a revoked key, is a verification failure.
+			var keyErr *knownhosts.KeyError
+			if !errors.As(err, &keyErr) {
+				var revokedErr *knownhosts.RevokedError
+				if errors.As(err, &revokedErr) {
+					sshLog.Errorf("SSH host key for %s is revoked by %s:%d. Key fingerprint: %s",
+						hostname, revokedErr.Revoked.Filename, revokedErr.Revoked.Line, ssh.FingerprintSHA256(key))
+					return errors.Wrapf(err, "SSH host key verification failed for %s: host key is revoked", hostname)
+				}
+				sshLog.Errorf("SSH host key verification failed for %s: %v", hostname, err)
+				return errors.Wrapf(err, "SSH host key verification failed for %s", hostname)
+			}
+			// Earlier versions recorded host certificates as plain host keys,
+			// which knownhosts never matches; compare their certified keys instead
+			for _, want := range keyErr.Want {
+				if wantCert, ok := want.Key.(*ssh.Certificate); ok && bytes.Equal(wantCert.Key.Marshal(), key.Marshal()) {
+					sshLog.Warnf("Accepting the host key for %s, which the host certificate at %s:%d certifies; "+
+						"consider replacing that line with the plain host key", hostname, want.Filename, want.Line)
+					return nil
+				}
+			}
 			// Check if it's a key mismatch error vs a new host
-			if keyErr, ok := err.(*knownhosts.KeyError); ok && len(keyErr.Want) > 0 {
+			if len(keyErr.Want) > 0 {
 				// Host key changed - this is a security concern
 				sshLog.Errorf("SSH host key mismatch for %s", hostname)
 				sshLog.Errorf("  Hostname passed to callback: %q", hostname)
@@ -567,6 +622,10 @@ func (c *SSHConnection) buildHostKeyCallback() (ssh.HostKeyCallback, error) {
 						i+1, want.Filename, want.Line, want.Key.Type(), ssh.FingerprintSHA256(want.Key))
 				}
 				sshLog.Errorf("  None of the known_hosts entries match the server's key.")
+				if certErr != nil {
+					sshLog.Errorf("  The server's host certificate failed verification: %v", certErr)
+					sshLog.Errorf("  Any @cert-authority entries above apply only to valid host certificates.")
+				}
 				sshLog.Errorf("  This could mean:")
 				sshLog.Errorf("    - The host key has genuinely changed (security concern)")
 				sshLog.Errorf("    - known_hosts has entries for IP address with different keys")
@@ -856,11 +915,13 @@ func (c *SSHConnection) Connect(ctx context.Context) error {
 
 	sshLog.Debugf("Building SSH auth methods...")
 	// Build auth methods
-	authMethods, err := c.buildSSHAuthMethods(ctx)
+	authMethods, closeAuthMethods, err := c.buildSSHAuthMethods(ctx)
 	if err != nil {
 		c.setState(StateDisconnected)
 		return errors.Wrap(err, "failed to build SSH auth methods")
 	}
+	// The auth methods are needed only for the SSH handshakes below.
+	defer closeAuthMethods()
 	sshLog.Debugf("Built %d auth methods", len(authMethods))
 
 	sshLog.Debugf("Building host key callback...")
