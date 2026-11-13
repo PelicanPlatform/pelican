@@ -557,6 +557,36 @@ func (c *SSHConnection) buildHostKeyCallback() (ssh.HostKeyCallback, error) {
 		sshLog.Debugf("Verifying host key for %s (key type: %s)", hostname, key.Type())
 		err := callback(hostname, remote, key)
 		if err != nil {
+			// x/crypto returns a RevokedError for a revoked host key,
+			// but a plain error for a host certificate whose CA is revoked,
+			// which we would otherwise treat as an unknown host. Reject the host
+			// if its key is revoked, or if it presents a certificate whose CA
+			// or certified key is revoked. For a certificate, we ask callback,
+			// which has no side effects, about its CA and certified key.
+			var revokedErr *knownhosts.RevokedError
+			var revoked string
+			cert, isCert := key.(*ssh.Certificate)
+			switch {
+			case errors.As(err, &revokedErr):
+				revoked = "host key"
+			case isCert && errors.As(callback(hostname, remote, cert.SignatureKey), &revokedErr):
+				revoked = "host certificate's CA"
+			case isCert && errors.As(callback(hostname, remote, cert.Key), &revokedErr):
+				revoked = "host certificate's certified key"
+			}
+			if revokedErr != nil {
+				sshLog.Errorf("SSH %s for %s is revoked", revoked, hostname)
+				sshLog.Errorf("  Revoked key fingerprint: %s", ssh.FingerprintSHA256(revokedErr.Revoked.Key))
+				if isCert {
+					// Like OpenSSH, fingerprint a certificate by its keys, not its blob
+					sshLog.Errorf("  Server offered certificate for key %s, signed by CA %s",
+						ssh.FingerprintSHA256(cert.Key), ssh.FingerprintSHA256(cert.SignatureKey))
+				} else {
+					sshLog.Errorf("  Server offered fingerprint: %s", ssh.FingerprintSHA256(key))
+				}
+				return errors.Wrapf(revokedErr, "SSH host key verification failed for %s: %s is revoked by %s:%d",
+					hostname, revoked, revokedErr.Revoked.Filename, revokedErr.Revoked.Line)
+			}
 			// Check if it's a key mismatch error vs a new host
 			if keyErr, ok := err.(*knownhosts.KeyError); ok && len(keyErr.Want) > 0 {
 				// Host key changed - this is a security concern
