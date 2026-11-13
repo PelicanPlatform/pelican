@@ -25,6 +25,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"text/template"
 
@@ -41,6 +42,10 @@ type ErrorType struct {
 }
 
 var requiredErrorKeys = [4]string{"code", "clientExitCode", "description", "retryable"}
+
+// retryableExitCode is the exit code reserved for retryable errors, and
+// required of exactly those. Every parsed entry is checked against it.
+const retryableExitCode = 11
 
 // GenErrorCodes takes the error_codes.yaml file (located: ../docs/error_codes.yaml) and generates the error_codes/error_codes.go file
 func GenErrorCodes() {
@@ -111,9 +116,32 @@ func GenErrorCodes() {
 			panic(fmt.Sprintf("Error: listed entry number %d from yaml, 'description' attribute is not a string: Current values are: %v", i, value))
 		}
 
+		// Exit code 11 is reserved for retryable errors and required of all of
+		// them, so that a wrapper deciding whether to resubmit can read the exit
+		// status alone. Enforced here rather than left to review because a
+		// violation is silent: the generated code compiles either way, and the
+		// first symptom is a job that will not retry a transient failure, or one
+		// that retries a permanent one until it exhausts its attempts.
+		if retryable != (exitCode == retryableExitCode) {
+			if retryable {
+				panic(fmt.Sprintf("Error: entry '%s' is retryable but has clientExitCode %d; every retryable error must use %d", errorType, exitCode, retryableExitCode))
+			}
+			panic(fmt.Sprintf("Error: entry '%s' is not retryable but claims clientExitCode %d, which is reserved for retryable errors", errorType, retryableExitCode))
+		}
+
 		errors = append(errors, ErrorType{Raw: camelErrorName, Display: displayName, ExitCode: exitCode,
 			Code: code, Retryable: retryable, Description: description})
 	}
+
+	// The sentinel lookup table is ordered most-specific-first, so that a
+	// Authorization.TokenNotFound error is tested against ErrAuthorization_TokenNotFound
+	// before ErrAuthorization -- both match it, and the narrower one is the answer.
+	// Within a depth the yaml order is kept, so the table stays diffable.
+	specificFirst := make([]ErrorType, len(errors))
+	copy(specificFirst, errors)
+	sort.SliceStable(specificFirst, func(i, j int) bool {
+		return strings.Count(specificFirst[i].Raw, ".") > strings.Count(specificFirst[j].Raw, ".")
+	})
 
 	// Create the file to be generated
 	f, err := os.Create("../error_codes/error_codes.go")
@@ -124,8 +152,10 @@ func GenErrorCodes() {
 
 	err = errorTemplate.Execute(f, struct {
 		PelicanErrors []ErrorType
+		SpecificFirst []ErrorType
 	}{
 		PelicanErrors: errors,
+		SpecificFirst: specificFirst,
 	})
 
 	if err != nil {
@@ -206,6 +236,33 @@ type PelicanError struct {
 	description string
 	err         error
 }
+
+// One sentinel per error type. These are the values to compare against with
+// errors.Is when the question is "is this that error":
+//
+//	if errors.Is(err, error_codes.ErrAuthorization) { ... }
+//
+// Matching is hierarchical, so the line above is also true of an
+// Authorization.TokenNotFound error.
+//
+// A sentinel carries the taxonomy's identity and its documented exit code but
+// never a wrapped cause, so it is safe to share and must not be passed to Wrap.
+// Use the New*Error constructors to build an error to return.
+var (
+{{range $idx, $pelicanError := .PelicanErrors}}	Err{{$pelicanError.Display}} = &PelicanError{
+		errorType:   "{{$pelicanError.Raw}}",
+		exitCode:    {{$pelicanError.ExitCode}},
+		code:        {{$pelicanError.Code}},
+		retryable:   {{$pelicanError.Retryable}},
+		description: "{{$pelicanError.Description}}",
+	}
+{{end}})
+
+// sentinels is ordered most-specific-first, so that ExitCodeFor returns the
+// narrowest classification that matches rather than its parent category.
+var sentinels = []*PelicanError{
+{{range $idx, $pelicanError := .SpecificFirst}}	Err{{$pelicanError.Display}},
+{{end}}}
 {{range $idx, $pelicanError := .PelicanErrors}}
 func New{{$pelicanError.Display}}Error(err error) *PelicanError {
 	return &PelicanError{
