@@ -557,6 +557,16 @@ func (c *SSHConnection) buildHostKeyCallback() (ssh.HostKeyCallback, error) {
 		sshLog.Debugf("Verifying host key for %s (key type: %s)", hostname, key.Type())
 		err := callback(hostname, remote, key)
 		if err != nil {
+			// x/crypto returns a RevokedError for a revoked host key,
+			// but a plain error for a host certificate whose CA is revoked,
+			// which we would otherwise treat as an unknown host. Reject the host
+			// if its key is revoked, or if it presents a certificate whose CA
+			// or certified key is revoked.
+			if revokedErr, revokedKey := findRevokedKey(callback, hostname, remote, key, err); revokedErr != nil {
+				sshLog.Errorf("SSH host key for %s is revoked by %s:%d. Revoked key fingerprint: %s",
+					hostname, revokedErr.Revoked.Filename, revokedErr.Revoked.Line, ssh.FingerprintSHA256(revokedKey))
+				return errors.Wrapf(revokedErr, "SSH host key verification failed for %s: host key is revoked", hostname)
+			}
 			// Check if it's a key mismatch error vs a new host
 			if keyErr, ok := err.(*knownhosts.KeyError); ok && len(keyErr.Want) > 0 {
 				// Host key changed - this is a security concern
@@ -609,6 +619,29 @@ func (c *SSHConnection) buildHostKeyCallback() (ssh.HostKeyCallback, error) {
 		sshLog.Debugf("Host key verification succeeded for %s", hostname)
 		return nil
 	}, nil
+}
+
+// findRevokedKey returns the knownhosts.RevokedError for key, if err is one,
+// or else for the certified key or CA of key, if key is a host certificate.
+func findRevokedKey(
+	callback ssh.HostKeyCallback,
+	hostname string,
+	remote net.Addr,
+	key ssh.PublicKey,
+	err error,
+) (*knownhosts.RevokedError, ssh.PublicKey) {
+	var revokedErr *knownhosts.RevokedError
+	if errors.As(err, &revokedErr) {
+		return revokedErr, key
+	}
+	if cert, ok := key.(*ssh.Certificate); ok {
+		for _, k := range []ssh.PublicKey{cert.SignatureKey, cert.Key} {
+			if errors.As(callback(hostname, remote, k), &revokedErr) {
+				return revokedErr, k
+			}
+		}
+	}
+	return nil, nil
 }
 
 // appendToKnownHosts adds a host key to the known_hosts file

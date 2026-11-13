@@ -42,6 +42,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"golang.org/x/crypto/ssh"
 	"golang.org/x/crypto/ssh/agent"
+	"golang.org/x/crypto/ssh/knownhosts"
 )
 
 // testSSHServerConfig holds the configuration for a test SSH server
@@ -1172,6 +1173,135 @@ server1.example.com ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABgQC7... comment
 			if tt.wantAlgos != nil {
 				assert.Equal(t, tt.wantAlgos, algos, "algorithms mismatch")
 			}
+		})
+	}
+}
+
+// TestHostKeyCallback tests that the host key callback accepts
+// a known host key, that AutoAddHostKey accepts and records
+// only an unknown one, and that the callback rejects a revoked host key,
+// a host certificate whose CA is revoked, and a host certificate
+// whose certified key is revoked and whose CA is untrusted.
+func TestHostKeyCallback(t *testing.T) {
+	newKey := func(t *testing.T) ssh.Signer {
+		_, priv, err := ed25519.GenerateKey(rand.Reader)
+		require.NoError(t, err)
+		signer, err := ssh.NewSignerFromKey(priv)
+		require.NoError(t, err)
+		return signer
+	}
+	hostKey := newKey(t).PublicKey()
+	otherKey := newKey(t).PublicKey()
+	caSigner := newKey(t)
+	remote := &net.TCPAddr{IP: net.IPv4(127, 0, 0, 1), Port: 22}
+
+	// newCert returns a host certificate for key, signed by caSigner
+	newCert := func(t *testing.T, key ssh.PublicKey, validBefore uint64) *ssh.Certificate {
+		cert := &ssh.Certificate{
+			Key:             key,
+			CertType:        ssh.HostCert,
+			ValidPrincipals: []string{"example.com"},
+			ValidBefore:     validBefore,
+		}
+		require.NoError(t, cert.SignCert(rand.Reader, caSigner))
+		return cert
+	}
+	cert := newCert(t, hostKey, ssh.CertTimeInfinity)
+
+	hostLine := func(key ssh.PublicKey) string {
+		return knownhosts.Line([]string{"example.com"}, key) + "\n"
+	}
+	caLine := "@cert-authority example.com " + string(ssh.MarshalAuthorizedKey(caSigner.PublicKey()))
+
+	// newCallback returns a host key callback and the path
+	// to its known_hosts file, which has the given contents
+	newCallback := func(t *testing.T, knownHosts string, autoAdd bool) (ssh.HostKeyCallback, string) {
+		knownHostsPath := filepath.Join(t.TempDir(), "known_hosts")
+		require.NoError(t, os.WriteFile(knownHostsPath, []byte(knownHosts), 0600))
+		conn := NewSSHConnection(&SSHConfig{
+			Host:           "example.com",
+			User:           "testuser",
+			AuthMethods:    []AuthMethod{AuthMethodAgent},
+			KnownHostsFile: knownHostsPath,
+			AutoAddHostKey: autoAdd,
+		})
+		callback, err := conn.buildHostKeyCallback()
+		require.NoError(t, err)
+		return callback, knownHostsPath
+	}
+
+	assertKnownHosts := func(t *testing.T, knownHostsPath, expected string) {
+		contents, err := os.ReadFile(knownHostsPath)
+		require.NoError(t, err)
+		assert.Equal(t, expected, string(contents))
+	}
+
+	for _, tc := range []struct {
+		name       string
+		knownHosts string
+		presented  ssh.PublicKey
+	}{
+		{"known key is accepted", hostLine(hostKey), hostKey},
+		{"certificate from listed CA is accepted", caLine, cert},
+	} {
+		for _, autoAdd := range []bool{false, true} {
+			t.Run(fmt.Sprintf("%s/autoAdd=%t", tc.name, autoAdd), func(t *testing.T) {
+				callback, knownHostsPath := newCallback(t, tc.knownHosts, autoAdd)
+				require.NoError(t, callback("example.com:22", remote, tc.presented))
+				assertKnownHosts(t, knownHostsPath, tc.knownHosts)
+			})
+		}
+	}
+
+	t.Run("unknown key is added with AutoAddHostKey", func(t *testing.T) {
+		callback, knownHostsPath := newCallback(t, "", true)
+		require.NoError(t, callback("example.com:22", remote, hostKey))
+		assertKnownHosts(t, knownHostsPath, hostLine(hostKey))
+	})
+
+	t.Run("unknown key is rejected without AutoAddHostKey", func(t *testing.T) {
+		callback, knownHostsPath := newCallback(t, "", false)
+		var keyErr *knownhosts.KeyError
+		require.ErrorAs(t, callback("example.com:22", remote, hostKey), &keyErr)
+		assert.Empty(t, keyErr.Want, "the key should be unknown")
+		assertKnownHosts(t, knownHostsPath, "")
+	})
+
+	for _, autoAdd := range []bool{false, true} {
+		t.Run(fmt.Sprintf("changed key is rejected/autoAdd=%t", autoAdd), func(t *testing.T) {
+			knownHosts := hostLine(otherKey)
+			callback, knownHostsPath := newCallback(t, knownHosts, autoAdd)
+			var keyErr *knownhosts.KeyError
+			require.ErrorAs(t, callback("example.com:22", remote, hostKey), &keyErr)
+			assert.NotEmpty(t, keyErr.Want, "the key should be a mismatch")
+			assertKnownHosts(t, knownHostsPath, knownHosts)
+		})
+	}
+
+	for _, tc := range []struct {
+		name               string
+		revoked, presented ssh.PublicKey
+	}{
+		{"revoked key is rejected", hostKey, hostKey},
+		{"certificate for revoked key is rejected", hostKey, cert},
+		{"certificate from revoked CA is rejected", caSigner.PublicKey(), cert},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			revoked := "@revoked * " + string(ssh.MarshalAuthorizedKey(tc.revoked))
+			callback, knownHostsPath := newCallback(t, revoked, true)
+			var revokedErr *knownhosts.RevokedError
+			assert.ErrorAs(t, callback("example.com:22", remote, tc.presented), &revokedErr)
+			assertKnownHosts(t, knownHostsPath, revoked)
+		})
+	}
+
+	for _, autoAdd := range []bool{false, true} {
+		t.Run(fmt.Sprintf("certificate from listed but revoked CA is rejected/autoAdd=%t", autoAdd), func(t *testing.T) {
+			knownHosts := caLine + "@revoked * " + string(ssh.MarshalAuthorizedKey(caSigner.PublicKey()))
+			callback, knownHostsPath := newCallback(t, knownHosts, autoAdd)
+			var revokedErr *knownhosts.RevokedError
+			assert.ErrorAs(t, callback("example.com:22", remote, cert), &revokedErr)
+			assertKnownHosts(t, knownHostsPath, knownHosts)
 		})
 	}
 }
