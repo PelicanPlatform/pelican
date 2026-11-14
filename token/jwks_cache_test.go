@@ -529,3 +529,128 @@ func TestJwksCache_ResolverFailure(t *testing.T) {
 	require.NoError(t, err, "a later attempt should succeed once the URL resolves")
 	require.NotNil(t, set)
 }
+
+// TestJwksCache_ShedFetchDoesNotBurnRetryWindow verifies that a fetch dropped
+// by the aggregate rate cap leaves the per-key throttle untouched.  The cap is
+// shared, so an unauthenticated caller working through invented keys can
+// exhaust it; if a shed attempt also stamped the key as "just tried", that
+// caller could keep a legitimate key from ever being fetched.
+func TestJwksCache_ShedFetchDoesNotBurnRetryWindow(t *testing.T) {
+	issuer := newJwksServer(t)
+	issuer.rotateTo(t, "key-1")
+	// A burst of one, spent below, so the next attempt is certain to be shed.
+	// The retry interval is long enough that a burnt stamp would still be in
+	// force on the retry.
+	kc := newTestJwksCache(t,
+		WithJwksFetchRate(0.001, 1),
+		WithJwksRetryInterval(time.Hour),
+	)
+
+	// Spend the burst on an unrelated key, standing in for the attacker's
+	// stream of invented ones.
+	_, err := kc.Keys(context.Background(), "noise", issuer.resolver())
+	require.NoError(t, err)
+
+	// The victim's first attempt is shed by the cap, not by its own throttle.
+	_, err = kc.Keys(context.Background(), "victim", issuer.resolver())
+	require.Error(t, err, "the shed fetch should leave the key without keys")
+
+	entry := kc.entry("victim")
+	require.NotNil(t, entry)
+	assert.True(t, entry.canAttempt(time.Hour),
+		"a fetch shed by the rate cap must not count as having contacted the issuer")
+}
+
+// TestJwksCache_ReResolvesUrlAfterFailure verifies that a failed fetch clears
+// the JWKS URL discovery resolved earlier, so an issuer that moves its jwks_uri
+// is found again.  The URL is recorded on a successful fetch and reused from
+// then on, so without this the cache would keep fetching from the old location
+// until the entry itself expired.
+func TestJwksCache_ReResolvesUrlAfterFailure(t *testing.T) {
+	oldIssuer := newJwksServer(t)
+	oldIssuer.rotateTo(t, "old-key")
+	newIssuer := newJwksServer(t)
+	newIssuer.rotateTo(t, "moved-key")
+
+	var mu sync.Mutex
+	moved := false
+	resolver := func(context.Context) (string, error) {
+		mu.Lock()
+		defer mu.Unlock()
+		if moved {
+			return newIssuer.server.URL, nil
+		}
+		return oldIssuer.server.URL, nil
+	}
+
+	// The throttle is disabled so the retries below are not suppressed.
+	kc := newTestJwksCache(t, WithJwksRetryInterval(0))
+
+	// A successful fetch records the resolved URL on the entry.
+	set, err := kc.Keys(context.Background(), "issuer", resolver)
+	require.NoError(t, err)
+	_, ok := set.LookupKeyID("old-key")
+	require.True(t, ok)
+	require.Equal(t, oldIssuer.server.URL, kc.entry("issuer").resolvedUrl())
+
+	// The issuer moves its keys: discovery now points elsewhere, and the old
+	// location stops answering.
+	mu.Lock()
+	moved = true
+	mu.Unlock()
+	oldIssuer.setDown(true)
+
+	// The first refresh still goes to the recorded URL and fails.  The cached
+	// keys stay in place, as they do through any fetch failure.
+	_, err = kc.Refresh(context.Background(), "issuer", resolver)
+	require.Error(t, err)
+
+	// The next one must re-run discovery rather than retry the dead URL.
+	set, err = kc.Refresh(context.Background(), "issuer", resolver)
+	require.NoError(t, err, "a failed fetch must not pin the old JWKS URL")
+	require.NotNil(t, set)
+	_, ok = set.LookupKeyID("moved-key")
+	assert.True(t, ok, "the keys should come from the issuer's new location")
+}
+
+// TestJwksCache_KeylessEntriesExpireOnProbation verifies that keys which never
+// resolved are reclaimed on a short probation TTL rather than occupying the
+// cache for the full one, while an entry that holds real keys keeps the full
+// TTL.  The broker looks a namespace up before verifying the caller's token, so
+// an unauthenticated caller can mint entries; bounding how long they linger is
+// what keeps them from crowding out entries that hold keys.
+func TestJwksCache_KeylessEntriesExpireOnProbation(t *testing.T) {
+	issuer := newJwksServer(t)
+	issuer.rotateTo(t, "key-1")
+	kc := newTestJwksCache(t,
+		WithJwksRetryInterval(10*time.Millisecond), // probation is twice this
+		WithJwksTTL(time.Hour),
+	)
+
+	// A real namespace, whose keys must survive on the full TTL.
+	_, err := kc.Keys(context.Background(), "good", issuer.resolver())
+	require.NoError(t, err)
+
+	// Entries an unauthenticated caller could mint: they never resolve, so
+	// they never graduate off probation.
+	badResolver := func(context.Context) (string, error) {
+		return "", errors.New("no such issuer")
+	}
+	for i := 0; i < 8; i++ {
+		_, _ = kc.Keys(context.Background(), fmt.Sprintf("bogus-%d", i), badResolver)
+	}
+	require.Equal(t, 9, kc.entries.Len())
+
+	require.Eventually(t, func() bool {
+		kc.entries.DeleteExpired()
+		return kc.entries.Len() == 1
+	}, 5*time.Second, 10*time.Millisecond,
+		"entries that never produced keys should be reclaimed on the probation TTL")
+
+	entry := kc.entry("good")
+	require.NotNil(t, entry, "the entry holding real keys must still be cached")
+	set, _ := entry.keys()
+	require.NotNil(t, set)
+	_, ok := set.LookupKeyID("key-1")
+	assert.True(t, ok, "the real keys must outlive the probation TTL")
+}

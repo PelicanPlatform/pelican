@@ -148,7 +148,13 @@ func WithJwksFetchRate(perSecond float64, burst int) JwksCacheOption {
 // would turn that into an outage.
 //
 // The report has to be repeated before the keys are dropped, so that a single
-// bad response cannot revoke a namespace.
+// bad response cannot revoke a namespace.  Note that this only filters out
+// blips shorter than the retry interval: a registry that answers 403/404 for
+// every namespace for longer than that -- a restore from a warm standby, a
+// migration, or Registry.RequireOriginApproval being turned on before the
+// origins are approved -- will drop the keys of every namespace in use.  That
+// resolves itself once the registry answers normally again, since an entry
+// with no keys is re-fetched on the next request.
 func WithJwksDropOnAbsence() JwksCacheOption {
 	return func(o *jwksCacheOptions) { o.dropOnAbsence = true }
 }
@@ -226,15 +232,37 @@ func (e *jwksEntry) keys() (jwk.Set, time.Time) {
 
 // beginAttempt records a fetch attempt unless one happened too recently,
 // reporting whether the caller should proceed.  Checking and stamping under one
-// lock keeps two callers from both deciding to fetch.
-func (e *jwksEntry) beginAttempt(retry time.Duration) bool {
+// lock keeps two callers from both deciding to fetch.  It returns the stamp it
+// replaced so that an attempt which never reaches the network can put it back.
+func (e *jwksEntry) beginAttempt(retry time.Duration) (prev time.Time, ok bool) {
 	e.mu.Lock()
 	defer e.mu.Unlock()
 	if !e.lastAttempt.IsZero() && time.Since(e.lastAttempt) < retry {
-		return false
+		return time.Time{}, false
 	}
+	prev = e.lastAttempt
 	e.lastAttempt = time.Now()
-	return true
+	return prev, true
+}
+
+// abandonAttempt restores the stamp beginAttempt replaced, for an attempt that
+// was given up before contacting the issuer.  Without it, shedding a fetch
+// would also lock the key out for the whole retry interval, so a flood of
+// unknown keys could keep a known one from ever being refreshed.
+func (e *jwksEntry) abandonAttempt(prev time.Time) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	e.lastAttempt = prev
+}
+
+// canAttempt reports whether a fetch would be allowed through the per-key
+// throttle right now.  It is advisory: beginAttempt makes the real decision
+// under the write lock.  It exists so a caller can avoid starting a goroutine
+// for a fetch that would immediately be refused.
+func (e *jwksEntry) canAttempt(retry time.Duration) bool {
+	e.mu.RLock()
+	defer e.mu.RUnlock()
+	return e.lastAttempt.IsZero() || time.Since(e.lastAttempt) >= retry
 }
 
 func (e *jwksEntry) recordSuccess(url string, set jwk.Set) {
@@ -271,6 +299,15 @@ func (e *jwksEntry) dropKeys() {
 	e.lastGood = time.Time{}
 }
 
+// forgetUrl discards the resolved JWKS URL so the next attempt re-runs
+// discovery.  An issuer that moves its jwks_uri would otherwise be chased to
+// the old location for as long as the entry stays alive.
+func (e *jwksEntry) forgetUrl() {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	e.url = ""
+}
+
 func (e *jwksEntry) resolvedUrl() string {
 	e.mu.RLock()
 	defer e.mu.RUnlock()
@@ -293,6 +330,18 @@ func NewJwksCache(ctx context.Context, egrp *errgroup.Group, options ...JwksCach
 		o(&opts)
 	}
 
+	// An entry that has never produced keys is worth keeping only long enough
+	// for its lastAttempt stamp to throttle re-fetches.  Giving it the full TTL
+	// would let keys nobody can resolve -- including ones invented by an
+	// unauthenticated caller, since the broker looks up the prefix from the
+	// request body before verifying the token -- sit in the cache for hours and
+	// push entries that do hold keys out of a capacity-bounded cache.  It is
+	// promoted to the full TTL as soon as a fetch succeeds.
+	probation := 2 * opts.retry
+	if probation > opts.ttl {
+		probation = opts.ttl
+	}
+
 	cacheOpts := []ttlcache.Option[string, *jwksEntry]{
 		ttlcache.WithTTL[string, *jwksEntry](opts.ttl),
 		// Touch-on-hit stays enabled: an entry holds keys plus the time they
@@ -304,7 +353,7 @@ func NewJwksCache(ctx context.Context, egrp *errgroup.Group, options ...JwksCach
 			ttlcache.NewSuppressedLoader[string, *jwksEntry](
 				ttlcache.LoaderFunc[string, *jwksEntry](
 					func(cache *ttlcache.Cache[string, *jwksEntry], key string) *ttlcache.Item[string, *jwksEntry] {
-						return cache.Set(key, &jwksEntry{}, ttlcache.DefaultTTL)
+						return cache.Set(key, &jwksEntry{}, probation)
 					},
 				), nil),
 		),
@@ -354,7 +403,13 @@ func (c *JwksCache) Keys(ctx context.Context, key string, resolve JwksUrlResolve
 			return set, nil
 		case age < c.opts.maxStale:
 			// Serve the keys we have and refresh behind the request, so a
-			// routine refresh never shows up as request latency.
+			// routine refresh never shows up as request latency.  Only start
+			// the goroutine when an attempt could actually proceed: otherwise
+			// every request arriving in the throttle window parks one on a
+			// fetch that beginAttempt refuses immediately.
+			if !entry.canAttempt(c.opts.retry) {
+				return set, nil
+			}
 			go func() {
 				if _, err := c.fetch(c.ctx, key, entry, resolve); err != nil {
 					log.Debugf("Background key refresh for %s failed (serving keys fetched %v ago): %v",
@@ -408,6 +463,7 @@ func (c *JwksCache) Set(key string, set jwk.Set) {
 		return
 	}
 	entry.recordSuccess(entry.resolvedUrl(), set)
+	c.entries.Set(key, entry, c.opts.ttl)
 }
 
 // fetchJwks retrieves and parses a keyset.  It checks the HTTP status itself
@@ -471,13 +527,19 @@ func (c *JwksCache) entry(key string) *jwksEntry {
 // suppressed the attempt.
 func (c *JwksCache) fetch(ctx context.Context, key string, entry *jwksEntry, resolve JwksUrlResolver) (jwk.Set, error) {
 	ch := c.group.DoChan(key, func() (interface{}, error) {
-		if !entry.beginAttempt(c.opts.retry) {
+		prevAttempt, ok := entry.beginAttempt(c.opts.retry)
+		if !ok {
 			return nil, nil
 		}
 		// Shed rather than queue: waiting here would let a caller working
 		// through invented issuers pile up goroutines, which is the thing the
 		// cap is for.  A caller that already has keys keeps serving them.
 		if c.limiter != nil && !c.limiter.Allow() {
+			// Give the throttle stamp back.  This attempt never reached the
+			// issuer, so it says nothing about how recently we bothered it,
+			// and holding the stamp would let unknown keys crowding the
+			// limiter keep a known key from being refreshed.
+			entry.abandonAttempt(prevAttempt)
 			log.Debugf("Skipping a key fetch for %s: the cache is at its fetch rate limit", key)
 			return nil, nil
 		}
@@ -498,6 +560,10 @@ func (c *JwksCache) fetch(ctx context.Context, key string, entry *jwksEntry, res
 
 		set, err := fetchJwks(fetchCtx, url)
 		if err != nil {
+			// Re-run discovery next time rather than retrying this URL
+			// forever: a failure is one of the few signals that the issuer
+			// may have moved its keys.
+			entry.forgetUrl()
 			var fetchErr *JwksFetchError
 			if errors.As(err, &fetchErr) && fetchErr.IsAbsence() {
 				// The issuer answered, and the answer is that these keys are
@@ -518,6 +584,9 @@ func (c *JwksCache) fetch(ctx context.Context, key string, entry *jwksEntry, res
 			return nil, errors.Wrapf(err, "failed to fetch public keys for %s", key)
 		}
 		entry.recordSuccess(url, set)
+		// The entry now holds keys that let verification survive an issuer
+		// outage, so it graduates from the probation TTL to the full one.
+		c.entries.Set(key, entry, c.opts.ttl)
 		log.Debugf("Fetched %d public key(s) for %s from %s", set.Len(), key, url)
 		return set, nil
 	})
