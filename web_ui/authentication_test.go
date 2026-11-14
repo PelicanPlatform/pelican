@@ -268,8 +268,8 @@ func TestPasswordResetAPI(t *testing.T) {
 		// reaching the AdminAuthHandler that this subtest is meant
 		// to exercise.
 		require.NoError(t, database.ServerDatabase.Create(&database.User{
-			ID: "user", Username: "user", Sub: "user",
-			Issuer: param.Server_ExternalWebUrl.GetString(),
+			ID: "user", Username: "user",
+
 			Status: database.UserStatusActive,
 		}).Error)
 
@@ -823,8 +823,8 @@ func TestCheckAdmin(t *testing.T) {
 			identity := UserIdentity{
 				Username: tc.user,
 				ID:       tc.id,
-				Sub:      tc.sub,
-				Groups:   tc.groups,
+
+				Groups: tc.groups,
 			}
 			isAdmin, msg = CheckAdmin(identity)
 
@@ -1050,9 +1050,8 @@ func TestUserAdminAuthHandler(t *testing.T) {
 				require.NoError(t, database.ServerDatabase.Create(&database.User{
 					ID:       "u-carol",
 					Username: "carol",
-					Sub:      "carol",
-					Issuer:   "https://example.com",
-					Status:   database.UserStatusActive,
+
+					Status: database.UserStatusActive,
 				}).Error)
 				require.NoError(t, database.GrantUserScope(
 					database.ServerDatabase, "u-carol",
@@ -1073,9 +1072,8 @@ func TestUserAdminAuthHandler(t *testing.T) {
 				require.NoError(t, database.ServerDatabase.Create(&database.User{
 					ID:       "u-dan",
 					Username: "dan",
-					Sub:      "dan",
-					Issuer:   "https://example.com",
-					Status:   database.UserStatusActive,
+
+					Status: database.UserStatusActive,
 				}).Error)
 				require.NoError(t, database.ServerDatabase.Create(&database.Group{
 					ID:        "g-priv",
@@ -1102,9 +1100,8 @@ func TestUserAdminAuthHandler(t *testing.T) {
 				require.NoError(t, database.ServerDatabase.Create(&database.User{
 					ID:       "u-eve",
 					Username: "eve",
-					Sub:      "eve",
-					Issuer:   "https://example.com",
-					Status:   database.UserStatusActive,
+
+					Status: database.UserStatusActive,
 				}).Error)
 				ctx.Set("User", "eve")
 				ctx.Set("UserId", "u-eve")
@@ -1188,9 +1185,8 @@ func TestUserRecordIsActive(t *testing.T) {
 		require.NoError(t, database.ServerDatabase.Create(&database.User{
 			ID:       "user-active",
 			Username: "alice",
-			Sub:      "alice",
-			Issuer:   "https://example.com",
-			Status:   database.UserStatusActive,
+
+			Status: database.UserStatusActive,
 		}).Error)
 		assert.True(t, userRecordIsActive("user-active"),
 			"a real, active row is what authenticated users hit on every request")
@@ -1201,9 +1197,8 @@ func TestUserRecordIsActive(t *testing.T) {
 		require.NoError(t, database.ServerDatabase.Create(&database.User{
 			ID:       "user-inactive",
 			Username: "bob",
-			Sub:      "bob",
-			Issuer:   "https://example.com",
-			Status:   database.UserStatusInactive,
+
+			Status: database.UserStatusInactive,
 		}).Error)
 		assert.False(t, userRecordIsActive("user-inactive"),
 			"a row with status=inactive must be treated as revoked, even though it still exists in the DB")
@@ -1214,9 +1209,8 @@ func TestUserRecordIsActive(t *testing.T) {
 		require.NoError(t, database.ServerDatabase.Create(&database.User{
 			ID:       "user-deleted",
 			Username: "carol",
-			Sub:      "carol",
-			Issuer:   "https://example.com",
-			Status:   database.UserStatusActive,
+
+			Status: database.UserStatusActive,
 		}).Error)
 		// Soft-delete via the public deletion path (admin self-driven
 		// is the easiest path that doesn't require a separate

@@ -49,11 +49,11 @@ type groupAuthzFixtures struct {
 func seedGroupAuthzFixtures(t *testing.T, db *gorm.DB) groupAuthzFixtures {
 	t.Helper()
 	users := []User{
-		{ID: "u-owner", Username: "owner", Sub: "owner", Issuer: "local", Status: UserStatusActive},
-		{ID: "u-admin", Username: "alice-admin", Sub: "alice-admin", Issuer: "local", Status: UserStatusActive},
-		{ID: "u-gadmin", Username: "carol-gadmin", Sub: "carol-gadmin", Issuer: "local", Status: UserStatusActive},
-		{ID: "u-member", Username: "dave-member", Sub: "dave-member", Issuer: "local", Status: UserStatusActive},
-		{ID: "u-stranger", Username: "eve-stranger", Sub: "eve-stranger", Issuer: "local", Status: UserStatusActive},
+		{ID: "u-owner", Username: "owner", Status: UserStatusActive},
+		{ID: "u-admin", Username: "alice-admin", Status: UserStatusActive},
+		{ID: "u-gadmin", Username: "carol-gadmin", Status: UserStatusActive},
+		{ID: "u-member", Username: "dave-member", Status: UserStatusActive},
+		{ID: "u-stranger", Username: "eve-stranger", Status: UserStatusActive},
 	}
 	for i := range users {
 		require.NoError(t, db.Create(&users[i]).Error)

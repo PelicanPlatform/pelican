@@ -382,8 +382,10 @@ func TestGroupAdminLatchMigrationDefaultsToUnknown(t *testing.T) {
 	}
 
 	// And a new account created after the migration starts the same way.
-	require.NoError(t, db.Exec(`INSERT INTO users (id, username, sub, issuer, created_by) VALUES
-		('u-carol', 'carol', 'carol@idp', 'https://idp.example', 'unknown')`).Error)
+	// No sub/issuer here: identity unification has since moved them to
+	// user_identities, and this row needs none.
+	require.NoError(t, db.Exec(`INSERT INTO users (id, username, created_by) VALUES
+		('u-carol', 'carol', 'unknown')`).Error)
 	var carol User
 	require.NoError(t, db.First(&carol, "id = ?", "u-carol").Error)
 	assert.Equal(t, GroupAdminUnknown, carol.GroupAdminStatus)

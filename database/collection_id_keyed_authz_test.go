@@ -64,14 +64,14 @@ import (
 
 func mkUser(t *testing.T, db *gorm.DB, id, username string) *User {
 	t.Helper()
-	// Sub is derived from the ID, not the username: these tests hand
-	// the same username to different accounts, and the IdP subject is
-	// what actually identifies a person.
-	u := &User{
-		ID: id, Username: username, Sub: id + "@idp",
-		Issuer: "https://idp.example", Status: UserStatusActive,
-	}
+	u := &User{ID: id, Username: username, Status: UserStatusActive}
 	require.NoError(t, db.Create(u).Error)
+	// The subject is derived from the ID, not the username: these tests hand
+	// the same username to different accounts over time, and the IdP subject
+	// is what actually identifies a person.
+	require.NoError(t, db.Create(&UserIdentity{
+		ID: "ident-" + id, UserID: id, Sub: id + "@idp", Issuer: "https://idp.example",
+	}).Error)
 	return u
 }
 
@@ -158,7 +158,7 @@ func TestRenamedUserKeepsGrantsAndLeavesNothingBehind(t *testing.T) {
 	require.NoError(t, GrantCollectionAcl(db, coll.ID, owner.Username, owner.ID, nil,
 		ACLSubjectRef("user-alice"), AclRoleRead, nil, false))
 
-	require.NoError(t, RenameUser(db, alice.ID, "alicia", localIssuerForTests))
+	require.NoError(t, RenameUser(db, alice.ID, "alicia"))
 
 	assert.NoError(t, validateACL(db, reload(t, db, coll.ID), "alicia", alice.ID, nil, token_scopes.Collection_Read),
 		"the renamed account keeps its grant; nothing had to be migrated")

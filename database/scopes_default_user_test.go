@@ -142,7 +142,7 @@ func TestCreateUserAppliesDefaultScopes(t *testing.T) {
 		db := setupCollectionTestDB(t)
 		withDefaultScopesConfig(t, []string{"web_ui.access"})
 
-		user, err := CreateLocalUser(db, "carol", "Carol the Local", "https://example.com", CreatorSelf())
+		user, err := CreateLocalUser(db, "carol", "Carol the Local", CreatorSelf())
 		require.NoError(t, err)
 		rows, err := ListUserScopes(db, user.ID)
 		require.NoError(t, err)

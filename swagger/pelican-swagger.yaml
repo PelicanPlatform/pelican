@@ -1154,11 +1154,11 @@ definitions:
     description: >-
       Canonical user record. Per the four-concept model
       (`docs/user-group-design.md`): `id` is opaque-internal,
-      `username` is the authorization handle (admin-controlled),
-      `displayName` is a human label (self-editable), and (`sub`,
-      `issuer`) is the *primary* linked OIDC identity (login linkage
-      only — never used for authorization). Additional identities live
-      in user_identities.
+      `username` is the authorization handle (admin-controlled) and
+      globally unique among live accounts, and `displayName` is a human
+      label (self-editable). The record carries no identity of its own:
+      every (`sub`, `issuer`) the account can be reached by is a
+      UserIdentity, listed through `/users/{id}/identities`.
     properties:
       id:
         type: string
@@ -1167,18 +1167,9 @@ definitions:
         type: string
         description: >-
           Authorization handle. Validated by ValidateIdentifier.
-          Admin-only renames after first creation; on rename, if the
-          user is a local-issuer account, the primary `sub` is kept in
-          lockstep (otherwise password login would silently break).
-      sub:
-        type: string
-        description: >-
-          The 'sub' claim of the user's *primary* linked OIDC identity.
-          For local-issuer users this equals `username`. Used for login
-          linkage; never used for authorization.
-      issuer:
-        type: string
-        description: The 'iss' claim of the user's primary linked OIDC identity.
+          Admin-only renames after first creation. A rename moves only
+          the username: an identity's `sub` is what its issuer calls the
+          person and is never rewritten.
       status:
         type: string
         description: User account status.
@@ -1574,12 +1565,14 @@ definitions:
   UserIdentity:
     type: object
     description: >-
-      Secondary OIDC identity for a user. The user's *primary* identity
-      lives on the User row itself (User.sub + User.issuer); this table
-      holds *additional* identities the user has linked. A user may have
-      at most one identity per issuer in total (primary + secondaries),
-      enforced by an in-table unique index plus a cross-table check
-      against User.issuer.
+      One identity a user can be reached by. All identities are equal —
+      none is distinguished as "primary" — and `user_identities` is the
+      only place they live. Two unique indexes hold the model together:
+      a (`sub`, `issuer`) pair belongs to at most one user, and a user
+      has at most one identity per issuer. The `issuer`
+      `urn:pelican:internal` marks an account this server authenticates
+      itself (an htpasswd entry or a stored password) rather than one
+      an external provider vouches for.
     properties:
       id:
         type: string
@@ -1605,9 +1598,9 @@ definitions:
   MePatch:
     type: object
     description: >-
-      Body for PATCH /me. Only displayName is self-editable. Username,
-      sub, issuer, and the user_identities are admin-only and go
-      through the corresponding /users endpoints instead.
+      Body for PATCH /me. Only displayName is self-editable. The
+      username and the user's identities are admin-only and go through
+      the corresponding /users endpoints instead.
     properties:
       displayName:
         type: string
@@ -7094,7 +7087,8 @@ paths:
         provided:
 
 
-        * **Local user** (omit `sub`/`issuer`): created without a
+        * **Local user** (omit `sub`/`issuer`): created with an identity
+          at the internal issuer (`urn:pelican:internal`) and without a
           password. Admins do NOT set passwords directly — to enable
           login for the new account, follow up with
           `POST /users/{id}/password-invite` and hand the invite link
@@ -7195,11 +7189,11 @@ paths:
       summary: Update an existing user
       description: >-
         `Admin privilege Required`. Only `username`, `displayName` and
-        `groupAdminRuledOut` are mutable here. The user's primary OIDC
-        identity (`sub`, `issuer`) is managed via
-        `/users/{id}/identities`, never inline — and a username rename
-        of a local-issuer account also rotates the primary `sub` so
-        password login keeps working.
+        `groupAdminRuledOut` are mutable here. A user's identities are
+        managed via `/users/{id}/identities`, never inline. A rename
+        moves only the username; password login is unaffected, since a
+        stored password is resolved by the (globally unique) username
+        and an htpasswd entry by the identity it already holds.
 
         `username` and `displayName` accept a user-admin caller;
         `groupAdminRuledOut` requires a full system administrator.
@@ -7585,11 +7579,12 @@ paths:
     get:
       tags:
         - users
-      summary: List user secondary identities (admin)
+      summary: List a user's identities (admin)
       description: >-
-        `Admin privilege Required`. Returns the user's *secondary* OIDC
-        identities (rows in user_identities). The user's *primary*
-        identity is on the User row itself; read it via GET /users/{id}.
+        `Admin privilege Required`. Returns every identity the user can
+        be reached by (rows in user_identities), including the internal
+        one (issuer `urn:pelican:internal`) of an account this server
+        authenticates itself. None is distinguished as "primary".
         Self-service equivalent: GET `/me/identities`.
       produces:
         - application/json
@@ -7617,12 +7612,13 @@ paths:
     post:
       tags:
         - users
-      summary: Add a secondary identity to a user (admin)
+      summary: Link an identity to a user (admin)
       description: >-
-        `Admin privilege Required`. Associate a new OAuth2/OIDC identity
-        with a user. Rejected if the new identity is at the same issuer
-        as the user's primary identity (each user may have at most one
-        identity per issuer).
+        `Admin privilege Required`. Associates an OAuth2/OIDC identity
+        with a user. Rejected with 409 when the (`sub`, `issuer`) pair
+        already belongs to some account, or when this user already holds
+        an identity at that issuer — both are unique indexes on
+        user_identities, so they hold for every writer.
       consumes:
         - application/json
       produces:
@@ -7663,7 +7659,9 @@ paths:
           schema:
             $ref: "#/definitions/ErrorModelV2"
         "409":
-          description: Identity already associated with a user
+          description: >-
+            The identity already belongs to an account, or this user
+            already has an identity at that issuer.
           schema:
             $ref: "#/definitions/ErrorModelV2"
         "500":
@@ -7674,12 +7672,13 @@ paths:
     delete:
       tags:
         - users
-      summary: Remove a secondary identity from a user (admin)
+      summary: Unlink an identity from a user (admin)
       description: >-
         `Admin privilege Required`. Removes a row from user_identities.
-        The user's primary identity (on the User row) is not removable
-        through this endpoint. Self-service equivalent for the same
-        record class: DELETE `/me/identities/{id}`.
+        Any identity may be unlinked, including the internal one, with
+        one guard: the last identity of an account that has no password
+        cannot be removed, since nothing would be left to sign in with
+        (409). Self-service equivalent: DELETE `/me/identities/{id}`.
       produces:
         - application/json
       parameters:
@@ -7702,6 +7701,12 @@ paths:
             $ref: "#/definitions/ErrorModelV2"
         "404":
           description: Identity not found
+          schema:
+            $ref: "#/definitions/ErrorModelV2"
+        "409":
+          description: >-
+            The account's last way to sign in; set a password or link
+            another identity first.
           schema:
             $ref: "#/definitions/ErrorModelV2"
         "500":
@@ -8050,13 +8055,12 @@ paths:
     get:
       tags:
         - me
-      summary: List the calling user's secondary OIDC identities
+      summary: List the calling user's identities
       description: >-
-        `Authentication Required`. Returns the caller's *secondary*
-        identities (rows in user_identities). The caller's *primary*
-        identity is on the User row itself and is exposed via GET /me;
-        the split matches the contract that secondaries are
-        self-unlinkable but primaries are admin-managed.
+        `Authentication Required`. Returns every identity the caller can
+        be reached by (rows in user_identities). None is distinguished
+        as "primary"; any of them may be unlinked, subject to the guard
+        on DELETE `/me/identities/{id}`.
       produces:
         - application/json
       responses:
@@ -8078,14 +8082,15 @@ paths:
     delete:
       tags:
         - me
-      summary: Self-unlink a secondary OIDC identity
+      summary: Self-unlink an identity
       description: >-
         `Authentication Required`. Removes one of the caller's
-        secondary identities. The caller's primary identity (on the
-        User row) cannot be unlinked here — admins handle primary
-        changes. 404 covers both "no such identity" and "identity
-        belongs to a different user" without distinguishing them, so
-        users can't probe the existence of other users' identities.
+        identities. Any of them may go, except the last one of an
+        account with no password — that is refused with 409, because
+        nothing would be left to sign in with. 404 covers both "no such
+        identity" and "identity belongs to a different user" without
+        distinguishing them, so users can't probe the existence of
+        other users' identities.
       produces:
         - application/json
       parameters:
@@ -8103,6 +8108,12 @@ paths:
             $ref: "#/definitions/ErrorModelV2"
         "404":
           description: Identity not found, or not owned by the caller
+          schema:
+            $ref: "#/definitions/ErrorModelV2"
+        "409":
+          description: >-
+            The account's last way to sign in; set a password or link
+            another identity first.
           schema:
             $ref: "#/definitions/ErrorModelV2"
         "500":

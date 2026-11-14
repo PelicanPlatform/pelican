@@ -144,17 +144,47 @@ func TransferAuthMiddleware(db *gorm.DB) gin.HandlerFunc {
 			}
 		}
 
-		// Resolve (issuer, subject) → users table ID, creating the user if needed.
-		// The bearer authenticated themselves via their token, so the user row is
-		// self-enrolled (as with OIDC first login).
-		user, err := database.GetOrCreateUser(db, subject, subject, issuer, database.CreatorSelf())
-		if err != nil {
-			log.Errorf("Failed to resolve user (sub=%s, iss=%s): %v", subject, issuer, err)
-			c.AbortWithStatusJSON(http.StatusInternalServerError, ErrorResponse{
-				Code:  "INTERNAL",
-				Error: "Failed to resolve user identity",
-			})
-			return
+		// Resolve the token to a users-table ID.
+		//
+		// A token this server minted names the account by user_id, and that is
+		// the only thing here that identifies it. Its SUBJECT is a username —
+		// setLoginCookie stamps userRecord.Username, and the embedded issuer
+		// stamps the gin "User" — so (subject, issuer) is not an identity any
+		// account was ever stored under: a local account's identity is
+		// (username, database.InternalIssuer), and a federated account's
+		// subject is whatever its IdP assigned. Asking the identity table for
+		// that pair misses every time, and then enrolling it either collides
+		// with the username it was trying to resolve or opens a second,
+		// parallel account for a person who already has one.
+		//
+		// checkLocalIssuer puts the claim in the context only after verifying
+		// that we signed the token and that its issuer is ours, which is what
+		// makes it safe to trust here; a federation- or origin-issued token
+		// cannot assert a user_id (see token/token_verify.go).
+		var user *database.User
+		if userID := c.GetString("UserId"); userID != "" {
+			user, err = database.GetUserByID(db, userID)
+			if err != nil {
+				log.Errorf("Failed to resolve user (user_id=%s): %v", userID, err)
+				c.AbortWithStatusJSON(http.StatusInternalServerError, ErrorResponse{
+					Code:  "INTERNAL",
+					Error: "Failed to resolve user identity",
+				})
+				return
+			}
+		} else {
+			// A foreign issuer's (subject, issuer) IS the account's identity.
+			// The bearer authenticated themselves via their token, so the user
+			// row is self-enrolled (as with OIDC first login).
+			user, err = database.GetOrCreateUser(db, subject, subject, issuer, database.CreatorSelf())
+			if err != nil {
+				log.Errorf("Failed to resolve user (sub=%s, iss=%s): %v", subject, issuer, err)
+				c.AbortWithStatusJSON(http.StatusInternalServerError, ErrorResponse{
+					Code:  "INTERNAL",
+					Error: "Failed to resolve user identity",
+				})
+				return
+			}
 		}
 
 		c.Set(ctxKeyOwnerUserID, user.ID)

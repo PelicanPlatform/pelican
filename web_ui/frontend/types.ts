@@ -294,6 +294,12 @@ export interface GroupInviteLinkPost {
   expiresIn: string; // Duration string, e.g. "168h"
 }
 
+// INTERNAL_ISSUER marks an identity this server authenticates itself (an
+// htpasswd entry or a stored password) rather than one an external provider
+// vouches for. It mirrors database.InternalIssuer and is part of the API
+// contract — see the UserIdentity definition in swagger/pelican-swagger.yaml.
+export const INTERNAL_ISSUER = 'urn:pelican:internal';
+
 export interface UserIdentity {
   id: string;
   userId: string;
