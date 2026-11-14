@@ -161,8 +161,8 @@ func (p *posixFS) Readlink(name string) (string, error) {
 	return posixCall(p, func() (string, error) { return p.root.Readlink(name) }, nil)
 }
 
-func (p *posixFS) Symlink(oldname, newname string) error {
-	return posixCallErr(p, func() error { return p.root.Symlink(oldname, newname) })
+func (p *posixFS) Link(oldname, newname string) error {
+	return posixCallErr(p, func() error { return p.root.Link(oldname, newname) })
 }
 
 func (p *posixFS) Rename(oldname, newname string) error {

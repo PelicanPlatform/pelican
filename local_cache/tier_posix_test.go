@@ -24,6 +24,7 @@ import (
 	"bytes"
 	"context"
 	"io"
+	"io/fs"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -407,17 +408,49 @@ func (env *posixTierEnv) readName(t *testing.T, name string) ([]byte, error) {
 	return root.ReadFile(name)
 }
 
-func (env *posixTierEnv) readlink(name string) string {
-	dest, err := os.Readlink(filepath.Join(env.dir, filepath.FromSlash(name)))
-	if err != nil {
+// linkedTo returns the object whose file the names-view entry name is a hard
+// link to, or "" if it is missing or is not a link to any object's file.
+func (env *posixTierEnv) linkedTo(t *testing.T, name string) InstanceHash {
+	t.Helper()
+	info, err := os.Lstat(filepath.Join(env.dir, filepath.FromSlash(name)))
+	if err != nil || !info.Mode().IsRegular() {
 		return ""
 	}
-	return dest
+	var found InstanceHash
+	objects := filepath.Join(env.dir, posixObjectsDir)
+	require.NoError(t, filepath.WalkDir(objects, func(p string, d fs.DirEntry, err error) error {
+		if err != nil || d.IsDir() || found != "" {
+			return err
+		}
+		objectInfo, err := os.Lstat(p)
+		if err != nil {
+			return err
+		}
+		if os.SameFile(info, objectInfo) {
+			rel, err := filepath.Rel(objects, p)
+			if err != nil {
+				return err
+			}
+			found = env.target.hashFromKey(filepath.ToSlash(rel))
+		}
+		return nil
+	}))
+	return found
+}
+
+// linkName makes name a hard link to the object's file, as the view would
+// -- or as something that does not belong there.
+func (env *posixTierEnv) linkName(t *testing.T, hash InstanceHash, name string) {
+	t.Helper()
+	p := filepath.Join(env.dir, filepath.FromSlash(name))
+	require.NoError(t, os.MkdirAll(filepath.Dir(p), 0o755))
+	object := filepath.Join(env.dir, posixObjectsDir, filepath.FromSlash(env.target.objectKey(hash)))
+	require.NoError(t, os.Link(object, p))
 }
 
 // TestTierNamesViewLifecycle follows one object through the names view:
 // tiering publishes it, a new version takes over the bare name, eviction
-// withdraws each version, and nothing dangles at any point.
+// withdraws each version, and no name outlives its object.
 func TestTierNamesViewLifecycle(t *testing.T) {
 	withUmask(t, 0o077)
 	ctx, cancel := context.WithCancel(context.Background())
@@ -437,12 +470,9 @@ func TestTierNamesViewLifecycle(t *testing.T) {
 	require.Equal(t, env.tierID, meta.StorageID, "a public object is tiered to the shared filesystem")
 
 	const (
-		bare      = "names/public/data/set%401/file.bin"
-		version1  = bare + "@v1"
-		version2  = bare + "@v2"
-		linkToV1  = "file.bin@v1"
-		linkToV2  = "file.bin@v2"
-		objectsUp = "../../../../objects/"
+		bare     = "names/public/data/set%401/file.bin"
+		version1 = bare + "@v1"
+		version2 = bare + "@v2"
 	)
 	got, err := env.readName(t, version1)
 	require.NoError(t, err)
@@ -450,8 +480,8 @@ func TestTierNamesViewLifecycle(t *testing.T) {
 	got, err = env.readName(t, bare)
 	require.NoError(t, err, "the bare name must resolve within an os.Root")
 	assert.Equal(t, v1, got)
-	assert.Equal(t, linkToV1, env.readlink(bare))
-	assert.True(t, strings.HasPrefix(env.readlink(version1), objectsUp), "links must be relative: %s", env.readlink(version1))
+	assert.Equal(t, h1, env.linkedTo(t, bare), "the bare name is the object's own file")
+	assert.Equal(t, h1, env.linkedTo(t, version1))
 	for _, d := range []string{"names/public", "names/public/data", "names/public/data/set%401"} {
 		fi, err := os.Stat(filepath.Join(env.dir, filepath.FromSlash(d)))
 		require.NoError(t, err)
@@ -462,7 +492,7 @@ func TestTierNamesViewLifecycle(t *testing.T) {
 	// version stays reachable under its own name until it is evicted.
 	h2 := env.storeVersion(t, ctx, sourceURL, `"v2"`, v2, start.Add(time.Minute))
 	require.NoError(t, env.uploader.processObject(ctx, h2))
-	assert.Equal(t, linkToV2, env.readlink(bare))
+	assert.Equal(t, h2, env.linkedTo(t, bare))
 	got, err = env.readName(t, bare)
 	require.NoError(t, err)
 	assert.Equal(t, v2, got)
@@ -474,14 +504,14 @@ func TestTierNamesViewLifecycle(t *testing.T) {
 	// bare name back.
 	h0 := env.storeVersion(t, ctx, sourceURL, `"v0"`, bytes.Repeat([]byte("version zero\n"), 400), start.Add(-time.Minute))
 	require.NoError(t, env.uploader.processObject(ctx, h0))
-	assert.NotEmpty(t, env.readlink(bare+"@v0"))
-	assert.Equal(t, linkToV2, env.readlink(bare), "only the latest version is the bare name")
+	assert.Equal(t, h0, env.linkedTo(t, bare+"@v0"))
+	assert.Equal(t, h2, env.linkedTo(t, bare), "only the latest version is the bare name")
 	require.NoError(t, env.storage.Delete(h0))
 
 	// Deleting the old version withdraws its link and leaves the bare name.
 	require.NoError(t, env.storage.Delete(h1))
-	assert.Empty(t, env.readlink(version1))
-	assert.Equal(t, linkToV2, env.readlink(bare))
+	assert.Empty(t, env.linkedTo(t, version1))
+	assert.Equal(t, h2, env.linkedTo(t, bare))
 
 	// Evicting the current version withdraws both, and the now-empty
 	// directories go with them.
@@ -489,8 +519,8 @@ func TestTierNamesViewLifecycle(t *testing.T) {
 	evicted, _, _, err := env.storage.EvictByLRU(env.tierID, NamespaceID(1), 0, 0)
 	require.NoError(t, err)
 	require.Len(t, evicted, 1)
-	assert.Empty(t, env.readlink(version2))
-	assert.Empty(t, env.readlink(bare))
+	assert.Empty(t, env.linkedTo(t, version2))
+	assert.Empty(t, env.linkedTo(t, bare))
 	assert.NoDirExists(t, filepath.Join(env.dir, "names", "public"))
 	assert.DirExists(t, filepath.Join(env.dir, "names"))
 }
@@ -511,25 +541,28 @@ func TestTierNamesViewSweepRepairs(t *testing.T) {
 	key := env.target.objectKey(hash)
 
 	names := filepath.Join(env.dir, "names")
-	link := func(dest string, name ...string) {
-		p := filepath.Join(append([]string{names}, name...)...)
+	// orphan makes name a file that was once linked to an object since
+	// deleted, as a crash between deleting an object and its names leaves.
+	orphan := func(name string) {
+		p := filepath.Join(names, filepath.FromSlash(name))
+		gone := filepath.Join(t.TempDir(), "gone")
+		require.NoError(t, os.WriteFile(gone, data, 0o644))
 		require.NoError(t, os.MkdirAll(filepath.Dir(p), 0o755))
-		require.NoError(t, os.Symlink(dest, p))
+		require.NoError(t, os.Link(gone, p))
+		require.NoError(t, os.Remove(gone))
 	}
 	// Damage: the object's bare name is lost (as after a crash) and its
-	// version link points somewhere else -- at a path that has the right
-	// length and ends in the object's key, but is not the object ...
+	// version name is a file with the right bytes that is not the object ...
 	require.NoError(t, os.Remove(filepath.Join(names, "public", "keep.bin")))
 	require.NoError(t, os.Remove(filepath.Join(names, "public", "keep.bin@e1")))
-	link("xx/xx/objects/"+key, "public", "keep.bin@e1")
-	// ... a version link points at an object the cache has no record of ...
-	link("../../objects/00/00/"+strings.Repeat("0", 60), "public", "gone.bin@x")
-	// ... a version link for a real object sits under the wrong name ...
-	link("../../objects/"+key, "public", "impostor.bin@e1")
-	// ... a bare name points at a version that does not exist ...
-	link("gone.bin@x", "public", "gone.bin")
-	// ... an absolute link and a stray file were planted ...
-	link(filepath.Join(env.dir, "objects", filepath.FromSlash(key)), "public", "absolute.bin@e1")
+	require.NoError(t, os.WriteFile(filepath.Join(names, "public", "keep.bin@e1"), data, 0o644))
+	// ... a version name and a bare name outlived their object ...
+	orphan("public/gone.bin@x")
+	orphan("public/gone.bin")
+	// ... a link to a real object sits under the wrong name ...
+	env.linkName(t, hash, "names/public/impostor.bin@e1")
+	// ... a symlink to the object and a stray file were planted ...
+	require.NoError(t, os.Symlink(filepath.Join(env.dir, "objects", filepath.FromSlash(key)), filepath.Join(names, "public", "symlink.bin@e1")))
 	require.NoError(t, os.WriteFile(filepath.Join(names, "public", "stray.txt"), []byte("x"), 0o644))
 	// ... and an empty directory was left behind.
 	require.NoError(t, os.MkdirAll(filepath.Join(names, "empty", "deeper"), 0o755))
@@ -569,17 +602,17 @@ func TestTierNamesViewSweepRepairs(t *testing.T) {
 	// The bare name is withdrawn the moment the cache learns of a newer
 	// version that is not on the target -- not an hour later.
 	require.NoError(t, env.db.SetLatestETag(env.db.ObjectHash(sourceURL), "e2", time.Now()))
-	assert.Empty(t, env.readlink("names/public/keep.bin"))
-	assert.NotEmpty(t, env.readlink("names/public/keep.bin@e1"), "the version itself is still valid")
-	// ...and one put back pointing at the superseded version is removed.
-	link("keep.bin@e1", "public", "keep.bin")
+	assert.Empty(t, env.linkedTo(t, "names/public/keep.bin"))
+	assert.Equal(t, hash, env.linkedTo(t, "names/public/keep.bin@e1"), "the version itself is still valid")
+	// ...and one put back on the superseded version is removed.
+	env.linkName(t, hash, "names/public/keep.bin")
 	require.NoError(t, env.checker.RunTierScan(ctx))
-	assert.Empty(t, env.readlink("names/public/keep.bin"))
+	assert.Empty(t, env.linkedTo(t, "names/public/keep.bin"))
 
 	// An object whose namespace stops being public leaves the view.
 	env.public["/public"] = false
 	require.NoError(t, env.checker.RunTierScan(ctx))
-	assert.Empty(t, env.readlink("names/public/keep.bin@e1"))
+	assert.Empty(t, env.linkedTo(t, "names/public/keep.bin@e1"))
 }
 
 // TestTierNamesViewDisabled: with the view turned off nothing is linked, and
@@ -595,9 +628,9 @@ func TestTierNamesViewDisabled(t *testing.T) {
 	meta, err := env.storage.GetMetadata(hash)
 	require.NoError(t, err)
 	assert.Equal(t, env.tierID, meta.StorageID, "the target still tiers")
-	assert.Empty(t, env.readlink("names/public/x.bin"))
+	assert.Empty(t, env.linkedTo(t, "names/public/x.bin"))
 
-	require.NoError(t, os.Symlink("x.bin@e", filepath.Join(env.dir, "names", "leftover")))
+	env.linkName(t, hash, "names/leftover")
 	require.NoError(t, env.checker.RunTierScan(ctx))
 	entries, err := os.ReadDir(filepath.Join(env.dir, "names"))
 	require.NoError(t, err)
@@ -635,7 +668,7 @@ func TestTierSharedFilesystemHoldsOnlyExposableObjects(t *testing.T) {
 	env.storage.SetTierExposurePolicy(func(string) (bool, bool) { return false, false })
 	assert.Equal(t, env.diskID, tierOf(public), "nothing is exposed before the namespace list is known")
 	require.NoError(t, env.checker.RunTierScan(ctx))
-	assert.NotEmpty(t, env.readlink("names/listed/shared.bin"), "an unknown answer withdraws nothing")
+	assert.Equal(t, listed, env.linkedTo(t, "names/listed/shared.bin"), "an unknown answer withdraws nothing")
 }
 
 // TestTierSharedFilesystemConfig covers the file:// spellings the
@@ -769,7 +802,8 @@ func TestTierNamesViewFoldingFilesystem(t *testing.T) {
 // TestTierNamesViewCollisions: names that would collide are resolved once
 // and stay resolved.  A path that is not in canonical form is not named at
 // all (it would share a link with its canonical spelling), and of two
-// versions whose tags differ only in quoting, the first keeps the name.
+// versions whose tags differ only in quoting, the one holding the name when
+// the sweep runs keeps it.
 func TestTierNamesViewCollisions(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -784,15 +818,15 @@ func TestTierNamesViewCollisions(t *testing.T) {
 	require.NoError(t, env.uploader.processObject(ctx, first))
 	second := env.storeVersion(t, ctx, "pelican://fed/public/q.bin", `x`, data, time.Now())
 	require.NoError(t, env.uploader.processObject(ctx, second))
-	want := "../../objects/" + env.target.objectKey(first)
-	assert.Equal(t, want, env.readlink("names/public/q.bin@x"), "the first version keeps the name")
+	holder := env.linkedTo(t, "names/public/q.bin@x")
+	assert.Contains(t, []InstanceHash{first, second}, holder)
 
 	label := env.target.metricLabel()
 	restored := testutil.ToFloat64(tierNameLinksRestoredTotal.WithLabelValues(label))
 	removed := testutil.ToFloat64(tierSweepRemovedTotal.WithLabelValues(label, tierSweepRemovedNameLink))
 	require.NoError(t, env.checker.RunTierScan(ctx))
 	require.NoError(t, env.checker.RunTierScan(ctx))
-	assert.Equal(t, want, env.readlink("names/public/q.bin@x"))
+	assert.Equal(t, holder, env.linkedTo(t, "names/public/q.bin@x"), "the sweep keeps the name where it is")
 	assert.Equal(t, restored, testutil.ToFloat64(tierNameLinksRestoredTotal.WithLabelValues(label)), "no flapping")
 	assert.Equal(t, removed, testutil.ToFloat64(tierSweepRemovedTotal.WithLabelValues(label, tierSweepRemovedNameLink)))
 }
@@ -808,20 +842,20 @@ func TestTierNamesViewPausedWhileUnhealthy(t *testing.T) {
 
 	hash := env.storeVersion(t, ctx, "pelican://fed/public/u.bin", "e", bytes.Repeat([]byte("u"), 4096), time.Now())
 	require.NoError(t, env.uploader.processObject(ctx, hash))
-	require.NotEmpty(t, env.readlink("names/public/u.bin"))
+	require.Equal(t, hash, env.linkedTo(t, "names/public/u.bin"))
 	require.NoError(t, os.Remove(filepath.Join(env.dir, "names", "public", "u.bin")))
-	require.NoError(t, os.Symlink("planted", filepath.Join(env.dir, "names", "public", "other")))
+	env.linkName(t, hash, "names/public/other")
 
 	env.target.healthy.Store(false)
 	env.storage.publishTierName(env.target, hash)
 	require.NoError(t, env.checker.RunTierScan(ctx))
-	assert.Empty(t, env.readlink("names/public/u.bin"), "nothing is published while unhealthy")
-	assert.Equal(t, "planted", env.readlink("names/public/other"), "nothing is reconciled while unhealthy")
+	assert.Empty(t, env.linkedTo(t, "names/public/u.bin"), "nothing is published while unhealthy")
+	assert.Equal(t, hash, env.linkedTo(t, "names/public/other"), "nothing is reconciled while unhealthy")
 
 	env.target.healthy.Store(true)
 	require.NoError(t, env.checker.RunTierScan(ctx))
-	assert.NotEmpty(t, env.readlink("names/public/u.bin"))
-	assert.Empty(t, env.readlink("names/public/other"))
+	assert.Equal(t, hash, env.linkedTo(t, "names/public/u.bin"))
+	assert.Empty(t, env.linkedTo(t, "names/public/other"))
 }
 
 // TestTierNamesViewKeepsLinksWhenNamespaceVanishes: a namespace that drops
@@ -837,6 +871,6 @@ func TestTierNamesViewKeepsLinksWhenNamespaceVanishes(t *testing.T) {
 
 	env.storage.SetTierExposurePolicy(func(string) (bool, bool) { return false, false })
 	require.NoError(t, env.checker.RunTierScan(ctx))
-	assert.NotEmpty(t, env.readlink("names/public/v.bin@e"))
-	assert.NotEmpty(t, env.readlink("names/public/v.bin"))
+	assert.Equal(t, hash, env.linkedTo(t, "names/public/v.bin@e"))
+	assert.Equal(t, hash, env.linkedTo(t, "names/public/v.bin"))
 }

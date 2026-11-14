@@ -26,33 +26,48 @@ import (
 	"net/url"
 	"os"
 	"path"
+	"sort"
 	"strings"
 	"sync"
 	"time"
 
 	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
+
+	"github.com/pelicanplatform/pelican/utils"
 )
 
-// The names view is a tree of symlinks, beside a shared-filesystem target's
-// hash-keyed objects, that spells each object by its federation path:
+// The names view is a tree of hard links, beside a shared-filesystem
+// target's hash-keyed objects, that spells each object by its federation
+// path:
 //
-//	names/<namespace path>@<etag>  -> ../../objects/aa/bb/<instance hash>
-//	names/<namespace path>         -> <final component>@<etag>
+//	names/<namespace path>@<etag>  = objects/aa/bb/<instance hash>
+//	names/<namespace path>         = the same file, for the current version
 //
 // The first kind names one version of an object; the second -- the bare name
-// -- resolves to whichever version the cache currently considers the latest.
+// -- is whichever version the cache currently considers the latest.
 // It exists so that someone with read access to the shared filesystem (a
 // user who prestaged their favourite dataset, say) can open the objects by
 // their logical names, read-only, without going through Pelican at all.
 //
-// Every link is relative.  An absolute link would bake in the cache's mount
-// point, which clients may mount elsewhere, and os.Root -- what the Pelican
-// client and other careful readers confine themselves with -- refuses to
-// follow an absolute symlink even when its target is inside the root.
+// Names are hard links rather than symlinks so that the view behaves as the
+// plain files its readers take it for: copying a directory of it copies the
+// data, not links that dangle outside the tree; a container that mounts only
+// part of it can still read it; and tools that do not follow links (rsync,
+// tar, find -type f) see files.  A hard link has nothing to read back, so
+// the view tells which object a name is by its inode: the sweep lists the
+// objects tree first and looks each name's inode up in that listing.  An
+// object's file is never rewritten in place -- a new copy is a new file
+// renamed over the key -- so an inode stands for one object for as long as
+// the file exists.  The price is that a name the cache failed to remove (a
+// crash between removing an object's metadata and its names, say) keeps the
+// object's bytes on disk after the object is deleted, until the sweep finds
+// the name linked to no object and removes it.  The view needs a filesystem
+// that supports hard links; a target on one that does not is refused unless
+// its view is disabled.
 //
 // Links are replaced atomically: a new one is created under a temporary name
-// and renamed over the old, so a reader resolving the bare name sees either
+// and renamed over the old, so a reader opening the bare name gets either
 // the previous version or the new one, never a missing file.
 //
 // The cache's metadata is the source of truth.  Links are added when an
@@ -95,7 +110,7 @@ import (
 // Exact names.  With NamesView: exact the tree instead spells each object
 // exactly as its federation path does, with no escaping and no versions:
 //
-//	names/<namespace path>  -> ../../objects/aa/bb/<instance hash>
+//	names/<namespace path>  = objects/aa/bb/<instance hash>
 //
 // for the version the cache currently considers the latest, and nothing for
 // any other.  Without versions in the tree, '@' and '%' mean nothing to it,
@@ -219,10 +234,70 @@ func (n tierLogicalName) versionPath() string { return n.dir + "/" + n.versionFi
 // currentPath is the bare name's path relative to the root.
 func (n tierLogicalName) currentPath() string { return n.dir + "/" + n.base }
 
-// objectLinkFrom is what a link in dir must hold to reach the object at
-// objectPath (relative to the root): one "../" per directory level.
-func objectLinkFrom(dir, objectPath string) string {
-	return strings.Repeat("../", strings.Count(dir, "/")+1) + objectPath
+// tierFileID identifies a file on the target by device and inode: what every
+// hard link to it shares.
+type tierFileID struct{ dev, ino uint64 }
+
+func tierFileIDOf(info fs.FileInfo) (tierFileID, bool) {
+	dev, ino, ok := utils.FileVFSID(info)
+	return tierFileID{dev: dev, ino: ino}, ok
+}
+
+// tierInodeIndex maps the files of a target's objects tree to the objects
+// they hold, as of one listing, sorted by file.  The sweep keeps one entry
+// per object on the target, and a sorted slice costs about half what a map
+// would.
+type tierInodeIndex []tierInodeEntry
+
+type tierInodeEntry struct {
+	id   tierFileID
+	hash [32]byte
+}
+
+// lookup returns the object whose file is id, or "" if the listing had none.
+func (x tierInodeIndex) lookup(id tierFileID) InstanceHash {
+	i := sort.Search(len(x), func(i int) bool {
+		e := x[i].id
+		return e.dev > id.dev || e.dev == id.dev && e.ino >= id.ino
+	})
+	if i < len(x) && x[i].id == id {
+		return InstanceHash(hex.EncodeToString(x[i].hash[:]))
+	}
+	return ""
+}
+
+// buildTierInodeIndex lists a target's objects tree.
+func buildTierInodeIndex(ctx context.Context, target *tierTarget) (tierInodeIndex, error) {
+	var x tierInodeIndex
+	err := target.names.b.listObjects(ctx, func(key string, info fs.FileInfo) error {
+		hash := target.hashFromKey(key)
+		id, ok := tierFileIDOf(info)
+		if hash == "" || !ok {
+			return nil // the identity or probe object, or a platform without inodes
+		}
+		e := tierInodeEntry{id: id}
+		if n, err := hex.Decode(e.hash[:], []byte(hash)); err != nil || n != len(e.hash) {
+			return nil
+		}
+		x = append(x, e)
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	sort.Slice(x, func(i, j int) bool {
+		a, b := x[i].id, x[j].id
+		return a.dev < b.dev || a.dev == b.dev && a.ino < b.ino
+	})
+	return x, nil
+}
+
+// tierObjectFile is an object's file on the target, as the names view links
+// to it.
+type tierObjectFile struct {
+	hash InstanceHash
+	path string      // relative to the root
+	info fs.FileInfo // its lstat, to recognize links to it
 }
 
 // tierNameView maintains the names tree of one shared-filesystem target.
@@ -240,13 +315,26 @@ type tierNameView struct {
 	// exact is set for NamesView: exact; see the note above.
 	exact bool
 	mu    sync.Mutex
+	// While a sweep runs, index is its listing of the objects tree, and
+	// linked records every link made since the listing began, which the
+	// listing may have missed: together they say whose a name is.  Both are
+	// guarded by mu and nil outside a sweep.
+	index  tierInodeIndex
+	linked map[tierFileID]InstanceHash
 }
 
 // newTierNameView prepares the names view of a shared-filesystem target.  It
-// fails only for an exact-names view on a filesystem that folds names (or
-// one that cannot be checked), which could not keep two objects apart.
+// fails for a filesystem that cannot hold the view: one without hard links,
+// or, for an exact-names view, one that folds names (or that cannot be
+// checked), which could not keep two objects apart.
 func newTierNameView(b *posixTierBackend, enabled, exact bool) (*tierNameView, error) {
 	v := &tierNameView{b: b, enabled: enabled, exact: exact}
+	if enabled {
+		if err := tierHardLinkProbe(b); err != nil {
+			return nil, errors.Wrapf(err, "cache tier target %s: its names view is made of hard links, which the "+
+				"filesystem would not create; set NamesView: none to use the target without one", b.display)
+		}
+	}
 	folds, err := tierNameFoldingProbe(b)
 	if err != nil && enabled && exact {
 		return nil, errors.Wrapf(err, "cache tier target %s: could not check whether the filesystem folds file "+
@@ -276,19 +364,29 @@ func newTierNameView(b *posixTierBackend, enabled, exact bool) (*tierNameView, e
 // filesystem other than the one they are given.
 var tierNameFoldingProbe = probeNameFolding
 
+// The names the folding probe creates and looks for.  They are spelled with
+// escapes rather than as the characters themselves: a tool that normalizes
+// Unicode would otherwise turn the decomposed spelling into the precomposed
+// one, and the probe would then find every filesystem folding names.
+const (
+	foldProbeCreated    = "-X\u00e9"  // "é" precomposed (NFC)
+	foldProbeOtherCase  = "-x\u00e9"  // the same name in another case
+	foldProbeDecomposed = "-Xe\u0301" // the same name decomposed (NFD)
+)
+
 // probeNameFolding reports whether the filesystem treats names that differ
 // in ASCII case, or in Unicode normalization, as the same entry.
 func probeNameFolding(b *posixTierBackend) (bool, error) {
 	tmp, release := b.newTempName("fold")
 	defer release()
-	created := tmp + "-Xé" // "é" precomposed (NFC)
+	created := tmp + foldProbeCreated
 	f, err := b.fs.OpenFile(created, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
 	if err != nil {
 		return false, err
 	}
 	_ = f.Close()
 	defer func() { _ = b.fs.Remove(created) }()
-	for _, variant := range []string{tmp + "-xé", tmp + "-Xé"} {
+	for _, variant := range []string{tmp + foldProbeOtherCase, tmp + foldProbeDecomposed} {
 		if _, err := b.fs.Lstat(variant); err == nil {
 			return true, nil
 		} else if !errors.Is(err, fs.ErrNotExist) {
@@ -296,6 +394,28 @@ func probeNameFolding(b *posixTierBackend) (bool, error) {
 		}
 	}
 	return false, nil
+}
+
+// tierHardLinkProbe is probeHardLinks; tests replace it to stand in for a
+// filesystem without hard links.
+var tierHardLinkProbe = probeHardLinks
+
+// probeHardLinks checks that the filesystem lets the cache hard-link a file
+// of its own.
+func probeHardLinks(b *posixTierBackend) error {
+	tmp, release := b.newTempName("hardlink")
+	defer release()
+	f, err := b.fs.OpenFile(tmp, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
+	if err != nil {
+		return err
+	}
+	_ = f.Close()
+	defer func() { _ = b.fs.Remove(tmp) }()
+	linked := tmp + "-link"
+	if err := b.fs.Link(tmp, linked); err != nil {
+		return err
+	}
+	return b.fs.Remove(linked)
 }
 
 // logicalName is where the object's version belongs in this view's spelling.
@@ -306,8 +426,9 @@ func (v *tierNameView) logicalName(sourceURL, etag string) (tierLogicalName, boo
 	return newTierLogicalName(sourceURL, etag, v.foldSafe)
 }
 
-// objectLinkPath is the link that leads to the object itself: in an exact
-// view, the object's own name; otherwise, its version link.
+// objectLinkPath is the name that leads to the object whatever version is
+// current: in an exact view, the object's own name; otherwise, its version
+// name.
 func (v *tierNameView) objectLinkPath(n tierLogicalName) string {
 	if v.exact {
 		return n.currentPath()
@@ -315,30 +436,61 @@ func (v *tierNameView) objectLinkPath(n tierLogicalName) string {
 	return n.versionPath()
 }
 
-// placeLink makes name a symlink holding target, atomically replacing
-// whatever link was there.  Reports whether anything changed.
-func (v *tierNameView) placeLink(name, target string) (bool, error) {
-	tmp, release := v.b.newTempName("link")
-	defer release()
-	if err := v.b.fs.Symlink(target, tmp); err != nil {
-		return false, errors.Wrapf(err, "failed to create a link for %s", name)
+// objectFile finds the file of the object stored under key.
+func (v *tierNameView) objectFile(hash InstanceHash, key string) (tierObjectFile, error) {
+	objectPath, err := v.b.objectPath(key)
+	if err != nil {
+		return tierObjectFile{}, err
 	}
-	// rename(2) over an existing link replaces it in one step; over a
-	// directory (an object whose name is also another object's directory)
-	// it fails, and the view simply lacks that name.
-	if err := v.b.fs.Rename(tmp, name); err != nil {
-		_ = v.b.fs.Remove(tmp)
-		return false, errors.Wrapf(err, "failed to place the link %s", name)
+	info, err := v.b.fs.Lstat(objectPath)
+	if err != nil {
+		return tierObjectFile{}, err
 	}
-	return true, nil
+	return tierObjectFile{hash: hash, path: objectPath, info: info}, nil
 }
 
-// removeLinkIf removes name if it is a symlink holding target.  Checking
-// the target keeps a stale removal from deleting a link that has since been
-// pointed somewhere else.
-func (v *tierNameView) removeLinkIf(name, target string) (bool, error) {
-	existing, err := v.b.fs.Readlink(name)
-	if err != nil || existing != target {
+// ownerLocked returns the object whose file info is, as far as the running
+// sweep can tell, or "" -- always "" outside a sweep.
+func (v *tierNameView) ownerLocked(info fs.FileInfo) InstanceHash {
+	id, ok := tierFileIDOf(info)
+	if !ok {
+		return ""
+	}
+	if hash, ok := v.linked[id]; ok {
+		return hash
+	}
+	return v.index.lookup(id)
+}
+
+// placeLink makes name a hard link to obj, atomically replacing whatever was
+// there.
+func (v *tierNameView) placeLink(name string, obj tierObjectFile) error {
+	tmp, release := v.b.newTempName("link")
+	defer release()
+	if err := v.b.fs.Link(obj.path, tmp); err != nil {
+		return errors.Wrapf(err, "failed to create a link for %s", name)
+	}
+	// rename(2) over an existing name replaces it in one step; over a
+	// directory (an object whose name is also another object's directory)
+	// it fails, and the view simply lacks that name.  Over another link to
+	// the same file it succeeds without doing anything, leaving tmp behind;
+	// so tmp is removed whatever happened.
+	err := v.b.fs.Rename(tmp, name)
+	_ = v.b.fs.Remove(tmp)
+	if err != nil {
+		return errors.Wrapf(err, "failed to place the link %s", name)
+	}
+	if id, ok := tierFileIDOf(obj.info); ok && v.linked != nil {
+		v.linked[id] = obj.hash
+	}
+	return nil
+}
+
+// removeLinkIf removes name if it is a link to obj.  Checking keeps a stale
+// removal from deleting a name that has since been given to another file.
+func (v *tierNameView) removeLinkIf(name string, obj tierObjectFile) (bool, error) {
+	info, err := v.b.fs.Lstat(name)
+	if err != nil || !os.SameFile(info, obj.info) {
 		return false, nil
 	}
 	if err := v.b.fs.Remove(name); err != nil && !errors.Is(err, fs.ErrNotExist) {
@@ -358,18 +510,23 @@ func (v *tierNameView) pruneDirs(dir string) {
 	}
 }
 
-// unlink withdraws one version of an object: its version link, and the
-// bare name if it resolved to that version.
-func (v *tierNameView) unlink(n tierLogicalName, key string) error {
-	objectPath, err := v.b.objectPath(key)
+// unlink withdraws one version of an object: its version name, and the bare
+// name if that is the same file.
+func (v *tierNameView) unlink(n tierLogicalName, hash InstanceHash, key string) error {
+	obj, err := v.objectFile(hash, key)
+	if errors.Is(err, fs.ErrNotExist) {
+		// Its names, if any are left, are linked to no object now; the
+		// sweep removes those.
+		return nil
+	}
 	if err != nil {
 		return err
 	}
-	if _, err := v.removeLinkIf(v.objectLinkPath(n), objectLinkFrom(n.dir, objectPath)); err != nil {
+	if _, err := v.removeLinkIf(v.objectLinkPath(n), obj); err != nil {
 		return err
 	}
 	if !v.exact {
-		if _, err := v.removeLinkIf(n.currentPath(), n.versionFile()); err != nil {
+		if _, err := v.removeLinkIf(n.currentPath(), obj); err != nil {
 			return err
 		}
 	}
@@ -413,95 +570,96 @@ func (sm *StorageManager) publishTierNameLocked(target *tierTarget, hash Instanc
 	key := target.objectKey(hash)
 	if allowed, known := target.mayHold(meta.SourceURL); !allowed {
 		if known {
-			return 0, v.unlink(name, key)
+			return 0, v.unlink(name, hash, key)
 		}
 		return 0, nil
 	}
-	objectPath, err := v.b.objectPath(key)
+	obj, err := v.objectFile(hash, key)
 	if err != nil {
 		return 0, err
 	}
-	latest, found, err := sm.db.GetLatestETag(sm.db.ObjectHash(meta.SourceURL))
+	current, err := sm.isLatest(meta)
 	if err != nil {
 		return 0, err
 	}
-	current := found && latest == meta.ETag
-	want := objectLinkFrom(name.dir, objectPath)
 	if v.exact {
-		return sm.publishExactNameLocked(target, name, want, current)
+		return sm.publishExactNameLocked(target, name, obj, current)
 	}
 
 	if err := v.b.mkdirAll(name.dir); err != nil {
 		return 0, err
 	}
 	changed := 0
-	existing, err := v.b.fs.Readlink(name.versionPath())
-	switch {
-	case err == nil && existing == want:
-	case err == nil && sm.judgeVersionLink(target, name.versionPath(), existing) == linkKeep:
-		// Another object already holds this name -- two versions whose
-		// tags differ only in quoting, say.  The first keeps it; flipping
-		// between them every sweep would be worse than either.
-		return 0, errors.Errorf("%s already names another object", name.versionPath())
-	default:
-		if _, err := v.placeLink(name.versionPath(), want); err != nil {
-			return changed, err
-		}
+	placed, err := sm.placeNameLocked(target, name.versionPath(), obj)
+	if err != nil {
+		return 0, err
+	}
+	if placed {
 		changed++
 	}
 	if current {
-		if existing, err := v.b.fs.Readlink(name.currentPath()); err != nil || existing != name.versionFile() {
-			if _, err := v.placeLink(name.currentPath(), name.versionFile()); err != nil {
-				return changed, err
-			}
+		placed, err := sm.placeNameLocked(target, name.currentPath(), obj)
+		if placed {
 			changed++
 		}
-	} else {
-		removed, err := v.removeLinkIf(name.currentPath(), name.versionFile())
-		if removed {
-			changed++
-		}
-		if err != nil {
-			return changed, err
-		}
+		return changed, err
 	}
-	return changed, nil
+	removed, err := v.removeLinkIf(name.currentPath(), obj)
+	if removed {
+		changed++
+	}
+	return changed, err
 }
 
 // publishExactNameLocked is publishTierNameLocked for an exact-names view:
-// the object's name leads straight to it while it is the current version,
-// and to nothing of its once it is not.
-func (sm *StorageManager) publishExactNameLocked(target *tierTarget, name tierLogicalName, want string, current bool) (int, error) {
+// the object's name is a link to it while it is the current version, and is
+// not once it is not.
+func (sm *StorageManager) publishExactNameLocked(target *tierTarget, name tierLogicalName, obj tierObjectFile, current bool) (int, error) {
 	v := target.names
 	if !current {
-		removed, err := v.removeLinkIf(name.currentPath(), want)
+		removed, err := v.removeLinkIf(name.currentPath(), obj)
 		if removed {
 			v.pruneDirs(name.dir)
 			return 1, err
 		}
 		return 0, err
 	}
-	existing, err := v.b.fs.Readlink(name.currentPath())
-	switch {
-	case err == nil && existing == want:
-		return 0, nil
-	case err == nil && sm.judgeExactLink(target, name.currentPath(), existing) == linkKeep:
-		// Another current object has this name -- the same path in another
-		// federation, say.  The first keeps it.
-		return 0, errors.Errorf("%s already names another object", name.currentPath())
-	}
 	if err := v.b.mkdirAll(name.dir); err != nil {
 		return 0, err
 	}
-	if _, err := v.placeLink(name.currentPath(), want); err != nil {
-		return 0, err
+	placed, err := sm.placeNameLocked(target, name.currentPath(), obj)
+	if placed {
+		return 1, err
 	}
-	return 1, nil
+	return 0, err
+}
+
+// placeNameLocked makes name a link to obj, unless it is one already or
+// another object rightly holds it: two versions whose tags differ only in
+// quoting, say, or one path in two federations.  The first keeps it;
+// flipping between them every sweep would be worse than either.  Only a
+// sweep can tell whose a name is; outside one, the newer link wins until the
+// next sweep, which then keeps it.
+func (sm *StorageManager) placeNameLocked(target *tierTarget, name string, obj tierObjectFile) (bool, error) {
+	v := target.names
+	if info, err := v.b.fs.Lstat(name); err == nil {
+		if os.SameFile(info, obj.info) {
+			return false, nil
+		}
+		if owner := v.ownerLocked(info); owner != "" && owner != obj.hash &&
+			sm.judgeName(target, name, owner).verdict == linkKeep {
+			return false, errors.Errorf("%s already names another object", name)
+		}
+	}
+	if err := v.placeLink(name, obj); err != nil {
+		return false, err
+	}
+	return true, nil
 }
 
 // unpublishTierName withdraws an object from its target's names view.
-// Callers remove the metadata first and the object last, so the links never
-// point at a missing file for longer than it takes to unlink them.
+// Callers remove the metadata first and the object last, so the names never
+// outlive the file they are links to.
 func (sm *StorageManager) unpublishTierName(target *tierTarget, hash InstanceHash, sourceURL, etag string) {
 	v := target.names
 	if v == nil {
@@ -513,7 +671,7 @@ func (sm *StorageManager) unpublishTierName(target *tierTarget, hash InstanceHas
 	}
 	v.mu.Lock()
 	defer v.mu.Unlock()
-	if err := v.unlink(name, target.objectKey(hash)); err != nil {
+	if err := v.unlink(name, hash, target.objectKey(hash)); err != nil {
 		log.Warnf("Failed to remove %s from the names view of %s (the consistency sweep will retry): %v",
 			hash, target.DisplayURL(), err)
 	}
@@ -548,81 +706,60 @@ const (
 	linkRemove                    // stale or foreign
 )
 
-// judgeVersionLink decides whether linkPath, holding dest, is a valid
-// version link.
-func (sm *StorageManager) judgeVersionLink(target *tierTarget, linkPath, dest string) linkVerdict {
-	verdict, _ := sm.judgeVersionLinkMeta(target, linkPath, dest)
-	return verdict
+// tierNameRole is what a valid name is to its object.
+type tierNameRole int
+
+const (
+	// tierNameObject is the name the object has whether or not it is the
+	// current version: its version name, or in an exact view its only one.
+	tierNameObject tierNameRole = iota + 1 // zero: kept, but undecidable right now
+	// tierNameCurrent is the bare name of the current version in a
+	// versioned view.
+	tierNameCurrent
+)
+
+// tierNameJudgement is judgeName's verdict on one name.
+type tierNameJudgement struct {
+	verdict linkVerdict
+	role    tierNameRole // for a name kept
+	current bool         // the object is the current version
 }
 
-// judgeVersionLinkMeta is judgeVersionLink, also returning the object's
-// metadata when the link is valid.
-func (sm *StorageManager) judgeVersionLinkMeta(target *tierTarget, linkPath, dest string) (linkVerdict, *CacheMetadata) {
-	prefix := objectLinkFrom(path.Dir(linkPath), posixObjectsDir+"/")
-	if !strings.HasPrefix(dest, prefix) {
-		return linkRemove, nil
-	}
-	hash := target.hashFromKey(dest[len(prefix):])
-	if hash == "" {
-		return linkRemove, nil
+// judgeName decides whether linkPath, a link to the object hash, belongs in
+// the view, and if so what it is to the object.  hash is "" for a file that
+// is no known object's.
+func (sm *StorageManager) judgeName(target *tierTarget, linkPath string, hash InstanceHash) tierNameJudgement {
+	remove := tierNameJudgement{verdict: linkRemove}
+	undecided := tierNameJudgement{verdict: linkKeep}
+	v := target.names
+	if !v.enabled || hash == "" {
+		return remove
 	}
 	meta, err := sm.db.GetMetadata(hash)
 	if err != nil {
-		return linkKeep, nil // cannot tell; do not destroy on a read error
+		return undecided // cannot tell; do not destroy on a read error
 	}
 	if meta == nil || meta.StorageID != target.id || meta.Completed.IsZero() {
-		return linkRemove, nil
+		return remove
 	}
 	if allowed, known := target.mayHold(meta.SourceURL); known && !allowed {
-		return linkRemove, nil
+		return remove
 	}
-	name, ok := target.names.logicalName(meta.SourceURL, meta.ETag)
-	if !ok || target.names.objectLinkPath(name) != linkPath {
-		return linkRemove, nil
+	name, ok := v.logicalName(meta.SourceURL, meta.ETag)
+	if !ok {
+		return remove
 	}
-	return linkKeep, meta
-}
-
-// judgeExactLink decides whether linkPath, holding dest, belongs in an
-// exact-names view: it must lead to an object on the target that may be
-// exposed, whose name is linkPath, and which is the current version.
-func (sm *StorageManager) judgeExactLink(target *tierTarget, linkPath, dest string) linkVerdict {
-	verdict, meta := sm.judgeVersionLinkMeta(target, linkPath, dest)
-	if meta == nil {
-		return verdict
-	}
-	if current, err := sm.isLatest(meta); err != nil {
-		return linkKeep
-	} else if !current {
-		return linkRemove
-	}
-	return linkKeep
-}
-
-// judgeBareLink decides whether the bare name linkPath, holding dest, is
-// valid: it must point at one of its own versions in the same directory,
-// and that version must be valid and the latest.  readlink resolves the
-// version link (the sweep passes what it already read).
-func (sm *StorageManager) judgeBareLink(target *tierTarget, linkPath, dest string, readlink func(string) (string, error)) linkVerdict {
-	base := path.Base(linkPath)
-	if strings.Contains(dest, "/") || !strings.HasPrefix(dest, base+"@") {
-		return linkRemove
-	}
-	versionPath := path.Dir(linkPath) + "/" + dest
-	versionDest, err := readlink(versionPath)
+	current, err := sm.isLatest(meta)
 	if err != nil {
-		return linkRemove
+		return undecided
 	}
-	verdict, meta := sm.judgeVersionLinkMeta(target, versionPath, versionDest)
-	if meta == nil {
-		return verdict
+	switch {
+	case linkPath == v.objectLinkPath(name) && (current || !v.exact):
+		return tierNameJudgement{verdict: linkKeep, role: tierNameObject, current: current}
+	case !v.exact && current && linkPath == name.currentPath():
+		return tierNameJudgement{verdict: linkKeep, role: tierNameCurrent, current: true}
 	}
-	if current, err := sm.isLatest(meta); err != nil {
-		return linkKeep
-	} else if !current {
-		return linkRemove
-	}
-	return linkKeep
+	return remove
 }
 
 // isLatest reports whether meta is the version the cache considers current.
@@ -634,24 +771,20 @@ func (sm *StorageManager) isLatest(meta *CacheMetadata) (bool, error) {
 	return found && latest == meta.ETag, nil
 }
 
-// judgeNameLink judges one symlink in the names tree, reading what it needs
-// from the filesystem.  It is the check made under the view's lock right
-// before a removal, so that nothing changed since the sweep looked is lost.
-func (sm *StorageManager) judgeNameLink(target *tierTarget, linkPath string) linkVerdict {
-	if !target.names.enabled {
-		return linkRemove
+// stillRemovableLocked re-judges, under the view's lock and right before a
+// removal, an entry the sweep found stale: it must still be the file the
+// sweep looked at, and still not belong, so that nothing changed since the
+// sweep looked is lost.
+func (sm *StorageManager) stillRemovableLocked(target *tierTarget, name string, seen fs.FileInfo) bool {
+	v := target.names
+	info, err := v.b.fs.Lstat(name)
+	if err != nil || !os.SameFile(info, seen) {
+		return false
 	}
-	dest, err := target.names.b.fs.Readlink(linkPath)
-	if err != nil {
-		return linkKeep // gone already, or unreadable: nothing to do here
+	if !info.Mode().IsRegular() {
+		return true // the view holds only links to objects
 	}
-	if target.names.exact {
-		return sm.judgeExactLink(target, linkPath, dest)
-	}
-	if strings.Contains(path.Base(linkPath), "@") {
-		return sm.judgeVersionLink(target, linkPath, dest)
-	}
-	return sm.judgeBareLink(target, linkPath, dest, target.names.b.fs.Readlink)
+	return sm.judgeName(target, name, v.ownerLocked(info)).verdict == linkRemove
 }
 
 // tierNamesPage bounds how many objects the sweep collects from one
@@ -684,15 +817,19 @@ func (s hashSet) has(h InstanceHash) bool {
 
 // reconcileTierNames rebuilds a target's names view from the metadata.
 //
-// It is one pass over the tree plus one over the metadata.  The walk reads
-// each link once and judges it against the metadata store -- which costs a
-// database lookup, not a filesystem round trip -- fixing a bare name that
-// should point elsewhere and removing whatever is stale or foreign; it
-// remembers which objects have a valid version link.  The metadata pass then
-// publishes only the objects the walk did not see.  In the steady state that
-// is one readlink per link and nothing else on the filesystem.  The view's
-// lock is taken only around changes, each re-checked under it, so evictions
-// are never held up behind the sweep's reads.
+// It lists the objects tree, to learn which file is which object; walks the
+// names tree once, judging each name against the metadata store -- a
+// database lookup, not a filesystem round trip -- removing whatever is stale,
+// foreign or linked to no object, and remembering which objects have a valid
+// name; and then publishes only the objects the walk did not see.  In the
+// steady state that is one lstat per object and per name, and nothing else on
+// the filesystem.  The view's lock is taken only around changes, each
+// re-checked under it, so evictions are never held up behind the sweep's
+// reads.
+//
+// The listing comes first, so a name seen by the walk whose file the listing
+// did not have was not linked to any object when the listing ran -- unless
+// the cache linked it since, which the view records while a sweep runs.
 //
 // Nothing happens while the target is failing its liveness probe.
 func (cc *ConsistencyChecker) reconcileTierNames(ctx context.Context, target *tierTarget) (added, removed int, err error) {
@@ -709,8 +846,26 @@ func (cc *ConsistencyChecker) reconcileTierNames(ctx context.Context, target *ti
 		tierNamesSweepDuration.WithLabelValues(target.metricLabel()).Set(time.Since(start).Seconds())
 	}()
 
+	var index tierInodeIndex
+	if v.enabled {
+		v.mu.Lock()
+		v.linked = map[tierFileID]InstanceHash{}
+		v.mu.Unlock()
+		defer func() {
+			v.mu.Lock()
+			v.index, v.linked = nil, nil
+			v.mu.Unlock()
+		}()
+		if index, err = buildTierInodeIndex(ctx, target); err != nil {
+			return 0, 0, err
+		}
+		v.mu.Lock()
+		v.index = index
+		v.mu.Unlock()
+	}
+
 	seen := hashSet{}
-	added, removed, err = cc.walkTierNames(ctx, target, posixNamesDir, seen)
+	added, removed, err = cc.walkTierNames(ctx, target, posixNamesDir, index, seen)
 	if err != nil || !v.enabled {
 		return added, removed, err
 	}
@@ -760,34 +915,36 @@ func (cc *ConsistencyChecker) reconcileTierNames(ctx context.Context, target *ti
 
 // walkTierNames reconciles one directory of the names tree and everything
 // below it; see reconcileTierNames.
-func (cc *ConsistencyChecker) walkTierNames(ctx context.Context, target *tierTarget, dir string, seen hashSet) (added, removed int, err error) {
+func (cc *ConsistencyChecker) walkTierNames(ctx context.Context, target *tierTarget, dir string, index tierInodeIndex, seen hashSet) (added, removed int, err error) {
 	v := target.names
 	sm := cc.storage
-	entries, err := v.b.fs.ReadDir(dir)
+	entries, err := v.b.fs.ReadDirInfo(dir)
 	if err != nil {
 		return 0, 0, errors.Wrapf(err, "failed to list %s on cache tier target %s", dir, target.DisplayURL())
 	}
 
 	// removeIf takes the lock and removes name only if it still deserves it.
-	removeIf := func(name string, stillStale func() bool) {
+	removeIf := func(name string, info fs.FileInfo) {
 		v.mu.Lock()
 		defer v.mu.Unlock()
-		if stillStale() {
+		if sm.stillRemovableLocked(target, name, info) {
 			if err := v.b.fs.Remove(name); err == nil {
 				removed++
 			}
 		}
 	}
 
-	dests := map[string]string{} // link name -> what it holds
-	for _, e := range entries {
+	wantCurrent := map[string]InstanceHash{}  // bare name -> the current version, which should hold it
+	holdsCurrent := map[string]InstanceHash{} // bare name -> the current version it validly holds
+	staleBare := map[string]fs.FileInfo{}     // bare names that do not belong as they are
+	for _, info := range entries {
 		if err := ctx.Err(); err != nil {
 			return added, removed, err
 		}
-		name := dir + "/" + e.Name()
+		name := dir + "/" + info.Name()
 		switch {
-		case e.IsDir():
-			a, r, err := cc.walkTierNames(ctx, target, name, seen)
+		case info.IsDir():
+			a, r, err := cc.walkTierNames(ctx, target, name, index, seen)
 			added += a
 			removed += r
 			if err != nil {
@@ -796,123 +953,57 @@ func (cc *ConsistencyChecker) walkTierNames(ctx context.Context, target *tierTar
 			v.mu.Lock()
 			_ = v.b.fs.Remove(name) // fails, harmlessly, unless empty
 			v.mu.Unlock()
-		case e.Type()&fs.ModeSymlink != 0:
-			dest, err := v.b.fs.Readlink(name)
-			if err != nil {
-				if errors.Is(err, errTargetNotResponding) {
-					return added, removed, err
-				}
-				continue
-			}
-			dests[e.Name()] = dest
+		case !info.Mode().IsRegular():
+			// The cache only ever puts links to objects and directories
+			// here, and the tree is writable only by the cache, so this was
+			// put here by someone with the cache's privileges.  It is not
+			// the cache's to keep.
+			log.Warnf("Removing unexpected entry %s from the names view of %s", name, target.DisplayURL())
+			removeIf(name, info)
 		default:
-			// The cache only ever puts symlinks and directories here, and
-			// the tree is writable only by the cache, so this was put here
-			// by someone with the cache's privileges.  It is not the cache's
-			// to keep.
-			log.Warnf("Removing unexpected file %s from the names view of %s", name, target.DisplayURL())
-			removeIf(name, func() bool {
-				info, err := v.b.fs.Lstat(name)
-				return err == nil && !info.IsDir() && info.Mode()&fs.ModeSymlink == 0
-			})
-		}
-	}
-
-	if v.exact {
-		for file, dest := range dests {
-			name := dir + "/" + file
-			if !v.enabled {
-				removeIf(name, func() bool { return sm.judgeNameLink(target, name) == linkRemove })
-				continue
+			var hash InstanceHash
+			if id, ok := tierFileIDOf(info); ok {
+				hash = index.lookup(id)
 			}
-			verdict, meta := sm.judgeVersionLinkMeta(target, name, dest)
-			if verdict == linkKeep && meta != nil {
-				if current, err := sm.isLatest(meta); err == nil && !current {
-					verdict = linkRemove
+			j := sm.judgeName(target, name, hash)
+			switch {
+			case j.verdict == linkRemove && !v.exact && !strings.Contains(info.Name(), "@"):
+				// A bare name: it may only need to move to the current
+				// version, which replaces it in one step; decided below,
+				// once the versions are known.
+				staleBare[info.Name()] = info
+			case j.verdict == linkRemove:
+				removeIf(name, info)
+			case j.role == tierNameObject:
+				seen.add(hash)
+				if !v.exact && j.current {
+					base, _, _ := strings.Cut(info.Name(), "@")
+					wantCurrent[base] = hash
 				}
+			case j.role == tierNameCurrent:
+				holdsCurrent[info.Name()] = hash
 			}
-			if verdict == linkRemove {
-				removeIf(name, func() bool { return sm.judgeNameLink(target, name) == linkRemove })
-				continue
-			}
-			if meta != nil {
-				seen.add(target.hashFromKey(dest[len(objectLinkFrom(dir, posixObjectsDir+"/")):]))
-			}
-		}
-		return added, removed, nil
-	}
-
-	readlink := func(name string) (string, error) {
-		if path.Dir(name) == dir {
-			if dest, ok := dests[path.Base(name)]; ok {
-				return dest, nil
-			}
-		}
-		return v.b.fs.Readlink(name)
-	}
-
-	// Version links first: they decide which bare names are right.
-	type version struct {
-		hash InstanceHash
-		file string
-	}
-	currentVersion := map[string]version{} // bare name -> its current, valid version
-	for file, dest := range dests {
-		if !strings.Contains(file, "@") {
-			continue
-		}
-		name := dir + "/" + file
-		if !v.enabled {
-			removeIf(name, func() bool { return sm.judgeNameLink(target, name) == linkRemove })
-			continue
-		}
-		verdict, meta := sm.judgeVersionLinkMeta(target, name, dest)
-		if verdict == linkRemove {
-			removeIf(name, func() bool { return sm.judgeNameLink(target, name) == linkRemove })
-			continue
-		}
-		if meta == nil {
-			continue // undecidable now; leave it
-		}
-		hash := target.hashFromKey(dest[len(objectLinkFrom(dir, posixObjectsDir+"/")):])
-		seen.add(hash)
-		if current, err := sm.isLatest(meta); err == nil && current {
-			currentVersion[file[:strings.IndexByte(file, '@')]] = version{hash: hash, file: file}
 		}
 	}
 
-	for file, dest := range dests {
-		if strings.Contains(file, "@") {
+	// A current version whose bare name is missing, or held by another
+	// version: point it at the current one.
+	for base, hash := range wantCurrent {
+		if holdsCurrent[base] == hash {
 			continue
 		}
-		name := dir + "/" + file
-		if want, ok := currentVersion[file]; ok {
-			if dest != want.file {
-				// Points at the wrong version; repoint it.
-				v.mu.Lock()
-				n, err := sm.publishTierNameLocked(target, want.hash)
-				v.mu.Unlock()
-				added += n
-				if err != nil {
-					log.Debugf("Could not update %s in the names view of %s: %v", name, target.DisplayURL(), err)
-				}
-			}
-			delete(currentVersion, file)
-			continue
-		}
-		if !v.enabled || sm.judgeBareLink(target, name, dest, readlink) == linkRemove {
-			removeIf(name, func() bool { return sm.judgeNameLink(target, name) == linkRemove })
-		}
-	}
-	// A current version whose bare name is missing altogether.
-	for _, want := range currentVersion {
+		delete(staleBare, base)
 		v.mu.Lock()
-		n, err := sm.publishTierNameLocked(target, want.hash)
+		n, err := sm.publishTierNameLocked(target, hash)
 		v.mu.Unlock()
 		added += n
 		if err != nil {
-			log.Debugf("Could not add %s to the names view of %s: %v", want.hash, target.DisplayURL(), err)
+			log.Debugf("Could not update %s in the names view of %s: %v", dir+"/"+base, target.DisplayURL(), err)
 		}
+	}
+	// A bare name with no current version to point at.
+	for file, info := range staleBare {
+		removeIf(dir+"/"+file, info)
 	}
 	return added, removed, nil
 }

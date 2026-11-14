@@ -25,13 +25,35 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
+
+// TestTierNameFoldingProbe: the probe's three spellings stay distinct byte
+// for byte -- normalizing the source once made two of them identical, and
+// every filesystem then looked as if it folded names -- and on Linux, whose
+// filesystems keep such names apart, the probe says so.
+func TestTierNameFoldingProbe(t *testing.T) {
+	assert.Equal(t, "-X\xc3\xa9", foldProbeCreated, "precomposed")
+	assert.Equal(t, "-x\xc3\xa9", foldProbeOtherCase, "precomposed, other case")
+	assert.Equal(t, "-Xe\xcc\x81", foldProbeDecomposed, "decomposed")
+
+	if runtime.GOOS != "linux" {
+		t.Skip("only Linux filesystems are known not to fold names; macOS's usually do")
+	}
+	b, err := openPosixTierBackend(TierTargetConfig{ProviderURL: fileTargetURL(filepath.Join(t.TempDir(), "shared")), MaxSize: 1 << 30})
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = b.Close() })
+	folds, err := probeNameFolding(b)
+	require.NoError(t, err)
+	assert.False(t, folds)
+}
 
 // assumeNameFolding makes the names view believe the filesystem does (or
 // does not) fold names, so the exact view can be tested on any filesystem.
@@ -67,7 +89,7 @@ func TestTierExactNameSpelling(t *testing.T) {
 
 // TestTierExactNamesView follows an object through an exact-names view: its
 // name is its federation path, unescaped, with no versions beside it, and it
-// always leads to the current version or to nothing.
+// is always the current version's file or nothing.
 func TestTierExactNamesView(t *testing.T) {
 	assumeNameFolding(t, false)
 	ctx, cancel := context.WithCancel(context.Background())
@@ -101,7 +123,7 @@ func TestTierExactNamesView(t *testing.T) {
 	require.NoError(t, err, "the exact name must resolve within an os.Root")
 	assert.Equal(t, v1, got)
 	assert.Equal(t, []string{"My file%.bin"}, listing(), "no versions beside the name")
-	assert.True(t, strings.HasPrefix(env.readlink(name), "../../../../objects/"), "the link is relative: %s", env.readlink(name))
+	assert.Equal(t, h1, env.linkedTo(t, name), "the name is the object's own file")
 
 	// A newer version takes the name; an older one tiered later does not.
 	h2 := env.storeVersion(t, ctx, sourceURL, `"v2"`, v2, start.Add(time.Minute))
@@ -117,16 +139,15 @@ func TestTierExactNamesView(t *testing.T) {
 	assert.Equal(t, v2, got, "only the current version has the name")
 	assert.Equal(t, []string{"My file%.bin"}, listing())
 
-	// The sweep restores a lost name, removes what does not belong -- a
-	// versioned-style link, a link to a superseded version, a stray file --
-	// and gives no name to a version that is not current.
+	// The sweep moves a name left on a superseded version, removes what
+	// does not belong -- a versioned-style name, a link under another name,
+	// a symlink, a stray file -- and gives no name to a version that is not
+	// current.
 	require.NoError(t, os.Remove(filepath.Join(env.dir, filepath.FromSlash(name))))
-	plant := func(dest, file string) {
-		require.NoError(t, os.Symlink(dest, filepath.Join(env.dir, filepath.FromSlash(dir), file)))
-	}
-	plant("My file%.bin@v1", "My file%.bin")
-	plant("../../../../objects/"+env.target.objectKey(h1), "My file%.bin@v1")
-	plant("../../../../objects/"+env.target.objectKey(h1), "Other.bin")
+	env.linkName(t, h1, name)
+	env.linkName(t, h1, dir+"/My file%.bin@v1")
+	env.linkName(t, h1, dir+"/Other.bin")
+	require.NoError(t, os.Symlink("My file%.bin", filepath.Join(env.dir, filepath.FromSlash(dir), "Symlink.bin")))
 	require.NoError(t, os.WriteFile(filepath.Join(env.dir, filepath.FromSlash(dir), "stray.txt"), []byte("x"), 0o644))
 	require.NoError(t, env.checker.RunTierScan(ctx))
 	assert.Equal(t, []string{"My file%.bin"}, listing())
@@ -139,14 +160,14 @@ func TestTierExactNamesView(t *testing.T) {
 	// Learning of a version that is not on the target withdraws the name at
 	// once; once that version is tiered, the name leads to it.
 	h3 := env.storeVersion(t, ctx, sourceURL, `"v3"`, bytes.Repeat([]byte("version three\n"), 400), time.Now())
-	assert.Empty(t, env.readlink(name), "the name must not serve a superseded version")
+	assert.Empty(t, env.linkedTo(t, name), "the name must not serve a superseded version")
 	require.NoError(t, env.uploader.processObject(ctx, h3))
-	assert.NotEmpty(t, env.readlink(name))
+	assert.Equal(t, h3, env.linkedTo(t, name))
 
 	// Deleting the current version withdraws its name and the emptied
 	// directories.
 	require.NoError(t, env.storage.Delete(h3))
-	assert.Empty(t, env.readlink(name))
+	assert.Empty(t, env.linkedTo(t, name))
 	for _, h := range []InstanceHash{h0, h1, h2} {
 		require.NoError(t, env.storage.Delete(h))
 	}
@@ -232,4 +253,52 @@ func TestTierNamesViewConfig(t *testing.T) {
 	} {
 		assert.Error(t, cfg.validate(), name)
 	}
+}
+
+// TestTierNamesViewRefusedWithoutHardLinks: the view is made of hard links,
+// so a filesystem that will not create them cannot hold one, though it can
+// still be a target with the view disabled.
+func TestTierNamesViewRefusedWithoutHardLinks(t *testing.T) {
+	prev := tierHardLinkProbe
+	tierHardLinkProbe = func(*posixTierBackend) error { return syscall.EPERM }
+	t.Cleanup(func() { tierHardLinkProbe = prev })
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	cfg := TierTargetConfig{ProviderURL: fileTargetURL(filepath.Join(t.TempDir(), "shared")), MaxSize: 1 << 30}
+	_, err := newTierTarget(ctx, cfg)
+	assert.ErrorContains(t, err, "NamesView: none")
+
+	cfg.NamesView = "none"
+	target, err := newTierTarget(ctx, cfg)
+	require.NoError(t, err)
+	_ = target.Close()
+}
+
+// TestTierNamesViewSparesLinksMadeDuringASweep: a name linked while a sweep
+// runs may be to an object the sweep's listing of the objects tree missed;
+// it must not be taken for a name linked to no object.
+func TestTierNamesViewSparesLinksMadeDuringASweep(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	env := newPosixTierEnv(t, ctx, TierTargetConfig{})
+	env.public["/public"] = true
+	v := env.target.names
+
+	// A sweep has listed the objects tree, which was empty then.
+	v.mu.Lock()
+	v.index, v.linked = tierInodeIndex{}, map[tierFileID]InstanceHash{}
+	v.mu.Unlock()
+	hash := env.storeVersion(t, ctx, "pelican://fed/public/new.bin", "e", bytes.Repeat([]byte("n"), 4096), time.Now())
+	require.NoError(t, env.uploader.processObject(ctx, hash))
+	const name = "names/public/new.bin@e"
+	require.Equal(t, hash, env.linkedTo(t, name))
+	info, err := os.Lstat(filepath.Join(env.dir, filepath.FromSlash(name)))
+	require.NoError(t, err)
+
+	v.mu.Lock()
+	defer v.mu.Unlock()
+	assert.False(t, env.storage.stillRemovableLocked(env.target, name, info), "the sweep knows whose the name is")
+	v.linked = nil
+	assert.True(t, env.storage.stillRemovableLocked(env.target, name, info),
+		"without the record, the name looks linked to no object; that is what the record is for")
 }

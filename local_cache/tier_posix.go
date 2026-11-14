@@ -249,8 +249,8 @@ func (b *posixTierBackend) newTempName(kind string) (name string, release func()
 
 // checkPermissions refuses a target that someone other than the cache could
 // write to.  Anyone who can write the root or one of its fixed directories
-// can plant a symlink in the names view -- pointing users who trust it at a
-// file of the attacker's choosing -- or swap an object's bytes; the cache's
+// can plant a file in the names view -- handing users who trust it bytes
+// of the attacker's choosing -- or swap an object's bytes; the cache's
 // own containment (os.Root) protects only the cache, not the people reading
 // the tree.  It runs at startup and on every liveness probe, so a permission
 // change made while the cache runs takes the target out of rotation.
@@ -491,10 +491,17 @@ func (b *posixTierBackend) Delete(_ context.Context, key string) error {
 // order, which the sweep's merge join needs.  Only regular files are keys;
 // anything else in the tree is not the cache's and is ignored.
 func (b *posixTierBackend) List(ctx context.Context, fn func(key string, size int64, modified time.Time) error) error {
+	return b.listObjects(ctx, func(key string, info fs.FileInfo) error {
+		return fn(key, info.Size(), info.ModTime())
+	})
+}
+
+// listObjects is List, giving each object's lstat information.
+func (b *posixTierBackend) listObjects(ctx context.Context, fn func(key string, info fs.FileInfo) error) error {
 	return b.listDir(ctx, posixObjectsDir, "", fn)
 }
 
-func (b *posixTierBackend) listDir(ctx context.Context, dir, keyPrefix string, fn func(string, int64, time.Time) error) error {
+func (b *posixTierBackend) listDir(ctx context.Context, dir, keyPrefix string, fn func(string, fs.FileInfo) error) error {
 	entries, err := b.fs.ReadDirInfo(dir)
 	if err != nil {
 		return errors.Wrapf(err, "failed to list %s on cache tier target %s", dir, b.display)
@@ -516,7 +523,7 @@ func (b *posixTierBackend) listDir(ctx context.Context, dir, keyPrefix string, f
 				return err
 			}
 		case e.Mode().IsRegular():
-			if err := fn(keyPrefix+e.Name(), e.Size(), e.ModTime()); err != nil {
+			if err := fn(keyPrefix+e.Name(), e); err != nil {
 				return err
 			}
 		}
