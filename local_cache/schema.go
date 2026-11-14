@@ -1169,8 +1169,8 @@ type TierTargetConfig struct {
 	// target, whose objects every user of that filesystem can read.
 
 	// NamesView chooses whether and how the cache keeps a browsable tree of
-	// logical names beside the objects: "versioned" (the default) or
-	// "none"; see tierNameView.
+	// logical names beside the objects: "versioned" (the default), "exact"
+	// or "none"; see tierNameView.
 	NamesView string
 	// ExposedNamespaces lists namespace prefixes whose objects may be
 	// tiered to -- and named on -- the shared filesystem even though
@@ -1188,11 +1188,15 @@ type TierTargetConfig struct {
 // Values of TierTargetConfig.NamesView.
 const (
 	tierNamesVersioned = "versioned"
+	tierNamesExact     = "exact"
 	tierNamesNone      = "none"
 )
 
 // namesViewEnabled reports whether the target keeps a names view.
 func (c *TierTargetConfig) namesViewEnabled() bool { return c.NamesView != tierNamesNone }
+
+// exactNames reports whether the target's names view spells exact names.
+func (c *TierTargetConfig) exactNames() bool { return c.NamesView == tierNamesExact }
 
 // tierFileScheme is the ProviderURL scheme of a shared-filesystem target.
 const tierFileScheme = "file"
@@ -1445,10 +1449,10 @@ func (cfg *TierTargetConfig) validate() error {
 		return errors.New("NamesView, ExposedNamespaces and AllObjects apply only to a shared-filesystem (file://) target")
 	}
 	switch strings.ToLower(cfg.NamesView) {
-	case "", tierNamesVersioned, tierNamesNone:
+	case "", tierNamesVersioned, tierNamesExact, tierNamesNone:
 		cfg.NamesView = strings.ToLower(cfg.NamesView)
 	default:
-		return fmt.Errorf("NamesView %q is not one of %q or %q", cfg.NamesView, tierNamesVersioned, tierNamesNone)
+		return fmt.Errorf("NamesView %q is not one of %q, %q or %q", cfg.NamesView, tierNamesVersioned, tierNamesExact, tierNamesNone)
 	}
 
 	if cfg.MaxSize == 0 {
