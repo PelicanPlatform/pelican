@@ -1,0 +1,43 @@
+---
+title: pelican transfer job list
+---
+
+## pelican transfer job list
+
+List the transfer jobs owned by the caller
+
+### Synopsis
+
+List the transfer jobs on the transfer server that belong to the
+authenticated caller, most recently created first.  The server never returns
+another user's jobs.
+
+```
+pelican transfer job list [flags]
+```
+
+### Options
+
+```
+  -h, --help            help for list
+      --limit int       Maximum number of jobs to return (the server caps this at 100) (default 10)
+      --offset int      Number of jobs to skip, for paging through a long list
+      --status string   Only show jobs in this state (pending, running, completed, failed, cancelled)
+```
+
+### Options inherited from parent commands
+
+```
+      --config string       config file (default is $HOME/.config/pelican/pelican.yaml)
+  -d, --debug               Enable debug log messages
+  -f, --federation string   Pelican federation to utilize
+      --json                output results in JSON format
+  -L, --log string          Specified log output file
+  -s, --server string       URL of the transfer server (e.g. https://transfer.example.com:8447)
+  -t, --token string        Path to a token file for authentication
+      --version             Print the version and exit
+```
+
+### SEE ALSO
+
+* [pelican transfer job](/commands-reference/pelican/transfer/job/)	 - Manage transfer jobs running on a remote transfer server

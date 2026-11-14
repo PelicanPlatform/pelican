@@ -1,0 +1,45 @@
+---
+title: pelican server transfer job status
+---
+
+## pelican-server transfer job status
+
+Show the status of one transfer job
+
+### Synopsis
+
+Show the status of a single transfer job on the transfer server.
+
+With "--wait" the command does not return until the job reaches a terminal
+state (completed, failed, or cancelled), following the server's event stream
+and falling back to polling where that stream is unavailable.  A job that has
+already finished is reported immediately.  The exit status is non-zero if the
+job failed or was cancelled.
+
+```
+pelican-server transfer job status {job_id} [flags]
+```
+
+### Options
+
+```
+  -h, --help   help for status
+      --wait   Wait for the job to reach a terminal state before returning
+```
+
+### Options inherited from parent commands
+
+```
+      --config string       config file (default is $HOME/.config/pelican/pelican.yaml)
+  -d, --debug               Enable debug log messages
+  -f, --federation string   Pelican federation to utilize
+      --json                output results in JSON format
+  -L, --log string          Specified log output file
+  -s, --server string       URL of the transfer server (e.g. https://transfer.example.com:8447)
+  -t, --token string        Path to a token file for authentication
+      --version             Print the version and exit
+```
+
+### SEE ALSO
+
+* [pelican-server transfer job](/commands-reference/pelican-server/transfer/job/)	 - Manage transfer jobs running on a remote transfer server

@@ -1,0 +1,39 @@
+---
+title: pelican transfer job cancel
+---
+
+## pelican transfer job cancel
+
+Cancel a transfer job
+
+### Synopsis
+
+Cancel a transfer job on the transfer server.  Transfers that have
+already completed are unaffected; those still in flight are stopped.
+
+```
+pelican transfer job cancel {job_id} [flags]
+```
+
+### Options
+
+```
+  -h, --help   help for cancel
+```
+
+### Options inherited from parent commands
+
+```
+      --config string       config file (default is $HOME/.config/pelican/pelican.yaml)
+  -d, --debug               Enable debug log messages
+  -f, --federation string   Pelican federation to utilize
+      --json                output results in JSON format
+  -L, --log string          Specified log output file
+  -s, --server string       URL of the transfer server (e.g. https://transfer.example.com:8447)
+  -t, --token string        Path to a token file for authentication
+      --version             Print the version and exit
+```
+
+### SEE ALSO
+
+* [pelican transfer job](/commands-reference/pelican/transfer/job/)	 - Manage transfer jobs running on a remote transfer server
