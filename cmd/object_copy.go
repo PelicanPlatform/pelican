@@ -30,6 +30,7 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"path"
 	"path/filepath"
 	"strings"
 	"time"
@@ -103,6 +104,19 @@ the client should fallback to discovered caches if all preferred caches fail.`)
 		flagSet.String("dest-origin", "", "Use the transfer service at the given destination origin URL (pings it first to verify availability)")
 		objectCmd.AddCommand(copyCmd)
 	}
+}
+
+// inferCopyObjectName joins the base name of a copy source onto a remote
+// collection URL.  A copy source is either a local path or a remote URL, and
+// the base name has to come off whichever one it is: `path.Base` on a URL so a
+// query string does not end up in the object name, `filepath.Base` on a local
+// path so a Windows separator is honored.
+func inferCopyObjectName(destURL *url.URL, source string) (string, error) {
+	srcURL, err := url.Parse(source)
+	if err == nil && pelican_url.IsPelicanScheme(srcURL.Scheme) {
+		return joinInferredObjectName(destURL, path.Base(srcURL.Path), source)
+	}
+	return joinInferredObjectName(destURL, filepath.Base(source), source)
 }
 
 func copyMain(cmd *cobra.Command, args []string) {
@@ -387,7 +401,18 @@ func copyMain(cmd *cobra.Command, args []string) {
 		os.Exit(1)
 	}
 
-	if len(source) > 1 {
+	isRecursive, _ := cmd.Flags().GetBool("recursive")
+	multipleObjects := len(source) > 1
+
+	// The destination decides which of the two checks below applies: a local
+	// destination is stat'ed on the filesystem, a remote one through the
+	// federation.  The local stat used to run for every destination, which
+	// made `copy A B osdf:///coll/` fail with "Destination does not exist"
+	// about a path that was never meant to be local.
+	destURL, destParseErr := url.Parse(dest)
+	destIsRemote := destParseErr == nil && pelican_url.IsPelicanScheme(destURL.Scheme)
+
+	if multipleObjects && !destIsRemote {
 		if destStat, err := os.Stat(dest); err != nil {
 			log.Errorln("Destination does not exist")
 			os.Exit(1)
@@ -397,11 +422,34 @@ func copyMain(cmd *cobra.Command, args []string) {
 		}
 	}
 
+	// `NewCopyJob` also enables recursion from a `?recursive` query parameter
+	// on either end, so the destination has to be consulted for it here too: a
+	// recursive copy lays entries flat under the destination collection (rows
+	// G5/P6 of docs/object-transfer-semantics.md) and must not take the
+	// name-inference branch.
+	packRequested := false
+	if destParseErr == nil {
+		destQuery := destURL.Query()
+		if _, exists := destQuery[pelican_url.QueryRecursive]; exists {
+			isRecursive = true
+		}
+		packRequested = destQuery.Get(pelican_url.QueryPack) != ""
+	}
+
+	// Object-name inference is off the table entirely for a local destination
+	// (the local filesystem and the download path decide that case), for a
+	// recursive copy (rows G5/P6 lay entries flat), for an archive request
+	// (`?pack` names the archive from the source), and for a destination that
+	// would not parse.
+	canInferNames := destIsRemote && !isRecursive && !packRequested
+
 	var result error
 	lastSrc := ""
 
 	// One engine for the whole command, not one per source; see the note in
 	// object_get.go for why the director's answer has to outlive a source.
+	// It is built before the pre-flight stat below so that stat's answer is
+	// the one the copies reuse.
 	engine, err := client.NewTransferEngine(ctx)
 	if err != nil {
 		log.Errorln("Failed to create transfer engine:", err)
@@ -413,9 +461,47 @@ func copyMain(cmd *cobra.Command, args []string) {
 		}
 	}()
 
-	isRecursive, _ := cmd.Flags().GetBool("recursive")
 	options := append([]client.TransferOption{client.WithCallback(pb.callback), client.WithCaches(caches...),
 		client.WithRejectCollections(!isRecursive)}, tokenOpts...)
+
+	// Pre-flight a remote destination once, outside the source loop, the same
+	// way `object put` does for row P3-cli.  Without it, copying an object
+	// onto an existing collection reaches the destination origin as a write to
+	// the collection itself, and the user gets back whatever that origin says
+	// about it -- for XRootD, an HTTP 409 whose "is a directory" lives only in
+	// the response body.  Naming the object after the source is both what `cp`
+	// does and what the destination can actually accept.
+	//
+	// Several sources mean the destination has to be a container no matter
+	// what the stat says or whether it ran at all (row P9), so that is the
+	// starting point.  A stat failure is otherwise soft (row P10): a namespace
+	// may grant writes without listings, and the copy has to keep working
+	// there -- the destination is used as given and the transfer machinery
+	// makes the real decision.
+	destIsCollection := canInferNames && multipleObjects
+	if canInferNames {
+		// The pre-flight is a convenience: it must never block a scripted
+		// copy on an interactive token acquisition, and it has to be told
+		// this is a write destination so that --dest-token applies and the
+		// Director hands back origins rather than caches.
+		statOptions := make([]client.TransferOption, 0, len(options)+2)
+		statOptions = append(statOptions, options...)
+		statOptions = append(statOptions,
+			client.WithStatUploadDestination(true),
+			client.WithAcquireToken(false))
+
+		statInfo, statErr := engine.Stat(ctx, dest, statOptions...)
+		if statErr != nil {
+			if !errors.Is(statErr, client.ErrObjectNotFound) {
+				log.Debugf("Stat of destination %q failed (%v); using the destination as given", dest, statErr)
+			}
+		} else if statInfo != nil {
+			// A successful stat is authoritative in both directions: a
+			// collection takes the container reading, and anything else
+			// takes the literal one even when several sources were named.
+			destIsCollection = statInfo.IsCollection
+		}
+	}
 
 	tc, err := engine.NewClient(options...)
 	if err != nil {
@@ -433,7 +519,16 @@ func copyMain(cmd *cobra.Command, args []string) {
 			if parseErr != nil {
 				return nil, errors.Wrap(parseErr, "failed to parse source URL")
 			}
-			parsedDest, parseErr := url.Parse(dest)
+			actualDest := dest
+			if destIsCollection {
+				inferredDest, inferErr := inferCopyObjectName(destURL, src)
+				if inferErr != nil {
+					return nil, errors.Wrap(inferErr, "failed to infer destination object name")
+				}
+				actualDest = inferredDest
+				log.Debugf("Inferred destination for %s: %s", src, actualDest)
+			}
+			parsedDest, parseErr := url.Parse(actualDest)
 			if parseErr != nil {
 				return nil, errors.Wrap(parseErr, "failed to parse destination URL")
 			}
@@ -443,7 +538,7 @@ func copyMain(cmd *cobra.Command, args []string) {
 			case isPut && isGet:
 				return tc.NewCopyJob(ctx, parsedSrc, parsedDest, isRecursive, options...)
 			case isPut:
-				plan, planErr := engine.PlanUpload(ctx, parsedSrc.Path, dest, isRecursive, options...)
+				plan, planErr := engine.PlanUpload(ctx, parsedSrc.Path, actualDest, isRecursive, options...)
 				if planErr != nil {
 					return nil, planErr
 				}
