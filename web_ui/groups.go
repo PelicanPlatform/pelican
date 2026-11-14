@@ -739,17 +739,8 @@ func handleAddUser(ctx *gin.Context) {
 
 	var user *database.User
 	if isLocal {
-		localIssuer := param.Server_ExternalWebUrl.GetString()
-		if localIssuer == "" {
-			ctx.JSON(http.StatusInternalServerError, server_structs.SimpleApiResp{
-				Status: server_structs.RespFailed,
-				Msg:    "Server.ExternalWebUrl is not configured; cannot create local users",
-			})
-			return
-		}
-		// Pass an empty password — the user will set their own via the
-		// invite flow.
-		user, err = database.CreateLocalUser(database.ServerDatabase, req.Username, req.DisplayName, localIssuer, creator)
+		// No password here — the user sets their own via the invite flow.
+		user, err = database.CreateLocalUser(database.ServerDatabase, req.Username, req.DisplayName, creator)
 	} else {
 		if req.Sub == "" || req.Issuer == "" {
 			ctx.JSON(http.StatusBadRequest, server_structs.SimpleApiResp{

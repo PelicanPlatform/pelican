@@ -452,12 +452,11 @@ func NewFedTest(t testing.TB, originConfig string, originSetup ...func(storageDi
 	}
 
 	// config.InitServer above ran BootstrapAdminAndBackfillOwners while
-	// Server.WebPort was still 0, so the "admin" identity was first recorded
-	// under Server.ExternalWebUrl at the unbound default port. There used to
-	// be an UPDATE here to realign it. It is not needed any more: LaunchModules
-	// binds the real port (UpdateConfigFromListener) before it reaches
-	// InitServerDatabase, and ensureBuiltinAdmin moves the admin's identity
-	// onto the bound URL there.
+	// Server.WebPort was still 0. There used to be an UPDATE here to realign
+	// the "admin" row's issuer once LaunchModules bound the real ephemeral
+	// port, because the account was keyed on Server.ExternalWebUrl. It is not
+	// needed any more: the internal issuer is a constant, so the port the
+	// listener happens to get does not enter into finding the admin.
 
 	desiredURL := param.Server_ExternalWebUrl.GetString() + "/api/v1.0/health"
 	err = server_utils.WaitUntilWorking(ctx, "GET", desiredURL, "director", 200, false)

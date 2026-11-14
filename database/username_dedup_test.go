@@ -164,6 +164,9 @@ func TestDedupLiveUsernamesKeepsRowMatchingExternalWebUrl(t *testing.T) {
 	assert.True(t, exists)
 
 	setExternalWebURL(t, dedupLocalIssuer)
+	// The startup sequence: identities written under the server's URL move to
+	// the internal issuer before anything looks the built-in admin up by it.
+	require.NoError(t, adoptInternalIssuer(db))
 	require.NoError(t, BootstrapAdminAndBackfillOwners(db))
 	admin, err := BuiltinAdminUser(db)
 	require.NoError(t, err)
@@ -266,6 +269,9 @@ func TestDedupLiveUsernamesMovesLoneStaleAdmin(t *testing.T) {
 	finishMigrations(t, sqlDB)
 	assert.Equal(t, "oldadmin", readColumnByID(t, db, "api_keys", "created_by")["k-admin"])
 	setExternalWebURL(t, dedupLocalIssuer)
+	// The startup sequence: identities written under the server's URL move to
+	// the internal issuer before anything looks the built-in admin up by it.
+	require.NoError(t, adoptInternalIssuer(db))
 	require.NoError(t, BootstrapAdminAndBackfillOwners(db))
 	admin, err := BuiltinAdminUser(db)
 	require.NoError(t, err)

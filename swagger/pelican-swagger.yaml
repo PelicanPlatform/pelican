@@ -1569,10 +1569,10 @@ definitions:
       none is distinguished as "primary" — and `user_identities` is the
       only place they live. Two unique indexes hold the model together:
       a (`sub`, `issuer`) pair belongs to at most one user, and a user
-      has at most one identity per issuer. An account this server
-      authenticates itself — an htpasswd entry or a stored password —
-      holds its identity at the internal issuer, which is an ordinary
-      row like any other.
+      has at most one identity per issuer. The `issuer`
+      `urn:pelican:internal` marks an account this server authenticates
+      itself (an htpasswd entry or a stored password) rather than one
+      an external provider vouches for.
     properties:
       id:
         type: string
@@ -7088,7 +7088,7 @@ paths:
 
 
         * **Local user** (omit `sub`/`issuer`): created with an identity
-          at this server's internal issuer and without a
+          at the internal issuer (`urn:pelican:internal`) and without a
           password. Admins do NOT set passwords directly — to enable
           login for the new account, follow up with
           `POST /users/{id}/password-invite` and hand the invite link
@@ -7583,8 +7583,8 @@ paths:
       description: >-
         `Admin privilege Required`. Returns every identity the user can
         be reached by (rows in user_identities), including the internal
-        one of an account this server authenticates itself. None is
-        distinguished as "primary".
+        one (issuer `urn:pelican:internal`) of an account this server
+        authenticates itself. None is distinguished as "primary".
         Self-service equivalent: GET `/me/identities`.
       produces:
         - application/json

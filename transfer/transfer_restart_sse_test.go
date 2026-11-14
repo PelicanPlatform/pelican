@@ -33,7 +33,6 @@ import (
 
 	"github.com/pelicanplatform/pelican/client_agent"
 	"github.com/pelicanplatform/pelican/database"
-	"github.com/pelicanplatform/pelican/param"
 	"github.com/pelicanplatform/pelican/test_utils"
 )
 
@@ -84,11 +83,11 @@ func TestTransferJobEventsSSEOverHTTP(t *testing.T) {
 func TestTransferServerRestartMarksInflightJobsFailed(t *testing.T) {
 	_, db := setupTestEnvironment(t)
 	tok := generateTransferToken(t, "restart-user")
-	issuer := param.Server_ExternalWebUrl.GetString()
 
-	// The auth middleware resolves (issuer, subject) → user; create that same
-	// user so the job row we insert is owned by the token's identity.
-	user, err := database.GetOrCreateUser(db, "restart-user", "restart-user", issuer, database.CreatorSelf())
+	// The token is one this server minted, so its subject is a username and the
+	// auth middleware resolves it to the local account of that name. Create the
+	// same account here so the job row below is owned by the caller.
+	user, err := database.GetOrCreateLocalUser(db, "restart-user", database.CreatorSelf())
 	require.NoError(t, err)
 
 	now := time.Now()

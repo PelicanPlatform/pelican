@@ -57,7 +57,7 @@ func TestRegistrationOwnershipInviteLink(t *testing.T) {
 	t.Run("mint-and-redeem-transfers-owner", func(t *testing.T) {
 		db := registrationInviteTestDB(t)
 		regID := registrationInviteTestRegistration(t, db, "u-old-owner")
-		redeemer, err := CreateLocalUser(db, "bob", "Bob", "https://local", CreatorSelf())
+		redeemer, err := CreateLocalUser(db, "bob", "Bob", CreatorSelf())
 		require.NoError(t, err)
 
 		link, plaintext, err := CreateRegistrationOwnershipInviteLink(
@@ -84,9 +84,9 @@ func TestRegistrationOwnershipInviteLink(t *testing.T) {
 	t.Run("second-redemption-fails", func(t *testing.T) {
 		db := registrationInviteTestDB(t)
 		regID := registrationInviteTestRegistration(t, db, "u-old-owner")
-		redeemer1, err := CreateLocalUser(db, "bob", "Bob", "https://local", CreatorSelf())
+		redeemer1, err := CreateLocalUser(db, "bob", "Bob", CreatorSelf())
 		require.NoError(t, err)
-		redeemer2, err := CreateLocalUser(db, "carol", "Carol", "https://local", CreatorSelf())
+		redeemer2, err := CreateLocalUser(db, "carol", "Carol", CreatorSelf())
 		require.NoError(t, err)
 
 		_, plaintext, err := CreateRegistrationOwnershipInviteLink(
@@ -106,7 +106,7 @@ func TestRegistrationOwnershipInviteLink(t *testing.T) {
 	t.Run("expired-link-fails", func(t *testing.T) {
 		db := registrationInviteTestDB(t)
 		regID := registrationInviteTestRegistration(t, db, "u-old-owner")
-		redeemer, err := CreateLocalUser(db, "bob", "Bob", "https://local", CreatorSelf())
+		redeemer, err := CreateLocalUser(db, "bob", "Bob", CreatorSelf())
 		require.NoError(t, err)
 
 		_, plaintext, err := CreateRegistrationOwnershipInviteLink(
@@ -127,9 +127,9 @@ func TestRegistrationOwnershipInviteLink(t *testing.T) {
 	t.Run("owner-change-revokes-other-outstanding-invites", func(t *testing.T) {
 		db := registrationInviteTestDB(t)
 		regID := registrationInviteTestRegistration(t, db, "u-old-owner")
-		redeemer, err := CreateLocalUser(db, "bob", "Bob", "https://local", CreatorSelf())
+		redeemer, err := CreateLocalUser(db, "bob", "Bob", CreatorSelf())
 		require.NoError(t, err)
-		rival, err := CreateLocalUser(db, "carol", "Carol", "https://local", CreatorSelf())
+		rival, err := CreateLocalUser(db, "carol", "Carol", CreatorSelf())
 		require.NoError(t, err)
 
 		_, plaintext1, err := CreateRegistrationOwnershipInviteLink(
@@ -167,7 +167,7 @@ func TestRegistrationOwnershipInviteLink(t *testing.T) {
 func TestRedeemRegistrationOwnershipInviteLinkNotFoundIsOnlyForTheLink(t *testing.T) {
 	t.Run("unknown-token", func(t *testing.T) {
 		db := registrationInviteTestDB(t)
-		redeemer, err := CreateLocalUser(db, "bob", "Bob", "https://local", CreatorSelf())
+		redeemer, err := CreateLocalUser(db, "bob", "Bob", CreatorSelf())
 		require.NoError(t, err)
 		_, _, err = RedeemRegistrationOwnershipInviteLink(db, "not-a-real-token", redeemer.ID)
 		assert.ErrorIs(t, err, gorm.ErrRecordNotFound)
@@ -176,7 +176,7 @@ func TestRedeemRegistrationOwnershipInviteLinkNotFoundIsOnlyForTheLink(t *testin
 	t.Run("registration-deleted-after-mint", func(t *testing.T) {
 		db := registrationInviteTestDB(t)
 		regID := registrationInviteTestRegistration(t, db, "u-old-owner")
-		redeemer, err := CreateLocalUser(db, "bob", "Bob", "https://local", CreatorSelf())
+		redeemer, err := CreateLocalUser(db, "bob", "Bob", CreatorSelf())
 		require.NoError(t, err)
 		_, plaintext, err := CreateRegistrationOwnershipInviteLink(
 			db, regID, "u-old-owner", time.Now().Add(time.Hour), "", "")
@@ -205,7 +205,7 @@ func TestRedeemRegistrationOwnershipInviteLinkNotFoundIsOnlyForTheLink(t *testin
 		assert.Contains(t, err.Error(), "does not exist")
 
 		// The failed redemption must not have consumed the link.
-		redeemer, err := CreateLocalUser(db, "bob", "Bob", "https://local", CreatorSelf())
+		redeemer, err := CreateLocalUser(db, "bob", "Bob", CreatorSelf())
 		require.NoError(t, err)
 		_, _, err = RedeemRegistrationOwnershipInviteLink(db, plaintext, redeemer.ID)
 		require.NoError(t, err, "the link must remain redeemable after a rejected redemption")

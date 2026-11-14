@@ -50,8 +50,6 @@ import (
 // userCredential bridge — see database/credentials.go
 // for why that bridge exists.
 
-const localIssuerForTests = "https://example.test"
-
 func adminCreator() Creator {
 	return Creator{UserID: "admin"}
 }
@@ -61,50 +59,44 @@ func adminCreator() Creator {
 func TestCreateLocalUserRejectsInvalidIdentifier(t *testing.T) {
 	db := setupCollectionTestDB(t)
 	for _, bad := range []string{"", "a", "alice/admin", "alice..bob", "_alice", strings.Repeat("a", 65)} {
-		_, err := CreateLocalUser(db, bad, "", localIssuerForTests, adminCreator())
+		_, err := CreateLocalUser(db, bad, "", adminCreator())
 		assert.ErrorIs(t, err, ErrInvalidIdentifier, "input %q", bad)
 	}
 }
 
 func TestCreateLocalUserRejectsInvalidDisplayName(t *testing.T) {
 	db := setupCollectionTestDB(t)
-	_, err := CreateLocalUser(db, "alice", strings.Repeat("x", 129), localIssuerForTests, adminCreator())
+	_, err := CreateLocalUser(db, "alice", strings.Repeat("x", 129), adminCreator())
 	assert.ErrorIs(t, err, ErrInvalidDisplayName)
 
-	_, err = CreateLocalUser(db, "bob", "bad\x07char", localIssuerForTests, adminCreator())
+	_, err = CreateLocalUser(db, "bob", "bad\x07char", adminCreator())
 	assert.ErrorIs(t, err, ErrInvalidDisplayName)
 }
 
 func TestCreateLocalUserHappyPath(t *testing.T) {
 	db := setupCollectionTestDB(t)
-	u, err := CreateLocalUser(db, "alice", "Alice Smith", localIssuerForTests, adminCreator())
+	u, err := CreateLocalUser(db, "alice", "Alice Smith", adminCreator())
 	require.NoError(t, err)
 	require.NotNil(t, u)
 
-	// The local identity is an ordinary row in user_identities like any
-	// other, with sub == username at the local issuer.
+	// The internal identity is an ordinary row in user_identities like any
+	// other, with sub == username at the internal issuer.
 	identities, err := ListUserIdentities(db, u.ID)
 	require.NoError(t, err)
 	require.Len(t, identities, 1)
 	assert.Equal(t, u.Username, identities[0].Sub)
-	assert.Equal(t, localIssuerForTests, identities[0].Issuer)
+	assert.Equal(t, InternalIssuer, identities[0].Issuer)
 	assert.Equal(t, "Alice Smith", u.DisplayName)
 	// No password is set up front — admins use the password-invite flow.
 	assert.False(t, u.HasPassword, "freshly-created local user must not have a password")
 	assert.Equal(t, adminCreator().UserID, u.CreatedBy)
 }
 
-func TestCreateLocalUserRequiresLocalIssuer(t *testing.T) {
-	db := setupCollectionTestDB(t)
-	_, err := CreateLocalUser(db, "alice", "", "", adminCreator())
-	assert.Error(t, err)
-}
-
 func TestCreateLocalUserRejectsDuplicateUsername(t *testing.T) {
 	db := setupCollectionTestDB(t)
-	_, err := CreateLocalUser(db, "alice", "", localIssuerForTests, adminCreator())
+	_, err := CreateLocalUser(db, "alice", "", adminCreator())
 	require.NoError(t, err)
-	_, err = CreateLocalUser(db, "alice", "", localIssuerForTests, adminCreator())
+	_, err = CreateLocalUser(db, "alice", "", adminCreator())
 	assert.Error(t, err, "second create with the same (username, issuer) must fail")
 }
 
@@ -123,7 +115,7 @@ func TestUsernameIsGloballyUniqueAcrossIssuers(t *testing.T) {
 	// A local password account for "alice" (different issuer, different
 	// sub) must be refused — otherwise both collapse into one issuer-blind
 	// authz identity.
-	_, err = CreateLocalUser(db, "alice", "Alice Local", localIssuerForTests, adminCreator())
+	_, err = CreateLocalUser(db, "alice", "Alice Local", adminCreator())
 	assert.Error(t, err, "local 'alice' must not coexist with OIDC 'alice'")
 
 	// An admin-created OIDC account under yet another issuer must also be
@@ -161,7 +153,7 @@ func TestCreateUserRejectsDuplicateIdentity(t *testing.T) {
 
 func TestRenameUserLeavesLocalIdentityAlone(t *testing.T) {
 	db := setupCollectionTestDB(t)
-	u, err := CreateLocalUser(db, "alice", "", localIssuerForTests, adminCreator())
+	u, err := CreateLocalUser(db, "alice", "", adminCreator())
 	require.NoError(t, err)
 	require.NoError(t, SetUserPassword(db, u.ID, "correct horse battery staple"))
 
@@ -204,7 +196,7 @@ func TestRenameUserLeavesOIDCSubAlone(t *testing.T) {
 
 func TestRenameUserRejectsInvalidIdentifier(t *testing.T) {
 	db := setupCollectionTestDB(t)
-	u, err := CreateLocalUser(db, "alice", "", localIssuerForTests, adminCreator())
+	u, err := CreateLocalUser(db, "alice", "", adminCreator())
 	require.NoError(t, err)
 	assert.ErrorIs(t, RenameUser(db, u.ID, "alice/admin"), ErrInvalidIdentifier)
 }
@@ -327,7 +319,7 @@ func TestUserStructHasNoPasswordHashField(t *testing.T) {
 
 func TestSetAndVerifyUserPasswordRoundTrip(t *testing.T) {
 	db := setupCollectionTestDB(t)
-	u, err := CreateLocalUser(db, "alice", "", localIssuerForTests, adminCreator())
+	u, err := CreateLocalUser(db, "alice", "", adminCreator())
 	require.NoError(t, err)
 
 	require.NoError(t, SetUserPassword(db, u.ID, "hunter2-correct-horse"))
@@ -349,7 +341,7 @@ func TestSetAndVerifyUserPasswordRoundTrip(t *testing.T) {
 
 func TestVerifyUserPasswordRejectsWhenNoPasswordSet(t *testing.T) {
 	db := setupCollectionTestDB(t)
-	_, err := CreateLocalUser(db, "alice", "", localIssuerForTests, adminCreator())
+	_, err := CreateLocalUser(db, "alice", "", adminCreator())
 	require.NoError(t, err)
 	// No SetUserPassword call — the row exists but has no credential.
 	_, err = VerifyUserPassword(db, "alice", "anything")
@@ -358,7 +350,7 @@ func TestVerifyUserPasswordRejectsWhenNoPasswordSet(t *testing.T) {
 
 func TestVerifyUserPasswordRejectsInactiveAccount(t *testing.T) {
 	db := setupCollectionTestDB(t)
-	u, err := CreateLocalUser(db, "alice", "", localIssuerForTests, adminCreator())
+	u, err := CreateLocalUser(db, "alice", "", adminCreator())
 	require.NoError(t, err)
 	require.NoError(t, SetUserPassword(db, u.ID, "hunter2-correct-horse"))
 	require.NoError(t, UpdateUserStatus(db, u.ID, UserStatusInactive))
@@ -369,7 +361,7 @@ func TestVerifyUserPasswordRejectsInactiveAccount(t *testing.T) {
 
 func TestSetUserPasswordEmptyClearsPassword(t *testing.T) {
 	db := setupCollectionTestDB(t)
-	u, err := CreateLocalUser(db, "alice", "", localIssuerForTests, adminCreator())
+	u, err := CreateLocalUser(db, "alice", "", adminCreator())
 	require.NoError(t, err)
 	require.NoError(t, SetUserPassword(db, u.ID, "hunter2-correct-horse"))
 
@@ -395,7 +387,7 @@ func TestSetUserPasswordOnUnknownUser(t *testing.T) {
 
 func TestUserAfterFindPopulatesHasPassword(t *testing.T) {
 	db := setupCollectionTestDB(t)
-	u, err := CreateLocalUser(db, "alice", "", localIssuerForTests, adminCreator())
+	u, err := CreateLocalUser(db, "alice", "", adminCreator())
 	require.NoError(t, err)
 
 	// Fresh-from-DB read: HasPassword must be false until a password is set.
@@ -414,7 +406,7 @@ func TestUserAfterFindPopulatesHasPassword(t *testing.T) {
 
 func TestRedeemPasswordInviteLinkSingleUseRaceSafe(t *testing.T) {
 	db := setupCollectionTestDB(t)
-	u, err := CreateLocalUser(db, "alice", "", localIssuerForTests, adminCreator())
+	u, err := CreateLocalUser(db, "alice", "", adminCreator())
 	require.NoError(t, err)
 
 	link, plaintext, err := CreatePasswordInviteLink(
@@ -460,7 +452,7 @@ func TestRedeemPasswordInviteLinkSingleUseRaceSafe(t *testing.T) {
 
 func TestRedeemPasswordInviteLinkSecondAttemptFails(t *testing.T) {
 	db := setupCollectionTestDB(t)
-	u, err := CreateLocalUser(db, "alice", "", localIssuerForTests, adminCreator())
+	u, err := CreateLocalUser(db, "alice", "", adminCreator())
 	require.NoError(t, err)
 
 	_, plaintext, err := CreatePasswordInviteLink(
@@ -484,7 +476,7 @@ func TestRedeemPasswordInviteLinkSecondAttemptFails(t *testing.T) {
 
 func TestPasswordInviteHashIsBcryptedAtRest(t *testing.T) {
 	db := setupCollectionTestDB(t)
-	u, err := CreateLocalUser(db, "alice", "", localIssuerForTests, adminCreator())
+	u, err := CreateLocalUser(db, "alice", "", adminCreator())
 	require.NoError(t, err)
 
 	_, plaintext, err := CreatePasswordInviteLink(
@@ -502,7 +494,7 @@ func TestPasswordInviteHashIsBcryptedAtRest(t *testing.T) {
 
 func TestInviteLinkExposesTokenPrefixForPublicID(t *testing.T) {
 	db := setupCollectionTestDB(t)
-	u, err := CreateLocalUser(db, "alice", "", localIssuerForTests, adminCreator())
+	u, err := CreateLocalUser(db, "alice", "", adminCreator())
 	require.NoError(t, err)
 
 	link, plaintext, err := CreatePasswordInviteLink(
@@ -689,17 +681,17 @@ func TestDeleteUserFreesIdentityForReEnrollment(t *testing.T) {
 }
 
 // TestGetOrCreateLocalUserAfterRename covers htpasswd login for an account an
-// admin has renamed. The local identity keeps the subject the credential store
-// knows, so the login still lands on the same account under its new name.
+// admin has renamed. The internal identity keeps the subject the credential
+// store knows, so the login still lands on the same account under its new name.
 func TestGetOrCreateLocalUserAfterRename(t *testing.T) {
 	db := setupCollectionTestDB(t)
 
-	u, err := CreateLocalUser(db, "alice", "", localIssuerForTests, adminCreator())
+	u, err := CreateLocalUser(db, "alice", "", adminCreator())
 	require.NoError(t, err)
 	require.NoError(t, RenameUser(db, u.ID, "alicia"))
 
 	// The htpasswd file still says "alice", and that is what logs in.
-	got, err := GetOrCreateLocalUser(db, "alice", localIssuerForTests, CreatorSelf())
+	got, err := GetOrCreateLocalUser(db, "alice", CreatorSelf())
 	require.NoError(t, err, "a renamed local account must still answer to the name its credential carries")
 	assert.Equal(t, u.ID, got.ID)
 	assert.Equal(t, "alicia", got.Username)
@@ -721,10 +713,10 @@ func TestGetOrCreateLocalUserRefusesToAdoptAnotherAccount(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, "alice", oidc.Username)
 
-	_, err = GetOrCreateLocalUser(db, "alice", localIssuerForTests, CreatorSelf())
+	_, err = GetOrCreateLocalUser(db, "alice", CreatorSelf())
 	require.Error(t, err, "an htpasswd login must not inherit an OIDC account that holds the name")
 
-	// The OIDC account is untouched: no local identity was grafted onto it.
+	// The OIDC account is untouched: no internal identity was grafted onto it.
 	identities, err := ListUserIdentities(db, oidc.ID)
 	require.NoError(t, err)
 	require.Len(t, identities, 1)

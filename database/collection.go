@@ -2229,8 +2229,8 @@ func GetOrCreateUser(db *gorm.DB, username string, sub string, issuer string, cr
 // against its own credentials (an htpasswd entry) to its account, creating
 // that account on first sight.
 //
-// The account is reached only through its local identity,
-// (username, localIssuer). There is deliberately no fallback to a bare
+// The account is reached only through its internal identity,
+// (username, InternalIssuer). There is deliberately no fallback to a bare
 // username match. A username is one namespace shared with every configured
 // OIDC issuer, so adopting whatever live account happens to hold the name
 // would hand an htpasswd entry to a person who self-enrolled under it from an
@@ -2240,25 +2240,25 @@ func GetOrCreateUser(db *gorm.DB, username string, sub string, issuer string, cr
 // renaming one of the two or by linking the identity deliberately
 // (AdoptUserIdentity).
 //
-// A rename does not break the link: the local identity keeps the subject the
-// credential store knows the person by, while the username moves.
-func GetOrCreateLocalUser(db *gorm.DB, username, localIssuer string, creator Creator) (*User, error) {
-	if username == "" || localIssuer == "" {
-		return nil, errors.New("username and localIssuer are required")
+// A rename does not break the link: the internal identity keeps the subject
+// the credential store knows the person by, while the username moves.
+func GetOrCreateLocalUser(db *gorm.DB, username string, creator Creator) (*User, error) {
+	if username == "" {
+		return nil, errors.New("username is required")
 	}
-	if user, err := GetUserByIdentity(db, username, localIssuer); err == nil {
+	if user, err := GetUserByIdentity(db, username, InternalIssuer); err == nil {
 		return user, nil
 	} else if !errors.Is(err, gorm.ErrRecordNotFound) {
 		return nil, err
 	}
 
-	created, createErr := CreateUser(db, username, username, localIssuer, creator)
+	created, createErr := CreateUser(db, username, username, InternalIssuer, creator)
 	if createErr == nil {
 		return created, nil
 	}
 	// A concurrent login may have created the same identity between the SELECT
 	// and the INSERT. For a get-or-create that is success, not a collision.
-	if user, getErr := GetUserByIdentity(db, username, localIssuer); getErr == nil {
+	if user, getErr := GetUserByIdentity(db, username, InternalIssuer); getErr == nil {
 		return user, nil
 	}
 	return nil, createErr
@@ -2336,20 +2336,16 @@ func creatorOrUnknown(s string) string {
 }
 
 // CreateLocalUser creates a user record intended for username/password
-// authentication. The user's sub is set to the username and the issuer is the
-// supplied local-issuer URL (typically Server.ExternalWebUrl). The row is
+// authentication: its identity is (username, InternalIssuer). The row is
 // created with no password — the only supported way to set a password is
 // the admin-issued password-invite flow (see CreatePasswordInviteLink),
 // so admins never see or pick a user's password.
-func CreateLocalUser(db *gorm.DB, username, displayName, localIssuer string, creator Creator) (*User, error) {
+func CreateLocalUser(db *gorm.DB, username, displayName string, creator Creator) (*User, error) {
 	if err := ValidateIdentifier(username); err != nil {
 		return nil, err
 	}
 	if err := ValidateDisplayName(displayName); err != nil {
 		return nil, err
-	}
-	if localIssuer == "" {
-		return nil, errors.New("local issuer URL is required for local users")
 	}
 	slug, err := generateSlug()
 	if err != nil {
@@ -2363,9 +2359,9 @@ func CreateLocalUser(db *gorm.DB, username, displayName, localIssuer string, cre
 		CreatorAuthMethod:   creator.AuthMethod,
 		CreatorAuthMethodID: creator.AuthMethodID,
 	}
-	// Local accounts get an identity at the local issuer like any other, so
-	// that nothing has to special-case "this user authenticates by password".
-	if err := createUserWithIdentity(db, user, username, localIssuer); err != nil {
+	// Local accounts get an identity at the internal issuer like any other,
+	// so nothing has to special-case "this user authenticates by password".
+	if err := createUserWithIdentity(db, user, username, InternalIssuer); err != nil {
 		if isUniqueConstraintError(err) {
 			return nil, errors.New("user shares either username or (sub and iss) with another")
 		}
@@ -2381,20 +2377,20 @@ const builtinAdminUsername = "admin"
 // account, and keeps that account reachable by password only.
 //
 // The username is bearer authority: the web layer grants the built-in admin
-// its privileges by name, so no externally-authenticated person may hold it,
-// and the built-in account itself must not be reachable through an external
-// identity. Accordingly: a live "admin" row that holds no identity with the
-// subject "admin" belongs to someone who enrolled under the name, and is
-// retired; the row that does is moved to the current Server.ExternalWebUrl
-// and stripped of every other identity.
+// its privileges by name, so nobody authenticated by an external provider may
+// hold it, and the built-in account itself must not be reachable through an
+// external identity.
+//
+// The built-in admin is the row holding ("admin", InternalIssuer) — subject
+// AND issuer. Matching on the subject alone would be looser than #3828's rule
+// was, since an IdP is free to issue a subject of "admin"; pinning the issuer
+// to a constant this server alone writes closes that. A built-in admin whose
+// identity is still at an old URL cannot reach here: adoptInternalIssuer runs
+// first and finds it by subject at whatever issuer it sits on.
 //
 // Creating the row when it is missing is BootstrapAdminAndBackfillOwners' job;
 // this runs first so that it finds the name free.
 func ensureBuiltinAdmin(db *gorm.DB) error {
-	localIssuer := param.Server_ExternalWebUrl.GetString()
-	if localIssuer == "" {
-		return nil
-	}
 	return db.Transaction(func(tx *gorm.DB) error {
 		var admin User
 		err := tx.Where("username = ?", builtinAdminUsername).First(&admin).Error
@@ -2404,28 +2400,29 @@ func ensureBuiltinAdmin(db *gorm.DB) error {
 			return err
 		}
 
-		var local UserIdentity
-		err = tx.Where("user_id = ? AND sub = ?", admin.ID, builtinAdminUsername).First(&local).Error
+		var internal UserIdentity
+		err = tx.Where("user_id = ? AND sub = ? AND issuer = ?", admin.ID, builtinAdminUsername, InternalIssuer).
+			First(&internal).Error
 		switch {
 		case errors.Is(err, gorm.ErrRecordNotFound):
-			// Nothing here with the built-in admin's subject. Which of the two
-			// cases it is turns on whether the row holds somebody *else's*
-			// identity. If it does, a person enrolled under the name and the
-			// row is theirs, so it is retired. If it holds none at all, this
-			// is the built-in admin that lost its identity — an account with a
+			// No internal identity. Which of the two cases it is turns on
+			// whether the row holds any identity at all. If it does, the
+			// identity is somebody else's, a person enrolled under the name,
+			// and the row is theirs to be retired. If it holds none, this is
+			// the built-in admin that lost its identity — an account with a
 			// password is allowed to unlink its last one — and re-linking is
 			// the answer. Deleting it would take the administrator's groups
 			// and everything they own along with it.
 			//
 			// Before unification the equivalent test read users.sub, a column
-			// no writer but this one touched; an identity row can be unlinked
+			// no writer but this one touched. An identity row can be unlinked
 			// through the API, so the distinction has to be made explicitly.
 			var held int64
 			if err := tx.Model(&UserIdentity{}).Where("user_id = ?", admin.ID).Count(&held).Error; err != nil {
 				return err
 			}
 			if held > 0 {
-				log.Warnf("Retiring user %s: it holds the username %q without the built-in admin's identity, which only the built-in admin may do",
+				log.Warnf("Retiring user %s: it holds the username %q without the built-in admin's internal identity, which only the built-in admin may do",
 					admin.ID, builtinAdminUsername)
 				return DeleteUser(tx, admin.ID, "", true)
 			}
@@ -2433,21 +2430,16 @@ func ensureBuiltinAdmin(db *gorm.DB) error {
 			if slugErr != nil {
 				return slugErr
 			}
-			local = UserIdentity{ID: slug, UserID: admin.ID, Sub: builtinAdminUsername, Issuer: localIssuer}
+			internal = UserIdentity{ID: slug, UserID: admin.ID, Sub: builtinAdminUsername, Issuer: InternalIssuer}
 			log.Warnf("Re-linking the built-in admin %s: it had no identity left to sign in with", admin.ID)
-			if err := tx.Create(&local).Error; err != nil {
+			if err := tx.Create(&internal).Error; err != nil {
 				return err
 			}
 		case err != nil:
 			return err
-		case local.Issuer != localIssuer:
-			log.Warnf("Moving the built-in admin %s from issuer %q to %q", admin.ID, local.Issuer, localIssuer)
-			if err := tx.Model(&UserIdentity{}).Where("id = ?", local.ID).Update("issuer", localIssuer).Error; err != nil {
-				return err
-			}
 		}
 
-		unlinked := tx.Where("user_id = ? AND id <> ?", admin.ID, local.ID).Delete(&UserIdentity{})
+		unlinked := tx.Where("user_id = ? AND id <> ?", admin.ID, internal.ID).Delete(&UserIdentity{})
 		if unlinked.Error != nil {
 			return unlinked.Error
 		}
@@ -2460,27 +2452,17 @@ func ensureBuiltinAdmin(db *gorm.DB) error {
 
 // BootstrapAdminAndBackfillOwners ensures the built-in "admin" user
 // record exists and that every group has a real owner_id. Both are
-// runtime concerns (the admin's primary identity is keyed off
-// Server.ExternalWebUrl, which isn't known at SQL-migration time;
-// existing groups created before owner_id existed need to be assigned
-// to a concrete user). Safe to call on every startup; idempotent.
-//
-// The function is conservative: if Server.ExternalWebUrl isn't
-// configured yet (e.g. brand-new install before the operator has set
-// the externally-visible URL), it returns nil and skips both steps.
-// They'll be retried the next time it's called.
+// runtime concerns rather than SQL migrations: the admin row needs the
+// slug generator and the default-scope machinery, and existing groups
+// created before owner_id existed need to be assigned to a concrete
+// user. Safe to call on every startup; idempotent.
 func BootstrapAdminAndBackfillOwners(db *gorm.DB) error {
-	externalURL := param.Server_ExternalWebUrl.GetString()
-	if externalURL == "" {
-		return nil
-	}
-
-	// 1. Ensure an admin user row exists. The admin "username" is
-	//    the literal string "admin"; CheckAdmin in the web layer keys
-	//    its bypass off that username, and the htpasswd login path has
-	//    historically created the row with sub == username == "admin"
-	//    and issuer == externalURL — so we follow the same shape.
-	adminUser, err := GetOrCreateLocalUser(db, "admin", externalURL, Creator{UserID: CreatorSelfEnrolled})
+	// 1. Ensure an admin user row exists. The admin "username" is the literal
+	//    string "admin" — the web layer keys its privilege grant off that
+	//    username — and its identity is ("admin", InternalIssuer), which is
+	//    how ensureBuiltinAdmin tells it from somebody who enrolled under the
+	//    same name.
+	adminUser, err := GetOrCreateLocalUser(db, builtinAdminUsername, Creator{UserID: CreatorSelfEnrolled})
 	if err != nil {
 		return err
 	}
