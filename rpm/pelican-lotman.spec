@@ -19,8 +19,9 @@
 #   # In a Pelican checkout (what images/Dockerfile does):
 #   rpmbuild -bb --nodeps --build-in-place --define "_topdir $PWD/dist/rpmbuild" rpm/pelican-lotman.spec
 #
-#   # From a release tarball, including the SRPM:
-#   rpmbuild -ba rpm/pelican-lotman.spec
+#   # The source RPM, and a rebuild of it:
+#   make lotman-srpm
+#   rpmbuild --rebuild dist/rpmbuild/SRPMS/pelican-lotman-*.src.rpm
 #
 # KNOWN GAP for distribution through OSG/Koji: %build runs `go build`, which
 # resolves modules from the network. An offline builder needs the module cache
@@ -38,13 +39,6 @@
 %global lotman_abi 0.1.0
 %{!?lotman_release: %global lotman_release 1}
 
-# The Pelican source release this is built from. It names the tarball in
-# Source0, so a tarball or SRPM build has to supply it:
-#   rpmbuild -ba --define "pelican_version 7.20.0" rpm/pelican-lotman.spec
-# --build-in-place skips %prep and never reads Source0, so it does not need
-# one; the placeholder below makes a forgotten --define fail visibly rather
-# than silently building the wrong thing.
-%{!?pelican_version: %global pelican_version 0.0.0}
 
 Name:    pelican-lotman
 Version: %{lotman_abi}
@@ -53,7 +47,13 @@ Summary: LotMan storage-lot management library (C ABI), built from Pelican's Go 
 License: Apache-2.0
 URL:     https://github.com/PelicanPlatform/pelican
 
-Source0: https://github.com/PelicanPlatform/pelican/archive/v%{pelican_version}/pelican-%{pelican_version}.tar.gz
+# A tree of Pelican's source, rooted at pelican-lotman-%%{version}/.
+# `make lotman-srpm` produces it with `git archive` and names it from the same
+# `lotman_abi` above, so the two cannot drift. It is deliberately named after
+# the ABI rather than after the Pelican release it was cut from: everything
+# %%prep needs has to be derivable from this spec alone, or the source RPM
+# stops rebuilding the moment it leaves the tree that produced it.
+Source0: pelican-lotman-%{version}.tar.gz
 
 # These describe what a distribution builder needs. Pelican tracks the current
 # Go release, which is newer than the `golang` any EL9 repo carries, so a
@@ -98,7 +98,7 @@ cutover from the C++ library -- lots have to be recreated.
 %global debug_package %{nil}
 
 %prep
-%autosetup -n pelican-%{pelican_version}
+%autosetup -n pelican-lotman-%{version}
 
 %build
 export CGO_ENABLED=1

@@ -236,9 +236,10 @@ lotman-shared:
 # cross-compiled. images/Dockerfile's `lotman-build` stage runs the same
 # rpmbuild command on the target platform.
 LOTMAN_RPM_TOPDIR := $(abspath $(PELICAN_DIST_PATH)/rpmbuild)
-# The Pelican source release the package is built from. It only names the
-# tarball in the spec's Source0; the package's own version is the C ABI.
-LOTMAN_PELICAN_VERSION ?= $(patsubst v%,%,$(shell git describe --tags --always --dirty 2>/dev/null || echo 0.0.0))
+# Read the packaged version out of the spec rather than repeating it. It is the
+# C ABI the library implements, and it names both the package and the source
+# tarball, so the two cannot disagree.
+LOTMAN_ABI_VERSION := $(shell awk '/^%global lotman_abi /{print $$3}' rpm/pelican-lotman.spec)
 
 .PHONY: lotman-package
 lotman-package:
@@ -248,14 +249,14 @@ lotman-package:
 	@find $(LOTMAN_RPM_TOPDIR)/RPMS -name '*.rpm'
 
 # The source RPM, for distribution through OSG/Koji. Unlike the binary target
-# this builds from a tarball, so the spec needs the Pelican version that names
-# it.
+# this builds from a tarball, so one is cut from HEAD first. The tarball's
+# prefix has to match the spec's %setup, which is why both take their version
+# from the same place.
 .PHONY: lotman-srpm
 lotman-srpm:
-	@echo SRPM libLotMan \(pelican $(LOTMAN_PELICAN_VERSION)\)
+	@echo SRPM libLotMan $(LOTMAN_ABI_VERSION)
 	@mkdir -p $(LOTMAN_RPM_TOPDIR)/SOURCES
-	git archive --format=tar.gz --prefix=pelican-$(LOTMAN_PELICAN_VERSION)/ \
-		-o $(LOTMAN_RPM_TOPDIR)/SOURCES/pelican-$(LOTMAN_PELICAN_VERSION).tar.gz HEAD
-	rpmbuild -bs --define "_topdir $(LOTMAN_RPM_TOPDIR)" \
-		--define "pelican_version $(LOTMAN_PELICAN_VERSION)" rpm/pelican-lotman.spec
+	git archive --format=tar.gz --prefix=pelican-lotman-$(LOTMAN_ABI_VERSION)/ \
+		-o $(LOTMAN_RPM_TOPDIR)/SOURCES/pelican-lotman-$(LOTMAN_ABI_VERSION).tar.gz HEAD
+	rpmbuild -bs --define "_topdir $(LOTMAN_RPM_TOPDIR)" rpm/pelican-lotman.spec
 	@find $(LOTMAN_RPM_TOPDIR)/SRPMS -name '*.rpm'
