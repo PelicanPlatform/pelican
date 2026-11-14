@@ -26,81 +26,56 @@ import (
 	"go/token"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 )
 
-// This file pins the exported C ABI against the interface libLotMan publishes,
-// so a Go-side signature can never silently drift from the header external
-// consumers compile against. Drift is not a compile error on either side -- the
-// XRootD purge plugin binds by symbol name at load time -- it is a wrong-arity
-// call that shifts every subsequent argument, so a bool lands where a pointer
-// was expected and the library stores through it. That is an immediate SIGSEGV
+// This file pins the exported C ABI against the header this library publishes,
+// so a Go-side signature can never silently drift from what external consumers
+// compile against. Drift is not a compile error on either side -- the XRootD
+// purge plugin binds by symbol name at load time -- it is a wrong-arity call
+// that shifts every subsequent argument, so a bool lands where a pointer was
+// expected and the library stores through it. That is an immediate SIGSEGV
 // inside xrootd with no diagnostic.
 //
-// The expectations below are transcribed from src/lotman.h in
-// https://github.com/PelicanPlatform/lotman (v0.1.0). Parameter *names* are free
-// to differ; the type sequence and arity are the contract. `const` is dropped
-// because it does not affect the calling convention.
-var upstreamPrototypes = map[string]string{
-	// lifecycle
-	"lotman_add_lot":               "int(char *, char **)",
-	"lotman_update_lot":            "int(char *, char **)",
-	"lotman_add_to_lot":            "int(char *, char **)",
-	"lotman_remove_lot":            "int(char *, bool, bool, bool, bool, char **)",
-	"lotman_remove_lots_recursive": "int(char *, char **)",
-	"lotman_rm_parents_from_lot":   "int(char *, char **)",
-	"lotman_rm_paths_from_lots":    "int(char *, char **)",
-	"lotman_reclaim_lot":           "int(char *, int64_t, char *, char **)",
+// The expectations are *parsed from* include/lotman/lotman.h rather than
+// transcribed into a table here. That header is the file the RPM installs at
+// /usr/include/lotman/lotman.h and the one xrootd-lotman compiles against, so
+// making it the single source of truth removes the failure mode a second copy
+// creates: a table that agrees with the Go code while the shipped header, which
+// is what actually governs callers, says something else.
+//
+// Parameter *names* are free to differ; the type sequence and arity are the
+// contract. `const` is dropped because it does not affect the calling
+// convention.
 
-	// predicates
-	"lotman_lot_exists": "int(char *, char **)",
-	"lotman_is_root":    "int(char *, char **)",
+// headerPath is the published interface, relative to this package directory.
+const headerPath = "include/lotman/lotman.h"
 
-	// hierarchy / listing
-	"lotman_get_owners":         "int(char *, bool, char ***, char **)",
-	"lotman_get_parent_names":   "int(char *, bool, bool, char ***, char **)",
-	"lotman_get_children_names": "int(char *, bool, bool, char ***, char **)",
-	"lotman_list_all_lots":      "int(char ***, char **)",
-
-	// path resolution. Note lotman_get_lots_for_path returns a single JSON
-	// array string (char **), not a string list (char ***), and takes an
-	// include_reclaimed flag between the window bounds and the output.
-	"lotman_get_lots_from_dir": "int(char *, bool, int64_t, char ***, char **)",
-	"lotman_get_lots_for_path": "int(char *, bool, int64_t, int64_t, bool, char **, char **)",
-
-	// documents / usage
-	"lotman_get_lot_as_json":        "int(char *, bool, char **, char **)",
-	"lotman_get_lot_dirs":           "int(char *, bool, char **, char **)",
-	"lotman_get_lot_usage":          "int(char *, char **, char **)",
-	"lotman_get_policy_attributes":  "int(char *, char **, char **)",
-	"lotman_get_available_capacity": "int(char *, int64_t, int64_t, char **, char **)",
-	"lotman_update_lot_usage":       "int(char *, bool, char **)",
-
-	// context
-	"lotman_set_context_str": "int(char *, char *, char **)",
-	"lotman_get_context_str": "int(char *, char **, char **)",
-	"lotman_set_context_int": "int(char *, int, char **)",
-	"lotman_get_context_int": "int(char *, int *, char **)",
-
-	// memory / metadata
-	"lotman_free_string_list": "void(char **)",
-	"lotman_version":          "char *()",
-}
+var (
+	blockCommentRe = regexp.MustCompile(`(?s)/\*.*?\*/`)
+	lineCommentRe  = regexp.MustCompile(`//[^\n]*`)
+	// A declaration is "<return type> lotman_<name>(<args>);". Argument lists
+	// in this header contain no nested parentheses.
+	declRe = regexp.MustCompile(`(?s)([A-Za-z_][A-Za-z0-9_ \t\n*]*?)(lotman_[a-z0-9_]+)\s*\(([^;()]*)\)\s*;`)
+)
 
 // abiVariantPrototypes are the entry points whose shape depends on the selected
-// ABI build tag. Only one variant is compiled at a time, but both source files
-// are parsed here, so both are checked on every run -- the legacy variant is
-// otherwise built by no CI job at all.
+// ABI build tag.
+//
+// The published header describes the current (v0.1.0) ABI, which is what the
+// package ships and what export_api_v1.go must match -- so that file is checked
+// against the header like every other export. The legacy variant deliberately
+// does *not* match the header: it re-exports the older lotman v0.0.4 signatures
+// for a site whose deployed libXrdPurgeLotMan was compiled against them, and it
+// is built only by hand (`make lotman-shared LOTMAN_ABI=legacy`), never
+// packaged. Its expectations therefore have to be stated here, transcribed from
+// src/lotman.h at tag v0.0.4 in https://github.com/PelicanPlatform/lotman.
+//
+// Both export files are parsed on every run even though only one is compiled,
+// so the legacy variant -- which no CI job builds -- is still checked.
 var abiVariantPrototypes = map[string]map[string]string{
-	"export_api_v1.go": {
-		"lotman_get_lots_past_exp":       "int(int64_t, bool, bool, char ***, char **)",
-		"lotman_get_lots_past_del":       "int(int64_t, bool, bool, char ***, char **)",
-		"lotman_get_lots_past_opp":       "int(bool, bool, bool, char ***, bool, char **)",
-		"lotman_get_lots_past_ded":       "int(bool, bool, bool, char ***, bool, char **)",
-		"lotman_get_lots_past_obj":       "int(bool, bool, bool, char ***, bool, char **)",
-		"lotman_update_lot_usage_by_dir": "int(char *, bool, int64_t, char **)",
-	},
 	"export_api_legacy.go": {
 		"lotman_get_lots_past_exp":       "int(bool, char ***, char **)",
 		"lotman_get_lots_past_del":       "int(bool, char ***, char **)",
@@ -122,7 +97,16 @@ var cgoToC = map[string]string{
 	"*C.int":    "int *",
 }
 
-func TestExportedABIMatchesUpstreamHeader(t *testing.T) {
+// cBaseTypes are the type keywords the published header is allowed to use. An
+// unlisted one fails the test rather than being normalized away, because a type
+// this test does not understand is a type it cannot check.
+var cBaseTypes = map[string]bool{
+	"char": true, "int": true, "bool": true, "int64_t": true, "void": true,
+}
+
+func TestExportedABIMatchesPublishedHeader(t *testing.T) {
+	header := parseHeaderPrototypes(t)
+
 	files, err := filepath.Glob("export*.go")
 	if err != nil || len(files) == 0 {
 		t.Fatalf("globbing export files: %v (found %d)", err, len(files))
@@ -156,28 +140,32 @@ func TestExportedABIMatchesUpstreamHeader(t *testing.T) {
 			}
 
 			name := fn.Name.Name
-			want, ok := upstreamPrototypes[name]
-			if !ok {
-				want, ok = abiVariantPrototypes[filepath.Base(file)][name]
+			source := headerPath
+			want, ok := abiVariantPrototypes[filepath.Base(file)][name]
+			if ok {
+				source = "the lotman v0.0.4 ABI"
+			} else {
+				want, ok = header[name]
 			}
 			if !ok {
-				t.Errorf("%s: exported by %s but absent from the upstream prototype table; "+
-					"add it (and confirm it exists in lotman.h) so the ABI stays pinned", name, file)
+				t.Errorf("%s: exported by %s but not declared in %s; "+
+					"add it to the published header so consumers can call it", name, file, headerPath)
 				continue
 			}
 			seen[file+":"+name] = true
 
 			got := cSignature(t, fset, src, fn)
 			if got != want {
-				t.Errorf("%s (%s):\n   exports: %s\n  upstream: %s\n"+
+				t.Errorf("%s (%s):\n   exports: %s\n  declared: %s (%s)\n"+
 					"An arity or type mismatch shifts the caller's arguments and faults inside the host process.",
-					name, file, got, want)
+					name, file, got, want, source)
 			}
 		}
 	}
 
-	// Every prototype in the table must actually be exported.
-	for name := range upstreamPrototypes {
+	// Every declaration in the published header must actually be exported, or
+	// a consumer links against a symbol this library does not define.
+	for name := range header {
 		found := false
 		for k := range seen {
 			if strings.HasSuffix(k, ":"+name) {
@@ -185,7 +173,7 @@ func TestExportedABIMatchesUpstreamHeader(t *testing.T) {
 			}
 		}
 		if !found {
-			t.Errorf("%s is in the upstream prototype table but is not exported by this library", name)
+			t.Errorf("%s is declared in %s but is not exported by this library", name, headerPath)
 		}
 	}
 	for file, protos := range abiVariantPrototypes {
@@ -195,6 +183,54 @@ func TestExportedABIMatchesUpstreamHeader(t *testing.T) {
 			}
 		}
 	}
+}
+
+// parseHeaderPrototypes reads the published header and returns each declared
+// function in the same canonical "ret(param, ...)" form cSignature produces.
+func parseHeaderPrototypes(t *testing.T) map[string]string {
+	t.Helper()
+
+	raw, err := os.ReadFile(headerPath)
+	if err != nil {
+		t.Fatalf("read %s: %v", headerPath, err)
+	}
+	src := lineCommentRe.ReplaceAllString(blockCommentRe.ReplaceAllString(string(raw), " "), " ")
+
+	protos := map[string]string{}
+	for _, m := range declRe.FindAllStringSubmatch(src, -1) {
+		ret, name, args := m[1], m[2], m[3]
+		var params []string
+		for _, arg := range strings.Split(args, ",") {
+			if strings.TrimSpace(arg) == "" {
+				continue
+			}
+			params = append(params, normalizeCType(t, name, arg))
+		}
+		protos[name] = normalizeCType(t, name, ret) + "(" + strings.Join(params, ", ") + ")"
+	}
+	if len(protos) == 0 {
+		t.Fatalf("no function declarations found in %s -- the header's shape changed and this test is no longer checking anything", headerPath)
+	}
+	return protos
+}
+
+// normalizeCType reduces a C declarator to "<base><spaced stars>", dropping the
+// parameter name, `const`, and all whitespace variation.
+func normalizeCType(t *testing.T, fn, decl string) string {
+	t.Helper()
+
+	stars := strings.Count(decl, "*")
+	cleaned := strings.ReplaceAll(strings.ReplaceAll(decl, "*", " "), "const", " ")
+	for _, field := range strings.Fields(cleaned) {
+		if cBaseTypes[field] {
+			if stars == 0 {
+				return field
+			}
+			return field + " " + strings.Repeat("*", stars)
+		}
+	}
+	t.Errorf("%s: cannot normalize C type %q from %s -- add its base type to cBaseTypes", fn, strings.TrimSpace(decl), headerPath)
+	return strings.TrimSpace(decl)
 }
 
 // nodeText returns the exact source text of a node. Positions are fileset
