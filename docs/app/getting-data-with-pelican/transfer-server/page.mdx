@@ -1,0 +1,129 @@
+import { Callout } from 'nextra/components'
+
+# Using a Transfer Server
+
+A *transfer server* runs transfers on your behalf.
+Instead of your client moving the data — or, for a third-party copy, supervising the origins that move it — you hand the job to a server, which returns a job ID and carries the transfer out whether or not your client is still running.
+
+Two things follow from that, and they are the reasons to use one:
+
+- **The transfer outlives your session.** You can submit a multi-hour copy, close your laptop, and let it finish.
+- **The server holds the credentials.** It stores your storage tokens encrypted and refreshes them as the job runs, so a transfer long enough to outlive its own access token still completes.
+
+<Callout type="info">
+This page is about `--transfer-server`, which submits to a *remote* server.
+It is a different mechanism from `--async`, which runs a transfer in the background on your own machine through the local client agent and is managed with `pelican job`.
+</Callout>
+
+## Submitting a transfer
+
+Point `pelican object copy` at the server with `--transfer-server`:
+
+```bash copy
+pelican object copy --transfer-server https://transfer.example.com:8447 \
+	pelican://<federation-url>/<namespace>/source \
+	pelican://<federation-url>/<namespace>/destination
+```
+
+The command returns as soon as the server accepts the job:
+
+```
+Transfer job submitted: 0194f3c2-... (status: pending)
+```
+
+If the origin you are writing to runs its own embedded transfer service, you can name the origin instead and let the client discover it.
+`--dest-origin` pings the origin first and fails fast if the service is not enabled there:
+
+```bash copy
+pelican object copy --dest-origin https://origin.example.com:8447 \
+	pelican://<federation-url>/<namespace>/source \
+	pelican://<federation-url>/<namespace>/destination
+```
+
+`--transfer-server` and `--dest-origin` are mutually exclusive.
+
+### Waiting for the job
+
+Add `--wait` to block until the job reaches a terminal state:
+
+```bash copy
+pelican object copy --transfer-server https://transfer.example.com:8447 --wait \
+	pelican://.../source pelican://.../destination
+```
+
+The client follows the server's event stream rather than polling, and falls back to polling if the stream is unavailable.
+The command's exit status then reflects the job's outcome, which is what makes `--wait` the form to use in a script.
+
+<Callout type="info">
+Without `--wait` you get a job ID and nothing else; there is currently no CLI command that reports on a previously submitted transfer-server job.
+To check on one later, query the server's API directly at `/api/v1.0/transfer/jobs/<job_id>`.
+</Callout>
+
+## Credentials
+
+The server cannot borrow the tokens on your machine — it needs its own copy of a storage credential it can refresh while the job runs.
+The first time you submit to a given server, the client arranges that for you:
+
+1. It authenticates you to the transfer server itself, which acts as its own OAuth2 issuer. You are prompted to visit a URL and approve the request.
+1. It works out which namespaces the transfer touches and what scopes they need, then obtains a storage credential for each end and stores it on the server.
+1. It records the resulting credential IDs locally, keyed by issuer and scope, so later transfers over the same namespaces reuse them without prompting.
+
+In the common case this means you approve something in a browser once per server, and subsequent submissions are silent.
+
+### Naming credentials explicitly
+
+To pin a transfer to credentials you have already stored, give their IDs:
+
+```bash copy
+pelican object copy --transfer-server https://transfer.example.com:8447 \
+	--source-credential-id <id> --dest-credential-id <id> \
+	pelican://.../source pelican://.../destination
+```
+
+When both are supplied the client skips discovery and bootstrapping entirely.
+
+### Managing stored credentials
+
+`pelican transfer credential` lists, adds, and removes the credentials a server holds for you:
+
+```bash copy
+pelican transfer credential list --server https://transfer.example.com:8447
+```
+
+If you already hold a storage token, you can store it directly rather than going through OAuth:
+
+```bash copy
+pelican transfer credential add --server https://transfer.example.com:8447 \
+	--name my-credential --issuer https://issuer.example.com \
+	--access-token-file /path/to/token
+```
+
+The token is read from standard input if `--access-token-file` is omitted.
+Stored credentials are encrypted on the server and are never returned by its API — you can list their names, issuers, and scopes, but not read the tokens back.
+
+Deleting one takes the credential's ID, which `list` reports:
+
+```bash copy
+pelican transfer credential delete --server https://transfer.example.com:8447 <id>
+```
+
+<Callout type="warning">
+A credential you store is a token the server can use on your behalf until it expires or you delete it.
+Store credentials only on a transfer server you trust, and delete them when you no longer need the access.
+</Callout>
+
+Servers clean up credentials that go unused; how long they are kept is up to the administrator.
+
+### Supplying the control-plane token yourself
+
+`--transfer-server-token` takes a file containing a token for the transfer server's API, skipping the interactive authentication step.
+This is the flag to use from a batch job or any other context where no one can approve a browser prompt:
+
+```bash copy
+pelican object copy --transfer-server https://transfer.example.com:8447 \
+	--transfer-server-token /path/to/api-token \
+	--source-credential-id <id> --dest-credential-id <id> \
+	pelican://.../source pelican://.../destination
+```
+
+This token authorizes *use of the API* only. It conveys no access to storage — that is what the stored credentials are for — so a non-interactive submission normally names its credential IDs as well.
