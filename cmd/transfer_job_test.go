@@ -659,59 +659,88 @@ func progressStreamServer(t *testing.T, frames int) *httptest.Server {
 	}))
 }
 
-// --wait has to show the job moving, not just report its final state.
-func TestTransferJobWaitRendersLiveProgress(t *testing.T) {
-	t.Run("terminal repaints one line", func(t *testing.T) {
+// --wait feeds the job's progress to the same progress bars the rest of the
+// client draws, rather than printing lines of its own.
+func TestTransferJobWaitDrivesProgressBars(t *testing.T) {
+	srv := progressStreamServer(t, 3)
+	defer srv.Close()
+
+	client, out := newTestJobClient(t, srv, false)
+	// Attach a bar display's bookkeeping without launching its renderer: the
+	// frames-to-callback wiring is what matters here, not what mpb paints.
+	bars := newProgressBar()
+	client.progress = bars
+
+	require.NoError(t, runWithDeadline(t, func() error {
+		return client.runTransferJobStatus(context.Background(), "job-1", true)
+	}))
+
+	bars.lock.RLock()
+	defer bars.lock.RUnlock()
+	// One job, one aggregate count, so one bar keyed by the job ID.
+	require.Len(t, bars.status, 1)
+	status, ok := bars.status["job-1"]
+	require.True(t, ok, "the bar must be keyed by job ID")
+	assert.Equal(t, int64(768), status.xfer, "the last frame's byte count must reach the bar")
+	assert.Equal(t, int64(1024), status.size)
+	assert.True(t, status.completed, "the bar must be retired when the job ends")
+
+	// Nothing is hand-printed around the bar; only the command's own messages.
+	assert.NotContains(t, out.String(), "Transferred ")
+	assert.Contains(t, out.String(), "completed successfully")
+}
+
+// Whether a wait draws bars at all is the configuration's decision plus
+// --json, never the wait's own idea of what a terminal is.
+func TestTransferJobWantsProgressBars(t *testing.T) {
+	cases := []struct {
+		name         string
+		showProgress bool
+		jsonOut      bool
+		want         bool
+	}{
+		{name: "enabled", showProgress: true, want: true},
+		{name: "config says no", showProgress: false, want: false},
+		// The object commands have no --json, so the shared gate cannot know
+		// about it; a wait that honors it keeps --json output parseable.
+		{name: "json suppresses", showProgress: true, jsonOut: true, want: false},
+		{name: "json and config", showProgress: false, jsonOut: true, want: false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			client := &transferJobClient{showProgress: tc.showProgress, jsonOut: tc.jsonOut}
+			assert.Equal(t, tc.want, client.wantsProgressBars())
+		})
+	}
+}
+
+// A wait that may not draw bars must not create a display at all, and must
+// leave --json output as nothing but the server's body.
+func TestTransferJobWaitSuppressesProgressBars(t *testing.T) {
+	t.Run("config disabled", func(t *testing.T) {
 		srv := progressStreamServer(t, 3)
 		defer srv.Close()
 
-		client, out := newTestJobClient(t, srv, false)
-		client.isTTY = true
+		client, _ := newTestJobClient(t, srv, false)
+		client.showProgress = false
 		require.NoError(t, runWithDeadline(t, func() error {
-			return client.runTransferJobStatus(context.Background(), "job-1", true)
+			return client.waitForJob(context.Background(), "job-1")
 		}))
-
-		text := out.String()
-		// Every frame is drawn, but each over the last: carriage returns
-		// rather than a growing wall of lines.
-		assert.Equal(t, 3, strings.Count(text, "\r"))
-		assert.Contains(t, text, "768 B / 1.0 KiB")
-		assert.Contains(t, text, "completed successfully")
-		// The completion message must start on a line of its own rather than
-		// landing on top of the last progress line.
-		assert.Regexp(t, "\n *Transfer job job-1 completed", text)
+		assert.Nil(t, client.progress, "no bar display may be created when bars are off")
 	})
 
-	t.Run("non-terminal throttles", func(t *testing.T) {
-		srv := progressStreamServer(t, 5)
-		defer srv.Close()
-
-		client, out := newTestJobClient(t, srv, false)
-		client.isTTY = false
-		require.NoError(t, runWithDeadline(t, func() error {
-			return client.runTransferJobStatus(context.Background(), "job-1", true)
-		}))
-
-		text := out.String()
-		// Nothing can repaint a redirected stream, so five frames must not
-		// become five lines: the first is shown and the rest fall inside the
-		// throttle window.
-		assert.Equal(t, 1, strings.Count(text, "Transferred "))
-		assert.NotContains(t, text, "\r")
-		assert.Contains(t, text, "completed successfully")
-	})
-
-	t.Run("json output carries no progress lines", func(t *testing.T) {
+	t.Run("json", func(t *testing.T) {
 		srv := progressStreamServer(t, 3)
 		defer srv.Close()
 
 		client, out := newTestJobClient(t, srv, true)
+		client.showProgress = true
 		require.NoError(t, runWithDeadline(t, func() error {
 			return client.runTransferJobStatus(context.Background(), "job-1", true)
 		}))
+		assert.Nil(t, client.progress, "--json must not start a bar display")
 
 		// --json promises the server's own body and nothing else.
-		assert.NotContains(t, out.String(), "Transferred ")
 		var decoded map[string]any
 		require.NoError(t, json.Unmarshal(out.Bytes(), &decoded))
 		assert.Equal(t, "completed", decoded["status"])
@@ -719,7 +748,7 @@ func TestTransferJobWaitRendersLiveProgress(t *testing.T) {
 }
 
 // `object copy --transfer-server --wait` waits through this very constructor,
-// so whatever it produces is what both paths render.
+// so whatever it decides is what both paths do.
 func TestNewTransferJobClientForSharesWaitRendering(t *testing.T) {
 	srv := progressStreamServer(t, 2)
 	defer srv.Close()
@@ -729,16 +758,22 @@ func TestNewTransferJobClientForSharesWaitRendering(t *testing.T) {
 	assert.Equal(t, srv.URL, client.serverURL)
 	assert.Equal(t, "tok", client.token)
 	assert.Equal(t, outputJSON, client.jsonOut)
-	assert.Equal(t, stdoutIsTerminal(), client.isTTY)
+	// The same gate every object command uses, not a private notion of one.
+	assert.Equal(t, shouldDisplayProgressBars(), client.showProgress)
 
-	// Redirect its output and confirm the shared wait path is the
-	// progress-rendering one, so object copy's --wait gets it for free.
+	// Redirect its output and confirm the shared wait path is the one that
+	// feeds the bars, so object copy's --wait gets them for free.
 	out := &bytes.Buffer{}
 	client.out = out
-	client.isTTY = true
+	bars := newProgressBar()
+	client.progress = bars
 	require.NoError(t, runWithDeadline(t, func() error {
 		return client.waitForJob(context.Background(), "job-1")
 	}))
-	assert.Contains(t, out.String(), "Transferred ")
+
+	bars.lock.RLock()
+	defer bars.lock.RUnlock()
+	require.Contains(t, bars.status, "job-1")
+	assert.Equal(t, int64(512), bars.status["job-1"].xfer)
 	assert.Contains(t, out.String(), "completed successfully")
 }

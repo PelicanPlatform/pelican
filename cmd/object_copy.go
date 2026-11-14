@@ -333,9 +333,7 @@ func copyMain(cmd *cobra.Command, args []string) {
 
 	tokenOpts := resolveTokenOptions(cmd)
 
-	// Check if the program was executed from a terminal and does not specify a log location
-	// https://rosettacode.org/wiki/Check_output_device_is_a_terminal#Go
-	if fileInfo, _ := os.Stdout.Stat(); (fileInfo.Mode()&os.ModeCharDevice) != 0 && param.Logging_LogLocation.GetString() == "" && !param.Logging_Client_DisableProgressBars.GetBool() {
+	if shouldDisplayProgressBars() {
 		pb.launchDisplay(ctx)
 	}
 

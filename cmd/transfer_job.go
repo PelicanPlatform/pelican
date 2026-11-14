@@ -135,14 +135,12 @@ type transferJobClient struct {
 	token      string
 	out        io.Writer
 	jsonOut    bool
-	// isTTY decides how live progress is rendered: a terminal gets one line
-	// repainted in place, anything else gets an occasional appended line.
-	isTTY bool
-
-	// Progress-rendering state. Only the goroutine consuming one job's event
-	// stream touches these, so they need no synchronization.
-	lastProgressAt   time.Time
-	progressLineOpen bool
+	// showProgress is the configuration's answer to whether progress bars may
+	// be drawn on this run (see shouldDisplayProgressBars).
+	showProgress bool
+	// progress is the bar display for the duration of a wait, created by
+	// waitForJob and nil at every other time.
+	progress *progressBars
 }
 
 // newTransferJobClientFor builds a job client that writes to this process's
@@ -152,20 +150,13 @@ type transferJobClient struct {
 // whether stdout is a terminal.
 func newTransferJobClientFor(httpClient *http.Client, serverURL, token string) *transferJobClient {
 	return &transferJobClient{
-		httpClient: httpClient,
-		serverURL:  serverURL,
-		token:      token,
-		out:        os.Stdout,
-		jsonOut:    outputJSON,
-		isTTY:      stdoutIsTerminal(),
+		httpClient:   httpClient,
+		serverURL:    serverURL,
+		token:        token,
+		out:          os.Stdout,
+		jsonOut:      outputJSON,
+		showProgress: shouldDisplayProgressBars(),
 	}
-}
-
-// stdoutIsTerminal reports whether standard output is a character device, the
-// same check the progress bars in `object get`/`object put` make.
-func stdoutIsTerminal() bool {
-	fileInfo, err := os.Stdout.Stat()
-	return err == nil && (fileInfo.Mode()&os.ModeCharDevice) != 0
 }
 
 // newTransferJobClient resolves the transfer server and token from the flags
@@ -233,13 +224,6 @@ func (c *transferJobClient) cancelJob(ctx context.Context, jobID string) ([]byte
 	return body, err
 }
 
-// nonTTYProgressInterval bounds how often a live progress line is written when
-// the output is not a terminal. There is no carriage return to repaint with
-// there, so one line per event would bury a log under thousands of them. The
-// first update still goes out immediately, so a redirected run shows promptly
-// that bytes are moving.
-const nonTTYProgressInterval = 30 * time.Second
-
 // formatTransferProgress renders a job's byte counts for a human.
 //
 // The server reports a total of zero when it does not yet know how big the job
@@ -270,35 +254,27 @@ func progressCell(progress *client_agent.JobProgress) string {
 	return utils.HumanBytes(progress.BytesTransferred)
 }
 
-// renderProgressEvent shows one `event: progress` frame from a job's event
-// stream. --json output is left alone: its contract is the server's own
-// terminal body, which a stream of progress lines would corrupt.
-func (c *transferJobClient) renderProgressEvent(bytesTransferred, totalBytes int64) {
-	if c.jsonOut || (bytesTransferred == 0 && totalBytes == 0) {
-		return
-	}
-	line := "Transferred " + formatTransferProgress(bytesTransferred, totalBytes)
-	if c.isTTY {
-		// Pad to overwrite whatever a previous, possibly longer, line left.
-		fmt.Fprintf(c.out, "\r%-60s", line)
-		c.progressLineOpen = true
-		return
-	}
-	now := time.Now()
-	if !c.lastProgressAt.IsZero() && now.Sub(c.lastProgressAt) < nonTTYProgressInterval {
-		return
-	}
-	c.lastProgressAt = now
-	fmt.Fprintln(c.out, line)
+// wantsProgressBars reports whether a wait should draw progress bars. The
+// configuration decides (shouldDisplayProgressBars); --json additionally
+// forbids them, since its contract is the server's own body on stdout and
+// nothing else, and the object commands have no --json for that gate to know
+// about.
+func (c *transferJobClient) wantsProgressBars() bool {
+	return c.showProgress && !c.jsonOut
 }
 
-// endProgressLine closes an in-place progress line so that whatever is printed
-// next starts on a line of its own instead of overwriting it.
-func (c *transferJobClient) endProgressLine() {
-	if c.progressLineOpen {
-		fmt.Fprintln(c.out)
-		c.progressLineOpen = false
+// recordProgress feeds one `event: progress` frame to the progress bar
+// display. A job's progress is a single aggregate count, so it drives a single
+// bar keyed -- and labelled -- by the job ID.
+//
+// A totalBytes of zero is the server saying it does not know the size yet. The
+// bar is created with no total and only takes one once a real size arrives, so
+// until then it shows its byte counter climbing rather than a bar stuck at 0%.
+func (c *transferJobClient) recordProgress(jobID string, bytesTransferred, totalBytes int64, completed bool) {
+	if c.progress == nil {
+		return
 	}
+	c.progress.callback(jobID, bytesTransferred, totalBytes, completed)
 }
 
 // errSSEUnavailable signals that the server-sent-events stream could not be used
@@ -310,6 +286,16 @@ var errSSEUnavailable = errors.New("transfer event stream unavailable")
 // server's push-based event stream (no polling) and falling back to polling when
 // the stream is unavailable.
 func (c *transferJobClient) waitForJob(ctx context.Context, jobID string) error {
+	// The job's progress is drawn with the same bars the rest of the client
+	// uses, so a wait here looks like any other transfer in progress.
+	if c.progress == nil && c.wantsProgressBars() {
+		progress := newProgressBar()
+		progress.launchDisplay(ctx)
+		defer progress.shutdown()
+		c.progress = progress
+		defer func() { c.progress = nil }()
+	}
+
 	if err := c.watchJobSSE(ctx, jobID); err != errSSEUnavailable {
 		return err // terminal result (nil / failed / cancelled) or ctx error
 	}
@@ -341,6 +327,9 @@ func (c *transferJobClient) watchJobSSE(ctx context.Context, jobID string) error
 
 	scanner := bufio.NewScanner(resp.Body)
 	scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024)
+	// Last counts seen, so the bar can be retired as complete rather than
+	// simply vanishing when the job ends.
+	var lastBytes, lastTotal int64
 	for scanner.Scan() {
 		data, ok := strings.CutPrefix(scanner.Text(), "data: ")
 		if !ok {
@@ -357,15 +346,16 @@ func (c *transferJobClient) watchJobSSE(ctx context.Context, jobID string) error
 		}
 		// A frame carrying no status is a progress update: the server
 		// publishes those as `event: progress` between status transitions
-		// while the job runs. Showing them is the difference between a wait
-		// that looks hung and one that is visibly moving.
+		// while the job runs. Feeding them to the bar is the difference
+		// between a wait that looks hung and one that is visibly moving.
 		if ev.Status == "" {
-			c.renderProgressEvent(ev.BytesTransferred, ev.TotalBytes)
+			lastBytes, lastTotal = ev.BytesTransferred, ev.TotalBytes
+			c.recordProgress(jobID, ev.BytesTransferred, ev.TotalBytes, false)
 			continue
 		}
 		switch ev.Status {
 		case "completed":
-			c.endProgressLine()
+			c.recordProgress(jobID, lastBytes, lastTotal, true)
 			if c.jsonOut {
 				fmt.Fprintln(c.out, data)
 			} else {
@@ -373,17 +363,16 @@ func (c *transferJobClient) watchJobSSE(ctx context.Context, jobID string) error
 			}
 			return nil
 		case "failed", "error":
-			c.endProgressLine()
+			c.recordProgress(jobID, lastBytes, lastTotal, true)
 			return fmt.Errorf("transfer job %s failed: %s", jobID, ev.Error)
 		case "cancelled":
-			c.endProgressLine()
+			c.recordProgress(jobID, lastBytes, lastTotal, true)
 			return fmt.Errorf("transfer job %s was cancelled", jobID)
 		}
 	}
-	// However this stream ended, anything printed from here on -- a polling
-	// fallback's output, or the caller's error -- must not land on top of a
-	// half-drawn progress line.
-	c.endProgressLine()
+	// However this stream ended, the bar must stop tracking a job nothing is
+	// watching any more.
+	c.recordProgress(jobID, lastBytes, lastTotal, true)
 	// Stream ended without a terminal event (dropped, or ctx cancelled). If the
 	// context is done, surface that; otherwise fall back to polling.
 	if ctx.Err() != nil {

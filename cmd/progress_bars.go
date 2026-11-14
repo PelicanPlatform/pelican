@@ -1,4 +1,4 @@
-//go:build client
+//go:build client || server
 
 /***************************************************************
  *
@@ -31,7 +31,36 @@ import (
 	"github.com/vbauerster/mpb/v8"
 	"github.com/vbauerster/mpb/v8/decor"
 	"golang.org/x/sync/errgroup"
+
+	"github.com/pelicanplatform/pelican/param"
 )
+
+// progressBarsEnabled reports whether this run's configuration permits
+// progress bars at all, independently of where output is going.
+//
+// Logging to a file turns them off because the display takes stdout over for
+// its own redraws (launchDisplay restores the log output when it ends), and
+// Logging.Client.DisableProgressBars is the knob a user sets when they do not
+// want bars regardless.
+func progressBarsEnabled() bool {
+	return param.Logging_LogLocation.GetString() == "" &&
+		!param.Logging_Client_DisableProgressBars.GetBool()
+}
+
+// shouldDisplayProgressBars reports whether a command should draw progress
+// bars on this run: stdout has to be a terminal, since nothing can repaint a
+// pipe or a log file, and the configuration has to permit them.
+//
+// Every command that draws a bar asks this one function. The three conditions
+// used to be spelled out inline at each call site, which is exactly how a new
+// caller comes to honor two of them and quietly ignore the third.
+func shouldDisplayProgressBars() bool {
+	fileInfo, err := os.Stdout.Stat()
+	if err != nil || (fileInfo.Mode()&os.ModeCharDevice) == 0 {
+		return false
+	}
+	return progressBarsEnabled()
+}
 
 type (
 	progressStatus struct {
