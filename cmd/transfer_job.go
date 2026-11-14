@@ -37,7 +37,9 @@ import (
 	log "github.com/sirupsen/logrus"
 	"github.com/spf13/cobra"
 
+	"github.com/pelicanplatform/pelican/client_agent"
 	"github.com/pelicanplatform/pelican/transfer"
+	"github.com/pelicanplatform/pelican/utils"
 )
 
 var (
@@ -133,6 +135,37 @@ type transferJobClient struct {
 	token      string
 	out        io.Writer
 	jsonOut    bool
+	// isTTY decides how live progress is rendered: a terminal gets one line
+	// repainted in place, anything else gets an occasional appended line.
+	isTTY bool
+
+	// Progress-rendering state. Only the goroutine consuming one job's event
+	// stream touches these, so they need no synchronization.
+	lastProgressAt   time.Time
+	progressLineOpen bool
+}
+
+// newTransferJobClientFor builds a job client that writes to this process's
+// standard output. Both the `transfer job` commands and `object copy
+// --transfer-server` go through here, so the two render a job's progress the
+// same way and neither has to work out for itself whether --json is set or
+// whether stdout is a terminal.
+func newTransferJobClientFor(httpClient *http.Client, serverURL, token string) *transferJobClient {
+	return &transferJobClient{
+		httpClient: httpClient,
+		serverURL:  serverURL,
+		token:      token,
+		out:        os.Stdout,
+		jsonOut:    outputJSON,
+		isTTY:      stdoutIsTerminal(),
+	}
+}
+
+// stdoutIsTerminal reports whether standard output is a character device, the
+// same check the progress bars in `object get`/`object put` make.
+func stdoutIsTerminal() bool {
+	fileInfo, err := os.Stdout.Stat()
+	return err == nil && (fileInfo.Mode()&os.ModeCharDevice) != 0
 }
 
 // newTransferJobClient resolves the transfer server and token from the flags
@@ -142,13 +175,7 @@ func newTransferJobClient() (*transferJobClient, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &transferJobClient{
-		httpClient: httpClient,
-		serverURL:  serverURL,
-		token:      tokenValue,
-		out:        os.Stdout,
-		jsonOut:    outputJSON,
-	}, nil
+	return newTransferJobClientFor(httpClient, serverURL, tokenValue), nil
 }
 
 // jobsURL builds the URL of the jobs collection, or of one job when a job ID
@@ -206,6 +233,74 @@ func (c *transferJobClient) cancelJob(ctx context.Context, jobID string) ([]byte
 	return body, err
 }
 
+// nonTTYProgressInterval bounds how often a live progress line is written when
+// the output is not a terminal. There is no carriage return to repaint with
+// there, so one line per event would bury a log under thousands of them. The
+// first update still goes out immediately, so a redirected run shows promptly
+// that bytes are moving.
+const nonTTYProgressInterval = 30 * time.Second
+
+// formatTransferProgress renders a job's byte counts for a human.
+//
+// The server reports a total of zero when it does not yet know how big the job
+// is (nothing has been stat'ed, or the sources do not advertise a size). A
+// percentage computed against that would be invented, so it is left out rather
+// than shown as 0% or 100%.
+func formatTransferProgress(bytesTransferred, totalBytes int64) string {
+	if totalBytes > 0 {
+		return fmt.Sprintf("%s / %s (%.1f%%)",
+			utils.HumanBytes(bytesTransferred), utils.HumanBytes(totalBytes),
+			float64(bytesTransferred)/float64(totalBytes)*100)
+	}
+	return fmt.Sprintf("%s (total size unknown)", utils.HumanBytes(bytesTransferred))
+}
+
+// progressCell renders a job's progress for one cell of the list table. A nil
+// progress is the server saying it cannot know (see
+// transfer.TransferJobStatus), which is not the same as nothing having moved.
+func progressCell(progress *client_agent.JobProgress) string {
+	if progress == nil {
+		return "unknown"
+	}
+	if progress.TotalBytes > 0 {
+		return fmt.Sprintf("%s / %s (%.0f%%)",
+			utils.HumanBytes(progress.BytesTransferred),
+			utils.HumanBytes(progress.TotalBytes), progress.Percentage)
+	}
+	return utils.HumanBytes(progress.BytesTransferred)
+}
+
+// renderProgressEvent shows one `event: progress` frame from a job's event
+// stream. --json output is left alone: its contract is the server's own
+// terminal body, which a stream of progress lines would corrupt.
+func (c *transferJobClient) renderProgressEvent(bytesTransferred, totalBytes int64) {
+	if c.jsonOut || (bytesTransferred == 0 && totalBytes == 0) {
+		return
+	}
+	line := "Transferred " + formatTransferProgress(bytesTransferred, totalBytes)
+	if c.isTTY {
+		// Pad to overwrite whatever a previous, possibly longer, line left.
+		fmt.Fprintf(c.out, "\r%-60s", line)
+		c.progressLineOpen = true
+		return
+	}
+	now := time.Now()
+	if !c.lastProgressAt.IsZero() && now.Sub(c.lastProgressAt) < nonTTYProgressInterval {
+		return
+	}
+	c.lastProgressAt = now
+	fmt.Fprintln(c.out, line)
+}
+
+// endProgressLine closes an in-place progress line so that whatever is printed
+// next starts on a line of its own instead of overwriting it.
+func (c *transferJobClient) endProgressLine() {
+	if c.progressLineOpen {
+		fmt.Fprintln(c.out)
+		c.progressLineOpen = false
+	}
+}
+
 // errSSEUnavailable signals that the server-sent-events stream could not be used
 // (server too old, a buffering proxy, or a mid-stream drop) and the caller
 // should fall back to polling.
@@ -252,14 +347,25 @@ func (c *transferJobClient) watchJobSSE(ctx context.Context, jobID string) error
 			continue // event:/comment/blank lines
 		}
 		var ev struct {
-			Status string `json:"status"`
-			Error  string `json:"error"`
+			Status           string `json:"status"`
+			Error            string `json:"error"`
+			BytesTransferred int64  `json:"bytes_transferred"`
+			TotalBytes       int64  `json:"total_bytes"`
 		}
 		if json.Unmarshal([]byte(data), &ev) != nil {
 			continue
 		}
+		// A frame carrying no status is a progress update: the server
+		// publishes those as `event: progress` between status transitions
+		// while the job runs. Showing them is the difference between a wait
+		// that looks hung and one that is visibly moving.
+		if ev.Status == "" {
+			c.renderProgressEvent(ev.BytesTransferred, ev.TotalBytes)
+			continue
+		}
 		switch ev.Status {
 		case "completed":
+			c.endProgressLine()
 			if c.jsonOut {
 				fmt.Fprintln(c.out, data)
 			} else {
@@ -267,11 +373,17 @@ func (c *transferJobClient) watchJobSSE(ctx context.Context, jobID string) error
 			}
 			return nil
 		case "failed", "error":
+			c.endProgressLine()
 			return fmt.Errorf("transfer job %s failed: %s", jobID, ev.Error)
 		case "cancelled":
+			c.endProgressLine()
 			return fmt.Errorf("transfer job %s was cancelled", jobID)
 		}
 	}
+	// However this stream ended, anything printed from here on -- a polling
+	// fallback's output, or the caller's error -- must not land on top of a
+	// half-drawn progress line.
+	c.endProgressLine()
 	// Stream ended without a terminal event (dropped, or ctx cancelled). If the
 	// context is done, surface that; otherwise fall back to polling.
 	if ctx.Err() != nil {
@@ -383,14 +495,14 @@ func (c *transferJobClient) runTransferJobList(ctx context.Context, status strin
 	}
 
 	w := tabwriter.NewWriter(c.out, 0, 0, 2, ' ', 0)
-	fmt.Fprintln(w, "JOB ID\tSTATUS\tCREATED\tCOMPLETED")
+	fmt.Fprintln(w, "JOB ID\tSTATUS\tCREATED\tCOMPLETED\tPROGRESS")
 	for _, job := range resp.Jobs {
 		completed := "-"
 		if job.CompletedAt != nil {
 			completed = job.CompletedAt.UTC().Format(time.RFC3339)
 		}
-		fmt.Fprintf(w, "%s\t%s\t%s\t%s\n", job.JobID, job.Status,
-			job.CreatedAt.UTC().Format(time.RFC3339), completed)
+		fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\n", job.JobID, job.Status,
+			job.CreatedAt.UTC().Format(time.RFC3339), completed, progressCell(job.Progress))
 	}
 	if err := w.Flush(); err != nil {
 		return errors.Wrap(err, "failed to write job list")
@@ -460,6 +572,25 @@ func (c *transferJobClient) printJobStatus(status *transfer.TransferJobStatus, b
 	}
 	if status.DestCredentialID != "" {
 		fmt.Fprintf(c.out, "Dest credential:   %s\n", status.DestCredentialID)
+	}
+	// An absent progress is not "nothing moved": the server drops a finished
+	// job from memory and rebuilds its status from a durable record that
+	// carries no byte counts, so say so rather than printing a zero.
+	if status.Progress == nil {
+		fmt.Fprintln(c.out, "Progress:  unknown (the server no longer holds this job's counters)")
+	} else {
+		progress := status.Progress
+		fmt.Fprintf(c.out, "Progress:  %s\n",
+			formatTransferProgress(progress.BytesTransferred, progress.TotalBytes))
+		fmt.Fprintf(c.out, "Transfers: %d/%d completed",
+			progress.TransfersCompleted, progress.TransfersTotal)
+		if progress.TransfersFailed > 0 {
+			fmt.Fprintf(c.out, " (%d failed)", progress.TransfersFailed)
+		}
+		fmt.Fprintln(c.out)
+		if progress.TransferRateMbps > 0 {
+			fmt.Fprintf(c.out, "Rate:      %.2f Mbps\n", progress.TransferRateMbps)
+		}
 	}
 	if status.Error != "" {
 		fmt.Fprintf(c.out, "Error:     %s\n", status.Error)

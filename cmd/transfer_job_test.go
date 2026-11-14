@@ -35,6 +35,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/pelicanplatform/pelican/client_agent"
 	"github.com/pelicanplatform/pelican/transfer"
 )
 
@@ -514,4 +515,230 @@ func TestTransferJobCommandWiring(t *testing.T) {
 	// The help has to tell the two job trees apart, since `pelican job` means
 	// something else entirely.
 	assert.Contains(t, jobCommand.Long, "pelican job")
+}
+
+// progressOf builds a JobProgress the way the server's GetJobProgress would.
+func progressOf(bytesTransferred, totalBytes int64, percentage float64) *client_agent.JobProgress {
+	return &client_agent.JobProgress{
+		BytesTransferred:   bytesTransferred,
+		TotalBytes:         totalBytes,
+		Percentage:         percentage,
+		TransfersCompleted: 1,
+		TransfersTotal:     2,
+	}
+}
+
+func TestFormatTransferProgress(t *testing.T) {
+	// A total of zero is the server saying it does not know how big the job
+	// is; a percentage against it would be invented.
+	assert.Equal(t, "1.0 KiB (total size unknown)", formatTransferProgress(1024, 0))
+	assert.Equal(t, "0 B (total size unknown)", formatTransferProgress(0, 0))
+
+	assert.Contains(t, formatTransferProgress(512, 1024), "50.0%")
+	assert.NotContains(t, formatTransferProgress(1024, 0), "%")
+}
+
+func TestProgressCell(t *testing.T) {
+	// Nil is "the server cannot know", which must not read as zero bytes.
+	assert.Equal(t, "unknown", progressCell(nil))
+	assert.NotContains(t, progressCell(nil), "0")
+
+	assert.Contains(t, progressCell(progressOf(512, 1024, 50)), "50%")
+	// No total: report what moved, invent no percentage.
+	noTotal := progressCell(progressOf(2048, 0, 0))
+	assert.Contains(t, noTotal, "2.0 KiB")
+	assert.NotContains(t, noTotal, "%")
+}
+
+func TestTransferJobListShowsProgress(t *testing.T) {
+	completed := mustTime(t, "2026-01-02T03:04:05Z")
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		writeJSON(t, w, http.StatusOK, transfer.TransferJobListResponse{
+			Jobs: []transfer.TransferJobStatus{
+				{
+					JobID:     "job-live",
+					Status:    "running",
+					CreatedAt: mustTime(t, "2026-01-02T03:00:00Z"),
+					Progress:  progressOf(512, 1024, 50),
+				},
+				{
+					JobID:       "job-evicted",
+					Status:      "completed",
+					CreatedAt:   mustTime(t, "2026-01-01T00:00:00Z"),
+					CompletedAt: &completed,
+					// No Progress: the server no longer holds the counters.
+				},
+			},
+			Total: 2, Limit: 10, Offset: 0,
+		})
+	}))
+	defer srv.Close()
+
+	client, out := newTestJobClient(t, srv, false)
+	require.NoError(t, client.runTransferJobList(context.Background(), "", 10, 0))
+
+	text := out.String()
+	assert.Contains(t, text, "PROGRESS")
+	assert.Contains(t, text, "50%")
+	assert.Contains(t, text, "unknown")
+}
+
+func TestTransferJobStatusShowsProgress(t *testing.T) {
+	cases := []struct {
+		name     string
+		progress *client_agent.JobProgress
+		contains []string
+		absent   []string
+	}{
+		{
+			name:     "known total",
+			progress: progressOf(512, 1024, 50),
+			contains: []string{"Progress:", "50.0%", "Transfers: 1/2 completed"},
+		},
+		{
+			name:     "unknown total",
+			progress: progressOf(2048, 0, 0),
+			contains: []string{"2.0 KiB", "total size unknown"},
+			absent:   []string{"%"},
+		},
+		{
+			name:     "no bytes yet",
+			progress: progressOf(0, 4096, 0),
+			contains: []string{"0 B", "0.0%"},
+			// A real zero must not be reported as unknowable.
+			absent: []string{"unknown"},
+		},
+		{
+			name:     "evicted job",
+			progress: nil,
+			contains: []string{"Progress:  unknown"},
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				writeJSON(t, w, http.StatusOK, transfer.TransferJobStatus{
+					JobID: "job-1", Status: "running", Progress: tc.progress,
+				})
+			}))
+			defer srv.Close()
+
+			client, out := newTestJobClient(t, srv, false)
+			require.NoError(t, client.runTransferJobStatus(context.Background(), "job-1", false))
+			for _, want := range tc.contains {
+				assert.Contains(t, out.String(), want)
+			}
+			for _, unwanted := range tc.absent {
+				assert.NotContains(t, out.String(), unwanted)
+			}
+		})
+	}
+}
+
+// progressStreamServer serves a job that is running, then streams several
+// progress frames before the terminal one.
+func progressStreamServer(t *testing.T, frames int) *httptest.Server {
+	t.Helper()
+	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if !strings.HasSuffix(r.URL.Path, "/events") {
+			writeJSON(t, w, http.StatusOK, transfer.TransferJobStatus{
+				JobID: "job-1", Status: "running", Progress: progressOf(0, 1024, 0),
+			})
+			return
+		}
+		events := make([]map[string]any, 0, frames+1)
+		for i := 1; i <= frames; i++ {
+			events = append(events, map[string]any{
+				"job_id":            "job-1",
+				"bytes_transferred": int64(i) * 256,
+				"total_bytes":       int64(1024),
+			})
+		}
+		events = append(events, map[string]any{"job_id": "job-1", "status": "completed"})
+		writeSSE(t, w, events)
+	}))
+}
+
+// --wait has to show the job moving, not just report its final state.
+func TestTransferJobWaitRendersLiveProgress(t *testing.T) {
+	t.Run("terminal repaints one line", func(t *testing.T) {
+		srv := progressStreamServer(t, 3)
+		defer srv.Close()
+
+		client, out := newTestJobClient(t, srv, false)
+		client.isTTY = true
+		require.NoError(t, runWithDeadline(t, func() error {
+			return client.runTransferJobStatus(context.Background(), "job-1", true)
+		}))
+
+		text := out.String()
+		// Every frame is drawn, but each over the last: carriage returns
+		// rather than a growing wall of lines.
+		assert.Equal(t, 3, strings.Count(text, "\r"))
+		assert.Contains(t, text, "768 B / 1.0 KiB")
+		assert.Contains(t, text, "completed successfully")
+		// The completion message must start on a line of its own rather than
+		// landing on top of the last progress line.
+		assert.Regexp(t, "\n *Transfer job job-1 completed", text)
+	})
+
+	t.Run("non-terminal throttles", func(t *testing.T) {
+		srv := progressStreamServer(t, 5)
+		defer srv.Close()
+
+		client, out := newTestJobClient(t, srv, false)
+		client.isTTY = false
+		require.NoError(t, runWithDeadline(t, func() error {
+			return client.runTransferJobStatus(context.Background(), "job-1", true)
+		}))
+
+		text := out.String()
+		// Nothing can repaint a redirected stream, so five frames must not
+		// become five lines: the first is shown and the rest fall inside the
+		// throttle window.
+		assert.Equal(t, 1, strings.Count(text, "Transferred "))
+		assert.NotContains(t, text, "\r")
+		assert.Contains(t, text, "completed successfully")
+	})
+
+	t.Run("json output carries no progress lines", func(t *testing.T) {
+		srv := progressStreamServer(t, 3)
+		defer srv.Close()
+
+		client, out := newTestJobClient(t, srv, true)
+		require.NoError(t, runWithDeadline(t, func() error {
+			return client.runTransferJobStatus(context.Background(), "job-1", true)
+		}))
+
+		// --json promises the server's own body and nothing else.
+		assert.NotContains(t, out.String(), "Transferred ")
+		var decoded map[string]any
+		require.NoError(t, json.Unmarshal(out.Bytes(), &decoded))
+		assert.Equal(t, "completed", decoded["status"])
+	})
+}
+
+// `object copy --transfer-server --wait` waits through this very constructor,
+// so whatever it produces is what both paths render.
+func TestNewTransferJobClientForSharesWaitRendering(t *testing.T) {
+	srv := progressStreamServer(t, 2)
+	defer srv.Close()
+
+	client := newTransferJobClientFor(srv.Client(), srv.URL, "tok")
+	require.NotNil(t, client)
+	assert.Equal(t, srv.URL, client.serverURL)
+	assert.Equal(t, "tok", client.token)
+	assert.Equal(t, outputJSON, client.jsonOut)
+	assert.Equal(t, stdoutIsTerminal(), client.isTTY)
+
+	// Redirect its output and confirm the shared wait path is the
+	// progress-rendering one, so object copy's --wait gets it for free.
+	out := &bytes.Buffer{}
+	client.out = out
+	client.isTTY = true
+	require.NoError(t, runWithDeadline(t, func() error {
+		return client.waitForJob(context.Background(), "job-1")
+	}))
+	assert.Contains(t, out.String(), "Transferred ")
+	assert.Contains(t, out.String(), "completed successfully")
 }

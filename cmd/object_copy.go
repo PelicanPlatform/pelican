@@ -677,14 +677,10 @@ func submitToTransferServer(ctx context.Context, serverURL, tokenFile string, so
 		fmt.Printf("Transfer job submitted: %s — waiting for completion...\n", jobID)
 	}
 
-	jobClient := &transferJobClient{
-		httpClient: httpClient,
-		serverURL:  serverURL,
-		token:      tokenValue,
-		out:        os.Stdout,
-		jsonOut:    outputJSON,
-	}
-	return jobClient.waitForJob(ctx, jobID)
+	// Built through the shared constructor so that waiting here renders the
+	// job's live progress exactly as `pelican transfer job status --wait`
+	// does -- same event stream, same TTY handling, same --json contract.
+	return newTransferJobClientFor(httpClient, serverURL, tokenValue).waitForJob(ctx, jobID)
 }
 
 // pingTransferService checks whether the transfer API is enabled at the given
