@@ -131,9 +131,21 @@ jobs:
           retention-days: 1
           if-no-files-found: error
 
+  lotman-rpm:
+    name: libLotMan packages
+    needs: params
+    if: ${{ needs.params.outputs.release == 'true' }}
+    # libLotMan is not a GoReleaser artifact: it needs cgo, and it has to
+    # Obsolete the C++ `lotman` package it replaces, which nfpm cannot express.
+    # It is built here so the release carries it, and the binaries it produces
+    # are handed to GoReleaser below as extra release files.
+    uses: ./.github/workflows/build-lotman-rpm.yml
+    with:
+      all_platforms: true
+
   goreleaser:
     name: GoReleaser
-    needs: web-build
+    needs: [web-build, lotman-rpm]
     runs-on: ubuntu-latest
     # Nothing here runs pnpm, and "--skip=before" keeps GoReleaser from
     # running the hooks that would.
@@ -166,6 +178,16 @@ jobs:
         with:
           name: web-ui
           path: web_ui/frontend/out
+
+      - name: Download the libLotMan packages
+        # Each architecture's RPM and the source RPM arrive as separate
+        # artifacts, each already flat, so merging them gives the single
+        # directory that release.extra_files globs over.
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333  # v8.0.2
+        with:
+          pattern: lotman-*
+          merge-multiple: true
+          path: dist-lotman
 
       - name: Generate GoReleaser config
         run: |
