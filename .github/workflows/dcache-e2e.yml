@@ -1,0 +1,64 @@
+---
+name: dCache Tiering E2E Tests
+
+# Runs the cache's dCache tiering target (WebDAV with macaroons) against a
+# real dCache: a single-node instance from the official dcache/dcache image,
+# with a WebDAV door that accepts WLCG tokens and issues macaroons.  The
+# workflow only starts the script; everything about the dCache instance and
+# the tests lives in github_scripts/dcache-e2e/, so it can change without
+# touching this file.
+#
+# It runs on ubuntu-latest rather than in the dev container because it
+# needs Docker Compose.  A run takes about five minutes, so pull requests
+# run it only when they touch the cache's code (the tiering targets, their
+# configuration and their lifecycle all live in local_cache/), the harness or
+# the module's dependencies; the nightly run catches changes elsewhere.
+
+on:
+  pull_request:
+    paths:
+      - "local_cache/**"
+      - "github_scripts/dcache-e2e/**"
+      - ".github/workflows/dcache-e2e.yml"
+      - "go.mod"
+      - "go.sum"
+  push:
+    branches:
+      - "main"
+    paths:
+      - "local_cache/**"
+      - "github_scripts/dcache-e2e/**"
+      - ".github/workflows/dcache-e2e.yml"
+      - "go.mod"
+      - "go.sum"
+  schedule:
+    - cron: "30 6 * * *"  # at 06:30 every day
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  dcache-e2e:
+    name: Test against dCache
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+
+      - name: Set up Go
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e  # v7.0.0
+        with:
+          go-version-file: go.mod
+
+      - name: Run the dCache end-to-end tests
+        run: bash github_scripts/dcache-e2e/run.sh "$RUNNER_TEMP/dcache-e2e"
+
+      - name: Upload logs
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9  # v7.0.2
+        with:
+          name: dcache-e2e-logs
+          path: ${{ runner.temp }}/dcache-e2e/logs
+          if-no-files-found: ignore

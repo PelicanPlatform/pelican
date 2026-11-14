@@ -1710,7 +1710,8 @@ func TestTierRedirectServing(t *testing.T) {
 		})
 
 		// No advertisement: the file:// URL must not be sent, and the cache
-		// serves the object itself.
+		// serves the object itself -- and says why.
+		schemeSkips := testutil.ToFloat64(tierRedirectSkippedTotal.WithLabelValues(target.metricLabel(), tierSkipSchemeNotAccepted))
 		plainResp, err := noRedirectClient.Get(srv.URL + objectPath)
 		require.NoError(t, err)
 		plainBody, err := io.ReadAll(plainResp.Body)
@@ -1719,6 +1720,8 @@ func TestTierRedirectServing(t *testing.T) {
 		assert.Equal(t, http.StatusOK, plainResp.StatusCode,
 			"without the advertisement the cache must serve the bytes itself")
 		assert.Equal(t, data, plainBody)
+		assert.Equal(t, schemeSkips+1,
+			testutil.ToFloat64(tierRedirectSkippedTotal.WithLabelValues(target.metricLabel(), tierSkipSchemeNotAccepted)))
 
 		// Advertised: the redirect is issued.  (That a file:// destination
 		// raises no Authorization concern is covered by

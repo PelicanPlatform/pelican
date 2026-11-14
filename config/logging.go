@@ -188,6 +188,18 @@ func (rt *regexpTransformHook) Fire(entry *log.Entry) (err error) {
 	return hook.Fire(entry)
 }
 
+// macaroonAuthzRegex matches a macaroon passed as an ?authz= query parameter,
+// as dCache accepts one and a cache tiering to dCache hands one out.  A v1
+// macaroon, the kind dCache issues, starts with a four-hex-digit packet length
+// that base64-encodes as "MDA"; it is not a JWT, so the bearer-token pattern
+// does not catch it.
+var macaroonAuthzRegex = regexp.MustCompile(`(authz=)MDA[A-Za-z0-9_-]{16,}={0,2}`)
+
+// censor applies the bearer-token transform and then redacts macaroons.
+func censor(regex *regexp.Regexp, s, template string) string {
+	return macaroonAuthzRegex.ReplaceAllString(regex.ReplaceAllString(s, template), "${1}REDACTED")
+}
+
 // redactEntryInPlace censors credentials in an entry's message and "url"
 // field. Mutating the caller's entry is what makes the censor effective for
 // logrus's own output path: this hook owns the writer, so every consumer
@@ -203,13 +215,13 @@ func redactEntryInPlace(entry *log.Entry) {
 	if regex == nil {
 		return
 	}
-	entry.Message = regex.ReplaceAllString(entry.Message, globalTransform.template)
+	entry.Message = censor(regex, entry.Message, globalTransform.template)
 	for key, value := range entry.Data {
 		if key != "url" {
 			continue
 		}
 		if s, ok := value.(string); ok {
-			entry.Data[key] = regex.ReplaceAllString(s, globalTransform.template)
+			entry.Data[key] = censor(regex, s, globalTransform.template)
 		}
 	}
 }
@@ -229,12 +241,12 @@ func redactEntryCopy(entry *log.Entry) *log.Entry {
 	}
 	template := globalTransform.template
 
-	message := regex.ReplaceAllString(entry.Message, template)
+	message := censor(regex, entry.Message, template)
 	// Rewrite "url" only when the censor actually changes it, so the common
 	// case (no credential in the entry) allocates nothing.
 	var data log.Fields
 	if raw, ok := entry.Data["url"].(string); ok {
-		if censored := regex.ReplaceAllString(raw, template); censored != raw {
+		if censored := censor(regex, raw, template); censored != raw {
 			data = make(log.Fields, len(entry.Data))
 			for k, v := range entry.Data {
 				data[k] = v

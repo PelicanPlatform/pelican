@@ -181,8 +181,9 @@ func (cc *ConsistencyChecker) scanTierTarget(ctx context.Context, sid StorageID,
 
 		if listOk && current.hash == instanceHash {
 			// Present in both — objects are stored plaintext, so the
-			// bucket size must equal ContentLength exactly.
-			if !meta.Completed.IsZero() && meta.ContentLength != current.size {
+			// bucket size must equal ContentLength exactly.  A size the
+			// listing could not report (-1) is no evidence either way.
+			if !meta.Completed.IsZero() && current.size >= 0 && meta.ContentLength != current.size {
 				log.Warnf("remote object %s size mismatch (bucket %d, metadata %d); removing",
 					instanceHash, current.size, meta.ContentLength)
 				if len(orphanDB) >= tierMaxOrphansPerScan {

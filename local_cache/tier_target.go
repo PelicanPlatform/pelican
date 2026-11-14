@@ -28,7 +28,10 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/pkg/errors"
+	"github.com/prometheus/client_golang/prometheus"
 	log "github.com/sirupsen/logrus"
+
+	"github.com/pelicanplatform/pelican/param"
 )
 
 // tierIdentityKey is the object key holding the target's identity UUID,
@@ -67,6 +70,17 @@ type tierTarget struct {
 	redirectScheme string
 	redirectHost   string
 
+	// identity is the UUID in the target's identity object, which the
+	// redirect self-test fetches.  Set at registration.
+	identity string
+
+	// redirectWorks is the latest redirect self-test's verdict (see
+	// checkRedirect); redirectChecked records that one has run, and
+	// lastRedirectError holds the latest failure's message.
+	redirectWorks     atomic.Bool
+	redirectChecked   atomic.Bool
+	lastRedirectError atomic.Value
+
 	// healthy is the latest liveness probe's verdict (true until a probe
 	// fails); probeFailures counts consecutive failed probes, and
 	// lastProbeError holds the latest failure's message.  See probe.
@@ -84,16 +98,22 @@ var wrapTierBackendForTest func(TierBackend) TierBackend
 // object I/O happens beyond the capability probe; identity resolution is a
 // separate, explicit step.
 func newTierTarget(ctx context.Context, cfg TierTargetConfig) (*tierTarget, error) {
-	blob, err := newBlobTierBackend(ctx, cfg)
+	backend, err := newTierBackend(ctx, cfg)
 	if err != nil {
 		return nil, err
 	}
-	var backend TierBackend = blob
 	if wrap := wrapTierBackendForTest; wrap != nil {
 		backend = wrap(backend)
 	}
 	t := &tierTarget{cfg: cfg, backend: backend}
 	t.healthy.Store(true)
+	// With redirects disabled, no target redirects, so none is probed for
+	// the capability or, later, self-tested.
+	if param.Cache_TieringDisableRedirect.GetBool() {
+		log.Infof("Cache tier target %s will not redirect clients (Cache.TieringDisableRedirect); its objects "+
+			"will be proxied through the cache", cfg.DisplayURL())
+		return t, nil
+	}
 	if probe, ok := probeTierRedirect(ctx, backend); ok {
 		if u, perr := url.Parse(probe); perr == nil {
 			t.canRedirect = true
@@ -106,6 +126,14 @@ func newTierTarget(ctx context.Context, cfg TierTargetConfig) (*tierTarget, erro
 			cfg.DisplayURL())
 	}
 	return t, nil
+}
+
+// newTierBackend opens the kind of backend cfg names.
+func newTierBackend(ctx context.Context, cfg TierTargetConfig) (TierBackend, error) {
+	if cfg.WebDavUrl != "" {
+		return newWebDAVTierBackend(cfg, fileTokenSource{path: cfg.TokenFile})
+	}
+	return newBlobTierBackend(ctx, cfg)
 }
 
 // probeTierRedirect asks a backend for a sample redirect URL, reporting
@@ -305,6 +333,26 @@ type tierObjectStream struct {
 
 	// stopReadCtx undoes setReadContext; called by Close.
 	stopReadCtx func()
+
+	// served counts the bytes the stream reads and readErrors its failed
+	// reads; set (see countProxied) only for a stream serving a client.
+	served, readErrors prometheus.Counter
+}
+
+// countProxied makes the stream count what it reads, and its failures, as
+// proxied to a client.
+func (s *tierObjectStream) countProxied() {
+	label := s.target.metricLabel()
+	s.served = tierProxiedBytesTotal.WithLabelValues(label)
+	s.readErrors = tierProxyReadErrorsTotal.WithLabelValues(label)
+}
+
+// readFailed counts a failed read from the target, unless the stream's reader
+// has gone: that is not the target's failure.
+func (s *tierObjectStream) readFailed() {
+	if s.readErrors != nil && s.ctx.Err() == nil {
+		s.readErrors.Inc()
+	}
 }
 
 // setReadContext makes the stream's requests end when ctx ends, as well as
@@ -341,6 +389,7 @@ func (s *tierObjectStream) open() (io.ReadCloser, error) {
 	if err == nil {
 		return body, nil
 	}
+	s.readFailed()
 	if errors.Is(err, ErrTierObjectChanged) {
 		log.Warnf("Tiered object %s no longer matches the copy that was uploaded: %v", s.hash, err)
 		if s.onChanged != nil {
@@ -372,6 +421,9 @@ func (s *tierObjectStream) Read(p []byte) (int, error) {
 	n, err := s.body.Read(p)
 	s.position += int64(n)
 	s.bodyOffset = s.position
+	if s.served != nil && n > 0 {
+		s.served.Add(float64(n))
+	}
 	if err != nil && err != io.EOF && s.ctx.Err() != nil {
 		// The stream's reader has gone (or the cache is closing): nothing
 		// to reopen for.
@@ -385,6 +437,7 @@ func (s *tierObjectStream) Read(p []byte) (int, error) {
 		// reading on through a broken stream: a mid-transfer network blip
 		// should cost one re-issued request, not the whole proxied transfer.
 		log.Warnf("Tier stream for %s failed at offset %d; will reopen: %v", s.hash, s.position, err)
+		s.readFailed()
 		s.body.Close()
 		s.body = nil
 		if n > 0 {
@@ -401,6 +454,7 @@ func (s *tierObjectStream) Read(p []byte) (int, error) {
 	if err == io.EOF && s.position < s.size {
 		// Short object relative to metadata -- surface as an error rather
 		// than silently truncating the response.
+		s.readFailed()
 		return n, errors.Errorf("tiered object %s ended at %d bytes; expected %d", s.hash, s.position, s.size)
 	}
 	return n, err

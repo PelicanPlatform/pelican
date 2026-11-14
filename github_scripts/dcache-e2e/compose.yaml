@@ -1,0 +1,50 @@
+# Single-node dCache for Pelican's dCache tiering end-to-end test; run.sh
+# starts it with the environment variables below set.
+#
+# The door's and pool's ports are published on the same numbers on the host,
+# and the pool advertises "localhost", so the door->pool redirects dCache
+# hands out work from the host.  The containers reach the token issuer that
+# run.sh starts on the host as host.docker.internal.
+name: pelican-dcache-e2e
+
+services:
+  postgres:
+    image: postgres:17.6
+    environment:
+      POSTGRES_USER: dcache
+      POSTGRES_PASSWORD: let-me-in
+      POSTGRES_DB: chimera
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "dcache", "-d", "chimera"]
+      interval: 2s
+      timeout: 5s
+      retries: 60
+
+  dcache:
+    image: dcache/dcache:${DCACHE_E2E_VERSION:-11.2.8}
+    # The image is published for amd64 only; on an arm64 workstation it runs
+    # under emulation.
+    platform: linux/amd64
+    # Root, so the bind-mounted host key (0600, owned by whoever ran run.sh)
+    # is readable.
+    user: "0:0"
+    command: ["core"]
+    depends_on:
+      postgres:
+        condition: service_healthy
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    environment:
+      JAVA_ARGS: "-Dorg.dcache.net.localaddresses=localhost"
+    ports:
+      - "127.0.0.1:2880:2880"
+      - "127.0.0.1:38083:38083"
+    volumes:
+      - ${DCACHE_E2E_ETC:?}/dcache.conf:/opt/dcache/etc/dcache.conf:ro
+      - ${DCACHE_E2E_ETC:?}/layout.conf:/opt/dcache/etc/layouts/pelican-e2e.conf:ro
+      - ${DCACHE_E2E_ETC:?}/gplazma.conf:/opt/dcache/etc/gplazma.conf:ro
+      - ${DCACHE_E2E_ETC:?}/multimap.conf:/opt/dcache/etc/multimap.conf:ro
+      - ${DCACHE_E2E_ETC:?}/storage-authzdb:/opt/dcache/etc/storage-authzdb:ro
+      - ${DCACHE_E2E_ETC:?}/poolmanager.conf:/opt/dcache/var/config/poolmanager.conf
+      - ${DCACHE_E2E_ETC:?}/init.sh:/dcache.init.d/00-init.sh:ro
+      - ${DCACHE_E2E_GRID_SECURITY:?}:/etc/grid-security:ro

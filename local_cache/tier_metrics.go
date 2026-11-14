@@ -19,8 +19,12 @@
 package local_cache
 
 import (
+	"context"
+	"net/http"
+	"strconv"
 	"time"
 
+	"github.com/pkg/errors"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promauto"
 )
@@ -56,6 +60,42 @@ const (
 	tierSweepRemovedRemoteObject = "remote_object"
 	tierSweepRemovedEntry        = "entry"
 )
+
+// Values of the "reason" label on tierRedirectSkippedTotal: why a read of a
+// tiered object was proxied rather than redirected.
+const (
+	// The target cannot hand out URLs a client could fetch on its own.
+	tierSkipCannotRedirect = "cannot_redirect"
+	// It can, but its latest redirect self-test failed.
+	tierSkipSelfTestFailing = "self_test_failing"
+	// The target's URLs use a scheme the client did not say it accepts.
+	tierSkipSchemeNotAccepted = "scheme_not_accepted"
+	// Redirecting would hand the client's Authorization header to the target.
+	tierSkipCredentialForwarding = "credential_forwarding"
+	// The object must be revalidated first (no-cache, no-store or expired).
+	tierSkipNeedsRevalidation = "needs_revalidation"
+	// The target holds no credential to mint a URL with right now -- for
+	// dCache, no macaroon that outlasts the URL.
+	tierSkipNoCredential = "no_credential"
+	// Minting the URL failed for another reason.
+	tierSkipMintFailed = "mint_failed"
+	// The minted URL pointed somewhere other than the target's probed host.
+	tierSkipDestinationMismatch = "destination_mismatch"
+	// The eviction hold for the redirected object could not be recorded.
+	tierSkipHoldFailed = "hold_failed"
+)
+
+// Values of the "result" label on tierMacaroonRequestsTotal.
+const (
+	tierMacaroonIssued           = "success"
+	tierMacaroonRefused          = "refused"
+	tierMacaroonRefusedForScopes = "refused_for_scopes"
+	tierMacaroonError            = "error"
+)
+
+// tierHTTPCodeError is the "code" of a request to a target that got no
+// response at all: the connection failed or timed out.
+const tierHTTPCodeError = "error"
 
 var (
 	tierUploadsTotal = promauto.NewCounterVec(prometheus.CounterOpts{
@@ -112,8 +152,9 @@ var (
 	})
 	tierRedirectCapable = promauto.NewGaugeVec(prometheus.GaugeOpts{
 		Name: "pelican_cache_tiering_redirect_capable",
-		Help: "1 when a tiering target can issue redirect URLs (probed at startup), so its objects can be served " +
-			"by redirect; 0 when they are always proxied through the cache",
+		Help: "1 when a tiering target's objects are served by redirect: it can issue redirect URLs and the latest " +
+			"self-test (a minted URL fetched with no other credential, at startup and with each liveness probe) " +
+			"worked; 0 when they are proxied through the cache",
 	}, []string{"target"})
 
 	tierChangedObjectsTotal = promauto.NewCounterVec(prometheus.CounterOpts{
@@ -130,6 +171,46 @@ var (
 		Name: "pelican_cache_tiering_sweep_last_success_timestamp_seconds",
 		Help: "Unix timestamp when the tiering consistency sweep last completed for a target",
 	}, []string{"target"})
+
+	tierRedirectSkippedTotal = promauto.NewCounterVec(prometheus.CounterOpts{
+		Name: "pelican_cache_tiering_redirect_skipped_total",
+		Help: "Reads of objects resident on a tiering target that were not redirected, by target and reason: " +
+			"cannot_redirect, self_test_failing, scheme_not_accepted, credential_forwarding, needs_revalidation, " +
+			"no_credential, mint_failed, destination_mismatch or hold_failed",
+	}, []string{"target", "reason"})
+	tierProxiedBytesTotal = promauto.NewCounterVec(prometheus.CounterOpts{
+		Name: "pelican_cache_tiering_proxied_bytes_total",
+		Help: "Bytes the cache read from a tiering target to serve clients itself, rather than redirecting them",
+	}, []string{"target"})
+	tierProxyReadErrorsTotal = promauto.NewCounterVec(prometheus.CounterOpts{
+		Name: "pelican_cache_tiering_proxy_read_errors_total",
+		Help: "Failed reads from a tiering target while proxying an object to a client: a read that could not be " +
+			"started, or one that broke partway (the cache reopens it once from where it stopped)",
+	}, []string{"target"})
+
+	tierMacaroonRequestsTotal = promauto.NewCounterVec(prometheus.CounterOpts{
+		Name: "pelican_cache_tiering_macaroon_requests_total",
+		Help: "Requests for a root macaroon from a dCache tiering target, by target and result: success, refused " +
+			"(the door does not issue macaroons for this login), refused_for_scopes (the token carries storage.* " +
+			"scopes) or error (an outage or a credential problem, retried)",
+	}, []string{"target", "result"})
+	tierMacaroonExpiry = promauto.NewGaugeVec(prometheus.GaugeOpts{
+		Name: "pelican_cache_tiering_macaroon_expiry_timestamp_seconds",
+		Help: "Unix timestamp when the root macaroon held for a dCache tiering target expires; 0 while none is held. " +
+			"Redirect URLs are minted from it only while it outlasts them",
+	}, []string{"target"})
+
+	tierTargetHTTPRequestsTotal = promauto.NewCounterVec(prometheus.CounterOpts{
+		Name: "pelican_cache_tiering_target_http_requests_total",
+		Help: "HTTP requests the cache made to a WebDAV tiering target, by target, method and status code; " +
+			"code is \"error\" when no response arrived.  A redirect followed counts each hop",
+	}, []string{"target", "method", "code"})
+	tierTargetHTTPDuration = promauto.NewHistogramVec(prometheus.HistogramOpts{
+		Name: "pelican_cache_tiering_target_http_request_duration_seconds",
+		Help: "Time a WebDAV tiering target took to answer the cache's HTTP requests, to the response headers " +
+			"(for an upload, that includes sending the body), by target and method",
+		Buckets: prometheus.ExponentialBuckets(0.005, 2, 18), // 5ms to ~11 minutes
+	}, []string{"target", "method"})
 )
 
 // metricLabel is the target's value for the "target" label.
@@ -143,4 +224,36 @@ func recordTierUpload(target *tierTarget, result string, size int64, elapsed tim
 	if result == tierUploadSucceeded {
 		tierUploadDuration.WithLabelValues(label).Observe(elapsed.Seconds())
 	}
+}
+
+// tierMetricsTransport counts and times the HTTP requests a tiering target's
+// client makes, by method and status, so the target's own answers -- a 401
+// when the token has lapsed, a 507 when it is full -- are visible without
+// reading the logs.
+//
+// A request the cache cancelled (its reader went away, or the cache is
+// closing) is not counted: that says nothing about the target.  One that ran
+// out of time is, as an error.
+type tierMetricsTransport struct {
+	base   http.RoundTripper
+	target string
+}
+
+func newTierMetricsTransport(base http.RoundTripper, target string) http.RoundTripper {
+	return &tierMetricsTransport{base: base, target: target}
+}
+
+func (t *tierMetricsTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	start := time.Now()
+	resp, err := t.base.RoundTrip(req)
+	code := tierHTTPCodeError
+	switch {
+	case err == nil:
+		code = strconv.Itoa(resp.StatusCode)
+	case errors.Is(req.Context().Err(), context.Canceled):
+		return resp, err
+	}
+	tierTargetHTTPRequestsTotal.WithLabelValues(t.target, req.Method, code).Inc()
+	tierTargetHTTPDuration.WithLabelValues(t.target, req.Method).Observe(time.Since(start).Seconds())
+	return resp, err
 }

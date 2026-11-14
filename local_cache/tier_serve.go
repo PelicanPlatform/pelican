@@ -29,6 +29,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
 
 	"github.com/pelicanplatform/pelican/param"
@@ -58,6 +59,7 @@ func (pc *PersistentCache) openTierStream(ctx context.Context, target *tierTarge
 	stream := newTierObjectStream(ctx, target, res.instanceHash, res.meta.ContentLength)
 	stream.onClose = pc.storage.PinObject(res.instanceHash)
 	stream.expect = res.meta.Remote
+	stream.countProxied()
 	hash, seen := res.instanceHash, res.meta
 	tierRequestsTotal.WithLabelValues(target.metricLabel(), tierServedByProxy).Inc()
 	stream.onChanged = func() {
@@ -240,10 +242,22 @@ func (pc *PersistentCache) tryTierRedirect(w http.ResponseWriter, r *http.Reques
 		return false
 	}
 	target := pc.storage.getTierTarget(meta.StorageID)
-	if target == nil || !target.canRedirect {
-		// Either the object is not tiered, or its target cannot hand out a
-		// URL the client could fetch on its own; proxy instead.
+	if target == nil {
 		return false
+	}
+	// From here on the object is tiered, and every way out that is not a
+	// redirect (or a 304) is counted by why; the request is then proxied.
+	skip := func(reason string) bool {
+		tierRedirectSkippedTotal.WithLabelValues(target.metricLabel(), reason).Inc()
+		return false
+	}
+	if !target.redirectUsable() {
+		// The target cannot hand out a URL the client could fetch on its
+		// own -- not at all, or not as of its latest self-test.
+		if !target.canRedirect {
+			return skip(tierSkipCannotRedirect)
+		}
+		return skip(tierSkipSelfTestFailing)
 	}
 	// A URL the client fetches over something other than HTTP -- a file://
 	// path on shared storage, say -- only works if the client is in a
@@ -255,7 +269,7 @@ func (pc *PersistentCache) tryTierRedirect(w http.ResponseWriter, r *http.Reques
 	// those.
 	if scheme := target.redirectScheme; scheme != "http" && scheme != "https" && !clientAcceptsRedirectScheme(r, scheme) {
 		reqLog.WithField("scheme", scheme).Debug("Client did not advertise support for this redirect scheme; proxying instead")
-		return false
+		return skip(tierSkipSchemeNotAccepted)
 	}
 	// Would redirecting hand this client's Authorization header to the target?
 	// Only a request that carries one has anything to leak -- a public read,
@@ -269,16 +283,16 @@ func (pc *PersistentCache) tryTierRedirect(w http.ResponseWriter, r *http.Reques
 	if r.Header.Get("Authorization") != "" && target.redirectSendsCredentials(r.Host) {
 		reqLog.Debug("Proxying instead of redirecting: the tier target shares this cache's DNS domain, " +
 			"so the client would forward its credentials to it")
-		return false
+		return skip(tierSkipCredentialForwarding)
 	}
 
 	// Freshness: no-store/no-cache objects and anything past its expiry
 	// must go through the normal path so revalidation happens.
 	if meta.CCFlags&(ccNoStore|ccNoCache) != 0 {
-		return false
+		return skip(tierSkipNeedsRevalidation)
 	}
 	if expires := meta.ComputeExpires(); expires.IsZero() || !expires.After(time.Now()) {
-		return false
+		return skip(tierSkipNeedsRevalidation)
 	}
 
 	// A client revalidating with the ETag it already holds is answered here
@@ -305,8 +319,16 @@ func (pc *PersistentCache) tryTierRedirect(w http.ResponseWriter, r *http.Reques
 
 	targetURL, err := target.redirectURL(r.Context(), instanceHash, tierRedirectExpiry(), meta.Remote)
 	if err != nil {
-		reqLog.WithError(err).Warn("Failed to build a redirect URL for the tier target; falling back to proxying")
-		return false
+		// A target that is between credentials says so with
+		// ErrTierRedirectUnavailable; that state is reported once, by the
+		// backend and the redirect self-test, not on every request.
+		entry := reqLog.WithError(err)
+		if errors.Is(err, ErrTierRedirectUnavailable) {
+			entry.Debug("The tier target cannot issue a redirect URL right now; proxying")
+			return skip(tierSkipNoCredential)
+		}
+		entry.Warn("Failed to build a redirect URL for the tier target; falling back to proxying")
+		return skip(tierSkipMintFailed)
 	}
 	// The credential check above was made against the host the startup probe
 	// reported.  Every backend we have points all of its URLs at one host,
@@ -315,14 +337,14 @@ func (pc *PersistentCache) tryTierRedirect(w http.ResponseWriter, r *http.Reques
 	if dst, perr := url.Parse(targetURL); perr != nil ||
 		!strings.EqualFold(dst.Scheme, target.redirectScheme) || !strings.EqualFold(dst.Host, target.redirectHost) {
 		reqLog.Warn("Tier target produced a redirect URL for a different destination than it reported at startup; proxying instead")
-		return false
+		return skip(tierSkipDestinationMismatch)
 	}
 
 	// Stamp the redirect-hold key *before* handing out the URL so the eviction
 	// hold is in place by the time the client can use it.
 	if err := pc.db.RecordRedirectIssued(instanceHash); err != nil {
 		reqLog.WithError(err).Warn("Failed to record redirect-hold stamp; falling back to proxying")
-		return false
+		return skip(tierSkipHoldFailed)
 	}
 	if err := pc.eviction.RecordAccess(instanceHash); err != nil {
 		log.Debugf("Failed to record access for %s during tiering redirect: %v", instanceHash, err)

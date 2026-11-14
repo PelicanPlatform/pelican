@@ -70,6 +70,8 @@ type TierBackend interface {
 	// List walks every object under the backend's prefix in ascending key
 	// order, which is what lets the consistency sweep merge-join the
 	// listing against hash-ordered metadata instead of buffering it.
+	// A size the backend cannot report (an object still being written,
+	// say) is passed as -1.
 	List(ctx context.Context, fn func(key string, size int64, modified time.Time) error) error
 
 	// DisplayURL is a human-readable identity for logs and for the
@@ -106,6 +108,11 @@ type TierObjectInfo struct {
 // ErrTierObjectChanged reports that a tiering target no longer holds the copy
 // of an object the cache uploaded -- it was overwritten or replaced.
 var ErrTierObjectChanged = errors.New("the tiering target no longer holds the copy of this object that was uploaded")
+
+// ErrTierRedirectUnavailable reports that a backend that can issue redirect
+// URLs cannot issue one at the moment -- it is waiting for a credential to
+// mint them from, say.  The caller proxies instead.
+var ErrTierRedirectUnavailable = errors.New("the tiering target cannot issue a redirect URL right now")
 
 // TierRedirector is implemented by backends that can hand a client a URL it
 // can fetch directly, carrying its own authorization.  This is the capability
