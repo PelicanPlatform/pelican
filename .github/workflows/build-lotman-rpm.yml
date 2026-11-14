@@ -1,0 +1,218 @@
+---
+name: Build the libLotMan RPM
+
+# libLotMan is the C ABI over Pelican's native Go lot engine. The XRootD purge
+# plugin (xrootd-lotman) is a separate process from pelican-server and reaches
+# lots through this library, so the cache images install it in place of the C++
+# `lotman` package -- see images/Dockerfile.
+#
+# It is packaged with rpmbuild rather than GoReleaser/nfpm because it has to
+# replace an already-published package: nfpm can express neither the Obsoletes
+# that requires nor the source RPM that distributing it through OSG needs.
+#
+# The build is images/Dockerfile's `lotman-build` stage, reused here rather
+# than reimplemented, so the package CI publishes comes out of the same
+# rpmbuild invocation the cache image installs -- and the spec's %check, which
+# compiles the published header the way a C++ consumer does, runs in both.
+#
+# Each architecture is built on a native runner. The pelican binaries
+# cross-compile because they are CGO-free; -buildmode=c-shared is not. That is
+# also why the release carries only x86_64 and aarch64 while GoReleaser ships
+# pelican for ppc64le too: GitHub offers no ppc64le runner.
+
+on:
+  workflow_call:
+    inputs:
+      all_platforms:
+        description: >-
+          Build every architecture the release ships rather than x86_64 alone.
+          A pull request only needs one, which is the default; the release
+          passes true.
+        required: false
+        type: boolean
+        default: false
+  # The paths are repeated under each trigger because GitHub Actions does not
+  # support YAML anchors in workflow files.
+  pull_request:
+    paths:
+      - "lotman/**"
+      - "rpm/pelican-lotman.spec"
+      - "images/Dockerfile"
+      - "Makefile"
+      - "go.mod"
+      - "go.sum"
+      - ".github/workflows/build-lotman-rpm.yml"
+  push:
+    branches:
+      - "main"
+    paths:
+      - "lotman/**"
+      - "rpm/pelican-lotman.spec"
+      - "images/Dockerfile"
+      - "Makefile"
+      - "go.mod"
+      - "go.sum"
+      - ".github/workflows/build-lotman-rpm.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+defaults:
+  run:
+    # bash-isms have a way of sneaking in unnoticed.
+    shell: bash
+
+jobs:
+  # The matrix is built here rather than inline, both to match
+  # build-and-test.yml and because a `strategy` block cannot read `env` or
+  # apply a default to an input that only workflow_call supplies.
+  params:
+    name: Set build parameters
+    outputs:
+      platforms: ${{ steps.params.outputs.PLATFORMS }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Determine which architectures to build
+        id: params
+        env:
+          ALL_PLATFORMS: ${{ inputs.all_platforms }}
+        run: |
+          set -eu
+
+          # 'id' is for where the slash in 'platform' is prohibited.
+          PLATFORMS='[
+            { "arch": "x86_64", "id": "linux-amd64", "platform": "linux/amd64", "runner": "ubuntu-latest" }
+          ]'
+
+          if [ "${ALL_PLATFORMS:-false}" = "true" ]; then
+            PLATFORMS='[
+              { "arch": "x86_64",  "id": "linux-amd64", "platform": "linux/amd64", "runner": "ubuntu-latest" },
+              { "arch": "aarch64", "id": "linux-arm64", "platform": "linux/arm64", "runner": "ubuntu-24.04-arm" }
+            ]'
+          fi
+
+          printf 'PLATFORMS<<EOF\n%s\nEOF\n' "${PLATFORMS}" >> "${GITHUB_OUTPUT}"
+
+  rpm:
+    name: Build the ${{ matrix.arch }} RPM
+    needs: params
+    strategy:
+      fail-fast: false
+      matrix:
+        include: ${{ fromJson(needs.params.outputs.platforms) }}
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069  # v4.4.1
+
+      - name: Build the RPM
+        # The `lotman-rpm` target is a scratch stage holding only the packages
+        # the build produced, so this exports the RPMs without the Go
+        # toolchain or the source tree.
+        run: |
+          set -eu
+          docker buildx build \
+            --platform "${{ matrix.platform }}" \
+            --file images/Dockerfile \
+            --target lotman-rpm \
+            --output "type=local,dest=dist/lotman-rpm" \
+            .
+
+      - name: Check the package's dependency contract
+        run: |
+          set -euo pipefail
+
+          # rpm is not installed on the GitHub runners, and querying the
+          # package is the point of this step.
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq rpm
+
+          # rpmbuild writes each package under its architecture. Flatten that
+          # here so the artifact's layout is the same whatever the matrix
+          # produced, and the release can merge the architectures into one
+          # directory without rearranging them. The file names already carry
+          # the architecture, so nothing collides.
+          find dist/lotman-rpm -mindepth 2 -name '*.rpm' -exec mv -t dist/lotman-rpm {} +
+
+          pkg=$(find dist/lotman-rpm -maxdepth 1 -name 'pelican-lotman-*.rpm' -print -quit)
+          if [ -z "${pkg}" ]; then
+            echo "::error::no pelican-lotman RPM was produced"
+            exit 1
+          fi
+          echo "Built ${pkg}"
+
+          # These two lines are why this package is built with rpmbuild at all,
+          # so assert them rather than trusting that nobody edited them out.
+          # xrootd-lotman carries `Requires: lotman >= 0.1.0` and
+          # `lotman < 0.2.0`; an unversioned Provides does not satisfy a
+          # versioned dependency in RPM, and without the Obsoletes an install
+          # on a host that already has the C++ package fails on a file
+          # conflict instead of replacing it.
+          provides=$(rpm -qp --provides "${pkg}" 2> /dev/null)
+          obsoletes=$(rpm -qp --obsoletes "${pkg}" 2> /dev/null)
+
+          echo "::group::Provides"
+          echo "${provides}"
+          echo "::endgroup::"
+          echo "::group::Obsoletes"
+          echo "${obsoletes}"
+          echo "::endgroup::"
+
+          if ! grep -qE '^lotman = [0-9]+\.[0-9]+\.[0-9]+' <<< "${provides}"; then
+            echo "::error::the package does not carry a versioned 'Provides: lotman'"
+            exit 1
+          fi
+          if ! grep -qE '^lotman < ' <<< "${obsoletes}"; then
+            echo "::error::the package does not Obsolete the C++ 'lotman' package"
+            exit 1
+          fi
+
+      - name: Upload the RPM
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9  # v7.0.2
+        with:
+          name: lotman-rpm-${{ matrix.id }}
+          path: dist/lotman-rpm/*.rpm
+          overwrite: true  # allow the workflow to be re-run
+          retention-days: 7
+          if-no-files-found: error
+
+  srpm:
+    name: Build the source RPM
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          # `make lotman-srpm` names the tarball after `git describe`,
+          # which needs the tags.
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Install rpmbuild
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq rpm
+
+      - name: Build the source RPM
+        # A source RPM holds only the spec and the tarball, so it is
+        # architecture-independent and needs neither cgo nor the EL9 container
+        # the binary packages are built in. %{?dist} is empty here rather than
+        # .el9; a distribution builder sets its own when it rebuilds, which is
+        # what a source RPM is for.
+        run: |
+          make lotman-srpm
+
+      - name: Upload the source RPM
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9  # v7.0.2
+        with:
+          name: lotman-srpm
+          path: dist/rpmbuild/SRPMS/*.rpm
+          overwrite: true  # allow the workflow to be re-run
+          retention-days: 7
+          if-no-files-found: error

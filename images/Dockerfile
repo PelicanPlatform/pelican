@@ -293,6 +293,24 @@ RUN --mount=type=cache,id=dnf-${TARGETPLATFORM},target=/var/cache/dnf,sharing=lo
 ENDRUN
 
 #################################################################
+# LotMan RPM
+#
+# An export-only stage holding just the packages the stage above
+# built, so CI can pull them out without dragging along the Go
+# toolchain and the source tree:
+#
+#   docker build --target lotman-rpm -f images/Dockerfile \
+#     --output type=local,dest=dist/lotman-rpm .
+#
+# Sharing one definition with the image build is the point: the
+# RPM CI publishes is produced by the same rpmbuild invocation
+# that the cache image installs, so the spec's %check runs in
+# both and neither can drift.
+#################################################################
+FROM scratch AS lotman-rpm
+COPY --from=lotman-build /lotman-build/RPMS /
+
+#################################################################
 # Pelican Software Base
 #
 # This stage should contain setup common to all images that we wish
