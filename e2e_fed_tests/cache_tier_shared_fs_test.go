@@ -189,3 +189,104 @@ func TestCacheTierSharedFilesystemE2E(t *testing.T) {
 	assert.Greater(t, tierRedirectCount(t), redirectsBefore,
 		"the client should have been redirected to the shared filesystem rather than served by the cache")
 }
+
+// sharedDirFoldsNames reports whether dir is on a filesystem that treats
+// names differing only in case as the same, where a cache refuses an
+// exact-names view.
+func sharedDirFoldsNames(t *testing.T, dir string) bool {
+	t.Helper()
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "Fold"), nil, 0o600))
+	defer os.Remove(filepath.Join(dir, "Fold"))
+	_, err := os.Lstat(filepath.Join(dir, "fOLD"))
+	return err == nil
+}
+
+// TestCacheTierSharedFilesystemAllObjectsE2E: with AllObjects, objects too
+// small to tier otherwise -- one below the threshold, one small enough to be
+// kept inside the cache's database -- reach the shared filesystem through a
+// running cache, are served from it both ways, and appear in an exact-names
+// view under their own names.
+func TestCacheTierSharedFilesystemAllObjectsE2E(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
+	server_utils.ResetTestState()
+	t.Cleanup(server_utils.ResetTestState)
+
+	parent := t.TempDir()
+	sharedDir := filepath.Join(parent, "shared-tier")
+	exact := !sharedDirFoldsNames(t, parent)
+	target := map[string]interface{}{
+		"ProviderURL": utils.PathToFileURL(sharedDir).String(),
+		"MaxSize":     "1GB",
+		"AllObjects":  true,
+	}
+	if exact {
+		target["NamesView"] = "exact"
+	}
+	require.NoError(t, param.Cache_EnableV2.Set(true))
+	require.NoError(t, param.Cache_TieringThreshold.Set("64KB"))
+	require.NoError(t, param.Cache_TieringTargets.Set([]interface{}{target}))
+
+	ft := fed_test_utils.NewFedTest(t, persistentCacheConfig)
+	token := getTempTokenForTest(t)
+	httpClient := noRedirectHTTPClient()
+
+	for _, tc := range []struct {
+		file string
+		size int
+	}{
+		{"Small.TXT", 100},        // kept inline
+		{"Medium.bin", 10 * 1024}, // on disk, below the threshold
+	} {
+		t.Run(tc.file, func(t *testing.T) {
+			objectPath := "/test/shared_fs_all/Set@2/" + tc.file
+			content := writeOriginFile(t, ft, "shared_fs_all/Set@2/"+tc.file, tc.size)
+			cacheURL := waitForCacheRedirectURL(t, ft, objectPath, token)
+
+			resp := getWithToken(t, httpClient, cacheURL, token, "")
+			body, err := io.ReadAll(resp.Body)
+			resp.Body.Close()
+			require.NoError(t, err)
+			require.Equal(t, http.StatusOK, resp.StatusCode, "cache-miss GET failed: %s", string(body))
+			require.Equal(t, content, body)
+
+			// The names are checked only where an exact view can run; on a
+			// folding filesystem the versioned view escapes them, which its
+			// own tests cover.
+			if exact {
+				name := filepath.Join(sharedDir, "names", "test", "shared_fs_all", "Set@2", tc.file)
+				require.Eventually(t, func() bool {
+					got, err := os.ReadFile(name)
+					return err == nil && string(got) == string(content)
+				}, 30*time.Second, 100*time.Millisecond, "the object never appeared under its exact name")
+			}
+
+			// Served from the shared filesystem: by redirect to a client
+			// that asks for one, by the cache to one that does not.
+			var location string
+			require.Eventually(t, func() bool {
+				req, err := http.NewRequest(http.MethodGet, cacheURL, nil)
+				require.NoError(t, err)
+				req.Header.Set("Authorization", "Bearer "+token)
+				req.Header.Set(server_structs.AcceptRedirectHeader, server_structs.RedirectSchemeFile)
+				resp, err := httpClient.Do(req)
+				require.NoError(t, err)
+				_, _ = io.Copy(io.Discard, resp.Body)
+				resp.Body.Close()
+				location = resp.Header.Get("Location")
+				return resp.StatusCode == http.StatusTemporaryRedirect
+			}, 30*time.Second, 100*time.Millisecond, "the object was never tiered to the shared filesystem")
+			locationURL, err := url.Parse(location)
+			require.NoError(t, err)
+			onDisk, err := os.ReadFile(utils.FileURLToPath(locationURL))
+			require.NoError(t, err)
+			assert.Equal(t, content, onDisk)
+
+			resp = getWithToken(t, httpClient, cacheURL, token, "")
+			body, err = io.ReadAll(resp.Body)
+			resp.Body.Close()
+			require.NoError(t, err)
+			require.Equal(t, http.StatusOK, resp.StatusCode)
+			assert.Equal(t, content, body)
+		})
+	}
+}
