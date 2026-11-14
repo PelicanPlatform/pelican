@@ -721,7 +721,8 @@ func (s *OIDCStorage) GetDeviceCodeSession(ctx context.Context, deviceCode strin
 		return nil, ErrExpiredToken
 	}
 
-	// RFC 8628 §3.5: enforce the minimum polling interval (5 seconds by default; see
+	// RFC 8628 §3.5: enforce the minimum polling interval -- the same value advertised
+	// in the device authorization response (5 seconds by default; see
 	// Issuer.DeviceCodePollingInterval).  A single conditional UPDATE atomically checks
 	// and advances last_polled_at, eliminating the TOCTOU race of a separate
 	// SELECT-then-UPDATE.  If RowsAffected == 0 the previous poll

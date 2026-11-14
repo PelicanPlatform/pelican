@@ -55,25 +55,29 @@ type DeviceAuthorizationResponse struct {
 	Interval                int    `json:"interval,omitempty"`
 }
 
-// pollingInterval is the minimum spacing the issuer requires between device-code polls.
-// It is advertised to clients and enforced server-side; see Issuer.DeviceCodePollingInterval.
-func pollingInterval() time.Duration {
-	if interval := param.Issuer_DeviceCodePollingInterval.GetDuration(); interval > 0 {
-		return interval
-	}
-	return 5 * time.Second
-}
+// defaultPollingInterval is RFC 8628 §3.5's recommended minimum, used when
+// Issuer.DeviceCodePollingInterval is unset.
+const defaultPollingInterval = 5 * time.Second
 
-// advertisedPollingIntervalSeconds renders the polling interval for the device authorization
-// response, whose "interval" field is whole seconds.  Sub-second intervals round up to one so
-// the field never reads as 0, which clients treat as "unset" and replace with their own
-// default; the server-side rate limit still honors the exact configured value.
-func advertisedPollingIntervalSeconds() int {
-	seconds := int(pollingInterval() / time.Second)
-	if seconds < 1 {
-		return 1
+// pollingInterval is the minimum spacing the issuer requires between device-code polls.  The
+// same value is advertised to clients and enforced server-side, so a client that honors what
+// we advertise is never answered with slow_down.
+//
+// Keeping that promise is why the configured value is normalized here rather than at each use:
+// the device authorization response's "interval" field is whole seconds, so anything we cannot
+// express exactly is rounded up -- advertising less than we enforce would earn the client a
+// slow_down on its second poll and a back-off far longer than the interval we shaved.  The
+// floor of one second is the same constraint seen from below: a sub-second field would read as
+// 0, which clients treat as "unset" and replace with a default of their own.
+func pollingInterval() time.Duration {
+	interval := param.Issuer_DeviceCodePollingInterval.GetDuration()
+	if interval <= 0 {
+		interval = defaultPollingInterval
 	}
-	return seconds
+	if remainder := interval % time.Second; remainder != 0 {
+		interval += time.Second - remainder
+	}
+	return interval
 }
 
 // HandleDeviceAuthorizationRequest creates a new device code session.
@@ -115,7 +119,7 @@ func (h *DeviceCodeHandler) HandleDeviceAuthorizationRequest(ctx context.Context
 		VerificationURI:         verificationURI,
 		VerificationURIComplete: fmt.Sprintf("%s?user_code=%s", verificationURI, userCode),
 		ExpiresIn:               int(expiresIn.Seconds()),
-		Interval:                advertisedPollingIntervalSeconds(),
+		Interval:                int(pollingInterval() / time.Second),
 	}, nil
 }
 

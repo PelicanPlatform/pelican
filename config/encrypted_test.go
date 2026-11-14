@@ -175,28 +175,56 @@ func TestDecryptString(t *testing.T) {
 	})
 }
 
-// TestGetPasswordRejectsNonTerminalStdin guards the regression that made every
+// TestPasswordPromptsRejectNonTerminalStdin guards the regression that made every
 // non-interactive run print a password prompt nobody could answer: /dev/null is a
 // character device, so testing os.Stdin's file mode for ModeCharDevice reported it as a
 // terminal.  Ask the terminal itself instead.
-func TestGetPasswordRejectsNonTerminalStdin(t *testing.T) {
-	devNull, err := os.Open(os.DevNull)
-	require.NoError(t, err)
-	t.Cleanup(func() { _ = devNull.Close() })
+//
+// Both entry points are checked, because the bug was able to survive its first fix by
+// hiding in a second copy of the test: `pelican-server generate password` has its own
+// prompt, and it now reaches the terminal through ReadPasswordsFromTerminal as well.
+func TestPasswordPromptsRejectNonTerminalStdin(t *testing.T) {
+	// readWithStdinAtDevNull runs prompt with os.Stdin pointed at /dev/null, and returns
+	// its error alongside everything the prompt wrote to stderr.
+	readWithStdinAtDevNull := func(t *testing.T, prompt func() error) (error, string) {
+		t.Helper()
 
-	stderrRead, stderrWrite, err := os.Pipe()
-	require.NoError(t, err)
+		devNull, err := os.Open(os.DevNull)
+		require.NoError(t, err)
+		t.Cleanup(func() { _ = devNull.Close() })
 
-	oldStdin, oldStderr := os.Stdin, os.Stderr
-	os.Stdin, os.Stderr = devNull, stderrWrite
-	_, passErr := GetPassword(true)
-	os.Stdin, os.Stderr = oldStdin, oldStderr
-	require.NoError(t, stderrWrite.Close())
+		stderrRead, stderrWrite, err := os.Pipe()
+		require.NoError(t, err)
 
-	prompt, err := io.ReadAll(stderrRead)
-	require.NoError(t, err)
+		oldStdin, oldStderr := os.Stdin, os.Stderr
+		os.Stdin, os.Stderr = devNull, stderrWrite
+		promptErr := prompt()
+		os.Stdin, os.Stderr = oldStdin, oldStderr
+		require.NoError(t, stderrWrite.Close())
 
-	require.Error(t, passErr)
-	assert.Contains(t, passErr.Error(), "not connected to a terminal")
-	assert.Empty(t, string(prompt), "must not prompt for a password when stdin is not a terminal")
+		written, err := io.ReadAll(stderrRead)
+		require.NoError(t, err)
+		return promptErr, string(written)
+	}
+
+	for _, tc := range []struct {
+		name   string
+		prompt func() error
+	}{
+		{"GetPassword", func() error {
+			_, err := GetPassword(true)
+			return err
+		}},
+		{"ReadPasswordsFromTerminal", func() error {
+			_, err := ReadPasswordsFromTerminal("Enter your password:", "Confirm the password:")
+			return err
+		}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			promptErr, written := readWithStdinAtDevNull(t, tc.prompt)
+			require.Error(t, promptErr)
+			assert.Contains(t, promptErr.Error(), "not connected to a terminal")
+			assert.Empty(t, written, "must not prompt for a password when stdin is not a terminal")
+		})
+	}
 }

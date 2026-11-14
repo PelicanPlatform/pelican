@@ -5035,12 +5035,13 @@ description: |+
   with `slow_down`.  RFC 8628 specifies 5 seconds, which is the default; it is exposed only
   so tests can drive the flow faster than a human would.
 
-  Because the `interval` field is expressed in whole seconds, values below one second are
-  advertised as one second, though the server-side rate limit still uses the exact value.
+  Because the `interval` field is expressed in whole seconds, the configured value is rounded
+  up to a whole second (at least one) before it is either advertised or enforced, so the two
+  always agree.
 type: duration
 default: 5s
 hidden: true
-components: ["origin", "registry"]
+components: ["origin"]
 ---
 name: Issuer.DynamicClientStaleTimeout
 description: |+
