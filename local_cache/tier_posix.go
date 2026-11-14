@@ -87,6 +87,14 @@ type posixTierBackend struct {
 	root    *os.Root
 	fs      *posixFS // root, with every call bounded; use this, not root
 	display string
+	// rootIno is the directory's inode, which redirected clients check the
+	// directory they reach against (server_structs.FileTarget); 0 where the
+	// platform has none.
+	rootIno uint64
+	// securePath is set when the path to the directory must be one only
+	// root or the cache can change (checkSecurePath), as the names view
+	// needs; see openPosixTierBackend.
+	securePath bool
 
 	// inflight holds the temporary names in use by writes now in progress,
 	// so that reaping leftovers never removes a file out from under its
@@ -146,14 +154,29 @@ func openPosixTierBackend(cfg TierTargetConfig) (*posixTierBackend, error) {
 			}
 		}
 	}
+	// Whoever can rearrange a directory on the way to the target can put
+	// their own in its place.  A redirected client checks the directory it
+	// reaches against the cache's, so it is safe either way; a person
+	// browsing the names view goes by path with ordinary tools and cannot,
+	// so the view needs a path only root or the cache can change.
+	securePath := cfg.namesViewEnabled()
 	if err := checkSecurePath(dir); err != nil {
-		return nil, errors.Wrapf(err, "refusing cache tier target %s", display)
+		if securePath {
+			return nil, errors.Wrapf(err, "refusing cache tier target %s, whose names view is read by path (setting "+
+				"NamesView: none on the target would allow this path: clients redirected to it check the "+
+				"directory they reach)", display)
+		}
+		log.Warnf("Cache tier target %s is reached through a directory others could rearrange (%v); allowing it "+
+			"because it keeps no names view and redirected clients check the directory they reach", display, err)
 	}
 	root, err := os.OpenRoot(dir)
 	if err != nil {
 		return nil, errors.Wrapf(err, "failed to open cache tier target %s", display)
 	}
-	b := &posixTierBackend{dir: dir, root: root, fs: newPosixFS(root), display: display}
+	b := &posixTierBackend{dir: dir, root: root, fs: newPosixFS(root), display: display, securePath: securePath}
+	if info, err := root.Stat("."); err == nil {
+		_, b.rootIno, _ = utils.FileVFSID(info)
+	}
 	for _, sub := range []string{posixObjectsDir, posixNamesDir, posixTempDir} {
 		if _, err := b.mkdir(sub); err != nil {
 			_ = root.Close()
@@ -292,8 +315,9 @@ func (b *posixTierBackend) checkPermissions() error {
 
 // checkHealth is the backend's part of the liveness probe: the directory
 // must still be one only the cache can write, its path must still lead
-// only through directories no one else can rearrange, and that path must
-// still name the directory the cache holds open.  The last is what catches
+// only through directories no one else can rearrange (when the names view
+// needs that), and that path must still name the directory the cache holds
+// open.  The last is what catches
 // a target swapped out from under the cache -- or a filesystem mounted over
 // it -- which the cache itself would never notice, since it works through
 // its open handle while clients and names-view readers go by path.
@@ -301,8 +325,10 @@ func (b *posixTierBackend) checkHealth() error {
 	if err := b.checkPermissions(); err != nil {
 		return err
 	}
-	if err := posixCallErr(b.fs, func() error { return checkSecurePath(b.dir) }); err != nil {
-		return err
+	if b.securePath {
+		if err := posixCallErr(b.fs, func() error { return checkSecurePath(b.dir) }); err != nil {
+			return err
+		}
 	}
 	return b.fs.sameDirectory(b.dir)
 }

@@ -33,6 +33,7 @@ import (
 	log "github.com/sirupsen/logrus"
 
 	"github.com/pelicanplatform/pelican/param"
+	"github.com/pelicanplatform/pelican/server_structs"
 )
 
 // tierIdentityKey is the object key holding the target's identity UUID,
@@ -97,6 +98,9 @@ type tierTarget struct {
 	// names is the browsable tree of logical names on a shared-filesystem
 	// target; nil for every other kind.
 	names *tierNameView
+	// shared is the backend of a shared-filesystem target, unwrapped; nil
+	// for every other kind.
+	shared *posixTierBackend
 	// publicReadable answers whether an object path is readable without a
 	// token, and whether that is known yet; see SetTierExposurePolicy.
 	publicReadable func(objectPath string) (allowed, known bool)
@@ -116,7 +120,8 @@ func newTierTarget(ctx context.Context, cfg TierTargetConfig) (*tierTarget, erro
 		return nil, err
 	}
 	var names *tierNameView
-	if posix, ok := backend.(*posixTierBackend); ok {
+	posix, _ := backend.(*posixTierBackend)
+	if posix != nil {
 		if names, err = newTierNameView(posix, cfg.namesViewEnabled(), cfg.exactNames()); err != nil {
 			_ = backend.Close()
 			return nil, err
@@ -125,7 +130,7 @@ func newTierTarget(ctx context.Context, cfg TierTargetConfig) (*tierTarget, erro
 	if wrap := wrapTierBackendForTest; wrap != nil {
 		backend = wrap(backend)
 	}
-	t := &tierTarget{cfg: cfg, backend: backend, names: names}
+	t := &tierTarget{cfg: cfg, backend: backend, names: names, shared: posix}
 	t.healthy.Store(true)
 	// With redirects disabled, no target redirects, so none is probed for
 	// the capability or, later, self-tested.
@@ -248,6 +253,17 @@ func (t *tierTarget) redirectSendsCredentials(reqHost string) bool {
 	default:
 		return false
 	}
+}
+
+// fileTarget identifies a shared-filesystem target's directory to a client
+// redirected into it, which checks the directory it reaches against it
+// before reading anything.  It reports false for any other target, and for
+// one whose directory has no inode to check.
+func (t *tierTarget) fileTarget() (server_structs.FileTarget, bool) {
+	if t.shared == nil || t.shared.rootIno == 0 || t.identity == "" {
+		return server_structs.FileTarget{}, false
+	}
+	return server_structs.FileTarget{Root: t.shared.dir, Inode: t.shared.rootIno, ID: t.identity}, true
 }
 
 // DisplayURL is the credential-free identity string for logs and the

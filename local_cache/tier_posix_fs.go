@@ -365,7 +365,7 @@ func (f *posixFile) Close() error {
 }
 
 // checkSecurePath refuses a directory that someone other than root or the
-// cache could make the path point somewhere else.  It applies the rule
+// cache could make the path point somewhere else, as the names view needs.  It applies the rule
 // OpenSSH (StrictModes) and sudo use for files they trust: every component
 // from / down to dir -- following symlinks, whose own location is checked
 // too -- must be owned by root or by the cache's user, and a directory must
@@ -374,10 +374,11 @@ func (f *posixFile) Close() error {
 // their place.
 //
 // That matters here because the cache's own access is through a handle and
-// cannot be redirected, but everyone else's is by path: a client following
-// a file:// redirect, and a person browsing the names view.  Swapping the
-// target directory would hand them the swapper's files under the cache's
-// name.
+// cannot be redirected, but a person browsing the names view goes by path.
+// Swapping the target directory would hand them the swapper's files under
+// the cache's name.  A client following a file:// redirect goes by path too,
+// but checks the directory it reaches against the one the cache names
+// (server_structs.FileTarget), so it does not depend on this.
 func checkSecurePath(dir string) error {
 	euid := os.Geteuid()
 	check := func(p string, info fs.FileInfo) error {
@@ -387,15 +388,15 @@ func checkSecurePath(dir string) error {
 		}
 		if uid != 0 && uid != euid {
 			return errors.Errorf("%s is owned by uid %d, which is neither root nor the cache's user (uid %d); its owner "+
-				"could replace the cache's directory with one of their own, which clients and names-view readers "+
+				"could replace the cache's directory with one of their own, which people reading its names view "+
 				"would then trust.  Put the target under a directory owned by root or by the cache's user", p, uid, euid)
 		}
 		if info.IsDir() {
 			perm := info.Mode()
 			if perm.Perm()&0o022 != 0 && perm&fs.ModeSticky == 0 {
 				return errors.Errorf("%s is writable by users other than its owner (mode %#o) and is not sticky; any of "+
-					"them could rename the cache's directory and put their own in its place, which clients and "+
-					"names-view readers would then trust.  Put the target under a directory the cache's user owns, "+
+					"them could rename the cache's directory and put their own in its place, which people reading "+
+					"its names view would then trust.  Put the target under a directory the cache's user owns, "+
 					"reached only through directories that only root or the cache's user can write -- or set the "+
 					"sticky bit on %s (chmod +t), so that its other users cannot rename entries they do not own", p, perm.Perm(), p)
 			}

@@ -408,6 +408,7 @@ type (
 		prestageAPISupport map[string]bool // Lookup table for caches that support the Pelican prestage API (key: host)
 		prestageAPIMutex   sync.RWMutex    // Protects the prestageAPISupport map
 		scheduler          *TagScheduler   // Optional fair-scheduler; when set, admits before te.files
+		fileRedirects      *fileRedirector // What this engine needs to follow file:// redirects
 	}
 
 	TransferCallbackFunc = func(path string, downloaded int64, totalSize int64, completed bool)
@@ -1009,6 +1010,7 @@ func NewTransferEngine(ctx context.Context, opts ...TransferEngineOption) (te *T
 		pelicanUrlCache:    pelicanUrlCache,
 		dirRespCache:       NewDirRespCache(5 * time.Minute),
 		prestageAPISupport: make(map[string]bool),
+		fileRedirects:      newFileRedirector(),
 	}
 	for idx := 0; idx < cfg.workerCount; idx++ {
 		egrp.Go(func() error {
@@ -1805,6 +1807,7 @@ func (te *TransferEngine) Shutdown() error {
 	if te.scheduler != nil {
 		te.scheduler.Stop()
 	}
+	te.fileRedirects.close()
 	if err != nil && err != context.Canceled {
 		return err
 	}
@@ -4573,8 +4576,13 @@ func downloadHTTP(ctx context.Context, te *TransferEngine, callback TransferCall
 	}
 	// Object transfers are the only requests allowed to follow a file://
 	// redirect, and only when Client.FileRedirectRoots names where.  This is
-	// a no-op (and returns the shared client untouched) otherwise.
-	client = withFileRedirects(client)
+	// a no-op (and returns the shared client untouched) otherwise, including
+	// for a transfer made without an engine.
+	var fileRedirects *fileRedirector
+	if te != nil {
+		fileRedirects = te.fileRedirects
+	}
+	client = fileRedirects.httpClient(client)
 	transferUrl := *transfer.Url
 	if transfer.Url.Scheme == "unix" {
 		transport := config.GetTransport().Clone()
@@ -4631,7 +4639,7 @@ func downloadHTTP(ctx context.Context, te *TransferEngine, callback TransferCall
 	req.Header.Set("X-Pelican-Timeout", headerTimeout.Round(time.Millisecond).String())
 	// Tell the cache which non-HTTP redirect schemes we can follow.  Silence
 	// means "none", which is what keeps the default behavior unchanged.
-	setAcceptRedirectHeader(req)
+	fileRedirects.advertise(req)
 	if bytesSoFar > 0 || byteRangeEnd >= 0 {
 		var rangeHeader string
 		if byteRangeEnd >= 0 {
