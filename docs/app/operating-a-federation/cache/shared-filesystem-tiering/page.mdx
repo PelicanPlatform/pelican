@@ -1,0 +1,140 @@
+# Tiering a Cache to a Shared Filesystem
+
+The V2 Cache (`Cache.EnableV2`) can move completed objects from its local disks to remote storage, configured through [`Cache.TieringTargets`](/parameters#Cache-TieringTargets).
+Besides object stores and WebDAV, a tiering target can be a directory on a filesystem that the Cache and its clients both mount, such as NFS, Lustre, GPFS or CephFS.
+Clients at the same site can then read cached objects straight off that filesystem instead of through the Cache, and anyone who can read the filesystem can browse them by name, without Pelican.
+This page describes how to set one up.
+
+## What the Cache Puts on the Filesystem
+
+The Cache keeps tiered objects under `objects/` in the target's directory, named by hash, as it would in a bucket.
+Every user of the filesystem can read them, and only the Cache can change them.
+
+Clients that are configured for it (see [Configuring Clients](#configuring-clients)) read objects straight from the filesystem; every other client is served by the Cache as usual.
+
+The Cache also maintains a **names view** under `names/`, which spells each object by its federation path (see [The Names View](#the-names-view)).
+
+Because every user of the filesystem can read what is stored there, a shared-filesystem target only takes objects from namespaces that are publicly readable through Pelican, plus those listed in the target's `ExposedNamespaces`.
+Objects from other namespaces stay on the Cache's local storage, or go to another target.
+
+## Configuring the Cache
+
+A shared-filesystem target names its directory with a `file://` URL:
+
+```yaml
+Cache:
+  TieringTargets:
+    - ProviderURL: file:///mnt/shared/pelican-cache
+      MaxSize: 50TB
+```
+
+The Cache creates the named directory if it is missing, but its parent must exist, since a missing parent usually means the filesystem is not mounted.
+Keep the whole target on one filesystem, not split across filesets or projects.
+`MaxSize` is the most the Cache stores on the target.
+The Cache assumes that it alone writes below the directory, so do not share it with another Cache or another application.
+
+The directory must be one only the Cache can change.
+The Cache refuses to start if the directory, or its `objects/`, `names/` or `.pelican-tmp/` subdirectory, is writable by group or other users, or is owned by a user other than the Cache's.
+
+Someone who can rearrange a directory above the target could rename it away and put their own directory in its place.
+Pelican clients detect this, but people browsing the [names view](#the-names-view) cannot, so while the names view is on, the Cache also refuses to start if:
+
+- any directory on the way to the target, following symbolic links, is owned by anyone other than root or the Cache's user;
+- any such directory is writable by group or other users without the sticky bit.
+
+For a group-writable project directory, a typical fix is to create a directory there owned by the Cache's user and set the sticky bit on the project directory.
+Otherwise, put the target somewhere else, or set `NamesView: none` on the target.
+
+The Cache repeats these checks every minute, and also notices if the directory is replaced or another filesystem is mounted over it.
+While a check fails, or the mount stops answering, the target is reported down and the Cache serves its objects itself.
+
+Shared-filesystem targets are not supported on Windows.
+
+### Keeping Everything on the Filesystem
+
+By default, only objects at least [`Cache.TieringThreshold`](/parameters#Cache-TieringThreshold) in size are tiered; smaller ones stay on the Cache's encrypted local disk.
+Setting `AllObjects: true` on the target makes it take every object it may hold, however small:
+
+```yaml
+Cache:
+  TieringTargets:
+    - ProviderURL: file:///mnt/shared/pelican-cache
+      MaxSize: 50TB
+      AllObjects: true
+```
+
+The filesystem then holds everything the Cache serves from it, so that, for example, every prestaged file appears in the names view.
+Objects from namespaces that may not be exposed still stay local, and other targets keep the threshold.
+
+## Configuring Clients
+
+A Pelican client reads objects from the filesystem only when its [`Client.FileRedirectRoots`](/parameters#Client-FileRedirectRoots) includes the target:
+
+```yaml
+Client:
+  FileRedirectRoots: ["/mnt/shared/pelican-cache"]
+```
+
+Name the target's directory, or a directory above it.
+Clients must mount the filesystem at the same path as the Cache.
+
+The filesystem must show every host the same inode numbers, as NFS, Lustre, GPFS and CephFS do.
+On one that does not, such as some FUSE filesystems or CIFS mounted with `noserverino`, clients do not read from the filesystem.
+Clients on Windows never read from it.
+
+## The Names View
+
+The names view lets anyone who can read the filesystem find a cached object by its federation path, at `names/<namespace>/<path>`.
+Each name is a hard link to the object's file, so the view behaves as ordinary files.
+The filesystem must support hard links; on one that does not, the Cache refuses to start unless the target sets `NamesView: none`.
+Names appear when an object is tiered and disappear when it is evicted or deleted.
+Only objects on the target appear, so set `AllObjects` if the view should list small objects, too.
+
+The target's `NamesView` key chooses between two spellings, or turns the view off.
+
+With `versioned`, the default, `names/<namespace>/<path>@<etag>` is each cached version, and `names/<namespace>/<path>` links to the version the Cache considers current.
+In both path and entity tag, `%`, `@`, `"`, `/` and control characters are percent-encoded, so `@` only ever separates a name from its version, and a strong entity tag loses its quotes.
+On a filesystem that treats names differing only in case or Unicode normalization as the same, upper-case letters and non-ASCII characters are percent-encoded as well, so that two objects never share a name.
+
+With `exact`, each name is the object's federation path unchanged, with no escaping and no versions:
+
+```yaml
+Cache:
+  TieringTargets:
+    - ProviderURL: file:///mnt/shared/pelican-cache
+      MaxSize: 50TB
+      NamesView: exact
+```
+
+The name links to the version the Cache considers current, and other versions have no name.
+When the Cache learns of a newer version that is not yet on the target, it withdraws the name at once, and the name returns once that version is tiered.
+Exact names cannot be kept apart on a filesystem that folds case or Unicode normalization, so the Cache refuses to start with such a target, which includes macOS's default APFS volumes; use `versioned` there.
+
+In either spelling, some paths get no name: those with a component longer than 255 bytes, those not in canonical form (`/a//b`), and those with an encoded slash (`%2F`), which would decode into another object's path.
+Setting `NamesView: none` turns the view off entirely.
+
+Once an hour the Cache repairs the view, restoring missing names and removing stale or foreign ones.
+Switching a target between the two spellings is safe in either direction: within the hour, the old tree is replaced with the new one.
+An object whose namespace stops being public leaves the view within the hour.
+
+## Monitoring
+
+The Cache exports Prometheus metrics for each tiering target, labeled `target` with the target's `file://` URL.
+
+| Question | Metric |
+|---|---|
+| Is the filesystem usable? | `pelican_cache_tiering_target_up` is 1 while the Cache's checks of the target succeed. |
+| Are clients being redirected? | `pelican_cache_tiering_requests_total` counts reads of tiered objects by `mode` (`redirect`, `proxy` or `not_modified`). |
+| Why was a read served by the Cache? | `pelican_cache_tiering_redirect_skipped_total` counts reads of tiered objects that were not redirected, by `reason`. |
+| How much traffic did the filesystem serve? | `pelican_cache_tiering_redirected_bytes_total` (read by clients directly) against `pelican_cache_tiering_proxied_bytes_total` (served by the Cache). |
+| Is the names view keeping up? | `pelican_cache_tiering_names_sweep_duration_seconds` is how long the latest hourly repair took; a value approaching an hour means the view is too large for the filesystem's latency. `pelican_cache_tiering_name_links_restored_total` and `pelican_cache_tiering_sweep_removed_total{kind="name_link"}` count the repairs. |
+| Is something else changing the Cache's files? | `pelican_cache_tiering_changed_objects_total` counts tiered objects found to differ from what the Cache wrote. |
+| Are uploads keeping up? | `pelican_cache_tiering_uploads_total` by `result`, `pelican_cache_tiering_queue_depth` and `pelican_cache_tiering_uploads_abandoned_total`. |
+
+For a shared-filesystem target, the `reason` of a skipped redirect is usually one of:
+
+- `scheme_not_accepted`: the client is not configured to read from the filesystem. This is expected for clients outside the site.
+- `target_down`: the target is reported down.
+- `needs_revalidation`: the object must be revalidated with the origin first.
+
+A steady stream of `name_link` removals or restored links means something other than the Cache is changing the names view.
