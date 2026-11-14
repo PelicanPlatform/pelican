@@ -791,11 +791,16 @@ func initLots(nsAds []server_structs.NamespaceAd) ([]Lot, error) {
 		policyLotMap[lot.LotName] = lot
 	}
 
-	cacheDisks := param.Cache_DataLocations.GetStringSlice()
+	// The V2 cache launcher installs its own storage directories; the V1
+	// (XRootD) cache leaves the override unset and its data locations are used.
+	cacheDisks := getLotDiskPaths()
+	if len(cacheDisks) == 0 {
+		cacheDisks = param.Cache_DataLocations.GetStringSlice()
+	}
 	log.Tracef("Cache data locations being tracked by Lotman: %v", cacheDisks)
 	var totalDiskSpaceB uint64
 	for _, disk := range cacheDisks {
-		diskSpace, _, err := getDiskUsage(disk)
+		diskSpace, _, err := diskCapacityOf(disk)
 		if err != nil {
 			return internalLots, errors.Wrapf(err, "error getting disk usage for filesystem path %s", disk)
 		}

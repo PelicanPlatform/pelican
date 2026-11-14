@@ -26,6 +26,7 @@ import (
 	"net"
 	"net/url"
 	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
@@ -189,6 +190,21 @@ func cacheServeWithPersistentCache(ctx context.Context, engine *gin.Engine, egrp
 			return nil, errors.New("could not determine federation host for lotman federation-qualification")
 		}
 		lotman.SetFederationPrefix("/" + fedHost)
+		// Size the root lot from the filesystems this cache actually stores on.
+		// Cache.DataLocations, lotman's default, describes the XRootD (V1)
+		// cache's data directories; a V2 cache never populates it.
+		lotDiskPaths := make([]string, 0, len(storageDirs))
+		for _, dir := range storageDirs {
+			lotDiskPaths = append(lotDiskPaths, dir.Path)
+		}
+		if len(lotDiskPaths) == 0 {
+			// No explicit StorageDirs: the cache falls back to a single tree
+			// under Cache.StorageLocation (see PersistentCacheConfig.BaseDir).
+			if loc := param.Cache_StorageLocation.GetString(); loc != "" {
+				lotDiskPaths = append(lotDiskPaths, filepath.Join(loc, "persistent-cache"))
+			}
+		}
+		lotman.SetLotDiskPaths(lotDiskPaths)
 		if success := lotman.InitLotman(cacheServer.GetNamespaceAds()); !success {
 			return nil, errors.New("failed to initialize lotman")
 		}
