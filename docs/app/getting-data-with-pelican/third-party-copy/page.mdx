@@ -16,7 +16,7 @@ A third-party copy needs three things:
 
 - **Both ends must be federation URLs.** If either the source or the destination is a local path, you get an ordinary download or upload instead — see [Pelican's Command Line Client](./client). A third-party copy is what happens when *both* sides are `pelican://` or `osdf:///` URLs.
 - **The destination namespace must support copies.** Origins advertise this with the `Copies` capability, which is enabled automatically for any export that allows `Writes`. See "[Origin and Namespace Capabilities](../../federating-your-data/origin#origin-and-namespace-capabilities)" if you administer the origin.
-- **You must be able to read the source and write the destination.** These are two separate authorizations, and in the general case they are two separate tokens. See [Tokens](#tokens) below.
+- **You must be able to read the source and write the destination.** These are two separate authorizations, which the client normally acquires for you. See [Tokens](#tokens) if you need to supply them yourself.
 
 ## Copying an object
 
@@ -30,7 +30,7 @@ The client prints a progress bar as the destination origin reports how many byte
 
 ### Naming the destination object
 
-If the destination names an **existing collection**, the object is placed inside it under the source's name — the same gesture `cp` gives you:
+If the destination names an **existing collection**, the object is placed inside it under the source's name — the same semantics as `cp`:
 
 ```bash copy
 # Copies the object to .../destination-collection/object.dat
@@ -53,7 +53,8 @@ On a namespace that grants writes but not listings, name the destination object 
 ### Copying a collection
 
 Add `-r` to copy a whole collection.
-As with `pelican object get -r` and `pelican object put -r`, the entries land **flat** under the destination — the source collection's own name is not interposed:
+Here the rule changes: a recursive copy is `rsync`-flavored rather than `cp`-flavored.
+The entries land **flat** under the destination and the source collection's own name is *not* interposed, exactly as in `rsync -a source/ destination/` — and exactly as `pelican object get -r` and `pelican object put -r` already behave:
 
 ```bash copy
 # Contents of source-collection land directly under destination-collection/
@@ -64,6 +65,10 @@ The `?recursive` query parameter works too, on either end of the copy, and means
 
 ## Tokens
 
+Most of the time you do not need this section.
+A third-party copy acquires its own credentials the same way `pelican object get` and `pelican object put` do, so the commands above generally work with no token flags at all.
+Reach for the flags below only when you need to override that — a credential the client cannot discover, or a namespace whose issuer it cannot reach.
+
 A third-party copy performs two different operations on two different servers: it **reads** the source and **writes** the destination.
 Where both are covered by the same credential, `-t` is enough:
 
@@ -71,7 +76,7 @@ Where both are covered by the same credential, `-t` is enough:
 pelican object copy -t /path/to/token pelican://.../source pelican://.../destination
 ```
 
-Where they are not — which is the usual case when the two namespaces belong to different projects — name each credential separately:
+Where they are not — two namespaces belonging to different projects, say — name each credential separately:
 
 ```bash copy
 pelican object copy \
@@ -88,18 +93,6 @@ Only start a third-party copy against a destination you are willing to trust wit
 </Callout>
 
 Public source namespaces need no source credential at all, and a public destination is not possible: writes always require authorization.
-
-## How it works
-
-Understanding the sequence helps when a copy fails, because the error tells you which step refused.
-
-1. The client asks the federation's Director where the destination may be written, using the `COPY` verb so that only origins advertising the `Copies` capability are offered.
-1. The client asks the Director where the source may be read. This is an ordinary read lookup, so the source may well resolve to a **cache** rather than the origin — which is often what you want, since a cached copy may be closer to the destination. Pass `--direct`, or add `?directread` to the source URL, to require the origin itself.
-1. The client sends a `HEAD` to the source to learn the object's size, authorizing it with the source credential.
-1. The client sends an HTTP `COPY` request to the **destination**, carrying the destination credential in `Authorization`, the source credential in `TransferHeaderAuthorization`, and the resolved source URL in a `Source` header.
-1. The destination origin pulls the object and streams progress markers back on the still-open `COPY` response. The client turns those into the progress bar, and a `201 Created` at the end means the copy succeeded.
-
-No object bytes traverse the client at any point; only the progress markers do.
 
 ## Troubleshooting
 
