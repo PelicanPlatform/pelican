@@ -263,11 +263,11 @@ type Config struct {
 		} `mapstructure:"rotation" yaml:"Rotation"`
 	} `mapstructure:"logging" yaml:"Logging"`
 	Lotman struct {
-		AutoCreateOnDiscover bool `mapstructure:"autocreateondiscover" yaml:"AutoCreateOnDiscover"`
 		DbLocation string `mapstructure:"dblocation" yaml:"DbLocation"`
 		DefaultLotDeletionLifetime time.Duration `mapstructure:"defaultlotdeletionlifetime" yaml:"DefaultLotDeletionLifetime"`
 		DefaultLotExpirationLifetime time.Duration `mapstructure:"defaultlotexpirationlifetime" yaml:"DefaultLotExpirationLifetime"`
 		DefaultLotOpportunisticGB int `mapstructure:"defaultlotopportunisticgb" yaml:"DefaultLotOpportunisticGB"`
+		DisableAutoCreateOnDiscover bool `mapstructure:"disableautocreateondiscover" yaml:"DisableAutoCreateOnDiscover"`
 		EnableAPI bool `mapstructure:"enableapi" yaml:"EnableAPI"`
 		EnabledPolicy string `mapstructure:"enabledpolicy" yaml:"EnabledPolicy"`
 		GarbageCollectionInterval time.Duration `mapstructure:"garbagecollectioninterval" yaml:"GarbageCollectionInterval"`
@@ -872,11 +872,11 @@ type configWithType struct {
 		}
 	}
 	Lotman struct {
-		AutoCreateOnDiscover struct { Type string; Value bool }
 		DbLocation struct { Type string; Value string }
 		DefaultLotDeletionLifetime struct { Type string; Value time.Duration }
 		DefaultLotExpirationLifetime struct { Type string; Value time.Duration }
 		DefaultLotOpportunisticGB struct { Type string; Value int }
+		DisableAutoCreateOnDiscover struct { Type string; Value bool }
 		EnableAPI struct { Type string; Value bool }
 		EnabledPolicy struct { Type string; Value string }
 		GarbageCollectionInterval struct { Type string; Value time.Duration }

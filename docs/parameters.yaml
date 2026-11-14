@@ -6469,15 +6469,18 @@ type: int
 default: 500
 components: ["cache"]
 ---
-name: Lotman.AutoCreateOnDiscover
+name: Lotman.DisableAutoCreateOnDiscover
 description: |+
-  Whether the renewal routine automatically creates lots for federation prefixes advertised by the
-  Director that do not yet have any lot covering them. When true (the default), a newly-advertised
-  namespace is given an auto-derived lot on the next renewal tick. Set this to false at
-  strict-reservations sites where only explicitly-configured or API-created lots should exist;
-  prefixes without a lot are then left to the catch-all `default` lot.
+  Whether to stop the renewal routine from automatically creating lots for federation prefixes
+  advertised by the Director that do not yet have any lot covering them. By default a
+  newly-advertised namespace is given an auto-derived lot on the next renewal tick. Set this to
+  true at strict-reservations sites where only explicitly-configured or API-created lots should
+  exist; prefixes without a lot are then left to the catch-all `default` lot.
+
+  This is the site-wide switch. It is ANDed with the enabled policy's own `DiscoverPrefixes`, so
+  either one can turn auto-creation off.
 type: bool
-default: true
+default: false
 components: ["cache"]
 ---
 name: Lotman.DefaultLotOpportunisticGB
@@ -6486,7 +6489,8 @@ description: |+
   cached data not aligned with an explicit lot. The default of 0 keeps the historical behavior:
   unlotted data has no protected quota and is reclaimed first. Set a positive value to let the
   cache retain unlotted data opportunistically (evicted ahead of lotted data under disk pressure),
-  or -1 for an unbounded opportunistic quota.
+  or -1 for an unbounded opportunistic quota. Whole GB only; the lot API accepts a fractional
+  `opportunisticGB`, but this site-wide default does not.
 type: int
 default: 0
 components: ["cache"]

@@ -335,7 +335,7 @@ func renewExpiringLots(cfg renewalConfig, fedAds []server_structs.NamespaceAd, e
 		if !cfg.AutoCreateOnDiscover && len(ownTimeline) == 0 {
 			prop.skips = append(prop.skips, skipReason{
 				NamespacePath: p,
-				Reason:        "Lotman.AutoCreateOnDiscover is false and no existing lot covers this prefix",
+				Reason:        "Lotman.DisableAutoCreateOnDiscover is set and no existing lot covers this prefix",
 			})
 			continue
 		}
@@ -806,7 +806,7 @@ func runRenewalTick(getNamespaceAds func() []server_structs.NamespaceAd, period 
 		MaxLifetimeMs:        param.Lotman_MaxLotLifetime.GetDuration().Milliseconds(),
 		RootDedicatedGB:      rootDedicatedGB(existing),
 		FederationIssuer:     federationIssuer,
-		AutoCreateOnDiscover: param.Lotman_AutoCreateOnDiscover.GetBool(),
+		AutoCreateOnDiscover: !param.Lotman_DisableAutoCreateOnDiscover.GetBool(),
 	}
 
 	prop := renewExpiringLots(cfg, ads, existing)

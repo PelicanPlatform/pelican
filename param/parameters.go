@@ -307,11 +307,11 @@ var runtimeConfigurableMap = map[string]bool{
 	"Logging.Rotation.MaxRetentionPeriod": false,
 	"Logging.Rotation.MaxRetentionSize": false,
 	"Logging.Rotation.MaxSize": false,
-	"Lotman.AutoCreateOnDiscover": false,
 	"Lotman.DbLocation": false,
 	"Lotman.DefaultLotDeletionLifetime": false,
 	"Lotman.DefaultLotExpirationLifetime": false,
 	"Lotman.DefaultLotOpportunisticGB": false,
+	"Lotman.DisableAutoCreateOnDiscover": false,
 	"Lotman.EnableAPI": false,
 	"Lotman.EnabledPolicy": false,
 	"Lotman.GarbageCollectionInterval": false,
@@ -1158,7 +1158,7 @@ var boolAccessors = map[string]func(*Config) bool{
 	"Logging.DisableProgressBars": func(c *Config) bool { return c.Logging.DisableProgressBars },
 	"Logging.Rotation.Disable": func(c *Config) bool { return c.Logging.Rotation.Disable },
 	"Logging.Rotation.DisableCompress": func(c *Config) bool { return c.Logging.Rotation.DisableCompress },
-	"Lotman.AutoCreateOnDiscover": func(c *Config) bool { return c.Lotman.AutoCreateOnDiscover },
+	"Lotman.DisableAutoCreateOnDiscover": func(c *Config) bool { return c.Lotman.DisableAutoCreateOnDiscover },
 	"Lotman.EnableAPI": func(c *Config) bool { return c.Lotman.EnableAPI },
 	"Monitoring.EnablePrometheus": func(c *Config) bool { return c.Monitoring.EnablePrometheus },
 	"Monitoring.MetricAuthorization": func(c *Config) bool { return c.Monitoring.MetricAuthorization },
@@ -1654,11 +1654,11 @@ var allParameterNames = []string{
 	"Logging.Rotation.MaxRetentionPeriod",
 	"Logging.Rotation.MaxRetentionSize",
 	"Logging.Rotation.MaxSize",
-	"Lotman.AutoCreateOnDiscover",
 	"Lotman.DbLocation",
 	"Lotman.DefaultLotDeletionLifetime",
 	"Lotman.DefaultLotExpirationLifetime",
 	"Lotman.DefaultLotOpportunisticGB",
+	"Lotman.DisableAutoCreateOnDiscover",
 	"Lotman.EnableAPI",
 	"Lotman.EnabledPolicy",
 	"Lotman.GarbageCollectionInterval",
@@ -2357,7 +2357,7 @@ var (
 	Logging_DisableProgressBars = BoolParam{"Logging.DisableProgressBars"}
 	Logging_Rotation_Disable = BoolParam{"Logging.Rotation.Disable"}
 	Logging_Rotation_DisableCompress = BoolParam{"Logging.Rotation.DisableCompress"}
-	Lotman_AutoCreateOnDiscover = BoolParam{"Lotman.AutoCreateOnDiscover"}
+	Lotman_DisableAutoCreateOnDiscover = BoolParam{"Lotman.DisableAutoCreateOnDiscover"}
 	Lotman_EnableAPI = BoolParam{"Lotman.EnableAPI"}
 	Monitoring_EnablePrometheus = BoolParam{"Monitoring.EnablePrometheus"}
 	Monitoring_MetricAuthorization = BoolParam{"Monitoring.MetricAuthorization"}
@@ -2918,7 +2918,7 @@ func init() {
 		"Logging.DisableProgressBars": Logging_DisableProgressBars,
 		"Logging.Rotation.Disable": Logging_Rotation_Disable,
 		"Logging.Rotation.DisableCompress": Logging_Rotation_DisableCompress,
-		"Lotman.AutoCreateOnDiscover": Lotman_AutoCreateOnDiscover,
+		"Lotman.DisableAutoCreateOnDiscover": Lotman_DisableAutoCreateOnDiscover,
 		"Lotman.EnableAPI": Lotman_EnableAPI,
 		"Monitoring.EnablePrometheus": Monitoring_EnablePrometheus,
 		"Monitoring.MetricAuthorization": Monitoring_MetricAuthorization,

@@ -434,14 +434,14 @@ func SetParameterDefaults(v *viper.Viper, isRoot bool, isOSDF bool) {
 	v.SetDefault(param.Logging_Rotation_MaxRetentionSize.GetName(), "1GB")
 	// Logging.Rotation.MaxSize
 	v.SetDefault(param.Logging_Rotation_MaxSize.GetName(), "100MB")
-	// Lotman.AutoCreateOnDiscover
-	v.SetDefault(param.Lotman_AutoCreateOnDiscover.GetName(), true)
 	// Lotman.DefaultLotDeletionLifetime
 	v.SetDefault(param.Lotman_DefaultLotDeletionLifetime.GetName(), "48h")
 	// Lotman.DefaultLotExpirationLifetime
 	v.SetDefault(param.Lotman_DefaultLotExpirationLifetime.GetName(), "24h")
 	// Lotman.DefaultLotOpportunisticGB
 	v.SetDefault(param.Lotman_DefaultLotOpportunisticGB.GetName(), 0)
+	// Lotman.DisableAutoCreateOnDiscover
+	v.SetDefault(param.Lotman_DisableAutoCreateOnDiscover.GetName(), false)
 	// Lotman.EnableAPI
 	v.SetDefault(param.Lotman_EnableAPI.GetName(), false)
 	// Lotman.EnabledPolicy
