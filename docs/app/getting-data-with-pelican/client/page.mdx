@@ -176,18 +176,23 @@ The same rule applies to `pelican object get`: a non-recursive get into an exist
 
 ## Pelican Object Copy
 
-> **Note**: We are phasing out the `object copy` command and we recommend user  use `object get` and `object put` command instead.
-
-As well with Pelican's `object get` and `object put` commands, there is also an older command called `pelican object copy`. This functions the same as the `pelican object get/put` except that it works for both gets and puts. For example, to do an `object get`:
+`pelican object copy` picks its direction from the URLs you give it rather than from the command name.
+With one local path and one federation URL it does the same job as `object get` or `object put`:
 
 ```bash
 pelican object copy pelican://<federation-url></namespace-prefix></path/to/file> <local/path/to/file>
 ```
 
-and to do an `object put`:
-
 ```bash
 pelican object copy <path/to/local/file> pelican://<federation-url></namespace-prefix></path/to/destination> -t </path/to/token/file>
+```
+
+> **Note**: For these two uses, prefer `object get` and `object put`. They say what they do, and `object copy` is kept for them mainly to support existing scripts.
+
+When **both** sides are federation URLs, `object copy` does something neither `get` nor `put` can: a [third-party copy](./third-party-copy), in which the destination origin pulls the object directly from the source and no object bytes pass through your computer.
+
+```bash
+pelican object copy pelican://<federation-url>/<namespace>/source pelican://<federation-url>/<namespace>/destination
 ```
 
 ## Utilizing Queries with your URL
