@@ -1125,15 +1125,14 @@ func DowntimeAuthHandler(ctx *gin.Context) {
 // Handle regular username/password based login.
 //
 // Login order:
-//  1. If a user with (username, externalURL) exists in the database AND has a
-//     non-empty password_hash, verify against that hash. This is the primary
-//     path for admin-created local accounts.
+//  1. If a user with this (globally unique) username exists in the database
+//     AND has a non-empty password_hash, verify against that hash. This is
+//     the primary path for admin-created local accounts.
 //  2. Otherwise fall back to the htpasswd file. The htpasswd path is used to
 //     bootstrap the built-in "admin" account before any DB password is set
 //     and to remain compatible with installations that already have one.
 func loginHandler(ctx *gin.Context) {
 	htDB := authDB.Load()
-	externalUrl := param.Server_ExternalWebUrl.GetString()
 
 	login := Login{}
 	if ctx.ShouldBind(&login) != nil {
@@ -1163,20 +1162,21 @@ func loginHandler(ctx *gin.Context) {
 
 	var userRecord *database.User
 
-	// Step 1: try the local-user database.
-	if externalUrl != "" {
-		dbUser, dbErr := database.VerifyUserPassword(database.ServerDatabase, login.User, login.Password)
-		if dbErr == nil {
-			userRecord = dbUser
-		} else if !errors.Is(dbErr, database.ErrInvalidPassword) {
-			log.Errorf("Local password verification failed for user %s: %s", login.User, dbErr)
-			ctx.JSON(http.StatusInternalServerError,
-				server_structs.SimpleApiResp{
-					Status: server_structs.RespFailed,
-					Msg:    "Failed to verify credentials",
-				})
-			return
-		}
+	// Step 1: try the local-user database. Deliberately not gated on
+	// Server.ExternalWebUrl: a stored password is resolved by username, and
+	// the internal issuer is a constant, so local login no longer depends on
+	// what this server calls itself.
+	dbUser, dbErr := database.VerifyUserPassword(database.ServerDatabase, login.User, login.Password)
+	if dbErr == nil {
+		userRecord = dbUser
+	} else if !errors.Is(dbErr, database.ErrInvalidPassword) {
+		log.Errorf("Local password verification failed for user %s: %s", login.User, dbErr)
+		ctx.JSON(http.StatusInternalServerError,
+			server_structs.SimpleApiResp{
+				Status: server_structs.RespFailed,
+				Msg:    "Failed to verify credentials",
+			})
+		return
 	}
 
 	// Step 2: fall back to htpasswd for users not yet in the DB (e.g. the
@@ -1213,7 +1213,7 @@ func loginHandler(ctx *gin.Context) {
 		// (the user came in with their own credential, no other user
 		// brought the account into existence).
 		var err error
-		userRecord, err = database.GetOrCreateLocalUser(database.ServerDatabase, login.User, externalUrl, database.CreatorSelf())
+		userRecord, err = database.GetOrCreateLocalUser(database.ServerDatabase, login.User, database.CreatorSelf())
 		if err != nil {
 			log.Errorf("Failed to get or create user %s: %s", login.User, err)
 			ctx.JSON(http.StatusInternalServerError,
@@ -1310,8 +1310,7 @@ func initLoginHandler(ctx *gin.Context) {
 
 	// Get or create the admin user in the database. The init-code path
 	// is the bootstrap admin authenticating themselves — self-enrolled.
-	externalUrl := param.Server_ExternalWebUrl.GetString()
-	userRecord, err := database.GetOrCreateLocalUser(database.ServerDatabase, "admin", externalUrl, database.CreatorSelf())
+	userRecord, err := database.GetOrCreateLocalUser(database.ServerDatabase, "admin", database.CreatorSelf())
 	if err != nil {
 		log.Errorf("Failed to get or create admin user: %s", err)
 		ctx.JSON(http.StatusInternalServerError,

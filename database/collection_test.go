@@ -411,22 +411,13 @@ func adminRows(t *testing.T, db *gorm.DB) (live, tombstoned []string) {
 	return live, tombstoned
 }
 
-// externalIdentities returns every identity that is not a built-in-admin local
-// one, which is what ensureBuiltinAdmin is expected to leave alone.
+// externalIdentities returns every identity that is not a built-in-admin
+// internal one, which is what ensureBuiltinAdmin is expected to leave alone.
 func externalIdentities(t *testing.T, db *gorm.DB) []UserIdentity {
 	t.Helper()
 	var out []UserIdentity
-	require.NoError(t, db.Where("sub <> ?", builtinAdminUsername).Order("id").Find(&out).Error)
+	require.NoError(t, db.Where("issuer <> ?", InternalIssuer).Order("id").Find(&out).Error)
 	return out
-}
-
-// adminLocalIdentity returns the built-in admin's own ("admin", <local issuer>)
-// identity row.
-func adminLocalIdentity(t *testing.T, db *gorm.DB, userID string) UserIdentity {
-	t.Helper()
-	var ident UserIdentity
-	require.NoError(t, db.Where("user_id = ? AND sub = ?", userID, builtinAdminUsername).First(&ident).Error)
-	return ident
 }
 
 // An administrator with a password may unlink their last identity, which used
@@ -468,6 +459,7 @@ func TestEnsureBuiltinAdminRelinksRatherThanRetires(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, relinked, 1, "the identity is put back")
 	assert.Equal(t, builtinAdminUsername, relinked[0].Sub)
+	assert.Equal(t, InternalIssuer, relinked[0].Issuer)
 
 	var group Group
 	require.NoError(t, db.First(&group, "id = ?", "ops").Error)
@@ -475,7 +467,7 @@ func TestEnsureBuiltinAdminRelinksRatherThanRetires(t *testing.T) {
 }
 
 // ensureBuiltinAdmin keeps the admin row and its state across a URL change,
-// evicts a row squatting on "admin", and recreates the admin when missing.
+// evicts a row squatting on "admin", and leaves the account password-only.
 func TestEnsureBuiltinAdmin(t *testing.T) {
 	const oldURL = "https://old-origin.example.test"
 	const newURL = "https://origin.example.test"
@@ -496,6 +488,8 @@ func TestEnsureBuiltinAdmin(t *testing.T) {
 	require.NoError(t, db.Create(&UserIdentity{ID: "li-admin", UserID: admin.ID, Sub: "sub-linked-1", Issuer: "https://idp.example.test"}).Error)
 	require.NoError(t, db.Create(&UserIdentity{ID: "li-alice", UserID: "alice", Sub: "sub-linked-2", Issuer: "https://idp.example.test"}).Error)
 
+	// The server moves to a new URL. The built-in admin does not notice:
+	// its identity is at the constant internal issuer, not at the URL.
 	setExternalWebURL(t, newURL)
 	require.NoError(t, ensureBuiltinAdmin(db))
 	require.NoError(t, BootstrapAdminAndBackfillOwners(db))
@@ -509,34 +503,35 @@ func TestEnsureBuiltinAdmin(t *testing.T) {
 	linked := externalIdentities(t, db)
 	require.Len(t, linked, 1)
 	assert.Equal(t, "li-alice", linked[0].ID, "only the admin's identities are unlinked")
-	assert.Equal(t, newURL, adminLocalIdentity(t, db, admin.ID).Issuer, "the local identity follows the server's URL")
 
 	require.NoError(t, ensureBuiltinAdmin(db))
 	live, tombstoned := adminRows(t, db)
 	assert.Equal(t, []string{admin.ID}, live)
 	assert.Empty(t, tombstoned)
 
-	// DeleteUser, not a bare soft delete: it is what releases the account's
-	// identities, which is the production path for retiring an account.
+	// Somebody enrolls under the name "admin" from an IdP. The username is
+	// bearer authority, so that row is retired and a fresh built-in admin
+	// takes the name back.
 	require.NoError(t, DeleteUser(db, admin.ID, "", true))
 	require.NoError(t, db.Create(&User{ID: "squatter", Username: "admin", CreatedBy: CreatorSelfEnrolled}).Error)
-	require.NoError(t, db.Create(&UserIdentity{ID: "li-squatter", UserID: "squatter", Sub: "sub-x", Issuer: "https://idp.example.test"}).Error)
+	require.NoError(t, db.Create(&UserIdentity{ID: "li-squatter", UserID: "squatter", Sub: "admin", Issuer: "https://idp.example.test"}).Error)
 	require.NoError(t, ensureBuiltinAdmin(db))
 	require.NoError(t, BootstrapAdminAndBackfillOwners(db))
 	fresh, err := BuiltinAdminUser(db)
 	require.NoError(t, err)
 	require.NotNil(t, fresh)
-	assert.Equal(t, newURL, adminLocalIdentity(t, db, fresh.ID).Issuer)
 	assert.NotEqual(t, admin.ID, fresh.ID)
 	live, tombstoned = adminRows(t, db)
 	assert.Equal(t, []string{fresh.ID}, live)
 	assert.ElementsMatch(t, []string{admin.ID, "squatter"}, tombstoned)
+
 	require.NoError(t, db.Create(&UserIdentity{ID: "li-fresh", UserID: fresh.ID, Sub: "sub-linked-3", Issuer: "https://idp.example.test"}).Error)
 	require.NoError(t, ensureBuiltinAdmin(db))
 	linked = externalIdentities(t, db)
 	require.Len(t, linked, 1)
 	assert.Equal(t, "li-alice", linked[0].ID)
 
+	// And it no longer depends on Server.ExternalWebUrl at all.
 	setExternalWebURL(t, "")
 	require.NoError(t, ensureBuiltinAdmin(db))
 	live, _ = adminRows(t, db)

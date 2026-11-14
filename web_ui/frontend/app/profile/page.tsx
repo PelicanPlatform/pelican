@@ -43,7 +43,7 @@ import { AlertDispatchContext } from '@/components/AlertProvider';
 import { alertOnError } from '@/helpers/util';
 import { Me, MeService, MyGroup } from '@/helpers/api';
 import ScopeService, { ScopeCatalogEntry } from '@/helpers/api/Scope/service';
-import { UserIdentity } from '@/types';
+import { INTERNAL_ISSUER, UserIdentity } from '@/types';
 
 // Min visible "Saving..." duration so it doesn't flash by on fast responses.
 const MIN_SAVING_MS = 600;
@@ -140,7 +140,6 @@ const ProfileContent = () => {
         <Skeleton variant='rounded' height={120} />
       ) : (
         <IdentitiesCard
-          me={me}
           identities={identities ?? []}
           onChanged={mutateIdentities}
         />
@@ -212,12 +211,9 @@ const ScopesCard: React.FC<{
   );
 };
 
-// AccountCard is the username + display-name + password panel. We
-// deliberately do NOT surface the user's primary (sub, issuer) here when
-// it's the internal identity (sub == username, issuer == this server) —
-// that pair is an implementation detail of password login. For OIDC
-// users, the primary identity is shown in the IdentitiesCard below
-// rather than mixed in with editable account fields.
+// AccountCard is the username + display-name + password panel. It
+// deliberately surfaces no (sub, issuer) at all: identities live in the
+// IdentitiesCard below rather than mixed in with editable account fields.
 const AccountCard: React.FC<{
   me: Me;
   onUpdated: () => Promise<Me | undefined> | void;
@@ -520,23 +516,21 @@ const PasswordSection: React.FC<{
   );
 };
 
-// IdentitiesCard renders the user's primary OIDC identity (if it isn't
-// the internal one — see isInternalIdentity for the rationale) plus
-// every secondary identity, with self-unlink for the secondaries.
-// "Linked identity" is a stable concept in the design contract; the
-// internal-issuer entry would just be noise here ("you can log in
-// with your password") and is replaced by the password indicator on
-// the AccountCard above.
+// IdentitiesCard renders every identity an external provider vouches for,
+// each with self-unlink. The internal-issuer entry is left out: it would just
+// be noise here ("you can log in with your password") and is already conveyed
+// by the password indicator on the AccountCard above.
 const IdentitiesCard: React.FC<{
-  me: Me;
   identities: UserIdentity[];
   onChanged: () => Promise<UserIdentity[] | undefined> | void;
-}> = ({ me, identities, onChanged }) => {
+}> = ({ identities, onChanged }) => {
   // Every identity now comes from /me/identities (there is no separate
-  // "primary" on the user record any more). The internal local-password
-  // identity — sub equals the username — is noise here, since the password
-  // indicator on the account card already conveys it, so it is filtered out.
-  const externalIdentities = identities.filter((id) => id.sub !== me.username);
+  // "primary" on the user record any more). The internal identity is noise
+  // here — the password indicator on the account card already conveys it —
+  // so it is filtered out by its issuer rather than by guessing from the sub.
+  const externalIdentities = identities.filter(
+    (id) => id.issuer !== INTERNAL_ISSUER
+  );
 
   if (externalIdentities.length === 0) {
     return (

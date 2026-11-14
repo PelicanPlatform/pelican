@@ -35,7 +35,7 @@ import (
 // subtests below so each one starts from the same baseline.
 func passwordInviteTestUser(t *testing.T, db *gorm.DB) string {
 	t.Helper()
-	u, err := CreateLocalUser(db, "alice", "Alice", "https://local", CreatorSelf())
+	u, err := CreateLocalUser(db, "alice", "Alice", CreatorSelf())
 	require.NoError(t, err)
 	return u.ID
 }
