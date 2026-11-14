@@ -117,7 +117,10 @@ func newTierTarget(ctx context.Context, cfg TierTargetConfig) (*tierTarget, erro
 	}
 	var names *tierNameView
 	if posix, ok := backend.(*posixTierBackend); ok {
-		names = newTierNameView(posix, cfg.namesViewEnabled())
+		if names, err = newTierNameView(posix, cfg.namesViewEnabled(), cfg.exactNames()); err != nil {
+			_ = backend.Close()
+			return nil, err
+		}
 	}
 	if wrap := wrapTierBackendForTest; wrap != nil {
 		backend = wrap(backend)

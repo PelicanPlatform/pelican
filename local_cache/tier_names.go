@@ -91,6 +91,19 @@ import (
 // escapes whose hex digits are only ever compared case-insensitively -- is
 // unchanged by folding, so the mapping stays injective; the cost is that
 // such names are harder to read, which beats serving the wrong object.
+//
+// Exact names.  With NamesView: exact the tree instead spells each object
+// exactly as its federation path does, with no escaping and no versions:
+//
+//	names/<namespace path>  -> ../../objects/aa/bb/<instance hash>
+//
+// for the version the cache currently considers the latest, and nothing for
+// any other.  Without versions in the tree, '@' and '%' mean nothing to it,
+// so names are left as they are; the mapping is the identity on paths, and
+// injective for that reason alone.  It cannot survive a filesystem that
+// folds names, where two objects would share a link, so a target asking for
+// exact names on one is refused when it opens.  Names that cannot be spelled
+// at all -- a NUL byte, a component longer than 255 bytes -- are left out.
 
 // tierNameMaxComponent is the longest file name the view will create; POSIX
 // filesystems commonly refuse anything longer.
@@ -140,14 +153,10 @@ type tierLogicalName struct {
 // reporting false for an object that cannot be named: no source URL, a path
 // not in canonical form, or a name too long for the filesystem.
 func newTierLogicalName(sourceURL, etag string, foldSafe bool) (tierLogicalName, bool) {
-	if sourceURL == "" {
+	parts, ok := tierNameParts(sourceURL)
+	if !ok {
 		return tierLogicalName{}, false
 	}
-	u, err := url.Parse(sourceURL)
-	if err != nil || u.Path == "" || u.Path == "/" || !strings.HasPrefix(u.Path, "/") || path.Clean(u.Path) != u.Path {
-		return tierLogicalName{}, false
-	}
-	parts := strings.Split(strings.TrimPrefix(u.Path, "/"), "/")
 	for i, part := range parts {
 		parts[i] = escapeTierName(part, foldSafe)
 		if len(parts[i]) > tierNameMaxComponent {
@@ -163,6 +172,42 @@ func newTierLogicalName(sourceURL, etag string, foldSafe bool) (tierLogicalName,
 		return tierLogicalName{}, false
 	}
 	return n, true
+}
+
+// tierNameParts splits an object's federation path into the components the
+// view spells, reporting false for one it cannot name: no source URL, a path
+// not in canonical form, or one with an encoded slash, which would decode
+// into a path another object may already have.
+func tierNameParts(sourceURL string) ([]string, bool) {
+	if sourceURL == "" {
+		return nil, false
+	}
+	u, err := url.Parse(sourceURL)
+	if err != nil || u.Path == "" || u.Path == "/" || !strings.HasPrefix(u.Path, "/") || path.Clean(u.Path) != u.Path {
+		return nil, false
+	}
+	if strings.Contains(strings.ToUpper(u.RawPath), "%2F") {
+		return nil, false
+	}
+	return strings.Split(strings.TrimPrefix(u.Path, "/"), "/"), true
+}
+
+// newTierExactName works out where an object belongs in an exact-names view
+// (see the note above): its federation path, unchanged.
+func newTierExactName(sourceURL string) (tierLogicalName, bool) {
+	parts, ok := tierNameParts(sourceURL)
+	if !ok {
+		return tierLogicalName{}, false
+	}
+	for _, part := range parts {
+		if len(part) > tierNameMaxComponent || strings.IndexByte(part, 0) >= 0 {
+			return tierLogicalName{}, false
+		}
+	}
+	return tierLogicalName{
+		dir:  path.Join(append([]string{posixNamesDir}, parts[:len(parts)-1]...)...),
+		base: parts[len(parts)-1],
+	}, true
 }
 
 // versionFile is the file name of the version link.
@@ -192,17 +237,31 @@ type tierNameView struct {
 	enabled bool
 	// foldSafe is set when the filesystem folds names; see the note above.
 	foldSafe bool
-	mu       sync.Mutex
+	// exact is set for NamesView: exact; see the note above.
+	exact bool
+	mu    sync.Mutex
 }
 
-func newTierNameView(b *posixTierBackend, enabled bool) *tierNameView {
-	v := &tierNameView{b: b, enabled: enabled}
-	folds, err := probeNameFolding(b)
+// newTierNameView prepares the names view of a shared-filesystem target.  It
+// fails only for an exact-names view on a filesystem that folds names (or
+// one that cannot be checked), which could not keep two objects apart.
+func newTierNameView(b *posixTierBackend, enabled, exact bool) (*tierNameView, error) {
+	v := &tierNameView{b: b, enabled: enabled, exact: exact}
+	folds, err := tierNameFoldingProbe(b)
+	if err != nil && enabled && exact {
+		return nil, errors.Wrapf(err, "cache tier target %s: could not check whether the filesystem folds file "+
+			"names, which NamesView: exact needs to know", b.display)
+	}
 	if err != nil {
 		// Assume the worst: the cost is only less readable names.
 		log.Warnf("Could not tell whether cache tier target %s folds file names (%v); spelling its names view "+
 			"so that folding cannot conflate two objects", b.display, err)
 		folds = true
+	}
+	if folds && enabled && exact {
+		return nil, errors.Errorf("cache tier target %s is on a filesystem that treats names differing in case or "+
+			"Unicode normalization as the same, where NamesView: exact could give two objects one name; use the "+
+			"default names view, which escapes such names", b.display)
 	}
 	if folds && enabled {
 		log.Warnf("Cache tier target %s is on a filesystem that treats names differing in case or Unicode "+
@@ -210,8 +269,12 @@ func newTierNameView(b *posixTierBackend, enabled bool) *tierNameView {
 			"two objects share a name", b.display)
 	}
 	v.foldSafe = folds
-	return v
+	return v, nil
 }
+
+// tierNameFoldingProbe is probeNameFolding; tests replace it to run on a
+// filesystem other than the one they are given.
+var tierNameFoldingProbe = probeNameFolding
 
 // probeNameFolding reports whether the filesystem treats names that differ
 // in ASCII case, or in Unicode normalization, as the same entry.
@@ -235,9 +298,21 @@ func probeNameFolding(b *posixTierBackend) (bool, error) {
 	return false, nil
 }
 
-// logicalName is newTierLogicalName in this view's spelling.
+// logicalName is where the object's version belongs in this view's spelling.
 func (v *tierNameView) logicalName(sourceURL, etag string) (tierLogicalName, bool) {
+	if v.exact {
+		return newTierExactName(sourceURL)
+	}
 	return newTierLogicalName(sourceURL, etag, v.foldSafe)
+}
+
+// objectLinkPath is the link that leads to the object itself: in an exact
+// view, the object's own name; otherwise, its version link.
+func (v *tierNameView) objectLinkPath(n tierLogicalName) string {
+	if v.exact {
+		return n.currentPath()
+	}
+	return n.versionPath()
 }
 
 // placeLink makes name a symlink holding target, atomically replacing
@@ -290,11 +365,13 @@ func (v *tierNameView) unlink(n tierLogicalName, key string) error {
 	if err != nil {
 		return err
 	}
-	if _, err := v.removeLinkIf(n.versionPath(), objectLinkFrom(n.dir, objectPath)); err != nil {
+	if _, err := v.removeLinkIf(v.objectLinkPath(n), objectLinkFrom(n.dir, objectPath)); err != nil {
 		return err
 	}
-	if _, err := v.removeLinkIf(n.currentPath(), n.versionFile()); err != nil {
-		return err
+	if !v.exact {
+		if _, err := v.removeLinkIf(n.currentPath(), n.versionFile()); err != nil {
+			return err
+		}
 	}
 	v.pruneDirs(n.dir)
 	return nil
@@ -349,12 +426,15 @@ func (sm *StorageManager) publishTierNameLocked(target *tierTarget, hash Instanc
 		return 0, err
 	}
 	current := found && latest == meta.ETag
+	want := objectLinkFrom(name.dir, objectPath)
+	if v.exact {
+		return sm.publishExactNameLocked(target, name, want, current)
+	}
 
 	if err := v.b.mkdirAll(name.dir); err != nil {
 		return 0, err
 	}
 	changed := 0
-	want := objectLinkFrom(name.dir, objectPath)
 	existing, err := v.b.fs.Readlink(name.versionPath())
 	switch {
 	case err == nil && existing == want:
@@ -386,6 +466,37 @@ func (sm *StorageManager) publishTierNameLocked(target *tierTarget, hash Instanc
 		}
 	}
 	return changed, nil
+}
+
+// publishExactNameLocked is publishTierNameLocked for an exact-names view:
+// the object's name leads straight to it while it is the current version,
+// and to nothing of its once it is not.
+func (sm *StorageManager) publishExactNameLocked(target *tierTarget, name tierLogicalName, want string, current bool) (int, error) {
+	v := target.names
+	if !current {
+		removed, err := v.removeLinkIf(name.currentPath(), want)
+		if removed {
+			v.pruneDirs(name.dir)
+			return 1, err
+		}
+		return 0, err
+	}
+	existing, err := v.b.fs.Readlink(name.currentPath())
+	switch {
+	case err == nil && existing == want:
+		return 0, nil
+	case err == nil && sm.judgeExactLink(target, name.currentPath(), existing) == linkKeep:
+		// Another current object has this name -- the same path in another
+		// federation, say.  The first keeps it.
+		return 0, errors.Errorf("%s already names another object", name.currentPath())
+	}
+	if err := v.b.mkdirAll(name.dir); err != nil {
+		return 0, err
+	}
+	if _, err := v.placeLink(name.currentPath(), want); err != nil {
+		return 0, err
+	}
+	return 1, nil
 }
 
 // unpublishTierName withdraws an object from its target's names view.
@@ -466,10 +577,26 @@ func (sm *StorageManager) judgeVersionLinkMeta(target *tierTarget, linkPath, des
 		return linkRemove, nil
 	}
 	name, ok := target.names.logicalName(meta.SourceURL, meta.ETag)
-	if !ok || name.versionPath() != linkPath {
+	if !ok || target.names.objectLinkPath(name) != linkPath {
 		return linkRemove, nil
 	}
 	return linkKeep, meta
+}
+
+// judgeExactLink decides whether linkPath, holding dest, belongs in an
+// exact-names view: it must lead to an object on the target that may be
+// exposed, whose name is linkPath, and which is the current version.
+func (sm *StorageManager) judgeExactLink(target *tierTarget, linkPath, dest string) linkVerdict {
+	verdict, meta := sm.judgeVersionLinkMeta(target, linkPath, dest)
+	if meta == nil {
+		return verdict
+	}
+	if current, err := sm.isLatest(meta); err != nil {
+		return linkKeep
+	} else if !current {
+		return linkRemove
+	}
+	return linkKeep
 }
 
 // judgeBareLink decides whether the bare name linkPath, holding dest, is
@@ -517,6 +644,9 @@ func (sm *StorageManager) judgeNameLink(target *tierTarget, linkPath string) lin
 	dest, err := target.names.b.fs.Readlink(linkPath)
 	if err != nil {
 		return linkKeep // gone already, or unreadable: nothing to do here
+	}
+	if target.names.exact {
+		return sm.judgeExactLink(target, linkPath, dest)
 	}
 	if strings.Contains(path.Base(linkPath), "@") {
 		return sm.judgeVersionLink(target, linkPath, dest)
@@ -595,6 +725,13 @@ func (cc *ConsistencyChecker) reconcileTierNames(ctx context.Context, target *ti
 			}
 			if meta.StorageID != target.id || seen.has(hash) {
 				return nil
+			}
+			if v.exact {
+				// Only the current version has a name; any link to another
+				// was judged by the walk.
+				if current, err := sm.isLatest(meta); err == nil && !current {
+					return nil
+				}
 			}
 			page = append(page, hash)
 			if len(page) >= tierNamesPage {
@@ -679,6 +816,30 @@ func (cc *ConsistencyChecker) walkTierNames(ctx context.Context, target *tierTar
 				return err == nil && !info.IsDir() && info.Mode()&fs.ModeSymlink == 0
 			})
 		}
+	}
+
+	if v.exact {
+		for file, dest := range dests {
+			name := dir + "/" + file
+			if !v.enabled {
+				removeIf(name, func() bool { return sm.judgeNameLink(target, name) == linkRemove })
+				continue
+			}
+			verdict, meta := sm.judgeVersionLinkMeta(target, name, dest)
+			if verdict == linkKeep && meta != nil {
+				if current, err := sm.isLatest(meta); err == nil && !current {
+					verdict = linkRemove
+				}
+			}
+			if verdict == linkRemove {
+				removeIf(name, func() bool { return sm.judgeNameLink(target, name) == linkRemove })
+				continue
+			}
+			if meta != nil {
+				seen.add(target.hashFromKey(dest[len(objectLinkFrom(dir, posixObjectsDir+"/")):]))
+			}
+		}
+		return added, removed, nil
 	}
 
 	readlink := func(name string) (string, error) {
