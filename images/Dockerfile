@@ -75,10 +75,6 @@ ARG TOMCAT_GID=10443
 #     WARNING: When building an RPM from source, the version the built RPM
 #     claims to be will *always* come from the .spec file. The upstream Git
 #     repository must have a correct .spec file, or confusion will ensue.
-ARG LOTMAN_SRC_BUILD=false
-ARG LOTMAN_VER=0.1.0
-ARG LOTMAN_RELEASE=
-# ARG LOTMAN_RELEASE=".osg${OSG_SERIES}.${BASE_OS}"
 # Note: github_scripts/osx_install.sh also (separately) specifies the version to use.
 # Until the two places are programmatically synchronized, please double-check by hand
 # when doing version changes.
@@ -245,6 +241,58 @@ RUN --mount=type=cache,id=go-cache,target=/root/.cache/go-build,sharing=shared \
 ENDRUN
 
 #################################################################
+# LotMan Build
+#
+# Builds libLotMan -- the C ABI over Pelican's native Go lot engine
+# (lotman/cshared) -- and packages it as an RPM that replaces the C++
+# `lotman` package.
+#
+# The XRootD purge plugin runs in a separate process from pelican-server and
+# reaches lots through this shared library. The C++ implementation keeps its
+# lots in a different file, under a different schema, than the Go engine the
+# cache now writes through, so installing that one instead would point the
+# plugin at an empty database and it would purge nothing by lot. The two have
+# to be the same implementation, and this is it.
+#
+# Unlike the Pelican binaries, the library needs cgo, which rules out
+# cross-compiling from the build platform; this stage runs on the TARGET
+# platform with a native toolchain.
+#################################################################
+FROM almalinux:9.8@sha256:245f8aab832fe800aa42bdab5fad75ebbd8e0b4c9f24820a83c638b177857ae2 AS lotman-build
+ARG TARGETPLATFORM
+ARG TARGETARCH
+
+COPY . /pelican-src
+WORKDIR /pelican-src
+
+RUN --mount=type=cache,id=dnf-${TARGETPLATFORM},target=/var/cache/dnf,sharing=locked \
+    --mount=type=cache,id=go-cache-lotman-${TARGETPLATFORM},target=/root/.cache/go-build,sharing=shared \
+    --mount=type=cache,id=go-mod-cache-${TARGETPLATFORM},target=/root/go,sharing=locked \
+    <<ENDRUN
+
+  set -eux
+  set -o pipefail
+
+  # gcc-c++ is for the spec's %check, which compiles the published header
+  # the way xrootd-lotman does.
+  dnf install -y gcc gcc-c++ jq rpm-build
+
+  # Install Go the same way pelican-build-base does, from go.mod's version.
+  # That version is newer than the `golang` any EL9 repository carries, which
+  # is also why rpmbuild runs with --nodeps below: the spec's BuildRequires
+  # describe what a distribution builder needs, and this stage satisfies them
+  # out of band.
+
+  GO_LANG_VER=$(grep -E '^go[[:space:]]*[0-9]+\.[0-9]+' go.mod | grep -oE '[0-9]+\.[0-9]+')
+  GO_TOOLCHAIN_VER=$(curl https://go.dev/dl/?mode=json | jq -r ".[].version | select(startswith(\"go${GO_LANG_VER}\"))" | sort -rV | head -n 1)
+  rm -rf /usr/local/go
+  curl -fSL https://dl.google.com/go/${GO_TOOLCHAIN_VER}.linux-${TARGETARCH}.tar.gz | tar -xz -f - -C /usr/local
+  export PATH="/usr/local/go/bin:${PATH}"
+
+  rpmbuild -bb --nodeps --build-in-place --define '_topdir /lotman-build' rpm/pelican-lotman.spec
+ENDRUN
+
+#################################################################
 # Pelican Software Base
 #
 # This stage should contain setup common to all images that we wish
@@ -405,8 +453,6 @@ ENDRUN
 # This stage builds XRootD components from source.
 #################################################################
 FROM xrootd-software-init AS xrootd-build
-ARG LOTMAN_SRC_BUILD
-ARG LOTMAN_VER
 ARG XRDCL_PELICAN_SRC_BUILD
 ARG XRDCL_PELICAN_VER
 ARG XRDHTTP_PELICAN_SRC_BUILD
@@ -421,9 +467,19 @@ ARG OSG_REPO
 
 WORKDIR /xrootd-build
 
-RUN --mount=type=cache,id=dnf-${TARGETPLATFORM},target=/var/cache/dnf,sharing=locked <<ENDRUN
+RUN --mount=type=bind,from=lotman-build,source=/lotman-build,target=/lotman-build \
+    --mount=type=cache,id=dnf-${TARGETPLATFORM},target=/var/cache/dnf,sharing=locked \
+    <<ENDRUN
   set -eux
   set -o pipefail
+
+  # libLotMan comes from Pelican's own Go engine (see the LotMan Build stage),
+  # not from the C++ `lotman` package. Install it first: xrootd-lotman carries
+  # `BuildRequires: lotman >= 0.1.0`, which this package's versioned
+  # `Provides: lotman` satisfies, so a source build of the plugin compiles
+  # against this header and links against this library.
+
+  dnf install -y /lotman-build/RPMS/*/pelican-lotman-*.rpm
 
   # Install the build requirements only if we actually need them, so that we
   # don't slow down the overall build unnecessarily.
@@ -489,7 +545,6 @@ RUN --mount=type=cache,id=dnf-${TARGETPLATFORM},target=/var/cache/dnf,sharing=lo
     fi
   }
 
-  run_task  LOTMAN            PelicanPlatform  lotman
   run_task  XRDCL_PELICAN     PelicanPlatform  xrdcl-pelican
   run_task  XRDHTTP_PELICAN   PelicanPlatform  xrdhttp-pelican
   run_task  XROOTD_LOTMAN     PelicanPlatform  xrootd-lotman
@@ -506,9 +561,6 @@ ENDRUN
 #################################################################
 FROM xrootd-software-init AS xrootd-software-base
 ARG TARGETARCH
-ARG LOTMAN_SRC_BUILD
-ARG LOTMAN_VER
-ARG LOTMAN_RELEASE
 ARG XRDCL_PELICAN_SRC_BUILD
 ARG XRDCL_PELICAN_VER
 ARG XRDCL_PELICAN_RELEASE
@@ -527,11 +579,19 @@ ARG XROOTD_MULTIUSER_RELEASE
 ARG OSG_REPO
 
 RUN --mount=type=bind,from=xrootd-build,source=/xrootd-build,target=/xrootd-build \
+    --mount=type=bind,from=lotman-build,source=/lotman-build,target=/lotman-build \
     --mount=type=cache,id=dnf-${TARGETPLATFORM},target=/var/cache/dnf,sharing=locked \
     <<ENDRUN
 
   set -eux
   set -o pipefail
+
+  # Pelican's libLotMan, in place of the C++ `lotman` package. It must go in
+  # before xrootd-lotman: the plugin's `Requires: lotman >= 0.1.0` is met by
+  # this package's versioned Provides, so dnf does not pull the C++ one, and
+  # its `Obsoletes: lotman` removes that package if something else drags it in.
+
+  dnf install -y /lotman-build/RPMS/*/pelican-lotman-*.rpm
 
   # NOTE: We include the `PROJECT` parameter here, even thought it is not
   # used, in order to maintain symmetry with the xrootd-build stage above.
@@ -559,7 +619,6 @@ RUN --mount=type=bind,from=xrootd-build,source=/xrootd-build,target=/xrootd-buil
     fi
   }
 
-  run_task  LOTMAN           PelicanPlatform  lotman
   run_task  XRDCL_PELICAN    PelicanPlatform  xrdcl-pelican
   run_task  XRDHTTP_PELICAN  PelicanPlatform  xrdhttp-pelican
   run_task  XROOTD_LOTMAN    PelicanPlatform  xrootd-lotman
