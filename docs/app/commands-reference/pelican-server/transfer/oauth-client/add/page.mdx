@@ -6,6 +6,22 @@ title: pelican server transfer oauth client add
 
 Register a new OAuth2 client on the transfer server
 
+### Synopsis
+
+Register an external issuer's confidential OAuth2 client with the transfer server.
+
+The server selects a registered client by the grant it needs, so --grant-types
+decides which credential bootstrap flows this client can serve.  Accepted
+values (comma-separated):
+  authorization_code                                  (browser flow)
+  urn:ietf:params:oauth:grant-type:token-exchange     (RFC 8693 exchange)
+
+Example -- register a client usable for both flows:
+  pelican-server transfer oauth-client add --server https://transfer.example.com:8447 \
+    --name example-issuer --issuer-url https://issuer.example.com \
+    --client-id &lt;id&gt; --client-secret-file /path/to/secret \
+    --grant-types "authorization_code,urn:ietf:params:oauth:grant-type:token-exchange"
+
 ```
 pelican-server transfer oauth-client add [flags]
 ```
@@ -15,9 +31,11 @@ pelican-server transfer oauth-client add [flags]
 ```
       --client-id string            OAuth2 client ID (required)
       --client-secret-file string   Path to a file containing the OAuth2 client secret (required)
+      --grant-types string          Comma-separated list of grant types the client may be used for (required)
   -h, --help                        help for add
       --issuer-url string           Issuer URL for the OAuth2 provider (required)
       --name string                 Name for the OAuth2 client (required)
+      --scopes string               Comma-separated list of scopes the client can obtain; narrows which requests it is chosen for
 ```
 
 ### Options inherited from parent commands

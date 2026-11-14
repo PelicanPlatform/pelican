@@ -390,3 +390,18 @@ func handleAdminApiResponse(resp *http.Response) ([]byte, error) {
 
 	return bodyBytes, errors.New(errMsg)
 }
+
+// splitAndTrim splits a comma-separated flag value into its parts, dropping
+// empty ones.  Several commands take lists this way -- grant types, scopes --
+// so the parsing lives here rather than beside any one of them.
+func splitAndTrim(s string) []string {
+	parts := strings.Split(s, ",")
+	result := make([]string, 0, len(parts))
+	for _, p := range parts {
+		p = strings.TrimSpace(p)
+		if p != "" {
+			result = append(result, p)
+		}
+	}
+	return result
+}

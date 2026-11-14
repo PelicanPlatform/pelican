@@ -25,12 +25,15 @@ import (
 	"fmt"
 	"net/http"
 	"os"
+	"slices"
 	"strings"
 	"text/tabwriter"
 
 	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
 	"github.com/spf13/cobra"
+
+	"github.com/pelicanplatform/pelican/transfer"
 )
 
 var (
@@ -42,7 +45,20 @@ var (
 	oauthClientAddCmd = &cobra.Command{
 		Use:   "add",
 		Short: "Register a new OAuth2 client on the transfer server",
-		RunE:  oauthClientAddMain,
+		Long: `Register an external issuer's confidential OAuth2 client with the transfer server.
+
+The server selects a registered client by the grant it needs, so --grant-types
+decides which credential bootstrap flows this client can serve.  Accepted
+values (comma-separated):
+  authorization_code                                  (browser flow)
+  urn:ietf:params:oauth:grant-type:token-exchange     (RFC 8693 exchange)
+
+Example -- register a client usable for both flows:
+  pelican-server transfer oauth-client add --server https://transfer.example.com:8447 \
+    --name example-issuer --issuer-url https://issuer.example.com \
+    --client-id <id> --client-secret-file /path/to/secret \
+    --grant-types "authorization_code,urn:ietf:params:oauth:grant-type:token-exchange"`,
+		RunE: oauthClientAddMain,
 	}
 
 	oauthClientListCmd = &cobra.Command{
@@ -62,6 +78,8 @@ var (
 	oauthIssuerURL        string
 	oauthClientID         string
 	oauthClientSecretFile string
+	oauthGrantTypes       string
+	oauthScopes           string
 )
 
 func init() {
@@ -74,6 +92,51 @@ func init() {
 	oauthClientAddCmd.Flags().StringVar(&oauthIssuerURL, "issuer-url", "", "Issuer URL for the OAuth2 provider (required)")
 	oauthClientAddCmd.Flags().StringVar(&oauthClientID, "client-id", "", "OAuth2 client ID (required)")
 	oauthClientAddCmd.Flags().StringVar(&oauthClientSecretFile, "client-secret-file", "", "Path to a file containing the OAuth2 client secret (required)")
+	oauthClientAddCmd.Flags().StringVar(&oauthGrantTypes, "grant-types", "",
+		"Comma-separated list of grant types the client may be used for (required)")
+	oauthClientAddCmd.Flags().StringVar(&oauthScopes, "scopes", "",
+		"Comma-separated list of scopes the client can obtain; narrows which requests it is chosen for")
+}
+
+// buildOAuthClientCreateRequest validates the add command's inputs and renders
+// them as the request body the transfer server expects.
+//
+// It exists as its own function for two reasons.  The body is built from
+// transfer.OAuthClientCreateRequest rather than an ad-hoc map, so a field the
+// API understands cannot be dropped by forgetting to name it here -- which is
+// how grant_types came to be omitted, leaving every client registered by this
+// command unusable.  And the grant types are checked against the set the
+// server actually looks up: an unrecognized grant is never rejected by the
+// server, it just means the client is silently never selected, with the
+// failure surfacing much later as "no OAuth client configured for this
+// issuer".
+//
+// The server stores and matches grant types and scopes whitespace-separated,
+// while the CLI takes them comma-separated for consistency with
+// `origin issuer client create`; the join happens here.
+func buildOAuthClientCreateRequest(name, issuerURL, clientID, clientSecret, grantTypes, scopes string) (transfer.OAuthClientCreateRequest, error) {
+	grants := splitAndTrim(grantTypes)
+	if len(grants) == 0 {
+		return transfer.OAuthClientCreateRequest{}, errors.Errorf(
+			"--grant-types is required and must not be empty; accepted values are %s",
+			strings.Join(transfer.SupportedGrantTypes, ", "))
+	}
+	for _, grant := range grants {
+		if !slices.Contains(transfer.SupportedGrantTypes, grant) {
+			return transfer.OAuthClientCreateRequest{}, errors.Errorf(
+				"unsupported grant type %q; accepted values are %s",
+				grant, strings.Join(transfer.SupportedGrantTypes, ", "))
+		}
+	}
+
+	return transfer.OAuthClientCreateRequest{
+		Name:         name,
+		IssuerURL:    issuerURL,
+		ClientID:     clientID,
+		ClientSecret: clientSecret,
+		GrantTypes:   strings.Join(grants, " "),
+		Scopes:       strings.Join(splitAndTrim(scopes), " "),
+	}, nil
 }
 
 func oauthClientAddMain(cmd *cobra.Command, args []string) error {
@@ -104,14 +167,13 @@ func oauthClientAddMain(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	reqBody := map[string]string{
-		"name":          oauthName,
-		"issuer_url":    oauthIssuerURL,
-		"client_id":     oauthClientID,
-		"client_secret": oauthClientSecret,
+	req, err := buildOAuthClientCreateRequest(oauthName, oauthIssuerURL, oauthClientID,
+		oauthClientSecret, oauthGrantTypes, oauthScopes)
+	if err != nil {
+		return err
 	}
 
-	bodyBytes, err := json.Marshal(reqBody)
+	bodyBytes, err := json.Marshal(req)
 	if err != nil {
 		return errors.Wrap(err, "failed to marshal request")
 	}

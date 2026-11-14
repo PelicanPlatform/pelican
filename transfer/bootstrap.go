@@ -429,7 +429,7 @@ func handleGetAuthMethods(db *gorm.DB) gin.HandlerFunc {
 		// token_exchange is supported if the issuer supports it and we have a
 		// registered client with that grant type
 		for _, gt := range issuerMeta.GrantTypes {
-			if gt == "urn:ietf:params:oauth:grant-type:token-exchange" {
+			if gt == GrantTypeTokenExchange {
 				if _, err := findOAuthClientForGrant(db, issuerURL, owner.UserID, gt, nil); err == nil {
 					methods = append(methods, "token_exchange")
 				}
@@ -440,8 +440,8 @@ func handleGetAuthMethods(db *gorm.DB) gin.HandlerFunc {
 		// authorization_code is supported if the issuer has an auth endpoint
 		// and we have a registered client with that grant type
 		if issuerMeta.AuthURL != "" {
-			if _, err := findOAuthClientForGrant(db, issuerURL, owner.UserID, "authorization_code", nil); err == nil {
-				methods = append(methods, "authorization_code")
+			if _, err := findOAuthClientForGrant(db, issuerURL, owner.UserID, GrantTypeAuthorizationCode, nil); err == nil {
+				methods = append(methods, GrantTypeAuthorizationCode)
 			}
 		}
 
@@ -485,7 +485,7 @@ func handleTokenExchangeBootstrap(db *gorm.DB) gin.HandlerFunc {
 		// Find an OAuth client for this issuer that supports token exchange.
 		// Use the requested scopes (if any) for scope-aware matching.
 		requestedScopes := strings.Fields(req.Scopes)
-		oauthClient, err := findOAuthClientForGrant(db, req.IssuerURL, owner.UserID, "urn:ietf:params:oauth:grant-type:token-exchange", requestedScopes)
+		oauthClient, err := findOAuthClientForGrant(db, req.IssuerURL, owner.UserID, GrantTypeTokenExchange, requestedScopes)
 		if err != nil {
 			if errors.Is(err, gorm.ErrRecordNotFound) {
 				c.JSON(http.StatusBadRequest, ErrorResponse{
@@ -592,7 +592,7 @@ func handleAuthCodeBootstrapStart(db *gorm.DB) gin.HandlerFunc {
 
 		// Find an OAuth client for this issuer that supports authorization_code
 		requestedScopes := strings.Fields(req.Scopes)
-		oauthClient, err := findOAuthClientForGrant(db, req.IssuerURL, owner.UserID, "authorization_code", requestedScopes)
+		oauthClient, err := findOAuthClientForGrant(db, req.IssuerURL, owner.UserID, GrantTypeAuthorizationCode, requestedScopes)
 		if err != nil {
 			if errors.Is(err, gorm.ErrRecordNotFound) {
 				c.JSON(http.StatusBadRequest, ErrorResponse{
@@ -817,7 +817,7 @@ func processAuthCodeCallback(c *gin.Context, db *gorm.DB, state string) {
 	// Find an OAuth client for this issuer that supports authorization_code.
 	// Use scope-aware matching with the session's requested scopes.
 	requestedScopes := strings.Fields(sess.Scopes)
-	oauthClient, err := findOAuthClientForGrant(db, sess.IssuerURL, sess.Owner.UserID, "authorization_code", requestedScopes)
+	oauthClient, err := findOAuthClientForGrant(db, sess.IssuerURL, sess.Owner.UserID, GrantTypeAuthorizationCode, requestedScopes)
 	if err != nil {
 		sess.setResult("error", "", "OAuth client not found for issuer")
 		redirectToBootstrapResult(c, "error", "OAuth client not found for issuer")
@@ -941,7 +941,7 @@ func handleAuthCodeBootstrapPoll(db *gorm.DB) gin.HandlerFunc {
 // issuer computes the intersection with the subject token's grants.
 func performTokenExchange(ctx context.Context, tokenURL, clientID, clientSecret, subjectToken, requestedScopes string) (*tokenExchangeResult, error) {
 	v := url.Values{
-		"grant_type":         {"urn:ietf:params:oauth:grant-type:token-exchange"},
+		"grant_type":         {GrantTypeTokenExchange},
 		"subject_token":      {subjectToken},
 		"subject_token_type": {"urn:ietf:params:oauth:token-type:access_token"},
 	}
@@ -971,7 +971,7 @@ type tokenExchangeResult struct {
 // exchangeCodeForToken exchanges an authorization code for tokens.
 func exchangeCodeForToken(ctx context.Context, tokenURL, clientID, clientSecret, code, redirectURI string) (*tokenExchangeResult, error) {
 	v := url.Values{
-		"grant_type":   {"authorization_code"},
+		"grant_type":   {GrantTypeAuthorizationCode},
 		"code":         {code},
 		"redirect_uri": {redirectURI},
 	}
