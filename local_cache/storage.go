@@ -829,6 +829,17 @@ func (sm *StorageManager) RegisterTierTargets(ctx context.Context, configs []Tie
 	return result, nil
 }
 
+// tiersAllObjects reports whether some tiering target takes every object,
+// whatever its size (TierTargetConfig.AllObjects).
+func (sm *StorageManager) tiersAllObjects() bool {
+	for _, target := range sm.tierTargets {
+		if target.cfg.AllObjects {
+			return true
+		}
+	}
+	return false
+}
+
 // IsTiered reports whether the given storage ID is a remote tiering target.
 func (sm *StorageManager) IsTiered(id StorageID) bool {
 	_, ok := sm.tierTargets[id]
@@ -1187,6 +1198,11 @@ func (sm *StorageManager) DirIDs() []StorageID {
 func (sm *StorageManager) StoreInline(ctx context.Context, instanceHash InstanceHash, meta *CacheMetadata, data []byte) (err error) {
 	// A creation: see instanceFences.create.
 	sm.fences.create(instanceHash, func() { err = sm.storeInline(ctx, instanceHash, meta, data) })
+	// Only a target that takes every object takes an inline one, so the
+	// uploader hears of inline objects only when there is such a target.
+	if err == nil && sm.onObjectComplete != nil && sm.tiersAllObjects() {
+		sm.onObjectComplete(instanceHash)
+	}
 	return err
 }
 

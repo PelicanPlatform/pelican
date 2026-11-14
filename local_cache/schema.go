@@ -1178,6 +1178,11 @@ type TierTargetConfig struct {
 	// here only publicly readable objects go to such a target, because
 	// putting an object there makes it readable by every local user.
 	ExposedNamespaces []string
+	// AllObjects makes the target take every completed object it may hold,
+	// whatever its size: those below Cache.TieringThreshold, and the small
+	// ones the cache otherwise keeps inside its database, too.  The shared
+	// filesystem then holds a copy of everything the cache serves from it.
+	AllObjects bool
 }
 
 // Values of TierTargetConfig.NamesView.
@@ -1436,8 +1441,8 @@ func (cfg *TierTargetConfig) validate() error {
 		return errors.New("AccessKeyfile and SecretKeyfile must be set together")
 	}
 
-	if !cfg.IsSharedFilesystem() && (cfg.NamesView != "" || len(cfg.ExposedNamespaces) > 0) {
-		return errors.New("NamesView and ExposedNamespaces apply only to a shared-filesystem (file://) target")
+	if !cfg.IsSharedFilesystem() && (cfg.NamesView != "" || len(cfg.ExposedNamespaces) > 0 || cfg.AllObjects) {
+		return errors.New("NamesView, ExposedNamespaces and AllObjects apply only to a shared-filesystem (file://) target")
 	}
 	switch strings.ToLower(cfg.NamesView) {
 	case "", tierNamesVersioned, tierNamesNone:
