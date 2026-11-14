@@ -170,10 +170,14 @@ func TestCacheTierSharedFilesystemE2E(t *testing.T) {
 			versions = append(versions, e.Name())
 		}
 	}
-	require.Len(t, versions, 1, "one version link per cached version")
-	dest, err := os.Readlink(filepath.Join(namesDir, "big.bin"))
-	require.NoError(t, err)
-	assert.Equal(t, versions[0], dest)
+	require.Len(t, versions, 1, "one version name per cached version")
+	// Every name is a hard link to the file the redirect named.
+	for _, name := range []string{"big.bin", versions[0]} {
+		nameInfo, err := os.Lstat(filepath.Join(namesDir, name))
+		require.NoError(t, err)
+		assert.True(t, nameInfo.Mode().IsRegular(), "%s is a file, not a symlink", name)
+		assert.True(t, os.SameFile(info, nameInfo), "%s is the object's own file", name)
+	}
 
 	// The Pelican client, allowed to follow file:// redirects under the
 	// shared directory, reads the object straight off it.
