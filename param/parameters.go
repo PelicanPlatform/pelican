@@ -235,6 +235,7 @@ var runtimeConfigurableMap = map[string]bool{
 	"Issuer.AuthenticationSource": false,
 	"Issuer.AuthorizationCodeLifetime": false,
 	"Issuer.AuthorizationTemplates": false,
+	"Issuer.DeviceCodePollingInterval": false,
 	"Issuer.DisableGroupAutoCreation": false,
 	"Issuer.DynamicClientStaleTimeout": false,
 	"Issuer.DynamicClientUnusedTimeout": false,
@@ -1270,6 +1271,7 @@ var durationAccessors = map[string]func(*Config) time.Duration{
 	"Issuer.AccessTokenLifetime": func(c *Config) time.Duration { return c.Issuer.AccessTokenLifetime },
 	"Issuer.AssertedGroupMembershipTTL": func(c *Config) time.Duration { return c.Issuer.AssertedGroupMembershipTTL },
 	"Issuer.AuthorizationCodeLifetime": func(c *Config) time.Duration { return c.Issuer.AuthorizationCodeLifetime },
+	"Issuer.DeviceCodePollingInterval": func(c *Config) time.Duration { return c.Issuer.DeviceCodePollingInterval },
 	"Issuer.DynamicClientStaleTimeout": func(c *Config) time.Duration { return c.Issuer.DynamicClientStaleTimeout },
 	"Issuer.DynamicClientUnusedTimeout": func(c *Config) time.Duration { return c.Issuer.DynamicClientUnusedTimeout },
 	"Issuer.GroupFileRefreshInterval": func(c *Config) time.Duration { return c.Issuer.GroupFileRefreshInterval },
@@ -1572,6 +1574,7 @@ var allParameterNames = []string{
 	"Issuer.AuthenticationSource",
 	"Issuer.AuthorizationCodeLifetime",
 	"Issuer.AuthorizationTemplates",
+	"Issuer.DeviceCodePollingInterval",
 	"Issuer.DisableGroupAutoCreation",
 	"Issuer.DynamicClientStaleTimeout",
 	"Issuer.DynamicClientUnusedTimeout",
@@ -2431,6 +2434,7 @@ var (
 	Issuer_AccessTokenLifetime = DurationParam{"Issuer.AccessTokenLifetime"}
 	Issuer_AssertedGroupMembershipTTL = DurationParam{"Issuer.AssertedGroupMembershipTTL"}
 	Issuer_AuthorizationCodeLifetime = DurationParam{"Issuer.AuthorizationCodeLifetime"}
+	Issuer_DeviceCodePollingInterval = DurationParam{"Issuer.DeviceCodePollingInterval"}
 	Issuer_DynamicClientStaleTimeout = DurationParam{"Issuer.DynamicClientStaleTimeout"}
 	Issuer_DynamicClientUnusedTimeout = DurationParam{"Issuer.DynamicClientUnusedTimeout"}
 	Issuer_GroupFileRefreshInterval = DurationParam{"Issuer.GroupFileRefreshInterval"}
@@ -2984,6 +2988,7 @@ func init() {
 		"Issuer.AccessTokenLifetime": Issuer_AccessTokenLifetime,
 		"Issuer.AssertedGroupMembershipTTL": Issuer_AssertedGroupMembershipTTL,
 		"Issuer.AuthorizationCodeLifetime": Issuer_AuthorizationCodeLifetime,
+		"Issuer.DeviceCodePollingInterval": Issuer_DeviceCodePollingInterval,
 		"Issuer.DynamicClientStaleTimeout": Issuer_DynamicClientStaleTimeout,
 		"Issuer.DynamicClientUnusedTimeout": Issuer_DynamicClientUnusedTimeout,
 		"Issuer.GroupFileRefreshInterval": Issuer_GroupFileRefreshInterval,

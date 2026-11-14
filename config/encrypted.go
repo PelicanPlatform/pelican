@@ -188,17 +188,25 @@ func ConvertX25519Key(ed25519_sk []byte) [32]byte {
 	return result
 }
 
-func GetPassword(newFile bool) ([]byte, error) {
-	if fileInfo, _ := os.Stdin.Stat(); (fileInfo.Mode() & os.ModeCharDevice) == 0 {
+// ReadPasswordsFromTerminal prompts on stderr and reads one password from the terminal for
+// each prompt given, in order.  It is the single place in Pelican that decides whether a
+// password can be asked for at all, so every prompt fails the same way, with the same
+// explanation, when it cannot be answered.
+//
+// That check asks the terminal itself rather than inferring from stdin's file mode.
+// /dev/null is a character device, so a ModeCharDevice test reports a terminal for any
+// non-interactive run whose stdin is /dev/null -- systemd, cron, a container entrypoint, CI
+// -- and the caller would go on to print a prompt nobody can answer and fail the read
+// afterwards.
+//
+// The terminal is put in raw mode once and held across every prompt, so the prompts
+// themselves end in CRLF: in raw mode a bare newline moves down a line without returning the
+// carriage.
+func ReadPasswordsFromTerminal(prompts ...string) ([][]byte, error) {
+	stdin := int(os.Stdin.Fd())
+	if !term.IsTerminal(stdin) {
 		return nil, errors.New("Cannot read password; not connected to a terminal")
 	}
-	if newFile {
-		fmt.Fprintln(os.Stderr, "Please create a new password to protect your local credentials: ")
-	} else {
-		fmt.Fprintln(os.Stderr, "Please enter the password you created to protect your local credentials: ")
-	}
-
-	stdin := int(os.Stdin.Fd())
 
 	oldState, err := term.MakeRaw(stdin)
 	if err != nil {
@@ -211,7 +219,29 @@ func GetPassword(newFile bool) ([]byte, error) {
 			fmt.Fprintf(os.Stderr, "Error restoring terminal state: %v\n", err)
 		}
 	}(stdin, oldState)
-	return term.ReadPassword(stdin)
+
+	passwords := make([][]byte, 0, len(prompts))
+	for _, prompt := range prompts {
+		fmt.Fprintf(os.Stderr, "%s\r\n", prompt)
+		password, err := term.ReadPassword(stdin)
+		if err != nil {
+			return nil, err
+		}
+		passwords = append(passwords, password)
+	}
+	return passwords, nil
+}
+
+func GetPassword(newFile bool) ([]byte, error) {
+	prompt := "Please enter the password you created to protect your local credentials: "
+	if newFile {
+		prompt = "Please create a new password to protect your local credentials: "
+	}
+	passwords, err := ReadPasswordsFromTerminal(prompt)
+	if err != nil {
+		return nil, err
+	}
+	return passwords[0], nil
 }
 
 // Returns the current contents of the credential configuration

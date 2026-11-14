@@ -30,7 +30,6 @@ import (
 	"github.com/pkg/errors"
 	"github.com/spf13/cobra"
 	"github.com/tg123/go-htpasswd"
-	"golang.org/x/term"
 
 	"github.com/pelicanplatform/pelican/config"
 	"github.com/pelicanplatform/pelican/param"
@@ -38,40 +37,14 @@ import (
 )
 
 func getPassword() ([]byte, error) {
-	if fileInfo, _ := os.Stdin.Stat(); (fileInfo.Mode() & os.ModeCharDevice) == 0 {
-		return nil, errors.New("Cannot read password; not connected to a terminal")
-	}
-	// prompt for first password
-	fmt.Fprintln(os.Stderr, "Enter your password:")
-
-	stdin := int(os.Stdin.Fd())
-
-	oldState, err := term.MakeRaw(stdin)
+	passwords, err := config.ReadPasswordsFromTerminal("Enter your password:", "Confirm the password:")
 	if err != nil {
 		return nil, err
 	}
-	defer fmt.Fprintf(os.Stderr, "\n")
-	defer func(fd int, oldState *term.State) {
-		err := term.Restore(fd, oldState)
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "Error restoring terminal state: %v\n", err)
-		}
-	}(stdin, oldState)
-	password, err := term.ReadPassword(stdin)
-	if err != nil {
-		return nil, err
-	}
-	// prompt for confirming password
-	fmt.Fprint(os.Stderr, "Confirm the password:\r\n")
-
-	confirmPassword, err := term.ReadPassword(stdin)
-	if err != nil {
-		return nil, err
-	}
-	if string(password) != string(confirmPassword) {
+	if string(passwords[0]) != string(passwords[1]) {
 		return nil, errors.New("passwords do not match")
 	}
-	return confirmPassword, nil
+	return passwords[1], nil
 }
 
 func passwordMain(cmd *cobra.Command, args []string) error {
