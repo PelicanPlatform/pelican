@@ -19,6 +19,10 @@ For more information about data transfers in HTCondor,
 see the HTCondor manual page about its [File Transfer Mechanism](https://htcondor.readthedocs.io/en/latest/users-manual/file-transfer.html),
 especially the section on [File Transfer Using a URL](https://htcondor.readthedocs.io/en/latest/users-manual/file-transfer.html#file-transfer-using-a-url).
 
+> The examples on this page transfer a world-readable object.
+> When the namespace requires authorization, HTCondor can obtain and renew the tokens for you;
+> see [HTCondor Credential Monitor](/advanced-concepts/htcondor-credmon) for how an origin administrator sets that up.
+
 Pelican object transfers as part of an HTCondor job occur at the Execution Point (EP) -
 the machine where the job is executing.
 The transfers use the Pelican Plugin at the EP
