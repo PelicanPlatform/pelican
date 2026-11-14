@@ -27,6 +27,7 @@
 package fed_tests
 
 import (
+	"bytes"
 	"fmt"
 	"io"
 	"net/http"
@@ -115,7 +116,7 @@ func TestCacheTierSharedFilesystemE2E(t *testing.T) {
 		req, err := http.NewRequest(http.MethodGet, cacheURL, nil)
 		require.NoError(t, err)
 		req.Header.Set("Authorization", "Bearer "+token)
-		req.Header.Set(server_structs.AcceptRedirectHeader, server_structs.RedirectSchemeFile)
+		req.Header.Set(server_structs.AcceptRedirectHeader, server_structs.RedirectSchemeFileVerified)
 		resp, err := httpClient.Do(req)
 		require.NoError(t, err)
 		return resp
@@ -192,7 +193,34 @@ func TestCacheTierSharedFilesystemE2E(t *testing.T) {
 	assert.Equal(t, content, downloaded)
 	assert.Greater(t, tierRedirectCount(t), redirectsBefore,
 		"the client should have been redirected to the shared filesystem rather than served by the cache")
+
+	// A partial download is redirected too, and gets only the bytes it
+	// asked for.
+	redirectsBefore = tierRedirectCount(t)
+	te, err := client.NewTransferEngine(ft.Ctx)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = te.Shutdown() })
+	tc, err := te.NewClient(client.WithToken(token))
+	require.NoError(t, err)
+	partURL, err := url.Parse(fedURL)
+	require.NoError(t, err)
+	var part closableBuffer
+	tj, err := tc.NewTransferJob(ft.Ctx, partURL, "", false, false, client.WithWriter(&part), client.WithByteRange(100, 199))
+	require.NoError(t, err)
+	require.NoError(t, tc.Submit(tj))
+	results, err := tc.Shutdown()
+	require.NoError(t, err)
+	require.Len(t, results, 1)
+	require.NoError(t, results[0].Error)
+	assert.Equal(t, content[100:200], part.Bytes())
+	assert.Greater(t, tierRedirectCount(t), redirectsBefore, "the partial download should have been redirected")
 }
+
+// closableBuffer collects a transfer's bytes; the client closes its writer
+// when the transfer ends.
+type closableBuffer struct{ bytes.Buffer }
+
+func (*closableBuffer) Close() error { return nil }
 
 // sharedDirFoldsNames reports whether dir is on a filesystem that treats
 // names differing only in case as the same, where a cache refuses an
@@ -271,7 +299,7 @@ func TestCacheTierSharedFilesystemAllObjectsE2E(t *testing.T) {
 				req, err := http.NewRequest(http.MethodGet, cacheURL, nil)
 				require.NoError(t, err)
 				req.Header.Set("Authorization", "Bearer "+token)
-				req.Header.Set(server_structs.AcceptRedirectHeader, server_structs.RedirectSchemeFile)
+				req.Header.Set(server_structs.AcceptRedirectHeader, server_structs.RedirectSchemeFileVerified)
 				resp, err := httpClient.Do(req)
 				require.NoError(t, err)
 				_, _ = io.Copy(io.Discard, resp.Body)

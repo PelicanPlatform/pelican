@@ -42,6 +42,7 @@ import (
 	"github.com/pelicanplatform/pelican/pelican_url"
 	"github.com/pelicanplatform/pelican/server_structs"
 	"github.com/pelicanplatform/pelican/server_utils"
+	"github.com/pelicanplatform/pelican/utils"
 )
 
 // The cache reaches a shared-filesystem target through an open handle, but
@@ -50,8 +51,11 @@ import (
 // keeps a hung mount from wedging the cache.
 
 // TestPosixTierRefusesInsecureAncestors: a target under a directory others
-// can write (and that is not sticky) could be renamed away and replaced, so
-// it is refused, whether the path reaches it directly or through a symlink.
+// can write (and that is not sticky) could be renamed away and replaced, and
+// people reading its names view would not notice, so with the view on it is
+// refused, whether the path reaches it directly or through a symlink.
+// Redirected clients check the directory they reach themselves, so with the
+// view off it is allowed.
 func TestPosixTierRefusesInsecureAncestors(t *testing.T) {
 	open := func(dir string) error {
 		b, err := newPosixTierBackend(TierTargetConfig{ProviderURL: fileTargetURL(dir), MaxSize: 1 << 30})
@@ -69,6 +73,19 @@ func TestPosixTierRefusesInsecureAncestors(t *testing.T) {
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "Put the target under a directory the cache's user owns")
 		assert.Contains(t, err.Error(), project)
+		assert.Contains(t, err.Error(), "NamesView: none")
+	})
+
+	t.Run("GroupWritableParentWithoutANamesView", func(t *testing.T) {
+		ctx := context.Background()
+		project := filepath.Join(t.TempDir(), "project")
+		require.NoError(t, os.Mkdir(project, 0o755))
+		require.NoError(t, os.Chmod(project, 0o775))
+		target, err := newTierTarget(ctx, TierTargetConfig{ProviderURL: fileTargetURL(filepath.Join(project, "pelican")),
+			MaxSize: 1 << 30, NamesView: "none"})
+		require.NoError(t, err)
+		t.Cleanup(func() { _ = target.Close() })
+		assert.NoError(t, target.probe(ctx), "the probe does not hold the path to a rule nothing relies on")
 	})
 
 	t.Run("StickyParentIsAccepted", func(t *testing.T) {
@@ -351,7 +368,7 @@ func TestTierSharedFilesystemServing(t *testing.T) {
 	get := func() *http.Response {
 		req, err := http.NewRequest(http.MethodGet, srv.URL+objectPath, nil)
 		require.NoError(t, err)
-		req.Header.Set(server_structs.AcceptRedirectHeader, server_structs.RedirectSchemeFile)
+		req.Header.Set(server_structs.AcceptRedirectHeader, server_structs.RedirectSchemeFileVerified)
 		resp, err := noFollow.Do(req)
 		require.NoError(t, err)
 		return resp
@@ -362,6 +379,20 @@ func TestTierSharedFilesystemServing(t *testing.T) {
 	require.Equal(t, http.StatusTemporaryRedirect, resp.StatusCode)
 	location := resp.Header.Get("Location")
 	assert.True(t, strings.HasPrefix(location, "file://"), location)
+
+	// The redirect names the directory, as a client checks it: its path,
+	// its inode, and the ID in the identity file where a client looks.
+	named, err := server_structs.ParseFileTarget(resp.Header.Get(server_structs.FileTargetHeader))
+	require.NoError(t, err)
+	assert.Equal(t, dir, named.Root)
+	assert.True(t, strings.HasPrefix(location, utils.PathToFileURL(named.Root).String()+"/"), location)
+	info, err := os.Stat(dir)
+	require.NoError(t, err)
+	_, inode, _ := utils.FileVFSID(info)
+	assert.Equal(t, inode, named.Inode)
+	id, err := os.ReadFile(filepath.Join(dir, filepath.FromSlash(server_structs.FileTargetIdentityFile)))
+	require.NoError(t, err)
+	assert.Equal(t, named.ID, strings.TrimSpace(string(id)))
 
 	// Swap the directory out from under the cache.
 	require.NoError(t, os.Rename(dir, filepath.Join(base, "moved")))

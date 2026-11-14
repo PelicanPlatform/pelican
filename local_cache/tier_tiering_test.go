@@ -1702,11 +1702,13 @@ func TestTierRedirectServing(t *testing.T) {
 
 		target := pc.storage.getTierTarget(tierID)
 		require.NotNil(t, target)
-		original, scheme, host := target.backend, target.redirectScheme, target.redirectHost
+		original, scheme, host, shared := target.backend, target.redirectScheme, target.redirectHost, target.shared
 		target.backend = fixedURLBackend{TierBackend: original, url: "file:///srv/shared/objects/obj.dat"}
 		target.redirectScheme, target.redirectHost = "file", ""
+		// What a client checks the directory it reaches against.
+		target.shared = &posixTierBackend{dir: "/srv/shared", rootIno: 42}
 		t.Cleanup(func() {
-			target.backend, target.redirectScheme, target.redirectHost = original, scheme, host
+			target.backend, target.redirectScheme, target.redirectHost, target.shared = original, scheme, host, shared
 		})
 
 		// No advertisement: the file:// URL must not be sent, and the cache
@@ -1723,18 +1725,33 @@ func TestTierRedirectServing(t *testing.T) {
 		assert.Equal(t, schemeSkips+1,
 			testutil.ToFloat64(tierRedirectSkippedTotal.WithLabelValues(target.metricLabel(), tierSkipSchemeNotAccepted)))
 
-		// Advertised: the redirect is issued.  (That a file:// destination
-		// raises no Authorization concern is covered by
+		advertising := func(advertisement string) *http.Response {
+			req, err := http.NewRequest(http.MethodGet, srv.URL+objectPath, nil)
+			require.NoError(t, err)
+			req.Header.Set(server_structs.AcceptRedirectHeader, advertisement)
+			resp, err := noRedirectClient.Do(req)
+			require.NoError(t, err)
+			_, _ = io.Copy(io.Discard, resp.Body)
+			resp.Body.Close()
+			return resp
+		}
+
+		// A client that would follow file:// without checking the directory
+		// it reaches is served the bytes too.
+		resp := advertising(server_structs.RedirectSchemeFile)
+		assert.Equal(t, http.StatusOK, resp.StatusCode, "a client that does not check the directory is not redirected")
+		assert.Equal(t, schemeSkips+2,
+			testutil.ToFloat64(tierRedirectSkippedTotal.WithLabelValues(target.metricLabel(), tierSkipSchemeNotAccepted)))
+
+		// Advertised: the redirect is issued, naming the directory.  (That a
+		// file:// destination raises no Authorization concern is covered by
 		// TestRedirectSendsCredentials.)
-		optIn, err := http.NewRequest(http.MethodGet, srv.URL+objectPath, nil)
+		resp = advertising(server_structs.RedirectSchemeFileVerified)
+		assert.Equal(t, http.StatusTemporaryRedirect, resp.StatusCode)
+		assert.Equal(t, "file:///srv/shared/objects/obj.dat", resp.Header.Get("Location"))
+		named, err := server_structs.ParseFileTarget(resp.Header.Get(server_structs.FileTargetHeader))
 		require.NoError(t, err)
-		optIn.Header.Set(server_structs.AcceptRedirectHeader, server_structs.RedirectSchemeFile)
-		optInResp, err := noRedirectClient.Do(optIn)
-		require.NoError(t, err)
-		_, _ = io.Copy(io.Discard, optInResp.Body)
-		optInResp.Body.Close()
-		assert.Equal(t, http.StatusTemporaryRedirect, optInResp.StatusCode)
-		assert.Equal(t, "file:///srv/shared/objects/obj.dat", optInResp.Header.Get("Location"))
+		assert.Equal(t, server_structs.FileTarget{Root: "/srv/shared", Inode: 42, ID: target.identity}, named)
 	})
 
 	// The redirect stamped a presign hold: eviction must skip the object.
