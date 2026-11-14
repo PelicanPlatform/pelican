@@ -4,11 +4,7 @@ import { Callout } from 'nextra/components'
 
 A *transfer server* runs transfers on your behalf.
 Instead of your client moving the data — or, for a third-party copy, supervising the origins that move it — you hand the job to a server, which returns a job ID and carries the transfer out whether or not your client is still running.
-
-Two things follow from that, and they are the reasons to use one:
-
-- **The transfer outlives your session.** You can submit a multi-hour copy, close your laptop, and let it finish.
-- **The server holds the credentials.** It stores your storage tokens encrypted and refreshes them as the job runs, so a transfer long enough to outlive its own access token still completes.
+That is the reason to use one: the transfer outlives your session, so you can submit a multi-hour copy, close your laptop, and let it finish.
 
 <Callout type="info">
 This page is about `--transfer-server`, which submits to a *remote* server.
@@ -51,7 +47,6 @@ pelican object copy --transfer-server https://transfer.example.com:8447 --wait \
 	pelican://.../source pelican://.../destination
 ```
 
-The client follows the server's event stream rather than polling, and falls back to polling if the stream is unavailable.
 The command's exit status then reflects the job's outcome, which is what makes `--wait` the form to use in a script.
 
 <Callout type="info">
@@ -61,12 +56,12 @@ To check on one later, query the server's API directly at `/api/v1.0/transfer/jo
 
 ## Credentials
 
-The server cannot borrow the tokens on your machine — it needs its own copy of a storage credential it can refresh while the job runs.
+The server needs its own copy of a storage credential it can refresh while the job runs.
 The first time you submit to a given server, the client arranges that for you:
 
-1. It authenticates you to the transfer server itself, which acts as its own OAuth2 issuer. You are prompted to visit a URL and approve the request.
-1. It works out which namespaces the transfer touches and what scopes they need, then obtains a storage credential for each end and stores it on the server.
-1. It records the resulting credential IDs locally, keyed by issuer and scope, so later transfers over the same namespaces reuse them without prompting.
+1. It authenticates you to the transfer server. You are prompted to visit a URL and approve the request.
+1. It obtains a storage credential for each end of the transfer and stores it on the server.
+1. It remembers those credentials, so later transfers over the same namespaces reuse them without prompting.
 
 In the common case this means you approve something in a browser once per server, and subsequent submissions are silent.
 
@@ -80,7 +75,7 @@ pelican object copy --transfer-server https://transfer.example.com:8447 \
 	pelican://.../source pelican://.../destination
 ```
 
-When both are supplied the client skips discovery and bootstrapping entirely.
+When both are supplied you are never prompted to approve anything.
 
 ### Managing stored credentials
 
@@ -99,7 +94,7 @@ pelican transfer credential add --server https://transfer.example.com:8447 \
 ```
 
 The token is read from standard input if `--access-token-file` is omitted.
-Stored credentials are encrypted on the server and are never returned by its API — you can list their names, issuers, and scopes, but not read the tokens back.
+You can list a stored credential's name, issuer, and scopes, but the token itself is never returned.
 
 Deleting one takes the credential's ID, which `list` reports:
 
@@ -114,9 +109,9 @@ Store credentials only on a transfer server you trust, and delete them when you 
 
 Servers clean up credentials that go unused; how long they are kept is up to the administrator.
 
-### Supplying the control-plane token yourself
+### Supplying the API token yourself
 
-`--transfer-server-token` takes a file containing a token for the transfer server's API, skipping the interactive authentication step.
+`--transfer-server-token` takes a file containing a token for the transfer server's API, skipping the interactive approval step.
 This is the flag to use from a batch job or any other context where no one can approve a browser prompt:
 
 ```bash copy
@@ -126,4 +121,4 @@ pelican object copy --transfer-server https://transfer.example.com:8447 \
 	pelican://.../source pelican://.../destination
 ```
 
-This token authorizes *use of the API* only. It conveys no access to storage — that is what the stored credentials are for — so a non-interactive submission normally names its credential IDs as well.
+This token authorizes *use of the API* only. It conveys no access to storage, so a non-interactive submission normally names its credential IDs as well.
