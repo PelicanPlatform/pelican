@@ -1622,6 +1622,36 @@ func (cdb *CacheDB) GetInlineData(instanceHash InstanceHash) ([]byte, error) {
 // SetInlineData stores encrypted inline data for a small file.
 // The caller (StoreInline) is responsible for usage accounting via
 // ChargeUsage; this function does NOT adjust usage counters.
+// DeleteRelocatedInlineData removes the inline data an object kept before it
+// was tiered, unless the object's record says it is inline now: deleted and
+// fetched again since, the data belongs to the new copy.  The check and the
+// delete are one transaction, so no new copy can slip in between.
+func (cdb *CacheDB) DeleteRelocatedInlineData(instanceHash InstanceHash) error {
+	if err := cdb.checkWritable(); err != nil {
+		return err
+	}
+	return cdb.db.Update(func(txn *badger.Txn) error {
+		item, err := txn.Get(MetaKey(instanceHash))
+		switch {
+		case errors.Is(err, badger.ErrKeyNotFound):
+		case err != nil:
+			return err
+		default:
+			var meta CacheMetadata
+			if err := item.Value(func(val []byte) error { return msgpack.Unmarshal(val, &meta) }); err != nil {
+				return errors.Wrap(err, "failed to unmarshal metadata")
+			}
+			if meta.IsInline() {
+				return nil
+			}
+		}
+		if err := txn.Delete(InlineKey(instanceHash)); err != nil && !errors.Is(err, badger.ErrKeyNotFound) {
+			return err
+		}
+		return nil
+	})
+}
+
 func (cdb *CacheDB) SetInlineData(instanceHash InstanceHash, encryptedData []byte) error {
 	if err := cdb.checkWritable(); err != nil {
 		return err
@@ -2225,9 +2255,6 @@ func (cdb *CacheDB) RelocateObject(instanceHash InstanceHash, newStorageID Stora
 
 		if prev.Completed.IsZero() {
 			return errors.New("cannot relocate an incomplete object")
-		}
-		if prev.StorageID == StorageIDInline && !prev.IsChunked() {
-			return errors.New("cannot relocate an inline object")
 		}
 		if prev.StorageID == newStorageID {
 			return errors.New("object already resides on the target storage")
