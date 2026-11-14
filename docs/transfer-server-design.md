@@ -35,7 +35,7 @@ The same code runs in two modes:
 
 1. **Embedded in an origin** (`Origin.EnableTransferAPI = true`). `launchers.OriginServeFinish` calls `transfer.RegisterTransferAPIForOrigin`, which additionally pins `allowedPrefixes` to the origin's exported federation prefixes. Every submitted transfer must have its source *or* destination under one of those prefixes (`transferMatchesPrefixes` in `handlers.go`), so an origin-embedded transfer server can only move data into or out of its own namespaces.
 
-Both modes share the server database (`database.ServerDatabase`) and the `transfer_*` tables created by the `20260412120000_create_transfer_tables.sql` migration.
+Both modes share the server database (`database.ServerDatabase`) and the `transfer_*` tables created by the `20260412120000_create_transfer_tables.sql` migration. There is deliberately **no** transfer-specific database location: the transfer tables live in the same database as the rest of the server's state (`Server.DbLocation`), so a single backup or restore covers them along with everything else.
 
 ## 3. Control-plane authentication
 
@@ -309,7 +309,6 @@ Authenticated (`pelican.transfer` scope, via `TransferAuthMiddleware`):
 - `Transfer.EnabledGroups` (default empty) — restrict cookie/web-UI access to these `wlcg.groups`.
 - `Transfer.MaxConcurrentJobs` (default `5`) — transfer-manager concurrency.
 - `Transfer.CredentialIdleTimeout` (default `168h`) — idle credential cleanup threshold.
-- `Transfer.DbLocation` (falls back to `Server.DbLocation`) — transfer DB path.
 
 ## 11. Known limitations / future work
 
