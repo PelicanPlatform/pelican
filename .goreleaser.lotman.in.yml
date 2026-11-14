@@ -8,6 +8,19 @@
 # NOTE: no release-CI job runs this config yet -- it is invoked by hand via
 # `make lotman-package`, which generates .goreleaser.lotman.generated.yml with
 # scripts/generate_goreleaser.sh.
+#
+# KNOWN GAPS, to close before this is wired into a release:
+#   - `bindir` below applies to every format, so the deb and apk builds also put
+#     the library in /usr/lib64, which is not on the library search path on
+#     Debian or Alpine. Those formats need their own nfpm entry.
+#   - `make lotman-package` is hardcoded to --snapshot and this template has no
+#     version placeholder, so generate_goreleaser.sh substitutes nothing and the
+#     packages get a snapshot version rather than a release one.
+#   - The three goarch values below all build with CGO_ENABLED=1 in one run,
+#     which needs a cross C toolchain per target; in practice each architecture
+#     has to be built on a native runner.
+#   - No `replaces`/Obsoletes, so there is no upgrade path from the upstream
+#     `lotman` package -- only the file-conflict refusal that `conflicts` gives.
 version: 2
 project_name: pelican-lotman
 
@@ -54,8 +67,7 @@ archives:
     files:
       - LICENSE
       - src: "dist/lotman-shared_{{ .Os }}_{{ .Arch }}*/libLotMan.h"
-        dst: include
-        strip_parent: true
+        dst: include/lotman/lotman.h
 
 nfpms:
   - id: lotman
@@ -76,12 +88,20 @@ nfpms:
       - deb
       - rpm
     release: 1
-    # This package installs /usr/lib64/libLotMan.so and /usr/include/lotman.h,
-    # both owned by the upstream `lotman` package it is a drop-in for. Without
-    # declaring that, installing it on a host that already has xrootd-lotman's
-    # dependency fails with a file conflict rather than replacing it.
+    # This package installs /usr/lib64/libLotMan.so and
+    # /usr/include/lotman/lotman.h, both owned by the upstream `lotman` package
+    # it is a drop-in for. Without declaring that, installing it on a host that
+    # already has xrootd-lotman's dependency fails with a file conflict rather
+    # than replacing it.
+    #
+    # The Provides is versioned at the C ABI level, not at Pelican's version:
+    # xrootd-lotman.spec carries `Requires: lotman >= 0.1.0` and
+    # `lotman < 0.2.0`, and an unversioned `Provides: lotman` does not satisfy a
+    # versioned dependency in RPM. What this library implements is the lotman
+    # v0.1.x C ABI, so that is what it claims; bump it when the exported ABI
+    # changes, independently of Pelican's own version.
     provides:
-      - lotman
+      - "lotman = 0.1.0"
     conflicts:
       - lotman
     # KNOWN GAP: Go's -buildmode=c-shared emits no DT_SONAME (the linker
@@ -94,11 +114,13 @@ nfpms:
     # default /usr/bin.
     bindir: /usr/lib64
     contents:
-      # cgo names the generated header after the package directory, but every
-      # consumer does #include "lotman.h", matching the upstream library this
-      # replaces. Install it under the name they expect.
+      # cgo names the generated header after the package directory. Upstream
+      # lotman installs its header at %{_includedir}/lotman/lotman.h and
+      # xrootd-lotman compiles `#include <lotman/lotman.h>`
+      # (src/XrdPurgeLotMan.cc), so a drop-in has to land in that subdirectory
+      # under that name -- not at the include root.
       - src: "dist/lotman-shared_{{ .Os }}_{{ .Arch }}*/libLotMan.h"
-        dst: "/usr/include/lotman.h"
+        dst: "/usr/include/lotman/lotman.h"
         file_info:
           mode: 0644
       - src: LICENSE
