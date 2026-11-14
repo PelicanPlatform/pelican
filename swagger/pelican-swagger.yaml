@@ -337,6 +337,13 @@ definitions:
       custom_fields:
         type: object
         description: The custom fields user registered, configurable by setting Registry.CustomRegistrationFields.
+      auth_state:
+        description: >-
+          How the namespace is authorized, so the Registry can advertise it while no Origin
+          for it is online.
+        x-nullable: true
+        allOf:
+          - $ref: "#/definitions/NamespaceAuthState"
   Institution:
     type: object
     properties:
@@ -372,14 +379,29 @@ definitions:
       custom_fields:
         type: object
         description: The custom fields user registered, configurable by setting Registry.CustomRegistrationFields.
+      auth_state:
+        description: >-
+          How the namespace is authorized, so the Registry can advertise it while no Origin
+          for it is online. Absent or `null` when the registration has none. Only namespace
+          prefix registrations may carry one.
+        x-nullable: true
+        allOf:
+          - $ref: "#/definitions/NamespaceAuthState"
   TokenGeneration:
     type: object
     properties:
       strategy:
         type: string
+        description: >-
+          Always `OAuth2`, the only token-generation strategy the Pelican client implements.
+        enum:
+          - OAuth2
         example: "OAuth2"
       vaultServer:
         type: string
+        description: >-
+          Must be empty. The field exists so the object has the same shape as the
+          Director's namespace view, from which an auth state can be copied.
       maxScopeDepth:
         type: integer
       issuer:
@@ -436,6 +458,204 @@ definitions:
             items:
               type: string
             example: ["example-cache.com"]
+  NamespaceCapabilities:
+    type: object
+    description: >-
+      The capabilities of a namespace as the Director serializes them (`server_structs.Capabilities`).
+      The JSON keys are kept in this form for backward compatibility.
+    properties:
+      PublicRead:
+        type: boolean
+        description: Objects can be read without a token. Implies `Read`.
+      Read:
+        type: boolean
+        description: Objects can be read with a token
+      Write:
+        type: boolean
+        description: Objects can be written with a token
+      Listing:
+        type: boolean
+        description: Collections can be listed
+      FallBackRead:
+        type: boolean
+        description: Clients may read directly from the Origin when no Cache can serve the request
+      Copies:
+        type: boolean
+        description: Third-party copy (HTTP `COPY`) is accepted
+  NamespaceAuthState:
+    type: object
+    description: >-
+      How a namespace is authorized, stored on its registration so the Registry can advertise the
+      namespace while no Origin for it is online. The shape matches the Director's namespace listing
+      (`GET /director_ui/namespaces`), so the values can be copied from there while an Origin is online.
+      Only namespace prefix registrations may carry one; Origin and Cache server registrations may not.
+      It is validated and normalized on every create and update, and the serialized value is limited to 8 KiB.
+    properties:
+      capabilities:
+        $ref: "#/definitions/NamespaceCapabilities"
+      tokenGeneration:
+        type: array
+        x-nullable: true
+        description: >-
+          How a client obtains a token for the namespace. Each `issuer` must be an absolute `https` URL,
+          each `strategy` must be `OAuth2` (the only strategy the Pelican client implements) and
+          `vaultServer` must be empty; an entry with every field empty is dropped.
+        items:
+          $ref: "#/definitions/TokenGeneration"
+      tokenIssuer:
+        type: array
+        x-nullable: true
+        description: >-
+          The issuers whose tokens are accepted for the namespace. Each `issuer` must be an absolute
+          `https` URL with at least one base path; every base path must lie within the registered prefix
+          and every restricted path under one of that issuer's base paths. Paths are normalized.
+        items:
+          $ref: "#/definitions/TokenIssuer"
+    example:
+      capabilities:
+        PublicRead: false
+        Read: true
+        Write: false
+        Listing: true
+        FallBackRead: false
+        Copies: false
+      tokenGeneration:
+        - strategy: OAuth2
+          vaultServer: ""
+          maxScopeDepth: 3
+          issuer: https://issuer.example.org
+      tokenIssuer:
+        - issuer: https://issuer.example.org
+          basePaths:
+            - /example
+          restrictedPaths: []
+  UrlObject:
+    type: object
+    description: >-
+      A URL as Go's `net/url` serializes it. Reassemble it as `Scheme://Host/Path`; the other keys are
+      usually empty.
+    properties:
+      Scheme:
+        type: string
+        example: https
+      Opaque:
+        type: string
+      User:
+        type: object
+        x-nullable: true
+      Host:
+        type: string
+        example: issuer.example.org
+      Path:
+        type: string
+      RawPath:
+        type: string
+      OmitHost:
+        type: boolean
+      ForceQuery:
+        type: boolean
+      RawQuery:
+        type: string
+      Fragment:
+        type: string
+      RawFragment:
+        type: string
+  AdvertisedTokenGeneration:
+    type: object
+    description: Token generation as carried in a namespace advertisement (`server_structs.TokenGen`)
+    properties:
+      strategy:
+        type: string
+        enum:
+          - OAuth2
+        description: The Registry stores only `OAuth2`, the single strategy the Pelican client implements
+      vault-server:
+        type: string
+        description: Always empty in an advertisement the Registry serves; kept for parity with `server_structs.TokenGen`
+      max-scope-depth:
+        type: integer
+      issuer:
+        $ref: "#/definitions/UrlObject"
+  AdvertisedTokenIssuer:
+    type: object
+    description: A token issuer as carried in a namespace advertisement (`server_structs.TokenIssuer`)
+    properties:
+      base-paths:
+        type: array
+        items:
+          type: string
+      restricted-paths:
+        type: array
+        items:
+          type: string
+      issuer:
+        $ref: "#/definitions/UrlObject"
+  AdvertisedNamespace:
+    type: object
+    description: >-
+      A namespace advertisement (`server_structs.NamespaceAd`): the element type of the list an Origin
+      sends the Director when it advertises, and of `GET /registry/namespaces/advertised`.
+    properties:
+      Caps:
+        $ref: "#/definitions/NamespaceCapabilities"
+      path:
+        type: string
+        example: /example
+      token-generation:
+        type: array
+        x-nullable: true
+        items:
+          $ref: "#/definitions/AdvertisedTokenGeneration"
+      token-issuer:
+        type: array
+        x-nullable: true
+        items:
+          $ref: "#/definitions/AdvertisedTokenIssuer"
+      from-topology:
+        type: boolean
+        description: Always `false` for an advertisement the Registry serves
+    example:
+      Caps:
+        PublicRead: false
+        Read: true
+        Write: false
+        Listing: true
+        FallBackRead: false
+        Copies: false
+      path: /example
+      token-generation:
+        - strategy: OAuth2
+          vault-server: ""
+          max-scope-depth: 3
+          issuer:
+            Scheme: https
+            Opaque: ""
+            User: null
+            Host: issuer.example.org
+            Path: ""
+            RawPath: ""
+            OmitHost: false
+            ForceQuery: false
+            RawQuery: ""
+            Fragment: ""
+            RawFragment: ""
+      token-issuer:
+        - base-paths:
+            - /example
+          restricted-paths: []
+          issuer:
+            Scheme: https
+            Opaque: ""
+            User: null
+            Host: issuer.example.org
+            Path: ""
+            RawPath: ""
+            OmitHost: false
+            ForceQuery: false
+            RawQuery: ""
+            Fragment: ""
+            RawFragment: ""
+      from-topology: false
   NamespaceForRegistration:
     type: object
     required:
@@ -456,6 +676,14 @@ definitions:
       custom_fields:
         type: object
         description: The custom fields to register, configurable by setting Registry.CustomRegistrationFields.
+      auth_state:
+        description: >-
+          How the namespace is authorized, so the Registry can advertise it while no Origin
+          for it is online. Absent or `null` when the registration has none. Only namespace
+          prefix registrations may carry one.
+        x-nullable: true
+        allOf:
+          - $ref: "#/definitions/NamespaceAuthState"
   TopologyNamespace:
     type: object
     properties:
@@ -471,6 +699,7 @@ definitions:
       - int
       - enum
       - datetime
+      - auth_state
     example: enum
   RegistrationField:
     type: object
@@ -2984,6 +3213,8 @@ tags:
     description: APIs for server metrics
   - name: registry_ui
     description: APIs for the Registry server Web UI
+  - name: registry
+    description: Non-UI facing APIs for the Registry server
   - name: director_ui
     description: APIs for the Director server Web UI
   - name: director
@@ -3655,6 +3886,34 @@ paths:
           schema:
             type: object
             $ref: "#/definitions/ErrorModelV2"
+  /registry/namespaces/advertised:
+    get:
+      tags:
+        - "registry"
+      summary: Return the namespace advertisements the registry holds
+      description: >-
+        A public API, no authentication. Returns one namespace advertisement for every `Approved`
+        namespace registration that carries an `auth_state`, sorted by prefix, in the same format an
+        Origin uses when it advertises its namespaces to the Director. Origin and Cache server
+        registrations are never listed, and a registration whose stored `auth_state` can no longer be
+        converted is skipped with a warning in the Registry log rather than failing the listing.
+
+        Director polls this endpoint for registry-backed namespaces so it can advertise a
+        namespace while no Origin for it is online.
+      produces:
+        - application/json
+      responses:
+        "200":
+          description: OK. Could be an empty array when no auth state is carried.
+          schema:
+            type: array
+            items:
+              $ref: "#/definitions/AdvertisedNamespace"
+        "500":
+          description: Internal server error
+          schema:
+            type: object
+            $ref: "#/definitions/ErrorModelV2"
   /registry_ui/namespaces:
     get:
       tags:
@@ -3877,9 +4136,12 @@ paths:
 
 
         Non-admin users can update only namespaces they own. For a namespace with `admin_metadata.status == approved`,
-        only `admin_metadata.description`, `admin_metadata.institution`, and
-        `admin_metadata.security_contact_user_id` are updated; `prefix`, `pubkey`, `admin_metadata.site_name`,
+        only `admin_metadata.description`, `admin_metadata.institution`,
+        `admin_metadata.security_contact_user_id`, and `auth_state` are updated; `prefix`, `pubkey`, `admin_metadata.site_name`,
         `custom_fields`, and `admin_metadata.user_id` keep their stored values.
+
+        An `auth_state`, if present, is validated and normalized before it is stored, for administrators
+        and owners; an invalid one is refused with 400 and the stored value is left unchanged.
         "
       operationId: updateNamespaceById
       parameters:
@@ -3910,7 +4172,7 @@ paths:
             type: object
             $ref: "#/definitions/SuccessModelV2"
         "400":
-          description: Invalid namespace ID
+          description: Invalid namespace ID, or the request data has an invalid field value (for example an `auth_state` that fails validation)
           schema:
             type: object
             $ref: "#/definitions/ErrorModelV2"

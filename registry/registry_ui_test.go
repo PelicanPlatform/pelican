@@ -860,6 +860,107 @@ func TestUpdateNamespaceStatus(t *testing.T) {
 	}
 }
 
+// mockAuthState returns an auth state validateAuthState accepts for /foo as is.
+func mockAuthState() *server_structs.NamespaceAuthState {
+	return &server_structs.NamespaceAuthState{
+		Capabilities: server_structs.Capabilities{Reads: true, Listings: true},
+		TokenGeneration: []server_structs.TokenGenResponse{{
+			Strategy:         server_structs.OAuthStrategy,
+			MaxScopeDepth:    3,
+			CredentialIssuer: "https://issuer.example.org",
+		}},
+		TokenIssuer: []server_structs.TokenIssuerResponse{{
+			IssuerUrl: "https://issuer.example.org",
+			BasePaths: []string{"/foo"},
+		}},
+	}
+}
+
+func TestApplyOwnerEdits(t *testing.T) {
+	stored := server_structs.Registration{
+		ID:       7,
+		Prefix:   "/foo",
+		Pubkey:   "stored-key",
+		Identity: "stored-identity",
+		AdminMetadata: server_structs.AdminMetadata{
+			UserID:                "owner",
+			Status:                server_structs.RegApproved,
+			SiteName:              "site",
+			Description:           "old",
+			Institution:           "1000",
+			SecurityContactUserID: "u-old",
+		},
+		CustomFields: map[string]interface{}{"note": "set-by-admin"},
+	}
+	edited := server_structs.Registration{
+		ID:       7,
+		Prefix:   "/sneaky",
+		Pubkey:   "other-key",
+		Identity: "other-identity",
+		AdminMetadata: server_structs.AdminMetadata{
+			UserID:                "someone-else",
+			Status:                server_structs.RegPending,
+			SiteName:              "new-site",
+			Description:           "new",
+			Institution:           "1001",
+			SecurityContactUserID: "u-new",
+		},
+		CustomFields: map[string]interface{}{"note": "tampered"},
+		AuthState:    mockAuthState(),
+	}
+
+	got := applyOwnerEdits(stored, edited)
+	// The owner-editable fields are taken from the request
+	assert.Equal(t, "new", got.AdminMetadata.Description)
+	assert.Equal(t, "1001", got.AdminMetadata.Institution)
+	assert.Equal(t, "u-new", got.AdminMetadata.SecurityContactUserID)
+	assert.Equal(t, mockAuthState(), got.AuthState)
+	// Everything else stays as stored
+	assert.Equal(t, "/foo", got.Prefix)
+	assert.Equal(t, "stored-key", got.Pubkey)
+	assert.Equal(t, "stored-identity", got.Identity)
+	assert.Equal(t, "owner", got.AdminMetadata.UserID)
+	assert.Equal(t, server_structs.RegApproved, got.AdminMetadata.Status)
+	assert.Equal(t, "site", got.AdminMetadata.SiteName)
+	assert.Equal(t, map[string]interface{}{"note": "set-by-admin"}, got.CustomFields)
+
+	// A request without an auth state clears the stored one
+	stored.AuthState = mockAuthState()
+	edited.AuthState = nil
+	assert.Nil(t, applyOwnerEdits(stored, edited).AuthState)
+}
+
+func TestGetNamespaceReturnsAuthState(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
+	setupMockRegistryDB(t)
+	defer teardownMockRegistryDB(t)
+
+	mockNs := mockNamespace("/foo", "", "", server_structs.AdminMetadata{UserID: "u-mock-id"})
+	mockNs.AuthState = mockAuthState()
+	require.NoError(t, insertMockDBData([]server_structs.Registration{mockNs}))
+	id, err := getLastNamespaceId()
+	require.NoError(t, err)
+
+	router := gin.Default()
+	router.GET("/namespaces/:id", func(ctx *gin.Context) {
+		ctx.Set("User", "mockUser")
+		ctx.Set("UserId", "u-mock-id")
+	}, getNamespace)
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest("GET", "/namespaces/"+strconv.Itoa(id), nil)
+	router.ServeHTTP(w, req)
+	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+
+	got := server_structs.Registration{}
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &got))
+	assert.Equal(t, mockAuthState(), got.AuthState)
+
+	// The public listing, which strips the public key, keeps the auth state
+	listed := excludePubKey([]server_structs.Registration{mockNs})
+	require.Len(t, listed, 1)
+	assert.Equal(t, mockAuthState(), listed[0].AuthState)
+}
+
 func TestCreateNamespace(t *testing.T) {
 	t.Cleanup(test_utils.SetupTestLogging(t))
 	server_utils.ResetTestState()
@@ -1279,6 +1380,65 @@ func TestCreateNamespace(t *testing.T) {
 		assert.NotEqual(t, time.Time{}, nss[0].AdminMetadata.CreatedAt)
 		config.ResetConfig()
 	})
+	t.Run("valid-request-with-auth-state-gives-200-and-stores-it", func(t *testing.T) {
+		resetMockRegistryDB(t)
+		require.NoError(t, param.Registry_Institutions.Set([]registrationFieldOption{{ID: "1000"}}))
+
+		pubKeyStr, err := test_utils.GenerateJWKS()
+		require.NoError(t, err)
+		mockNs := server_structs.Registration{
+			Prefix:        "/foo",
+			Pubkey:        pubKeyStr,
+			AdminMetadata: server_structs.AdminMetadata{Institution: "1000", SiteName: "test-site-name", Description: "test description"},
+			AuthState:     mockAuthState(),
+		}
+		mockNsBytes, err := json.Marshal(mockNs)
+		require.NoError(t, err)
+
+		w := httptest.NewRecorder()
+		req, _ := http.NewRequest("POST", "/namespaces", bytes.NewReader(mockNsBytes))
+		router.ServeHTTP(w, req)
+
+		body, err := io.ReadAll(w.Result().Body)
+		require.NoError(t, err)
+		require.Equal(t, http.StatusOK, w.Result().StatusCode, string(body))
+
+		nss, err := getAllRegistrations()
+		require.NoError(t, err)
+		require.Len(t, nss, 1)
+		assert.Equal(t, mockAuthState(), nss[0].AuthState)
+	})
+
+	t.Run("server-registration-with-auth-state-returns-400", func(t *testing.T) {
+		resetMockRegistryDB(t)
+		require.NoError(t, param.Registry_Institutions.Set([]registrationFieldOption{{ID: "1000"}}))
+
+		pubKeyStr, err := test_utils.GenerateJWKS()
+		require.NoError(t, err)
+		mockNs := server_structs.Registration{
+			Prefix:        "/origins/example.org",
+			Pubkey:        pubKeyStr,
+			AdminMetadata: server_structs.AdminMetadata{Institution: "1000", SiteName: "test-site-name", Description: "test description"},
+			AuthState:     mockAuthState(),
+		}
+		mockNsBytes, err := json.Marshal(mockNs)
+		require.NoError(t, err)
+
+		w := httptest.NewRecorder()
+		req, _ := http.NewRequest("POST", "/namespaces", bytes.NewReader(mockNsBytes))
+		router.ServeHTTP(w, req)
+
+		body, err := io.ReadAll(w.Result().Body)
+		require.NoError(t, err)
+		assert.Equal(t, http.StatusBadRequest, w.Result().StatusCode, string(body))
+		assert.Contains(t, string(body), "Validation for auth state failed")
+		assert.Contains(t, string(body), "not on an origin or cache registration")
+
+		nss, err := getAllRegistrations()
+		require.NoError(t, err)
+		assert.Empty(t, nss)
+	})
+
 }
 
 func TestUpdateNamespaceHandler(t *testing.T) {
@@ -1746,6 +1906,122 @@ func TestUpdateNamespaceHandler(t *testing.T) {
 		assert.Equal(t, "newDescription", nss[0].AdminMetadata.Description)
 		assert.Equal(t, updatedPubKeyStr, nss[0].Pubkey)
 	})
+	// Owner edits of an approved registration: the auth state is owner-editable
+	putAsOwner := func(id int, reg server_structs.Registration) (int, string) {
+		regBytes, err := json.Marshal(reg)
+		require.NoError(t, err)
+		w := httptest.NewRecorder()
+		req, _ := http.NewRequest("PUT", "/namespaces/"+strconv.Itoa(id), bytes.NewReader(regBytes))
+		router.ServeHTTP(w, req)
+		body, err := io.ReadAll(w.Result().Body)
+		require.NoError(t, err)
+		return w.Result().StatusCode, string(body)
+	}
+	approvedNs := func(t *testing.T, owner string, authState *server_structs.NamespaceAuthState) (server_structs.Registration, int) {
+		resetMockRegistryDB(t)
+		require.NoError(t, param.Registry_Institutions.Set([]registrationFieldOption{{ID: "1000"}}))
+		pubKeyStr, err := test_utils.GenerateJWKS()
+		require.NoError(t, err)
+		ns := server_structs.Registration{
+			Prefix: "/foo",
+			Pubkey: pubKeyStr,
+			AdminMetadata: server_structs.AdminMetadata{
+				Institution: "1000",
+				SiteName:    "test-site-name",
+				Description: "test description",
+				UserID:      owner,
+				Status:      server_structs.RegApproved,
+			},
+			AuthState: authState,
+		}
+		require.NoError(t, insertMockDBData([]server_structs.Registration{ns}))
+		id, err := getLastNamespaceId()
+		require.NoError(t, err)
+		return ns, id
+	}
+
+	t.Run("owner-edit-of-approved-sets-auth-state", func(t *testing.T) {
+		mockNs, id := approvedNs(t, "u-mock-id", nil)
+
+		// The owner sets an auth state that needs normalizing and tampers
+		// with the fields that must stay pinned to their stored values
+		otherPubKeyStr, err := test_utils.GenerateJWKS()
+		require.NoError(t, err)
+		updatedNs := mockNs
+		updatedNs.Prefix = "/sneaky-new-prefix"
+		updatedNs.Pubkey = otherPubKeyStr
+		updatedNs.AuthState = &server_structs.NamespaceAuthState{
+			Capabilities:    server_structs.Capabilities{PublicReads: true},
+			TokenGeneration: []server_structs.TokenGenResponse{{}},
+			TokenIssuer: []server_structs.TokenIssuerResponse{{
+				IssuerUrl: "https://issuer.example.org",
+				BasePaths: []string{"/foo/bar/"},
+			}},
+		}
+		code, body := putAsOwner(id, updatedNs)
+		require.Equal(t, http.StatusOK, code, body)
+
+		got, err := getRegistrationById(id)
+		require.NoError(t, err)
+		assert.Equal(t, &server_structs.NamespaceAuthState{
+			Capabilities:    server_structs.Capabilities{PublicReads: true, Reads: true},
+			TokenGeneration: []server_structs.TokenGenResponse{},
+			TokenIssuer: []server_structs.TokenIssuerResponse{{
+				IssuerUrl: "https://issuer.example.org",
+				BasePaths: []string{"/foo/bar"},
+			}},
+		}, got.AuthState, "the auth state is stored normalized")
+		assert.Equal(t, "/foo", got.Prefix)
+		assert.Equal(t, mockNs.Pubkey, got.Pubkey)
+		assert.Equal(t, "u-mock-id", got.AdminMetadata.UserID)
+		assert.Equal(t, server_structs.RegApproved, got.AdminMetadata.Status)
+	})
+
+	t.Run("owner-put-without-auth-state-clears-it", func(t *testing.T) {
+		mockNs, id := approvedNs(t, "u-mock-id", mockAuthState())
+
+		updatedNs := mockNs
+		updatedNs.AuthState = nil
+		updatedNs.AdminMetadata.Description = "edited without an auth state"
+		code, body := putAsOwner(id, updatedNs)
+		require.Equal(t, http.StatusOK, code, body)
+
+		got, err := getRegistrationById(id)
+		require.NoError(t, err)
+		assert.Nil(t, got.AuthState)
+		assert.Equal(t, "edited without an auth state", got.AdminMetadata.Description)
+	})
+
+	t.Run("owner-edit-of-approved-with-invalid-auth-state-returns-400", func(t *testing.T) {
+		mockNs, id := approvedNs(t, "u-mock-id", mockAuthState())
+
+		updatedNs := mockNs
+		updatedNs.AuthState = mockAuthState()
+		updatedNs.AuthState.TokenIssuer[0].BasePaths = []string{"/other"}
+		code, body := putAsOwner(id, updatedNs)
+		assert.Equal(t, http.StatusBadRequest, code, body)
+		assert.Contains(t, body, "Validation for auth state failed")
+		assert.Contains(t, body, "outside the registered prefix /foo")
+
+		// Nothing was written
+		got, err := getRegistrationById(id)
+		require.NoError(t, err)
+		assert.Equal(t, mockAuthState(), got.AuthState)
+	})
+
+	t.Run("non-owner-cant-set-auth-state-on-approved", func(t *testing.T) {
+		mockNs, id := approvedNs(t, "u-other-id", nil)
+
+		updatedNs := mockNs
+		updatedNs.AuthState = mockAuthState()
+		code, body := putAsOwner(id, updatedNs)
+		assert.Equal(t, http.StatusForbidden, code, body)
+
+		got, err := getRegistrationById(id)
+		require.NoError(t, err)
+		assert.Nil(t, got.AuthState)
+	})
+
 }
 
 // TestUpdateNamespaceAccessTokenProofOfPossession is a regression test for the
@@ -2502,6 +2778,19 @@ func TestPopulateRegistrationFields(t *testing.T) {
 	t.Cleanup(test_utils.SetupTestLogging(t))
 	result := populateRegistrationFields("", server_structs.Registration{})
 	assert.NotEqual(t, 0, len(result))
+
+	// The optional auth state is offered to the form as one structured field
+	var authState *registrationField
+	for i := range result {
+		if result[i].Name == "auth_state" {
+			authState = &result[i]
+		}
+	}
+	require.NotNil(t, authState)
+	assert.Equal(t, AuthState, authState.Type)
+	assert.Equal(t, "Auth State", authState.DisplayedName)
+	assert.False(t, authState.Required)
+	assert.NotEmpty(t, authState.Description)
 }
 
 func TestDeleteNamespaceDeletesServerWhenSingleService(t *testing.T) {

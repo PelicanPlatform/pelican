@@ -76,11 +76,12 @@ type (
 var registrationFields []registrationField // A list of available registration fields
 
 const (
-	String   registrationFieldType = "string"
-	Int      registrationFieldType = "int"
-	Boolean  registrationFieldType = "bool"
-	Enum     registrationFieldType = "enum"
-	DateTime registrationFieldType = "datetime"
+	String    registrationFieldType = "string"
+	Int       registrationFieldType = "int"
+	Boolean   registrationFieldType = "bool"
+	Enum      registrationFieldType = "enum"
+	DateTime  registrationFieldType = "datetime"
+	AuthState registrationFieldType = "auth_state"
 )
 
 func init() {
@@ -169,6 +170,13 @@ func populateRegistrationFields(prefix string, data interface{}) []registrationF
 					existing_prefix = prefix + "."
 				}
 				fields = append(fields, populateRegistrationFields(existing_prefix+"admin_metadata", server_structs.AdminMetadata{})...)
+			}
+		case reflect.Pointer:
+			// The auth state is optional (nil means none) and is edited as one
+			// structured field rather than being flattened like AdminMetadata
+			if field.Type.Elem() == reflect.TypeOf(server_structs.NamespaceAuthState{}) {
+				regField.Type = AuthState
+				fields = append(fields, regField)
 			}
 		}
 
@@ -360,6 +368,7 @@ func applyOwnerEdits(stored server_structs.Registration, edited server_structs.R
 	stored.AdminMetadata.Description = edited.AdminMetadata.Description
 	stored.AdminMetadata.Institution = edited.AdminMetadata.Institution
 	stored.AdminMetadata.SecurityContactUserID = edited.AdminMetadata.SecurityContactUserID
+	stored.AuthState = edited.AuthState
 	return stored
 }
 
@@ -439,7 +448,7 @@ func createUpdateNamespace(ctx *gin.Context, isUpdate bool) {
 	// Assign ID from path param because the request data doesn't have ID set
 	ns.ID = id
 
-	// Allow the owner of an approved registration to change its descriptive fields only
+	// Allow the owner of an approved registration to change its descriptive fields only (including auth state)
 	ownerEditOfApproved := isUpdate && !isAdmin &&
 		existingNs.AdminMetadata.Status == server_structs.RegApproved
 	if ownerEditOfApproved {
@@ -538,6 +547,15 @@ func createUpdateNamespace(ctx *gin.Context, isUpdate bool) {
 				Msg:    "Invalid custom fields without a validation error returned"})
 			return
 		}
+	}
+
+	// The auth state is checked for create and update, admins and owners alike,
+	// and normalized in place so the stored value is what the registry advertises
+	if err := validateAuthState(ns.Prefix, ns.AuthState); err != nil {
+		ctx.JSON(http.StatusBadRequest, server_structs.SimpleApiResp{
+			Status: server_structs.RespFailed,
+			Msg:    fmt.Sprintf("Validation for auth state failed: %v", err)})
+		return
 	}
 
 	if !isUpdate { // Create

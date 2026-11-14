@@ -19,6 +19,16 @@ export interface TokenIssuer {
   issuer: string;
 }
 
+// The auth state a namespace registration may carry: what the director would
+// otherwise learn from an origin's advertisement, so it can advertise the
+// namespace while no origin for it is online. Same shape and keys as the
+// director's own namespace view, so one can be copied from the other.
+export interface NamespaceAuthState {
+  capabilities: Capabilities;
+  tokenGeneration: TokenGeneration[] | null;
+  tokenIssuer: TokenIssuer[] | null;
+}
+
 export interface DirectorNamespace {
   path: string;
   capabilities: Capabilities;
