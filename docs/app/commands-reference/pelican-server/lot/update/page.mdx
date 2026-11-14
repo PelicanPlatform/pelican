@@ -1,0 +1,47 @@
+---
+title: pelican server lot update
+---
+
+## pelican-server lot update
+
+Update a lot's management-policy attributes
+
+### Synopsis
+
+Update the management-policy attributes of an existing storage lot.
+
+Only the attributes you specify are sent; quota flags are in GB and time flags
+are UTC 'YYYY-MM-DD HH:MM:SS'. Requires an administrative token for the cache.
+
+```
+pelican-server lot update <lotName> [flags]
+```
+
+### Options
+
+```
+      --creation string          Creation time, UTC 'YYYY-MM-DD HH:MM:SS'
+      --dedicated-gb float       Dedicated (guaranteed) quota, in GB
+      --deletion string          Deletion time, UTC 'YYYY-MM-DD HH:MM:SS'
+      --expiration string        Expiration time, UTC 'YYYY-MM-DD HH:MM:SS'
+  -h, --help                     help for update
+      --max-objects int          Maximum number of objects
+      --opportunistic-gb float   Opportunistic (burst) quota, in GB
+```
+
+### Options inherited from parent commands
+
+```
+      --config string       config file (default is $HOME/.config/pelican/pelican.yaml)
+  -d, --debug               Enable debug log messages
+  -f, --federation string   Pelican federation to utilize
+      --json                output results in JSON format
+  -L, --log string          Specified log output file
+  -s, --server string       Web URL of the Pelican cache (e.g. https://my-cache.com:8447)
+  -t, --token string        Path to an admin token file
+      --version             Print the version and exit
+```
+
+### SEE ALSO
+
+* [pelican-server lot](/commands-reference/pelican-server/lot/)	 - Manage storage lots (reservations) on a Pelican cache

@@ -241,6 +241,9 @@ func TestOpenCacheDBReadOnlyRefusesWrites(t *testing.T) {
 			return db.UnmarkPurgeFirst(instHash)
 		},
 		"PurgeStorageID": func() error { return db.PurgeStorageID(StorageIDInline) },
+		"SetObjectCount": func() error {
+			return db.SetObjectCount(StorageIDInline, 1, 1)
+		},
 		"EnsureStoreMode": func() error {
 			return db.EnsureStoreMode(StoreModeCache)
 		},

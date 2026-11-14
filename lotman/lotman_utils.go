@@ -1,5 +1,3 @@
-//go:build linux && !ppc64le
-
 /***************************************************************
 *
 * Copyright (C) 2025, Pelican Project, Morgridge Institute for Research
@@ -18,11 +16,11 @@
 *
 ***************************************************************/
 
-// The LotMan library is used for managing storage in Pelican caches. For more information, see:
-// https://github.com/pelicanplatform/lotman
 package lotman
 
 import (
+	"io/fs"
+	"path/filepath"
 	"reflect"
 
 	"github.com/pkg/errors"
@@ -146,6 +144,26 @@ func compareMPAs(mpa1, mpa2 *MPA) bool {
 	return true
 }
 
+// pathsForDiff projects paths onto the fields that actually identify them, so a
+// stored lot and a config-derived one can be compared.
+//
+// LotPath carries a LotName that read paths populate and construction paths
+// leave empty (see the field's comment in lotjson). Because LotPath is used
+// directly as the comparable key in getModMap, leaving it in makes every stored
+// path unequal to its own config-derived twin: the diff reports one removal plus
+// one addition, getModMap folds that pair into an "update" whose Current and New
+// are the same path, and applying it adds the row (a no-op, it already exists)
+// and then removes it. The net effect is that every lot loses all of its paths
+// on the second InitLotman -- i.e. on the first restart.
+func pathsForDiff(paths []LotPath) []LotPath {
+	out := make([]LotPath, 0, len(paths))
+	for _, p := range paths {
+		p.LotName = ""
+		out = append(out, p)
+	}
+	return out
+}
+
 // Check various lot fields for the purpose of determining whether a lot needs an update.
 // Note that we can't use reflect.DeepEqual here because we need to ignore some fields from the
 // lot we grabbed via the `GetLot()` invocation (e.g. children, usage, etc.)
@@ -169,7 +187,7 @@ func lotRequiresUpdate(existingLot, newLot *Lot) (bool, error) {
 	if !reflect.DeepEqual(existingLot.Parents, newLot.Parents) {
 		return true, nil
 	}
-	if !reflect.DeepEqual(existingLot.Paths, newLot.Paths) {
+	if !reflect.DeepEqual(pathsForDiff(existingLot.Paths), pathsForDiff(newLot.Paths)) {
 		return true, nil
 	}
 
@@ -258,8 +276,8 @@ func getLotUpdateJSONs(existingLot *Lot, newLot *Lot) (*LotUpdate, *LotAddition,
 	}
 
 	// Check for path updates
-	if !reflect.DeepEqual(existingLot.Paths, newLot.Paths) {
-		updateMap := getModMap(existingLot.Paths, newLot.Paths)
+	if !reflect.DeepEqual(pathsForDiff(existingLot.Paths), pathsForDiff(newLot.Paths)) {
+		updateMap := getModMap(pathsForDiff(existingLot.Paths), pathsForDiff(newLot.Paths))
 		for path, update := range updateMap {
 			switch {
 			case update.Remove:
@@ -273,6 +291,13 @@ func getLotUpdateJSONs(existingLot *Lot, newLot *Lot) (*LotUpdate, *LotAddition,
 				}
 				lotAddition.Paths = append(lotAddition.Paths, path)
 			default: // update
+				// A "rename" onto the same path is never meaningful, and it is
+				// destructive: applying one adds the row (a no-op, it is already
+				// there) and then removes it. Skip it rather than trusting the
+				// diff to never produce one.
+				if path.Path == update.Update.Path && path.Recursive == update.Update.Recursive {
+					continue
+				}
 				if lotUpdate == nil {
 					lotUpdate = &LotUpdate{}
 				}
@@ -302,4 +327,28 @@ func getLotUpdateJSONs(existingLot *Lot, newLot *Lot) (*LotUpdate, *LotAddition,
 	}
 
 	return lotUpdate, lotAddition, lotPathRemoval, lotParentRemoval, nil
+}
+
+// diskCapacityOf reports the capacity of the filesystem backing path, resolving
+// a path that does not exist yet to its nearest existing ancestor.
+//
+// Lots are built during InitLotman, which the V2 cache launcher runs *before*
+// NewPersistentCache creates the storage directories. statfs on the
+// not-yet-created directory would fail with ENOENT and abort cache startup, so
+// walk up until a component exists: an ancestor of a directory that does not
+// exist is on the filesystem that will host it, and statfs reports the
+// filesystem, not the directory.
+func diskCapacityOf(path string) (total uint64, free uint64, err error) {
+	probe := filepath.Clean(path)
+	for {
+		total, free, err = getDiskUsage(probe)
+		if err == nil || !errors.Is(err, fs.ErrNotExist) {
+			return total, free, err
+		}
+		parent := filepath.Dir(probe)
+		if parent == probe {
+			return 0, 0, err
+		}
+		probe = parent
+	}
 }

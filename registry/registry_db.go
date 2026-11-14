@@ -33,6 +33,7 @@ import (
 
 	"github.com/pelicanplatform/pelican/config"
 	"github.com/pelicanplatform/pelican/database"
+	dbutils "github.com/pelicanplatform/pelican/database/utils"
 	"github.com/pelicanplatform/pelican/param"
 	"github.com/pelicanplatform/pelican/server_structs"
 	"github.com/pelicanplatform/pelican/server_utils"
@@ -210,7 +211,7 @@ func claimRegistration(id int, owner string) error {
 	if owner == "" {
 		return errors.New("cannot claim a registration for an empty owner")
 	}
-	return database.ServerDatabase.Transaction(func(tx *gorm.DB) error {
+	return dbutils.WriteTx(database.ServerDatabase, func(tx *gorm.DB) error {
 		// Re-checked the owner is empty inside the transaction, so two concurrent
 		// claims cannot both succeed (SQLite serializes the write; the loser sees
 		// the committed owner or fails to commit, but not a silent overwrite).
@@ -236,7 +237,7 @@ func assignRegistrationOwner(id int, owner string) error {
 	if owner == "" {
 		return errors.New("cannot assign a registration to an empty owner")
 	}
-	return database.ServerDatabase.Transaction(func(tx *gorm.DB) error {
+	return dbutils.WriteTx(database.ServerDatabase, func(tx *gorm.DB) error {
 		ns := server_structs.Registration{}
 		if err := tx.First(&ns, "id = ?", id).Error; err != nil {
 			if errors.Is(err, gorm.ErrRecordNotFound) {
@@ -678,7 +679,7 @@ func AddRegistration(ns *server_structs.Registration) error {
 
 	// Wrap all database operations in a transaction
 	// If any operation fails, all changes are reverted. No partial records left.
-	return database.ServerDatabase.Transaction(func(tx *gorm.DB) error {
+	return dbutils.WriteTx(database.ServerDatabase, func(tx *gorm.DB) error {
 		// Save the registration
 		if err := tx.Save(&ns).Error; err != nil {
 			return errors.Wrapf(err, "failed to save registration: %s", ns.AdminMetadata.SiteName)
@@ -961,7 +962,7 @@ func updateRegistration(ns *server_structs.Registration, ownerEditOfApproved boo
 	// transaction replaces, or a concurrent claim/ownership transfer that
 	// commits between an outside read and the Save would be silently
 	// reverted.
-	return database.ServerDatabase.Transaction(func(tx *gorm.DB) error {
+	return dbutils.WriteTx(database.ServerDatabase, func(tx *gorm.DB) error {
 		existingNs, err := getRegistrationByIdTx(tx, ns.ID)
 		if err != nil || existingNs == nil {
 			return errors.Wrap(err, "Failed to get registration")
@@ -1031,7 +1032,7 @@ func updateRegistrationStatusById(id int, status server_structs.RegistrationStat
 	// Read-modify-write of the admin_metadata JSON column: the read must
 	// happen inside the write transaction (see getRegistrationByIdTx) or a
 	// concurrent owner write would be reverted by this stale marshal.
-	return database.ServerDatabase.Transaction(func(tx *gorm.DB) error {
+	return dbutils.WriteTx(database.ServerDatabase, func(tx *gorm.DB) error {
 		ns, err := getRegistrationByIdTx(tx, id)
 		if err != nil {
 			return errors.Wrap(err, "Error getting registration by id")
@@ -1074,7 +1075,7 @@ func setRegistrationPubKey(prefix string, pubkeyDbString string) error {
 // If services remain, update the server's is_origin and is_cache fields accordingly.
 func deleteRegistrationByID(id int) error {
 	// Wrap in a transaction to perform an atomic operation
-	return database.ServerDatabase.Transaction(func(tx *gorm.DB) error {
+	return dbutils.WriteTx(database.ServerDatabase, func(tx *gorm.DB) error {
 		// Determine the server ID associated with this registration via the services table
 		// (Server ID is not empty if this is a server registration)
 		var svc server_structs.Service
@@ -1153,7 +1154,7 @@ func deleteRegistrationByPrefix(prefix string) error {
 func deleteServerByID(id string) error {
 	// Wrap all database operations in a transaction
 	// If any operation fails, all changes are reverted. No partial records left.
-	return database.ServerDatabase.Transaction(func(tx *gorm.DB) error {
+	return dbutils.WriteTx(database.ServerDatabase, func(tx *gorm.DB) error {
 		// Look up registration IDs for this server inside the transaction to avoid
 		// a race where a registration is added after we read but before we delete.
 		var registrationIDs []int
@@ -1260,7 +1261,7 @@ func PopulateTopology(ctx context.Context) error {
 		toAddTopo = append(toAddTopo, Topology{Prefix: prefix})
 	}
 
-	return database.ServerDatabase.Transaction(func(tx *gorm.DB) error {
+	return dbutils.WriteTx(database.ServerDatabase, func(tx *gorm.DB) error {
 		if err := tx.Where("prefix IN ?", toDelete).Delete(&Topology{}).Error; err != nil {
 			return err
 		}

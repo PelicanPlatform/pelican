@@ -1,5 +1,3 @@
-//go:build linux && !ppc64le
-
 /***************************************************************
 *
 * Copyright (C) 2026, Pelican Project, Morgridge Institute for Research
@@ -20,7 +18,7 @@
 
 // Nested-namespace lot tree construction and quota allocation. The
 // data-plane in this file is intentionally pure: no lotman C calls are
-// made here, so it can be unit-tested without dlopen'ing libLotMan.so.
+// made here, so it can be unit-tested without touching the lot store.
 //
 // The pipeline is:
 //
@@ -61,7 +59,7 @@
 //      without forcing a global reallocation of the entire subtree.
 //
 // Sentinel values are never divided:
-//   - -1 means "unbounded" (lotman PR #46); it propagates verbatim to all
+//   - -1 means "unbounded" (PelicanPlatform/lotman PR #46); it propagates verbatim to all
 //     descendants. Today, opportunistic_GB and max_num_objects are always
 //     -1 because the root carries -1 on both axes.
 //   - 0 means "zero capacity" (literal zero, not a sentinel for unbounded).
@@ -76,13 +74,13 @@
 package lotman
 
 import (
+	"path"
 	"sort"
 	"strings"
 
 	"github.com/google/uuid"
 
 	"github.com/pelicanplatform/pelican/server_structs"
-	"github.com/pelicanplatform/pelican/server_utils"
 )
 
 // lotTreeNode mirrors the planned parent/child structure of the cache's
@@ -98,10 +96,23 @@ type lotTreeNode struct {
 // root path) so that path-prefix containment checks behave consistently
 // regardless of whether the source ad uses /foo or /foo/.
 func normaliseLotPath(p string) string {
+	if p == "" {
+		return p
+	}
+	// path.Clean collapses "." and ".." segments and duplicate slashes, so the
+	// planner's notion of a path matches what the core stores (core.normalizePath
+	// cleans too). Without it "/x", "/./x" and "/x/y/.." are three distinct paths
+	// to the dedup and fair-share arithmetic here but one path once stored.
+	// It also matters for the federation boundary, which builds qualified paths
+	// by concatenation.
 	if p == "/" {
 		return p
 	}
-	return strings.TrimRight(p, "/")
+	cleaned := path.Clean(p)
+	if cleaned == "." {
+		return p
+	}
+	return strings.TrimRight(cleaned, "/")
 }
 
 // pathContains reports whether `parent` is a strict ancestor of `child`
@@ -140,7 +151,9 @@ func buildLotTree(rootLot Lot, nsAds []server_structs.NamespaceAd, federationIss
 	}
 	seen := map[string]nsNode{}
 	for _, ad := range nsAds {
-		if strings.HasPrefix(ad.Path, server_utils.MonitoringBaseNs) {
+		// ad paths may be federation-qualified (V2); compare against the
+		// correspondingly-qualified monitoring base.
+		if strings.HasPrefix(ad.Path, monitoringBasePath()) {
 			continue
 		}
 		path := normaliseLotPath(ad.Path)

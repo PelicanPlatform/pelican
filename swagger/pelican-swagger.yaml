@@ -9008,6 +9008,12 @@ paths:
     patch:
       tags: ["lots"]
       summary: Modify a lot's MPA and/or parent attributions
+      description: |-
+        Modify a lot's management policy attributes and/or parent attributions.
+        Authorization depends on the kind of caller: a web-UI session
+        recognized as a Pelican admin (`Admin privilege Required`) acts as the
+        system caller and bypasses the lot-ownership check entirely, while a
+        bearer-token caller must own the lot or one of its ancestors.
       consumes: [application/json]
       produces: [application/json]
       parameters:
@@ -9027,6 +9033,12 @@ paths:
     delete:
       tags: ["lots"]
       summary: Delete a lot reservation
+      description: |-
+        Delete a lot reservation.
+        Authorization depends on the kind of caller: a web-UI session
+        recognized as a Pelican admin (`Admin privilege Required`) acts as the
+        system caller and bypasses the lot-ownership check entirely, while a
+        bearer-token caller must own the lot or one of its ancestors.
       produces: [application/json]
       responses:
         "204": { description: No Content }
@@ -9118,6 +9130,12 @@ paths:
     post:
       tags: ["lots"]
       summary: Reclaim a lot (mark deleted, evict associated objects)
+      description: |-
+        Mark a lot deleted and evict the objects associated with it.
+        Authorization depends on the kind of caller: a web-UI session
+        recognized as a Pelican admin (`Admin privilege Required`) acts as the
+        system caller and bypasses the lot-ownership check entirely, while a
+        bearer-token caller must own the lot or one of its ancestors.
       consumes: [application/json]
       produces: [application/json]
       parameters:

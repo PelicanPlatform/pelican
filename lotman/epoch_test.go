@@ -1,5 +1,3 @@
-//go:build linux && !ppc64le
-
 package lotman
 
 import (

@@ -95,6 +95,10 @@ enable = true
 `
 )
 
+// minXrootdPurgeInterval is the smallest value XRootD accepts for
+// `pfc.diskusage ... purgeinterval`; it rejects anything shorter.
+const minXrootdPurgeInterval = 60 * time.Second
+
 type (
 	OriginConfig struct {
 		Multiuser           bool
@@ -161,6 +165,7 @@ type (
 		FilesBaseSize              string
 		FilesNominalSize           string
 		FilesMaxSize               string
+		PurgeInterval              string
 		ExportLocation             string
 		RunLocation                string
 		DataLocations              []string
@@ -1223,6 +1228,20 @@ func ConfigXrootd(ctx context.Context, isOrigin bool) (string, error) {
 			return "", err
 		}
 		xrdConfig.Cache.PSSOrigin = pssOrigin
+
+		// Render the pfc purge cadence as an xrootd-formatted seconds string.
+		// XRootD rejects a purgeinterval below 60s outright, and anything under
+		// a second would round to "0s" here -- an xrootd config the server
+		// refuses to start on. Clamp rather than fail: the cadence is a
+		// performance knob, and refusing to boot the cache over it would turn a
+		// typo into an outage.
+		purgeInterval := param.Cache_PurgeInterval.GetDuration()
+		if purgeInterval < minXrootdPurgeInterval {
+			log.Warningf("%s is %v, below the %v minimum XRootD accepts; using %v instead",
+				param.Cache_PurgeInterval.GetName(), purgeInterval, minXrootdPurgeInterval, minXrootdPurgeInterval)
+			purgeInterval = minXrootdPurgeInterval
+		}
+		xrdConfig.Cache.PurgeInterval = strconv.FormatInt(int64(purgeInterval.Seconds()), 10) + "s"
 
 		// The watermarks and the file-usage sizes may each be given as an integer
 		// percentage of total disk or as an absolute size; normalize the percentage

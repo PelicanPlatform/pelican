@@ -163,3 +163,100 @@ pelican-serve-test-origin: pelican-build
 pelican-build-server-image:
 	@echo BUILD SERVER IMAGE
 	@$(CONTAINER_TOOL) build -t pelican-server -f images/Dockerfile .
+
+# libLotMan is the only artifact that needs CGO. The pelican / pelican-server
+# binaries stay CGO-free (see the lotman/core embedded engine); this target
+# builds the standalone C-ABI shared library that external C consumers — notably
+# the XRootD pfc purge plugin — link against, from the same Go core.
+LOTMAN_SHARED_EXT := so
+ifeq ($(goos),darwin)
+	LOTMAN_SHARED_EXT := dylib
+endif
+LOTMAN_SHARED_DIR := $(PELICAN_DIST_PATH)/lotman
+
+# The XRootD pfc purge plugin (libXrdPurgeLotMan) links libLotMan at a specific C
+# ABI. lotman v0.1.0 added query_time / include_reclaimed / hierarchical params to
+# the eviction queries and update_lot_usage_by_dir; a plugin built against the
+# older v0.0.4 ABI (shipped with xrootd-lotman v0.0.5) passes fewer arguments, so
+# a new-ABI libLotMan reads shifted registers and segfaults. Build the matching
+# ABI via the lotman_legacy_api build tag.
+#
+# LOTMAN_ABI picks the variant: auto (default — sniff the installed lotman
+# header), new, or legacy. Override e.g. `make lotman-shared LOTMAN_ABI=legacy`.
+LOTMAN_ABI ?= auto
+ifeq ($(LOTMAN_ABI),auto)
+  LOTMAN_HEADER := $(firstword $(wildcard \
+    /usr/include/lotman.h /usr/include/lotman/lotman.h \
+    /usr/local/include/lotman.h /usr/local/include/lotman/lotman.h))
+  ifeq ($(LOTMAN_HEADER),)
+    # No header to sniff (e.g. a cross build); assume the current ABI.
+    LOTMAN_ABI_RESOLVED := new
+  else ifeq ($(shell awk '/lotman_update_lot_usage_by_dir/{f=1} f{print} f&&/;/{exit}' $(LOTMAN_HEADER) | grep -c int64_t),0)
+    # The new ABI added an int64_t query_time arg to update_lot_usage_by_dir.
+    LOTMAN_ABI_RESOLVED := legacy
+  else
+    LOTMAN_ABI_RESOLVED := new
+  endif
+else
+  LOTMAN_ABI_RESOLVED := $(LOTMAN_ABI)
+endif
+LOTMAN_BUILD_TAGS :=
+ifeq ($(LOTMAN_ABI_RESOLVED),legacy)
+  LOTMAN_BUILD_TAGS := -tags lotman_legacy_api
+endif
+
+# Go's c-shared link never passes -soname, so the library would carry no
+# DT_SONAME; the C++ libLotMan it replaces has one (CMake's default). Match it,
+# on ELF targets only -- it is a GNU ld option with no Mach-O spelling.
+LOTMAN_LDFLAGS :=
+ifneq ($(goos),darwin)
+  LOTMAN_LDFLAGS := -ldflags "-extldflags '-Wl,-soname,libLotMan.so'"
+endif
+
+.PHONY: lotman-shared
+lotman-shared:
+	@echo "BUILD libLotMan C-ABI shared library (lotman ABI: $(LOTMAN_ABI_RESOLVED))"
+	@mkdir -p $(LOTMAN_SHARED_DIR)
+	CGO_ENABLED=1 go build -buildmode=c-shared $(LOTMAN_BUILD_TAGS) $(LOTMAN_LDFLAGS) -o $(LOTMAN_SHARED_DIR)/libLotMan.$(LOTMAN_SHARED_EXT) ./lotman/cshared
+	@# cgo writes a libLotMan.h next to the library, but that file does not
+	@# compile in C++ (it emits `_Bool`, drops every `const`, and has no
+	@# `extern "C"` block) and every consumer of this library is C++. Ship the
+	@# hand-maintained header instead -- the same one the RPM installs.
+	@mkdir -p $(LOTMAN_SHARED_DIR)/include/lotman
+	@cp lotman/cshared/include/lotman/lotman.h $(LOTMAN_SHARED_DIR)/include/lotman/lotman.h
+	@echo "Wrote $(LOTMAN_SHARED_DIR)/libLotMan.$(LOTMAN_SHARED_EXT) and include/lotman/lotman.h"
+
+# Produce the libLotMan RPM. This one is built with rpmbuild rather than
+# GoReleaser/nfpm, because it has to *replace* an already-published package:
+# nfpm cannot express Obsoletes and cannot produce a source RPM, and this
+# package needs both. See rpm/pelican-lotman.spec.
+#
+# -buildmode=c-shared needs CGO and a per-target toolchain, so unlike the
+# CGO-free pelican packages this is built natively per architecture rather than
+# cross-compiled. images/Dockerfile's `lotman-build` stage runs the same
+# rpmbuild command on the target platform.
+LOTMAN_RPM_TOPDIR := $(abspath $(PELICAN_DIST_PATH)/rpmbuild)
+# Read the packaged version out of the spec rather than repeating it. It is the
+# C ABI the library implements, and it names both the package and the source
+# tarball, so the two cannot disagree.
+LOTMAN_ABI_VERSION := $(shell awk '/^%global lotman_abi /{print $$3}' rpm/pelican-lotman.spec)
+
+.PHONY: lotman-package
+lotman-package:
+	@echo PACKAGE libLotMan
+	@mkdir -p $(LOTMAN_RPM_TOPDIR)
+	rpmbuild -bb --nodeps --build-in-place --define "_topdir $(LOTMAN_RPM_TOPDIR)" rpm/pelican-lotman.spec
+	@find $(LOTMAN_RPM_TOPDIR)/RPMS -name '*.rpm'
+
+# The source RPM, for distribution through OSG/Koji. Unlike the binary target
+# this builds from a tarball, so one is cut from HEAD first. The tarball's
+# prefix has to match the spec's %setup, which is why both take their version
+# from the same place.
+.PHONY: lotman-srpm
+lotman-srpm:
+	@echo SRPM libLotMan $(LOTMAN_ABI_VERSION)
+	@mkdir -p $(LOTMAN_RPM_TOPDIR)/SOURCES
+	git archive --format=tar.gz --prefix=pelican-lotman-$(LOTMAN_ABI_VERSION)/ \
+		-o $(LOTMAN_RPM_TOPDIR)/SOURCES/pelican-lotman-$(LOTMAN_ABI_VERSION).tar.gz HEAD
+	rpmbuild -bs --define "_topdir $(LOTMAN_RPM_TOPDIR)" rpm/pelican-lotman.spec
+	@find $(LOTMAN_RPM_TOPDIR)/SRPMS -name '*.rpm'

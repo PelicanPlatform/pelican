@@ -26,6 +26,7 @@ import (
 	"net"
 	"net/url"
 	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
@@ -165,6 +166,55 @@ func cacheServeWithPersistentCache(ctx context.Context, engine *gin.Engine, egrp
 		cfg.StorageDirs = storageDirs
 	}
 
+	// Federation-qualified lot tracking for the persistent (V2) cache. Lots live
+	// in the shared server DB and their paths are prefixed with the federation
+	// discovery host so the same path in different federations resolves to
+	// distinct lots, matching the cache's resolution keys. InitLotman runs
+	// before NewPersistentCache so the cache can build its lot index from the
+	// bootstrapped lots and account/evict per lot.
+	if param.Cache_EnableLotman.GetBool() {
+		fedInfo, ferr := config.GetFederation(ctx)
+		if ferr != nil {
+			return nil, errors.Wrap(ferr, "failed to get federation info for lotman")
+		}
+		fedHost := ""
+		if u, e := url.Parse(fedInfo.DiscoveryEndpoint); e == nil && u.Host != "" {
+			fedHost = u.Host
+		}
+		if fedHost == "" {
+			if u, e := url.Parse(fedInfo.DirectorEndpoint); e == nil {
+				fedHost = u.Host
+			}
+		}
+		if fedHost == "" {
+			return nil, errors.New("could not determine federation host for lotman federation-qualification")
+		}
+		lotman.SetFederationPrefix("/" + fedHost)
+		// Size the root lot from the filesystems this cache actually stores on.
+		// Cache.DataLocations, lotman's default, describes the XRootD (V1)
+		// cache's data directories; a V2 cache never populates it.
+		lotDiskPaths := make([]string, 0, len(storageDirs))
+		for _, dir := range storageDirs {
+			lotDiskPaths = append(lotDiskPaths, dir.Path)
+		}
+		if len(lotDiskPaths) == 0 {
+			// No explicit StorageDirs: the cache falls back to a single tree
+			// under Cache.StorageLocation (see PersistentCacheConfig.BaseDir).
+			if loc := param.Cache_StorageLocation.GetString(); loc != "" {
+				lotDiskPaths = append(lotDiskPaths, filepath.Join(loc, "persistent-cache"))
+			}
+		}
+		lotman.SetLotDiskPaths(lotDiskPaths)
+		if success := lotman.InitLotman(cacheServer.GetNamespaceAds()); !success {
+			return nil, errors.New("failed to initialize lotman")
+		}
+		cfg.LotManager = lotman.GetManager()
+		cfg.LotReconcileInterval = param.Cache_LotUsageReconcileInterval.GetDuration()
+		// Pin the cache to the same federation host so its resolution keys match
+		// the federation-qualified lot paths exactly.
+		cfg.DefaultFederation = fedHost
+	}
+
 	pc, err := local_cache.NewPersistentCache(ctx, egrp, cfg)
 	if err != nil {
 		return nil, errors.Wrap(err, "failed to create persistent cache")
@@ -187,6 +237,19 @@ func cacheServeWithPersistentCache(ctx context.Context, engine *gin.Engine, egrp
 	// Register HTTP handlers on the Gin engine
 	if err := pc.RegisterCacheHandlers(engine, directorEnabled); err != nil {
 		return nil, errors.Wrap(err, "failed to register persistent cache handlers")
+	}
+
+	// Lotman background work for the persistent cache: the REST API, periodic
+	// per-namespace lot renewal, and GC of expired lot records. Lot
+	// initialization and manager injection happened before NewPersistentCache.
+	if param.Cache_EnableLotman.GetBool() {
+		if param.Lotman_EnableAPI.GetBool() {
+			if err := lotman.RegisterLotsAPI(engine.Group("/", web_ui.ServerHeaderMiddleware)); err != nil {
+				return nil, errors.Wrap(err, "failed to register lotman API")
+			}
+		}
+		lotman.LaunchRenewalRoutine(ctx, cacheServer.GetNamespaceAds)
+		lotman.LaunchLotGcRoutine(ctx)
 	}
 
 	// Set Cache.Url to point to the API endpoint when director is enabled
@@ -273,7 +336,8 @@ func cacheServeWithXRootD(ctx context.Context, engine *gin.Engine, egrp *errgrou
 			}
 		}
 
-		// Bind the c library funcs to Go, instantiate lots, set up the Lotman database, etc
+		// Open the lot database, apply schema migrations, and instantiate the
+		// federation/config-derived lots.
 		if success := lotman.InitLotman(cacheServer.GetNamespaceAds()); !success {
 			return nil, errors.New("Failed to initialize lotman")
 		}
