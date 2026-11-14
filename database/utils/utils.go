@@ -73,6 +73,12 @@ func InitSQLiteDB(dbPath string) (*gorm.DB, error) {
 			LogLevel:   ormLevel,
 		}),
 	)
+	// gorm.ErrRecordNotFound is how a First()/Take() reports "no such row", which is
+	// ordinary control flow all over this codebase (is there an active AUP document?
+	// has this user signed one?).  Logging every such miss at error level turned
+	// routine lookups into a stream of ERROR lines in operators' logs.  Callers that
+	// care still get the error; it just isn't logged on their behalf.
+	gormLogger.SkipErrRecordNotFound = true
 
 	log.Debugln("Opening connection to sqlite DB", dbName)
 
