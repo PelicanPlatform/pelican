@@ -341,6 +341,12 @@ func TestXrootDCacheConfig(t *testing.T) {
 		{"TestCacheXrdIncorrectConfig", "Logging.Cache.Xrd", "degub", true, ""},
 		{"TestCacheXrootdCorrectConfig", "Logging.Cache.Xrootd", "debug", false, "xrootd.trace debug"},
 		{"TestCacheXrootdIncorrectConfig", "Logging.Cache.Xrootd", "degub", true, ""},
+		// XRootD refuses a purgeinterval under 60s, and anything under a
+		// second would render as "0s" -- a config it will not start on. A
+		// too-small value is clamped rather than failing the cache's startup.
+		{"TestCachePurgeIntervalHonoured", "Cache.PurgeInterval", "10m", false, "purgeinterval 600s"},
+		{"TestCachePurgeIntervalClamped", "Cache.PurgeInterval", "5s", false, "purgeinterval 60s"},
+		{"TestCachePurgeIntervalSubSecondClamped", "Cache.PurgeInterval", "100ms", false, "purgeinterval 60s"},
 	}
 
 	for _, tt := range tests {
