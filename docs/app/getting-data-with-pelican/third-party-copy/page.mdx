@@ -1,0 +1,112 @@
+import { Callout } from 'nextra/components'
+
+# Third-Party Copy
+
+A *third-party copy* (TPC) moves an object from one place in a federation to another without the data passing through your computer.
+Instead of downloading the object and uploading it again, your client asks the **destination** origin to fetch the object from the **source** itself, then watches the transfer's progress.
+
+This matters whenever the two origins have a better network path to each other than either has to you.
+Copying a 640 GB dataset between two origins with `pelican object get` followed by `pelican object put` moves 1.28 TB across your laptop's network connection; a third-party copy moves nothing across it.
+
+Third-party copy is the one job `pelican object copy` does that `pelican object get` and `pelican object put` cannot.
+
+## Before you start
+
+A third-party copy needs three things:
+
+- **Both ends must be federation URLs.** If either the source or the destination is a local path, you get an ordinary download or upload instead — see [Pelican's Command Line Client](./client). A third-party copy is what happens when *both* sides are `pelican://` or `osdf:///` URLs.
+- **The destination namespace must support copies.** Origins advertise this with the `Copies` capability, which is enabled automatically for any export that allows `Writes`. See "[Origin and Namespace Capabilities](../../federating-your-data/origin#origin-and-namespace-capabilities)" if you administer the origin.
+- **You must be able to read the source and write the destination.** These are two separate authorizations, which the client normally acquires for you. See [Tokens](#tokens) if you need to supply them yourself.
+
+## Copying an object
+
+Give `pelican object copy` a source and a destination that are both in a federation:
+
+```bash copy
+pelican object copy pelican://<federation-url>/<namespace>/path/to/object pelican://<federation-url>/<other-namespace>/path/to/destination
+```
+
+The client prints a progress bar as the destination origin reports how many bytes it has pulled so far.
+
+### Naming the destination object
+
+If the destination names an **existing collection**, the object is placed inside it under the source's name — the same semantics as `cp`:
+
+```bash copy
+# Copies the object to .../destination-collection/object.dat
+pelican object copy pelican://<federation-url>/<namespace>/path/to/object.dat pelican://<federation-url>/<namespace>/destination-collection/
+```
+
+Naming several sources at once does the same thing, since the destination can only be a collection:
+
+```bash copy
+pelican object copy pelican://.../a.dat pelican://.../b.dat pelican://<federation-url>/<namespace>/destination-collection/
+```
+
+Otherwise the destination is taken literally, as the full path of the object to create.
+
+<Callout type="info">
+Name inference needs to see the destination to know whether it is a collection, so it only applies where the destination namespace permits listings.
+On a namespace that grants writes but not listings, name the destination object explicitly.
+</Callout>
+
+### Copying a collection
+
+Add `-r` to copy a whole collection.
+Here the rule changes: a recursive copy is `rsync`-flavored rather than `cp`-flavored.
+The entries land **flat** under the destination and the source collection's own name is *not* interposed, exactly as in `rsync -a source/ destination/` — and exactly as `pelican object get -r` and `pelican object put -r` already behave:
+
+```bash copy
+# Contents of source-collection land directly under destination-collection/
+pelican object copy -r pelican://<federation-url>/<namespace>/source-collection pelican://<federation-url>/<namespace>/destination-collection
+```
+
+The `?recursive` query parameter works too, on either end of the copy, and means the same thing as `-r`.
+
+## Tokens
+
+Most of the time you do not need this section.
+A third-party copy acquires its own credentials the same way `pelican object get` and `pelican object put` do, so the commands above generally work with no token flags at all.
+Reach for the flags below only when you need to override that — a credential the client cannot discover, or a namespace whose issuer it cannot reach.
+
+A third-party copy performs two different operations on two different servers: it **reads** the source and **writes** the destination.
+Where both are covered by the same credential, `-t` is enough:
+
+```bash copy
+pelican object copy -t /path/to/token pelican://.../source pelican://.../destination
+```
+
+Where they are not — two namespaces belonging to different projects, say — name each credential separately:
+
+```bash copy
+pelican object copy \
+	--source-token /path/to/read-token \
+	--dest-token /path/to/write-token \
+	pelican://.../source pelican://.../destination
+```
+
+`--source-token` and `--dest-token` each override `-t` for their own side, so you can supply one of them alongside a general `-t`.
+
+<Callout type="warning">
+Your source credential is handed to the destination origin, which needs it to read the object on your behalf.
+Only start a third-party copy against a destination you are willing to trust with read access to the source.
+</Callout>
+
+Public source namespaces need no source credential at all, and a public destination is not possible: writes always require authorization.
+
+## Troubleshooting
+
+**`... is a directory` or an HTTP 409 from the destination.**
+The destination named a collection that the client could not inspect, so the copy was attempted against the collection itself.
+Name the destination object explicitly.
+
+**`the destination origin does not have the TPC module loaded (HTTP 200 instead of 201)`.**
+The destination origin accepted the request but is not configured for third-party copy.
+For a Pelican origin, check that the export has the `Copies` capability and that the backend is a POSIX-like one that supports it.
+
+**`failed to get namespace information for destination URL`.**
+No origin in the federation advertised `Copies` for the destination namespace — or, against an older Director that does not understand the `COPY` verb, the lookup fell back to asking about writes and found an origin that cannot actually perform a copy.
+
+**`Using provided token ... even though it does not appear to be acceptable to perform transfer`.**
+The credential you supplied does not obviously authorize the operation, and the client is using it anyway because you named it explicitly.
+If the copy then succeeds, the warning was conservative; if it fails with a 403, check that the token's scope covers the right path and the right operation (`storage.read` for the source, `storage.modify` or `storage.create` for the destination).
