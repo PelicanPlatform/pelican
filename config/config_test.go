@@ -35,6 +35,7 @@ import (
 	"time"
 
 	"github.com/sirupsen/logrus"
+	"github.com/sirupsen/logrus/hooks/test"
 	"github.com/spf13/viper"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -1015,6 +1016,33 @@ func TestInitServerGlobusBackendRequiresUI(t *testing.T) {
 	require.ErrorContains(t, err, "globus")
 }
 
+// captureLogEntries records everything written to the standard logrus logger for
+// the duration of the test. Unlike captureLogs it hands back the entries
+// themselves, which a test needs when the level a message is logged at is the
+// thing under test.
+func captureLogEntries(t *testing.T) *test.Hook {
+	t.Helper()
+	hook := test.NewLocal(logrus.StandardLogger())
+	prevLevel := logrus.GetLevel()
+	logrus.SetLevel(logrus.DebugLevel)
+	t.Cleanup(func() {
+		logrus.SetLevel(prevLevel)
+		hook.Reset()
+	})
+	return hook
+}
+
+// hasLogEntry reports whether the hook saw an entry at the given level whose
+// message contains substr.
+func hasLogEntry(hook *test.Hook, level logrus.Level, substr string) bool {
+	for _, entry := range hook.AllEntries() {
+		if entry.Level == level && strings.Contains(entry.Message, substr) {
+			return true
+		}
+	}
+	return false
+}
+
 // standaloneOriginBase applies the minimum configuration a standalone origin
 // needs: a native backend and no federation to discover.
 func standaloneOriginBase(t *testing.T) {
@@ -1172,8 +1200,34 @@ func TestInitServerStandaloneOrigin(t *testing.T) {
 		standaloneOriginBase(t)
 		require.NoError(t, param.Origin_DirectorTest.Set(true))
 
+		hook := captureLogEntries(t)
 		require.NoError(t, InitServer(context.Background(), server_structs.OriginType))
 		assert.False(t, param.Origin_DirectorTest.GetBool())
+		// The operator asked for director tests, so they are owed a warning that
+		// the setting is being overridden.
+		assert.True(t, hasLogEntry(hook, logrus.WarnLevel, param.Origin_DirectorTest.GetName()),
+			"expected a warning naming %s", param.Origin_DirectorTest.GetName())
+	})
+
+	// Origin.DirectorTest defaults to true, so a standalone origin always turns
+	// it off. Warning about it told every operator their configuration was being
+	// overridden when they had configured nothing -- noise they cannot act on.
+	t.Run("silently-disables-default-director-test", func(t *testing.T) {
+		ResetConfig()
+		t.Cleanup(ResetConfig)
+
+		standaloneOriginBase(t)
+		require.NoError(t, param.Logging_Level.Set("debug"))
+
+		hook := captureLogEntries(t)
+		require.NoError(t, InitServer(context.Background(), server_structs.OriginType))
+		assert.False(t, param.Origin_DirectorTest.GetBool())
+		assert.False(t, hasLogEntry(hook, logrus.WarnLevel, param.Origin_DirectorTest.GetName()),
+			"a default-valued %s must not be warned about", param.Origin_DirectorTest.GetName())
+		// The knob's effective value still differs from the parameter reference,
+		// so the override is recorded -- just where it belongs.
+		assert.True(t, hasLogEntry(hook, logrus.DebugLevel, param.Origin_DirectorTest.GetName()),
+			"expected a debug line naming %s; without one this test proves nothing", param.Origin_DirectorTest.GetName())
 	})
 
 	t.Run("does-not-apply-without-origin-module", func(t *testing.T) {
@@ -2102,6 +2156,53 @@ func TestInitServerAcceptsLotmanMaxLotLifetimeAtBounds(t *testing.T) {
 			}
 		})
 	}
+}
+
+// The Cache.* disk-management parameters are consumed only by the cache module,
+// yet every one of them carries a generated default, so IsSet() is true even on
+// an origin. Validating them regardless meant an origin rejected -- and logged
+// about -- watermarks it would never apply.
+func TestInitServerCacheValidationIsCacheOnly(t *testing.T) {
+	// A low watermark above the high watermark: nonsense for a cache, and
+	// meaningless anywhere else.
+	setBadWatermarks := func(t *testing.T) {
+		t.Helper()
+		require.NoError(t, param.ConfigBase.Set(t.TempDir()))
+		require.NoError(t, param.Cache_LowWaterMark.Set("90"))
+		require.NoError(t, param.Cache_HighWaterMark.Set("80"))
+	}
+
+	t.Run("rejected-for-cache", func(t *testing.T) {
+		ResetConfig()
+		t.Cleanup(ResetConfig)
+		mockFederationRoot(t)
+		setBadWatermarks(t)
+
+		err := InitServer(context.Background(), server_structs.CacheType)
+		require.Error(t, err)
+		assert.ErrorContains(t, err, param.Cache_HighWaterMark.GetName())
+	})
+
+	t.Run("ignored-for-origin", func(t *testing.T) {
+		ResetConfig()
+		t.Cleanup(ResetConfig)
+		mockFederationRoot(t)
+		setBadWatermarks(t)
+		require.NoError(t, param.Origin_StoragePrefix.Set(t.TempDir()))
+		require.NoError(t, param.Origin_FederationPrefix.Set("/origin"))
+		// Debug, so the negative assertion below covers every level the
+		// watermark validator could speak at.
+		require.NoError(t, param.Logging_Level.Set("debug"))
+
+		logged := captureLogs(t)
+		// InitServer may still fail for unrelated reasons on this host; only the
+		// cache watermarks are under test.
+		if err := InitServer(context.Background(), server_structs.OriginType); err != nil {
+			assert.NotContains(t, err.Error(), param.Cache_HighWaterMark.GetName())
+		}
+		assert.False(t, logged(param.Cache_LowWaterMark.GetName()),
+			"an origin must not inspect or log about cache watermarks")
+	})
 }
 
 // The Cache.Files*Size parameters accept either an integer percentage of total

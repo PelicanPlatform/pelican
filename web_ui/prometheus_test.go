@@ -32,7 +32,10 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/go-kit/log/level"
 	"github.com/prometheus/common/route"
+	"github.com/sirupsen/logrus"
+	"github.com/sirupsen/logrus/hooks/test"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -462,5 +465,52 @@ func TestPrometheusAlertsEndpoint(t *testing.T) {
 		assert.Contains(t, string(resultBytes), "success", "Response should contain success status")
 		assert.Contains(t, string(resultBytes), "alerts", "Response should contain alerts field")
 		assert.Contains(t, string(resultBytes), "[]", "Response should contain empty array")
+	})
+}
+
+// The embedded Prometheus logs "Unknown series references" at warning level
+// whenever a WAL replay finds samples whose series records did not survive the
+// last checkpoint -- the normal aftermath of an unclean shutdown. It names no
+// Pelican setting and asks nothing of the operator, so relaying it as a warning
+// only made a healthy server's startup look broken.
+func TestLogrusAdapterDemotesBenignTSDBWarnings(t *testing.T) {
+	logger := logrus.New()
+	logger.SetLevel(logrus.DebugLevel)
+	hook := test.NewLocal(logger)
+
+	adapter := LogrusAdapter{Logger: logger, defaultFields: logrus.Fields{"component": "prometheus"}}
+
+	t.Run("demoted", func(t *testing.T) {
+		hook.Reset()
+		require.NoError(t, adapter.Log("level", level.WarnValue(), "component", "tsdb",
+			"msg", "Unknown series references", "samples", 1904))
+
+		entry := hook.LastEntry()
+		require.NotNil(t, entry)
+		assert.Equal(t, logrus.DebugLevel, entry.Level)
+		assert.Equal(t, "Unknown series references", entry.Message)
+		// Demoting must not swallow the detail an operator would need if they
+		// ever did go looking.
+		assert.Equal(t, 1904, entry.Data["samples"])
+	})
+
+	t.Run("same-message-from-another-component-untouched", func(t *testing.T) {
+		hook.Reset()
+		require.NoError(t, adapter.Log("level", level.WarnValue(), "component", "scrape manager",
+			"msg", "Unknown series references"))
+
+		entry := hook.LastEntry()
+		require.NotNil(t, entry)
+		assert.Equal(t, logrus.WarnLevel, entry.Level)
+	})
+
+	t.Run("other-tsdb-warnings-untouched", func(t *testing.T) {
+		hook.Reset()
+		require.NoError(t, adapter.Log("level", level.WarnValue(), "component", "tsdb",
+			"msg", "compaction failed"))
+
+		entry := hook.LastEntry()
+		require.NotNil(t, entry)
+		assert.Equal(t, logrus.WarnLevel, entry.Level)
 	})
 }
