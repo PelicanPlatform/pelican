@@ -205,23 +205,57 @@ ifeq ($(LOTMAN_ABI_RESOLVED),legacy)
   LOTMAN_BUILD_TAGS := -tags lotman_legacy_api
 endif
 
+# Go's c-shared link never passes -soname, so the library would carry no
+# DT_SONAME; the C++ libLotMan it replaces has one (CMake's default). Match it,
+# on ELF targets only -- it is a GNU ld option with no Mach-O spelling.
+LOTMAN_LDFLAGS :=
+ifneq ($(goos),darwin)
+  LOTMAN_LDFLAGS := -ldflags "-extldflags '-Wl,-soname,libLotMan.so'"
+endif
+
 .PHONY: lotman-shared
 lotman-shared:
 	@echo "BUILD libLotMan C-ABI shared library (lotman ABI: $(LOTMAN_ABI_RESOLVED))"
 	@mkdir -p $(LOTMAN_SHARED_DIR)
-	CGO_ENABLED=1 go build -buildmode=c-shared $(LOTMAN_BUILD_TAGS) -o $(LOTMAN_SHARED_DIR)/libLotMan.$(LOTMAN_SHARED_EXT) ./lotman/cshared
-	@echo "Wrote $(LOTMAN_SHARED_DIR)/libLotMan.$(LOTMAN_SHARED_EXT) and its C header"
+	CGO_ENABLED=1 go build -buildmode=c-shared $(LOTMAN_BUILD_TAGS) $(LOTMAN_LDFLAGS) -o $(LOTMAN_SHARED_DIR)/libLotMan.$(LOTMAN_SHARED_EXT) ./lotman/cshared
+	@# cgo writes a libLotMan.h next to the library, but that file does not
+	@# compile in C++ (it emits `_Bool`, drops every `const`, and has no
+	@# `extern "C"` block) and every consumer of this library is C++. Ship the
+	@# hand-maintained header instead -- the same one the RPM installs.
+	@mkdir -p $(LOTMAN_SHARED_DIR)/include/lotman
+	@cp lotman/cshared/include/lotman/lotman.h $(LOTMAN_SHARED_DIR)/include/lotman/lotman.h
+	@echo "Wrote $(LOTMAN_SHARED_DIR)/libLotMan.$(LOTMAN_SHARED_EXT) and include/lotman/lotman.h"
 
-# Produce the libLotMan packages (RPM/DEB/APK). -buildmode=c-shared needs CGO
-# and a per-target toolchain, so unlike the CGO-free pelican packages this must
-# be built on a native runner per architecture rather than cross-compiled.
-# NOTE: no release-CI job invokes this yet; it is run by hand.
+# Produce the libLotMan RPM. This one is built with rpmbuild rather than
+# GoReleaser/nfpm, because it has to *replace* an already-published package:
+# nfpm cannot express Obsoletes and cannot produce a source RPM, and this
+# package needs both. See rpm/pelican-lotman.spec.
+#
+# -buildmode=c-shared needs CGO and a per-target toolchain, so unlike the
+# CGO-free pelican packages this is built natively per architecture rather than
+# cross-compiled. images/Dockerfile's `lotman-build` stage runs the same
+# rpmbuild command on the target platform.
+LOTMAN_RPM_TOPDIR := $(abspath $(PELICAN_DIST_PATH)/rpmbuild)
+# The Pelican source release the package is built from. It only names the
+# tarball in the spec's Source0; the package's own version is the C ABI.
+LOTMAN_PELICAN_VERSION ?= $(patsubst v%,%,$(shell git describe --tags --always --dirty 2>/dev/null || echo 0.0.0))
+
 .PHONY: lotman-package
 lotman-package:
 	@echo PACKAGE libLotMan
-	./scripts/generate_goreleaser.sh .goreleaser.lotman.in.yml .goreleaser.lotman.generated.yml
-ifeq ($(USE_DOCKER),0)
-	@goreleaser release --clean --snapshot --config .goreleaser.lotman.generated.yml
-else
-	@$(CONTAINER_TOOL) run -w /app -v $(PWD):/app goreleaser/goreleaser release --clean --snapshot --config .goreleaser.lotman.generated.yml
-endif
+	@mkdir -p $(LOTMAN_RPM_TOPDIR)
+	rpmbuild -bb --nodeps --build-in-place --define "_topdir $(LOTMAN_RPM_TOPDIR)" rpm/pelican-lotman.spec
+	@find $(LOTMAN_RPM_TOPDIR)/RPMS -name '*.rpm'
+
+# The source RPM, for distribution through OSG/Koji. Unlike the binary target
+# this builds from a tarball, so the spec needs the Pelican version that names
+# it.
+.PHONY: lotman-srpm
+lotman-srpm:
+	@echo SRPM libLotMan \(pelican $(LOTMAN_PELICAN_VERSION)\)
+	@mkdir -p $(LOTMAN_RPM_TOPDIR)/SOURCES
+	git archive --format=tar.gz --prefix=pelican-$(LOTMAN_PELICAN_VERSION)/ \
+		-o $(LOTMAN_RPM_TOPDIR)/SOURCES/pelican-$(LOTMAN_PELICAN_VERSION).tar.gz HEAD
+	rpmbuild -bs --define "_topdir $(LOTMAN_RPM_TOPDIR)" \
+		--define "pelican_version $(LOTMAN_PELICAN_VERSION)" rpm/pelican-lotman.spec
+	@find $(LOTMAN_RPM_TOPDIR)/SRPMS -name '*.rpm'

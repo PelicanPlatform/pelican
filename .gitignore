@@ -7,7 +7,6 @@ local
 web_ui/frontend/app/api/docs/pelican-swagger.yaml
 .goreleaser.dev.yml
 .goreleaser.generated.yml
-.goreleaser.lotman.generated.yml
 .DS_Store
 .idea
 pelican.yaml
