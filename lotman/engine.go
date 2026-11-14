@@ -62,6 +62,18 @@ var (
 	// are required there.
 	fedPrefix   string
 	fedPrefixMu sync.RWMutex
+
+	// lotDiskPaths, when non-empty, overrides the filesystems whose capacity
+	// sizes the synthesized root lot. The V2 cache launcher sets it to the
+	// persistent cache's own storage directories BEFORE InitLotman, because a
+	// V2 cache stores objects under LocalCache.StorageDirs (or
+	// Cache.StorageLocation) and never populates Cache.DataLocations -- that
+	// setting describes the XRootD cache's data directories. Sizing the root lot
+	// from the wrong filesystem hands out a quota the cache cannot back, and
+	// when the XRootD directory does not exist at all the statfs fails and
+	// takes cache startup down with it. V1 leaves this unset.
+	lotDiskPaths   []string
+	lotDiskPathsMu sync.RWMutex
 )
 
 // getManager returns the initialized core manager, or nil if InitLotman has not
@@ -125,6 +137,23 @@ func SetFederationPrefix(prefix string) {
 	fedPrefixMu.Lock()
 	defer fedPrefixMu.Unlock()
 	fedPrefix = prefix
+}
+
+// SetLotDiskPaths overrides the filesystems used to size the root lot. The V2
+// cache launcher calls it with the persistent cache's storage directories
+// BEFORE InitLotman; V1 must never call it, so that Cache.DataLocations (the
+// XRootD data directories) stays the source. Pass nil to clear.
+func SetLotDiskPaths(paths []string) {
+	lotDiskPathsMu.Lock()
+	defer lotDiskPathsMu.Unlock()
+	lotDiskPaths = append([]string(nil), paths...)
+}
+
+// getLotDiskPaths returns the root-lot sizing override (nil if none).
+func getLotDiskPaths() []string {
+	lotDiskPathsMu.RLock()
+	defer lotDiskPathsMu.RUnlock()
+	return append([]string(nil), lotDiskPaths...)
 }
 
 // getFederationPrefix returns the configured federation path prefix ("" if none).

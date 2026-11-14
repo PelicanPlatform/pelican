@@ -19,6 +19,8 @@
 package lotman
 
 import (
+	"io/fs"
+	"path/filepath"
 	"reflect"
 
 	"github.com/pkg/errors"
@@ -325,4 +327,28 @@ func getLotUpdateJSONs(existingLot *Lot, newLot *Lot) (*LotUpdate, *LotAddition,
 	}
 
 	return lotUpdate, lotAddition, lotPathRemoval, lotParentRemoval, nil
+}
+
+// diskCapacityOf reports the capacity of the filesystem backing path, resolving
+// a path that does not exist yet to its nearest existing ancestor.
+//
+// Lots are built during InitLotman, which the V2 cache launcher runs *before*
+// NewPersistentCache creates the storage directories. statfs on the
+// not-yet-created directory would fail with ENOENT and abort cache startup, so
+// walk up until a component exists: an ancestor of a directory that does not
+// exist is on the filesystem that will host it, and statfs reports the
+// filesystem, not the directory.
+func diskCapacityOf(path string) (total uint64, free uint64, err error) {
+	probe := filepath.Clean(path)
+	for {
+		total, free, err = getDiskUsage(probe)
+		if err == nil || !errors.Is(err, fs.ErrNotExist) {
+			return total, free, err
+		}
+		parent := filepath.Dir(probe)
+		if parent == probe {
+			return 0, 0, err
+		}
+		probe = parent
+	}
 }
