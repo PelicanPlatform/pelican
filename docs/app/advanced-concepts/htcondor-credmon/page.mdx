@@ -1,0 +1,203 @@
+# HTCondor Credential Monitor
+
+The [HTCondor Plugin](/advanced-concepts/plugin) transfers objects for a job, but it needs a token whenever the namespace is not world-readable.
+HTCondor can obtain and renew those tokens on its own, using the *Pelican credential monitor* (credmon) that ships with the `condor-credmon-oauth` package in HTCondor 25.14.1 and newer.
+
+This page is for administrators who already run an origin and want to pair it with an HTCondor access point (AP).
+It covers the origin side in full and as much of the access point side as you need to see the whole credential path;
+the [HTCondor manual](https://htcondor.readthedocs.io/en/latest/admin-manual/file-and-cred-transfer.html) documents the access point knobs in detail.
+
+## How the pieces fit together
+
+1. A user submits a job with `use_oauth_services = <service>` and a `pelican://` or `osdf://` URL in `transfer_input_files`.
+1. `condor_submit` runs `condor_credential_storer`, which recognizes the service as a Pelican service and runs `pelican token fetch` for the whole of `<SERVICE>_PELICAN_PREFIX`.
+1. The user approves the device code in a browser, authenticating to the origin as themselves; the resulting *subject* token is handed to the credd and stored as `<service>.top`.
+1. The credmon exchanges that subject token at the issuer's token endpoint, using [RFC 8693](https://www.rfc-editor.org/rfc/rfc8693) token exchange and its own client credentials, and receives an access token plus a refresh token.
+1. The access token lands in `<service>.use` and is delivered to the job as `$_CONDOR_CREDS/<service>.use`, where the plugin picks it up automatically.
+1. The credmon refreshes that access token for as long as the credential is held, with no further user interaction.
+
+The point of the exchange is that the user authenticates once, interactively, while the long-lived refresh credential belongs to the credmon's OAuth2 client rather than to the user's browser session.
+
+## Before you start
+
+You will need:
+
+- Pelican 7.26 or newer (including the 26.x series) on the origin, for the embedded issuer's client administration API and the token-exchange grant.
+- HTCondor 25.14.1 or newer on the access point, for the Pelican credmon and the merged `condor_credential_storer`.
+- The `pelican` client on the access point, both on `PATH` (the storer invokes it) and installed as a file-transfer plugin.
+- A trusted TLS certificate on the origin's web endpoint; the credmon validates it against the system trust store.
+
+## Step 1: Enable the embedded issuer on the origin
+
+The embedded issuer runs inside the origin process and serves one OIDC issuer per exported federation prefix.
+Set [`Origin.EnableIssuer`](/parameters#Origin-EnableIssuer) and describe what an authenticated user may ask for:
+
+```yaml filename="pelican.yaml" copy
+Origin:
+  EnableIssuer: true
+  Exports:
+    - FederationPrefix: /physics-data
+      StoragePrefix: /mnt/data/physics
+      Capabilities: ["Reads", "Writes", "Listings"]
+
+Issuer:
+  AuthorizationTemplates:
+    - prefix: /users/$USER
+      actions: ["read", "create", "modify"]
+    - prefix: /shared
+      actions: ["read"]
+```
+
+> **Template prefixes are relative to the exported federation prefix, not absolute federation paths.**
+> Above, `prefix: /shared` authorizes `/physics-data/shared` and produces the scope `storage.read:/shared`.
+> Writing `prefix: /physics-data/shared` would instead authorize `/physics-data/physics-data/shared`, and the tokens your users receive would be rejected by the origin.
+
+Those templates are a small example rather than a recommended scheme: they give each user a private directory and make one subtree readable to anyone who can log in.
+Design your own around how the namespace is actually used.
+Templates are also not the only way to grant access — a [collection](/managing-data-access/collections-and-shares) lets you assign read or write access to groups from the origin's web interface, and lets users share part of their own access, without editing the origin's configuration.
+See [How Access Control Works](/managing-data-access/access-control-model) for the model behind both.
+
+[`Issuer.AuthorizationTemplates`](/parameters#Issuer-AuthorizationTemplates) is the ceiling on everything that follows:
+the subject token a user obtains can never exceed what these templates grant them, and the exchanged token the credmon receives can never exceed the subject token.
+Per-export `AuthorizationTemplates` (under [`Origin.Exports`](/parameters#Origin-Exports)) replace the global list for that namespace entirely, rather than merging with it.
+
+Users authenticate to the embedded issuer through the origin's **web login** when they approve a device code, so the origin needs a working web sign-in:
+either an OIDC provider configured under `OIDC.*`, or [`Server.UIPasswordFile`](/parameters#Server-UIPasswordFile).
+Whatever identity that login yields becomes the token's `sub` claim and the `$USER` in your templates.
+
+If no cache in the federation serves this namespace, add `"DirectReads"` to the export's `Capabilities`.
+Without it the Director will not resolve the object for the client, and the storer's token fetch fails before the user is ever prompted.
+
+Restart the origin and confirm that the issuer is serving metadata for the prefix
+(substitute your own web URL; [`Server.WebPort`](/parameters#Server-WebPort) defaults to 8444):
+
+```console
+$ curl -s https://origin.example.org:8444/api/v1.0/issuer/ns/physics-data/.well-known/openid-configuration | jq -r .token_endpoint
+https://origin.example.org:8444/api/v1.0/issuer/ns/physics-data/token
+```
+
+## Step 2: Create the credmon's OAuth2 client
+
+Each namespace keeps its own client table, so create one client per federation prefix the access point will use.
+Run the command on the origin host, as a user who can read the running server's runtime and configuration directories:
+it mints a short-lived administrative token for itself and needs the `pelican.addresses` file that the running server writes in order to learn which issuer that server accepts.
+
+```console
+# pelican-server origin issuer client create \
+    --server https://origin.example.org:8444 \
+    --namespace /physics-data \
+    --grant-types "urn:ietf:params:oauth:grant-type:token-exchange,refresh_token" \
+    --scopes "openid,offline_access,wlcg,storage.read:/,storage.create:/,storage.modify:/"
+Client ID:     ex4mpl3cl13nt1d
+Client Secret: s3cr3t-shown-only-once
+Grant Types:   [urn:ietf:params:oauth:grant-type:token-exchange refresh_token]
+Scopes:        [openid offline_access wlcg storage.read:/ storage.create:/ storage.modify:/]
+```
+
+> A `401 Unauthorized` here means the command could not work out the right issuer for the token it minted.
+> Its error message names both the issuer it used and the one the server expects.
+> Run it where it can see the server's runtime directory, or pass `--token <file>` with an administrative token obtained some other way.
+
+Use `pelican-server origin issuer client list`, `... update`, and `... delete` to manage these clients afterwards.
+
+A few notes on that client:
+
+- **The token-exchange grant is mandatory.** Without it the issuer answers `unauthorized_client`.
+- **The `refresh_token` grant together with the `offline_access` scope is what produces a refresh token.** If either is missing the exchange still returns an access token, the credmon logs a warning, and the credential stops renewing when that token expires an hour later.
+- **Scopes are intersected, not combined.** The exchanged token carries only the scopes present in *both* the user's subject token and this client's allowed list; anything else is dropped silently. A client restricted to `storage.read:/` can never hand out write access, even to a user who holds it. Storage scopes are hierarchical, so `storage.read:/` covers `storage.read:/shared` within this namespace.
+
+Copy the secret to the access point into a file readable only by the account the credmon runs as:
+
+```console
+# install -m 0400 -o root -g root client_secret /etc/condor/.secrets/physicsdata_client_secret
+```
+
+## Step 3: Configure the access point
+
+Install `condor-credmon-oauth` and the `pelican` client, enable the credd and credmon with the `use feature: oauth` configuration template, and describe the service:
+
+```text filename="/etc/condor/config.d/60-pelican-credmon.conf" copy
+# Route credential requests through the merged storer.
+SEC_CREDENTIAL_STORER = /usr/bin/condor_credential_storer
+
+# Services owned by the Pelican credmon.
+PELICAN_CREDMON_PROVIDER_NAMES = physicsdata
+
+# What the service's tokens are good for.  The URL names the federation the
+# origin belongs to (its discovery URL), not the origin itself.
+PHYSICSDATA_PELICAN_URL         = pelican://osg-htc.org
+PHYSICSDATA_PELICAN_PREFIX      = /physics-data/shared
+PHYSICSDATA_PELICAN_PERMISSIONS = read
+
+# The credmon's own client, from step 2.
+PHYSICSDATA_PELICAN_CLIENT_ID          = ex4mpl3cl13nt1d
+PHYSICSDATA_PELICAN_CLIENT_SECRET_FILE = /etc/condor/.secrets/physicsdata_client_secret
+```
+
+`<SERVICE>_PELICAN_URL` and `<SERVICE>_PELICAN_PREFIX` are what the storer turns into the `pelican://` URL it requests a token for, and the Director resolves that prefix to your origin's issuer.
+
+> **The prefix must be a path your issuer's templates actually authorize for your users.**
+> The storer asks for a token covering the whole prefix, so pointing a service at the namespace root while the templates grant only `/shared` and `/users/$USER` fails at submit time with `acquired token not valid for /physics-data (missing scope or namespace/base-path mismatch)`.
+
+The prefix does not narrow the token the job receives.
+The client asks the issuer for a token over the namespace, and the issuer substitutes every path in that namespace the user may read,
+so a service pointed at `/physics-data/shared` still yields a token carrying `storage.read:/shared` *and* `storage.read:/users/<them>`.
+Limit what a job can reach with the credmon client's `--scopes` or with the issuer's authorization templates; the service prefix only decides what the storer asks for.
+
+Set `<SERVICE>_PELICAN_TOKEN_URL` only when OIDC discovery cannot reach the issuer and you have to pin the endpoint by hand.
+If the `pelican` binary is not on `PATH` for `condor_submit`, set `PELICAN_BIN` in the environment.
+
+Define a separate service for each distinct set of capabilities, for example `physicsdata` for reads and `physicswrite` for writes.
+They may share one credmon client, as long as that client's scopes cover both.
+
+> Avoid underscores in service names.
+> Unless `CREDMON_ALLOW_SPECIAL_CHAR_NAMES` is set, the credmon treats everything after the first underscore as a user-supplied handle and looks the client credentials up under the base name,
+> so `physicsdata_out` would silently be served by `physicsdata`'s configuration.
+
+## Step 4: Submitting jobs
+
+Users name the service and refer to objects with federation URLs:
+
+```text
+executable = analyze.sh
+use_oauth_services = physicsdata
+transfer_input_files = osdf:///physics-data/shared/run42.root
+queue
+```
+
+The first submission prints a verification URL, which the user opens, logs into, and approves.
+After that, submissions reuse the stored credential silently, and the job finds its token at `$_CONDOR_CREDS/physicsdata.use`.
+
+## Verifying and troubleshooting
+
+The credmon logs to `$(LOG)/CredMonOAuthLog`, and credentials live under `SEC_CREDENTIAL_DIRECTORY_OAUTH/<user>/`.
+In a healthy steady state `<service>.top` holds `refresh_token`, `iss`, and `token_url` (and no `access_token`), with a newer `<service>.use` holding the current access token as JSON.
+Sending `SIGHUP` to the credmon, whose PID is in the credential directory's `pid` file, forces an immediate scan.
+
+| Symptom | Likely cause |
+| --- | --- |
+| `unauthorized_client` in the credmon log | The client's grant types omit `urn:ietf:params:oauth:grant-type:token-exchange`. |
+| `invalid_grant`, or "subject_token is invalid or expired" | The subject token expired before the credmon ran (access tokens last an hour by default), or the origin and access point clocks disagree. |
+| "returned no refresh_token; periodic refresh is disabled" | The client lacks the `refresh_token` grant, or `offline_access` is missing from the client's scopes or from the user's subject token. |
+| `acquired token not valid for <path>` at submit time | `<SERVICE>_PELICAN_PREFIX` names a path the authorization templates do not grant that user, or a template prefix was written with the federation prefix included. |
+| The job receives a token but the origin denies it | The client's allowed scopes, or the authorization templates, do not cover the path being accessed. |
+| `unknown_namespace` from the issuer | `<SERVICE>_PELICAN_PREFIX` matches no `FederationPrefix` exported by the origin. |
+| Submitters see "Please create a new password to protect your local credentials" | Harmless, but avoidable: see below. The device flow continues regardless, and the verification URL follows. |
+| The storer reports that the Pelican client was not found | `pelican` is not on `PATH` for `condor_submit`; set `PELICAN_BIN`. |
+
+That password prompt appears because the client wants to protect its local credential wallet and `condor_submit` gives it no terminal to ask on.
+Storing that wallet without a password removes the prompt, at the cost of leaving its contents — refresh tokens and OAuth client secrets — unencrypted on disk.
+A submitter can opt in once, before their first submission:
+
+```bash copy
+pelican credentials token setup --no-password --read pelican://osg-htc.org/physics-data/shared
+```
+
+Alternatively, set `PELICAN_CLIENT_NOPASSWORD=1` in the environment the storer runs in, which has the same effect for every user on the access point.
+The client logs a warning whenever it stores the wallet unencrypted.
+
+## Limitations
+
+- `pelican token fetch` accepts exactly one of `--read`, `--write`, and `--modify`, so `<SERVICE>_PELICAN_PERMISSIONS` must name a single permission today, even though the HTCondor manual describes a list. Define one service per capability until the client accepts combinations.
+- `Issuer.RefreshTokenLifetime` (one week by default) bounds how long a credential survives without a successful refresh. A user whose credential goes stale beyond that window has to approve a new device code.
+- Issuer clients are per-namespace: a client created under `/physics-data` is unknown to the issuer for any other exported prefix.
