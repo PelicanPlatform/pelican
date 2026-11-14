@@ -99,7 +99,11 @@ A few commonly-tuned settings (see the [Parameters](../parameters.mdx) page for 
 * **`Lotman.DefaultLotOpportunisticGB`**: opportunistic quota for the `default` lot.
   `0` (the default) reclaims unlotted data first; a positive value (or `-1` for unbounded) lets the cache retain it opportunistically.
 
-The legacy XRootD (V1) cache reaches the same lot engine through the `libLotMan` shared library; `Cache.EnableV2` caches need no external library.
+The legacy XRootD (V1) cache reaches the same lot engine through the `libLotMan` shared library, because its purge plugin runs in a separate process from `pelican-server`.
+That library is shipped as the `pelican-lotman` RPM, which replaces the older C++ `lotman` package and is installed in Pelican's own cache images.
+Both must be the same implementation: the C++ library keeps its lots in a different file under a different schema, so a cache paired with it would write lots the purge plugin never sees.
+Lots do not carry across that cutover and have to be recreated.
+`Cache.EnableV2` caches need no external library at all.
 
 ## Test Cache Functionality
 
