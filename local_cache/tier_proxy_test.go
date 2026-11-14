@@ -31,6 +31,7 @@ import (
 	"time"
 
 	"github.com/pkg/errors"
+	"github.com/prometheus/client_golang/prometheus/testutil"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"golang.org/x/sync/errgroup"
@@ -259,11 +260,52 @@ func TestTierProxiedReadOfAGoneClientEndsItsRequest(t *testing.T) {
 	}
 	require.True(t, env.pc.storage.IsObjectPinned(hash), "a proxied read pins its object")
 
+	label := env.pc.storage.getTierTarget(env.tierID).metricLabel()
+	readErrors := testutil.ToFloat64(tierProxyReadErrorsTotal.WithLabelValues(label))
 	cancel()
 	_ = <-errCh
 	require.Eventually(t, func() bool {
 		return env.backend.stalled.Load() == 0 && !env.pc.storage.IsObjectPinned(hash)
 	}, 10*time.Second, 10*time.Millisecond, "the read of a client that has gone should end")
+	assert.Equal(t, readErrors, testutil.ToFloat64(tierProxyReadErrorsTotal.WithLabelValues(label)),
+		"a read ended by its client leaving is not the target's failure")
+}
+
+// TestTierProxyMetrics checks what is counted when the cache proxies an
+// object from a target that cannot redirect: why the read was not
+// redirected, the bytes the cache served, and a read the target failed.
+func TestTierProxyMetrics(t *testing.T) {
+	env := newMemTierCache(t)
+	const path = "/test/tiered/metrics.bin"
+	data := tierProxyTestData(4 * BlockDataSize)
+	env.putObject(t, path, data)
+
+	label := env.pc.storage.getTierTarget(env.tierID).metricLabel()
+	skipped := func() float64 {
+		return testutil.ToFloat64(tierRedirectSkippedTotal.WithLabelValues(label, tierSkipCannotRedirect))
+	}
+	served := func() float64 { return testutil.ToFloat64(tierProxiedBytesTotal.WithLabelValues(label)) }
+	failed := func() float64 { return testutil.ToFloat64(tierProxyReadErrorsTotal.WithLabelValues(label)) }
+	skips, bytesServed, readErrors := skipped(), served(), failed()
+
+	resp, err := http.Get(env.srv.URL + path)
+	require.NoError(t, err)
+	body, err := io.ReadAll(resp.Body)
+	resp.Body.Close()
+	require.NoError(t, err)
+	require.Equal(t, http.StatusOK, resp.StatusCode)
+	require.Equal(t, data, body)
+	assert.Equal(t, skips+1, skipped(), "an in-memory target cannot redirect")
+	assert.Equal(t, bytesServed+float64(len(data)), served())
+	assert.Equal(t, readErrors, failed())
+
+	// A target that no longer holds the uploaded copy fails the read.
+	env.backend.changed.Store(true)
+	resp, err = http.Get(env.srv.URL + path)
+	require.NoError(t, err)
+	_, _ = io.Copy(io.Discard, resp.Body)
+	resp.Body.Close()
+	assert.Greater(t, failed(), readErrors)
 }
 
 // TestTierChangedCopyDropsOnlyTheCopyItRead checks that a proxied read that

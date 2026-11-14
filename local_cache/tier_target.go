@@ -28,6 +28,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/pkg/errors"
+	"github.com/prometheus/client_golang/prometheus"
 	log "github.com/sirupsen/logrus"
 
 	"github.com/pelicanplatform/pelican/param"
@@ -332,6 +333,26 @@ type tierObjectStream struct {
 
 	// stopReadCtx undoes setReadContext; called by Close.
 	stopReadCtx func()
+
+	// served counts the bytes the stream reads and readErrors its failed
+	// reads; set (see countProxied) only for a stream serving a client.
+	served, readErrors prometheus.Counter
+}
+
+// countProxied makes the stream count what it reads, and its failures, as
+// proxied to a client.
+func (s *tierObjectStream) countProxied() {
+	label := s.target.metricLabel()
+	s.served = tierProxiedBytesTotal.WithLabelValues(label)
+	s.readErrors = tierProxyReadErrorsTotal.WithLabelValues(label)
+}
+
+// readFailed counts a failed read from the target, unless the stream's reader
+// has gone: that is not the target's failure.
+func (s *tierObjectStream) readFailed() {
+	if s.readErrors != nil && s.ctx.Err() == nil {
+		s.readErrors.Inc()
+	}
 }
 
 // setReadContext makes the stream's requests end when ctx ends, as well as
@@ -368,6 +389,7 @@ func (s *tierObjectStream) open() (io.ReadCloser, error) {
 	if err == nil {
 		return body, nil
 	}
+	s.readFailed()
 	if errors.Is(err, ErrTierObjectChanged) {
 		log.Warnf("Tiered object %s no longer matches the copy that was uploaded: %v", s.hash, err)
 		if s.onChanged != nil {
@@ -399,6 +421,9 @@ func (s *tierObjectStream) Read(p []byte) (int, error) {
 	n, err := s.body.Read(p)
 	s.position += int64(n)
 	s.bodyOffset = s.position
+	if s.served != nil && n > 0 {
+		s.served.Add(float64(n))
+	}
 	if err != nil && err != io.EOF && s.ctx.Err() != nil {
 		// The stream's reader has gone (or the cache is closing): nothing
 		// to reopen for.
@@ -412,6 +437,7 @@ func (s *tierObjectStream) Read(p []byte) (int, error) {
 		// reading on through a broken stream: a mid-transfer network blip
 		// should cost one re-issued request, not the whole proxied transfer.
 		log.Warnf("Tier stream for %s failed at offset %d; will reopen: %v", s.hash, s.position, err)
+		s.readFailed()
 		s.body.Close()
 		s.body = nil
 		if n > 0 {
@@ -428,6 +454,7 @@ func (s *tierObjectStream) Read(p []byte) (int, error) {
 	if err == io.EOF && s.position < s.size {
 		// Short object relative to metadata -- surface as an error rather
 		// than silently truncating the response.
+		s.readFailed()
 		return n, errors.Errorf("tiered object %s ended at %d bytes; expected %d", s.hash, s.position, s.size)
 	}
 	return n, err

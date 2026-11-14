@@ -183,10 +183,11 @@ func (d *dcacheMacaroons) start(ctx context.Context) error {
 		return err
 	case err != nil:
 		d.failures = 1
+		tierMacaroonExpiry.WithLabelValues(d.display).Set(0)
 		log.Warnf("Failed to obtain a macaroon from cache tier target %s: %v; objects on it will be proxied "+
 			"until one is issued", d.display, err)
 	default:
-		d.root.Store(root)
+		d.store(root)
 	}
 	d.mu.Lock()
 	defer d.mu.Unlock()
@@ -260,7 +261,14 @@ func (d *dcacheMacaroons) refresh(ctx context.Context) {
 		log.Infof("Cache tier target %s issued a macaroon after %d failed attempts", d.display, d.failures)
 	}
 	d.failures = 0
+	d.store(root)
+}
+
+// store makes root the macaroon URLs are minted from, and publishes its
+// expiry.
+func (d *dcacheMacaroons) store(root *rootMacaroon) {
 	d.root.Store(root)
+	tierMacaroonExpiry.WithLabelValues(d.display).Set(float64(root.expiry.Unix()))
 }
 
 // fetch requests a root macaroon.  The validity asked for can be refused:
@@ -279,6 +287,20 @@ func (d *dcacheMacaroons) fetch(ctx context.Context) (*rootMacaroon, error) {
 	}
 	if status == http.StatusBadRequest && !errors.Is(err, errScopedTokenRefused) {
 		err = errors.Wrap(err, "the door refused to issue a macaroon for this token")
+	}
+	// A request abandoned because the refresher is stopping says nothing
+	// about the door; one that timed out does.
+	if err == nil || !errors.Is(ctx.Err(), context.Canceled) {
+		result := tierMacaroonIssued
+		switch {
+		case errors.Is(err, errScopedTokenRefused):
+			result = tierMacaroonRefusedForScopes
+		case errors.Is(err, errMacaroonsRefused):
+			result = tierMacaroonRefused
+		case err != nil:
+			result = tierMacaroonError
+		}
+		tierMacaroonRequestsTotal.WithLabelValues(d.display, result).Inc()
 	}
 	return root, err
 }

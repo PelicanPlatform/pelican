@@ -132,6 +132,15 @@ func TestTierWebDAVServing(t *testing.T) {
 	require.NotNil(t, meta.Remote)
 	assert.NotEmpty(t, meta.Remote.ETag, "the entity tag the door reported is recorded")
 
+	label := target.metricLabel()
+	// The door's answers are counted: the upload's PUT, and the macaroon
+	// requests, whose current macaroon's expiry is published.
+	assert.Positive(t, testutil.ToFloat64(tierTargetHTTPRequestsTotal.WithLabelValues(label, http.MethodPut, "201")),
+		"the upload's PUT is counted with the door's status")
+	assert.Positive(t, testutil.ToFloat64(tierMacaroonRequestsTotal.WithLabelValues(label, tierMacaroonIssued)))
+	assert.Greater(t, testutil.ToFloat64(tierMacaroonExpiry.WithLabelValues(label)), float64(time.Now().Unix()),
+		"the macaroon in use has not expired")
+
 	srv := httptest.NewServer(http.HandlerFunc(pc.serveObject))
 	t.Cleanup(srv.Close)
 	noRedirectClient := &http.Client{CheckRedirect: func(*http.Request, []*http.Request) error {
@@ -139,6 +148,7 @@ func TestTierWebDAVServing(t *testing.T) {
 	}}
 
 	// The GET is redirected to the door with a macaroon.
+	redirects := testutil.ToFloat64(tierRequestsTotal.WithLabelValues(label, tierServedByRedirect))
 	resp, err := noRedirectClient.Get(srv.URL + objectPath)
 	require.NoError(t, err)
 	resp.Body.Close()
@@ -148,6 +158,7 @@ func TestTierWebDAVServing(t *testing.T) {
 	assert.Equal(t, door.srv.Listener.Addr().String(), location.Host)
 	assert.Equal(t, "/data/pelican/"+GetInstanceStoragePath(instanceHash), location.Path)
 	require.NotEmpty(t, location.Query().Get("authz"))
+	assert.Equal(t, redirects+1, testutil.ToFloat64(tierRequestsTotal.WithLabelValues(label, tierServedByRedirect)))
 
 	// A plain client follows it and the door serves the bytes, having
 	// verified the macaroon.
@@ -172,7 +183,10 @@ func TestTierWebDAVServing(t *testing.T) {
 	require.NotNil(t, current)
 	backend.macaroons.root.Store(&rootMacaroon{m: current.m, scope: current.scope, expiry: time.Now().Add(time.Minute)})
 
-	proxied := testutil.ToFloat64(tierRequestsTotal.WithLabelValues(target.metricLabel(), tierServedByProxy))
+	proxied := testutil.ToFloat64(tierRequestsTotal.WithLabelValues(label, tierServedByProxy))
+	noCredential := testutil.ToFloat64(tierRedirectSkippedTotal.WithLabelValues(label, tierSkipNoCredential))
+	proxiedBytes := testutil.ToFloat64(tierProxiedBytesTotal.WithLabelValues(label))
+	readErrors := testutil.ToFloat64(tierProxyReadErrorsTotal.WithLabelValues(label))
 	resp, err = noRedirectClient.Get(srv.URL + objectPath)
 	require.NoError(t, err)
 	body, err = io.ReadAll(resp.Body)
@@ -181,7 +195,11 @@ func TestTierWebDAVServing(t *testing.T) {
 	require.Equal(t, http.StatusOK, resp.StatusCode, "an expired root macaroon must fall back to proxying: %s", body)
 	assert.Empty(t, resp.Header.Get("Location"))
 	assert.Equal(t, data, body)
-	assert.Equal(t, proxied+1, testutil.ToFloat64(tierRequestsTotal.WithLabelValues(target.metricLabel(), tierServedByProxy)))
+	assert.Equal(t, proxied+1, testutil.ToFloat64(tierRequestsTotal.WithLabelValues(label, tierServedByProxy)))
+	// The metrics say why it was proxied, and how much the cache served.
+	assert.Equal(t, noCredential+1, testutil.ToFloat64(tierRedirectSkippedTotal.WithLabelValues(label, tierSkipNoCredential)))
+	assert.Equal(t, proxiedBytes+float64(len(data)), testutil.ToFloat64(tierProxiedBytesTotal.WithLabelValues(label)))
+	assert.Equal(t, readErrors, testutil.ToFloat64(tierProxyReadErrorsTotal.WithLabelValues(label)))
 
 	// Proxied ranges are pinned to the recorded entity tag and served too.
 	req, err := http.NewRequest(http.MethodGet, srv.URL+objectPath, nil)
@@ -194,4 +212,6 @@ func TestTierWebDAVServing(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, http.StatusPartialContent, resp.StatusCode)
 	assert.Equal(t, data[4000:5000], body)
+	assert.Equal(t, proxiedBytes+float64(len(data))+1000, testutil.ToFloat64(tierProxiedBytesTotal.WithLabelValues(label)),
+		"a proxied range counts only the bytes read for it")
 }

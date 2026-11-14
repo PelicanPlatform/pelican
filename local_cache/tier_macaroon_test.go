@@ -36,6 +36,7 @@ import (
 	"time"
 
 	"github.com/pkg/errors"
+	"github.com/prometheus/client_golang/prometheus/testutil"
 	log "github.com/sirupsen/logrus"
 	logrustest "github.com/sirupsen/logrus/hooks/test"
 	"github.com/stretchr/testify/assert"
@@ -454,12 +455,24 @@ func TestWebDAVMacaroonOutage(t *testing.T) {
 	b := newFakeDCacheBackend(t, f, "cache", false)
 	putString(t, b, "aa/bb/object", "eventually redirected")
 
+	requests := func(result string) float64 {
+		return testutil.ToFloat64(tierMacaroonRequestsTotal.WithLabelValues(b.display, result))
+	}
+	unavailable := func() float64 {
+		return testutil.ToFloat64(tierTargetHTTPRequestsTotal.WithLabelValues(b.display, http.MethodPost, "503"))
+	}
+	minted, failed, answered503 := requests(tierMacaroonIssued), requests(tierMacaroonError), unavailable()
+
 	// An outage is not a refusal: the target stays redirect-capable...
 	_, ok := b.probeRedirect(ctx)
 	require.True(t, ok)
-	// ...but has nothing to mint from yet.
+	// ...but has nothing to mint from yet, which the metrics show.
 	_, err := b.RedirectURL(ctx, "aa/bb/object", 5*time.Minute, nil)
 	require.Error(t, err)
+	assert.Greater(t, requests(tierMacaroonError), failed)
+	assert.Equal(t, minted, requests(tierMacaroonIssued))
+	assert.Zero(t, testutil.ToFloat64(tierMacaroonExpiry.WithLabelValues(b.display)), "no macaroon is held")
+	assert.Greater(t, unavailable(), answered503, "the door's answer to the macaroon request is counted")
 
 	f.set(func(f *fakeDCache) { f.macaroonStatus = 0 })
 	var redirect string
@@ -468,6 +481,8 @@ func TestWebDAVMacaroonOutage(t *testing.T) {
 		return err == nil
 	}, 10*time.Second, 10*time.Millisecond, "the refresher should obtain a macaroon once the door recovers")
 	assertDoorStatus(t, http.MethodGet, redirect, nil, http.StatusOK)
+	assert.Greater(t, requests(tierMacaroonIssued), minted)
+	assert.Greater(t, testutil.ToFloat64(tierMacaroonExpiry.WithLabelValues(b.display)), float64(time.Now().Unix()))
 
 	// The refresher keeps replacing it.
 	issued, _, _ := f.stats()
@@ -600,10 +615,12 @@ func TestWebDAVMacaroonRefusedForScopedToken(t *testing.T) {
 			f := newFakeDCache(t)
 			f.set(func(f *fakeDCache) { f.refuseRestriction, f.refuseInPageOnly = true, tc.inPageOnly })
 			b := newFakeDCacheBackend(t, f, "cache", false)
+			refusals := testutil.ToFloat64(tierMacaroonRequestsTotal.WithLabelValues(b.display, tierMacaroonRefusedForScopes))
 
 			_, err := b.macaroons.fetch(ctx)
 			require.ErrorIs(t, err, errScopedTokenRefused)
 			require.ErrorIs(t, err, errMacaroonsRefused)
+			assert.Equal(t, refusals+1, testutil.ToFloat64(tierMacaroonRequestsTotal.WithLabelValues(b.display, tierMacaroonRefusedForScopes)))
 			if !tc.inPageOnly {
 				assert.ErrorContains(t, err, "400 Cannot serialise restriction MultiTargetedRestriction")
 			}
@@ -634,11 +651,14 @@ func TestWebDAVMacaroonRefusedForToken(t *testing.T) {
 	f := newFakeDCache(t)
 	f.set(func(f *fakeDCache) { f.macaroonStatus = http.StatusBadRequest })
 	b := newFakeDCacheBackend(t, f, "cache", false)
+	refusals := testutil.ToFloat64(tierMacaroonRequestsTotal.WithLabelValues(b.display, tierMacaroonRefused))
 
 	_, err := b.macaroons.fetch(ctx)
 	require.ErrorIs(t, err, errMacaroonsRefused)
 	assert.NotErrorIs(t, err, errScopedTokenRefused)
 	assert.ErrorContains(t, err, "refused to issue a macaroon for this token")
+	assert.Equal(t, refusals+1, testutil.ToFloat64(tierMacaroonRequestsTotal.WithLabelValues(b.display, tierMacaroonRefused)),
+		"one request for a macaroon, however many attempts it took")
 	f.mu.Lock()
 	assert.Equal(t, 2, f.macaroonRequests, "retried once without a validity")
 	f.mu.Unlock()

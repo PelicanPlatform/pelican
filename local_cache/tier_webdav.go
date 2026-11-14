@@ -140,13 +140,22 @@ func newWebDAVTierBackend(cfg TierTargetConfig, tokens TierTokenSource) (*webdav
 		return nil, errors.New("WebDavUrl is not a valid URL")
 	}
 	root := &url.URL{Scheme: parsed.Scheme, Host: parsed.Host, Path: strings.TrimRight(parsed.Path, "/")}
+	// Both clients, and the macaroon issuer's (a copy of client), report
+	// every request they make; see tierMetricsTransport.
+	display := cfg.DisplayURL()
 	b := &webdavTierBackend{
-		root:      root,
-		prefix:    trimTierPrefix(cfg.Prefix),
-		client:    &http.Client{Transport: config.GetTransport(), CheckRedirect: followReadRedirects},
-		putClient: &http.Client{Transport: putTransport(), CheckRedirect: followReadRedirects},
+		root:   root,
+		prefix: trimTierPrefix(cfg.Prefix),
+		client: &http.Client{
+			Transport:     newTierMetricsTransport(config.GetTransport(), display),
+			CheckRedirect: followReadRedirects,
+		},
+		putClient: &http.Client{
+			Transport:     newTierMetricsTransport(putTransport(), display),
+			CheckRedirect: followReadRedirects,
+		},
 		tokens:    tokens,
-		display:   cfg.DisplayURL(),
+		display:   display,
 		knownDirs: make(map[string]struct{}),
 	}
 	if !cfg.DisableMacaroons && !param.Cache_TieringDisableRedirect.GetBool() {
