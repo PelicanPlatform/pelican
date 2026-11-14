@@ -772,14 +772,14 @@ func initLots(nsAds []server_structs.NamespaceAd) ([]Lot, error) {
 	}
 	policy := policies[policyName]
 
-	// The policy's own DiscoverPrefixes is the per-policy switch; the
-	// Lotman.AutoCreateOnDiscover parameter is the site-wide one, and it is
+	// The policy's own DiscoverPrefixes is the per-policy switch;
+	// Lotman.DisableAutoCreateOnDiscover is the site-wide one, and it is
 	// documented as the way a strict-reservations site says only explicitly
 	// configured or API-created lots should exist. Renewal honours it; this path
 	// did not, so every restart re-minted a lot for each advertised prefix and
 	// carved up the root quota again -- and renewal then kept those lots alive,
 	// because a prefix that already has a lot is renewed regardless.
-	discoverPrefixes := policy.DiscoverPrefixes && param.Lotman_AutoCreateOnDiscover.GetBool()
+	discoverPrefixes := policy.DiscoverPrefixes && !param.Lotman_DisableAutoCreateOnDiscover.GetBool()
 	shouldMerge := policy.MergeLocalWithDiscovered
 	if shouldMerge && !discoverPrefixes {
 		return internalLots, errors.New("MergeLocalWithDiscovered is set to true, but DiscoverPrefixes is set to false. This is not a valid configuration")
