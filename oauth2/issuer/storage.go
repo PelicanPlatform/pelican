@@ -653,6 +653,29 @@ func (s *OIDCStorage) SetClientAssertionJWT(ctx context.Context, jti string, exp
 	}).Create(&record).Error
 }
 
+// ConsumeSubjectTokenJTI records that an external subject token with this
+// replay key has been exchanged, failing with fosite.ErrJTIKnown when an
+// unexpired record already exists. Unlike the check-then-set pair above, the
+// insert itself is the check, so two concurrent exchanges of one token cannot
+// both succeed.
+func (s *OIDCStorage) ConsumeSubjectTokenJTI(ctx context.Context, key string, exp time.Time) error {
+	return s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		// An expired record no longer blocks reuse; clear it so the insert
+		// below can claim the key.
+		if err := tx.Where("jti = ? AND expires_at < ?", key, time.Now()).Delete(&OIDCJWTAssertion{}).Error; err != nil {
+			return err
+		}
+		result := tx.Clauses(clause.OnConflict{DoNothing: true}).Create(&OIDCJWTAssertion{JTI: key, ExpiresAt: exp})
+		if result.Error != nil {
+			return result.Error
+		}
+		if result.RowsAffected == 0 {
+			return fosite.ErrJTIKnown
+		}
+		return nil
+	})
+}
+
 // ---- Device Code Flow ----
 
 func (s *OIDCStorage) CreateDeviceCodeSession(ctx context.Context, deviceCode, userCode string,
