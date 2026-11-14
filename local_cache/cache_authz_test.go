@@ -616,10 +616,10 @@ func TestAuthorize_TokenExpiryBoundsCacheEntry(t *testing.T) {
 	assert.True(t, item.ExpiresAt().Before(maxExpiry),
 		"cache entry expiry %v should be clamped near the token's exp, not the default TTL", item.ExpiresAt())
 
-	// A read must not push the entry's expiry out.  Let the wall clock advance
-	// so that a touch-on-hit, if present, would produce a visibly later expiry.
+	// A read must not push the entry's expiry out.  Touch-on-hit would reset
+	// the expiry to now plus the TTL, which cannot equal the stamp taken at
+	// insertion, so exact equality below is what rules it out.
 	firstExpiry := item.ExpiresAt()
-	time.Sleep(20 * time.Millisecond)
 	ok, _ = ac.authorize(token_scopes.Wlcg_Storage_Read, "/data/file.txt", tokenStr)
 	require.True(t, ok)
 	item = ac.tokenAuthz.Get(tokenStr)

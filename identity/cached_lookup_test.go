@@ -346,10 +346,9 @@ func TestCachedLookup_ReadsDoNotExtendExpiry(t *testing.T) {
 	secondaryExpiry := cached.secondaryCache.Get("alice").ExpiresAt()
 	negativeExpiry := cached.userCache.Get("nonexistent").ExpiresAt()
 
-	// Let the wall clock advance so a touch-on-hit, if present, would
-	// produce a visibly later expiry on the re-reads below.
-	time.Sleep(20 * time.Millisecond)
-
+	// Touch-on-hit would reset each expiry to now plus the TTL, which cannot
+	// equal the stamp taken at insertion, so the exact-equality assertions
+	// below are what rule it out.
 	_, err = cached.UidForUser("alice")
 	require.NoError(t, err)
 	_, err = cached.GidForGroup("users")

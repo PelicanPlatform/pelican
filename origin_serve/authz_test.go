@@ -753,10 +753,10 @@ func TestTokenAuthzCacheClampsToTokenExpiry(t *testing.T) {
 	assert.True(t, item.ExpiresAt().Before(maxExpiry),
 		"cache entry expiry %v should be clamped near the token's exp, not the default TTL", item.ExpiresAt())
 
-	// A read must not push the entry's expiry out.  Let the wall clock advance
-	// so that a touch-on-hit, if present, would produce a visibly later expiry.
+	// A read must not push the entry's expiry out.  Touch-on-hit would reset
+	// the expiry to now plus the TTL, which cannot equal the stamp taken at
+	// insertion, so exact equality below is what rules it out.
 	firstExpiry := item.ExpiresAt()
-	time.Sleep(20 * time.Millisecond)
 	require.True(t, ac.authorize(token_scopes.Wlcg_Storage_Read, "/data/file.txt", tokenStr))
 	item = ac.tokenAuthz.Get(tokenStr)
 	require.NotNil(t, item)
@@ -821,6 +821,7 @@ func TestGetResourceScopes(t *testing.T) {
 	})
 
 	ac := &authConfig{}
+	ac.ctx = ctx
 	ac.issuers.Store(&map[string]bool{issuer: true})
 	ac.issuerKeys = token.NewJwksCache(ctx, egrp)
 	ac.issuerKeys.Set(issuer, keySet)
