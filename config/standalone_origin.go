@@ -116,27 +116,40 @@ func validateStandaloneOrigin(currentServers server_structs.ServerType) error {
 	// Director tests are initiated by a director that will never learn this
 	// origin exists.  Turn the knob off rather than leaving the origin's health
 	// status permanently critical on a test that can never arrive.
-	if param.Origin_DirectorTest.GetBool() {
-		log.Warningf("%s may not be enabled when %s is true (no director will ever run the test). Turning off...",
-			param.Origin_DirectorTest.GetName(), standaloneName)
-		if err := param.Origin_DirectorTest.Set(false); err != nil {
-			return err
-		}
+	if err := disableForStandalone(param.Origin_DirectorTest, standaloneName, "no director will ever run the test"); err != nil {
+		return err
 	}
 
 	// The broker exists to punch through a firewall on behalf of a cache the
 	// director sent here; with no federation there is nobody on the other end of
 	// the reverse connection, and launchers/launcher.go never starts the
 	// listener.  Say so rather than leaving the operator believing it is on.
-	if param.Origin_EnableBroker.GetBool() {
-		log.Warningf("%s may not be enabled when %s is true (there is no federation broker to connect to). Turning off...",
-			param.Origin_EnableBroker.GetName(), standaloneName)
-		if err := param.Origin_EnableBroker.Set(false); err != nil {
-			return err
-		}
+	if err := disableForStandalone(param.Origin_EnableBroker, standaloneName, "there is no federation broker to connect to"); err != nil {
+		return err
 	}
 
 	return nil
+}
+
+// disableForStandalone turns off a parameter a standalone origin cannot honor.
+//
+// Only an operator who asked for the setting is warned.  Origin.DirectorTest,
+// for one, defaults to true, so warning on the value alone told every standalone
+// origin at startup that it was "turning off" something its operator never turned
+// on -- advice they could not act on, in the register reserved for problems they
+// can.  The default case is still worth a line, just a debug one, because the
+// knob's effective value no longer matches what the parameter reference says.
+func disableForStandalone(p param.BoolParam, standaloneName, why string) error {
+	if !p.GetBool() {
+		return nil
+	}
+	if isDefaultSource(p.GetName()) {
+		log.Debugf("Disabling %s because %s is true (%s).", p.GetName(), standaloneName, why)
+	} else {
+		log.Warningf("%s may not be enabled when %s is true (%s). Turning off...",
+			p.GetName(), standaloneName, why)
+	}
+	return p.Set(false)
 }
 
 // configuredExportPrefix pairs a federation prefix with the configuration

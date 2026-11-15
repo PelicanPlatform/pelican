@@ -226,7 +226,10 @@ func ValidateWatermark(wmStr string, paramName string, requireSuffix bool) (wm f
 
 	}
 
-	log.Infof("Interpreting watermark value %s for config param '%s' as a percentage.", wmStr, paramName)
+	// Which of the two accepted spellings an operator used is a detail of how the
+	// value is parsed, not news: emitting it at info level put a line in every
+	// server's startup log for values nobody configured.
+	log.Debugf("Interpreting watermark value %s for config param '%s' as a percentage.", wmStr, paramName)
 	if wm > 100 || wm < 0 {
 		return 0, false, errors.Errorf("watermark value %s for config param '%s' must be a valid percentage in the range [0, 100].", wmStr, paramName)
 	}

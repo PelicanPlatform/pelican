@@ -2456,138 +2456,146 @@ func InitServer(ctx context.Context, currentServers server_structs.ServerType) e
 		return errors.Errorf("the configuration %s is not set but the Origin module is enabled. Please set %s", param.Origin_Port.GetName(), param.Origin_Port.GetName())
 	}
 
-	if param.Cache_LowWaterMark.IsSet() || param.Cache_HighWaterMark.IsSet() {
-		lowWm, lwmIsAbs, err := utils.ValidateWatermark(param.Cache_LowWaterMark.GetString(), param.Cache_LowWaterMark.GetName(), false)
-		if err != nil {
-			return err
-		}
-		highWm, hwmIsAbs, err := utils.ValidateWatermark(param.Cache_HighWaterMark.GetString(), param.Cache_HighWaterMark.GetName(), false)
-		if err != nil {
-			return err
-		}
-		if lwmIsAbs == hwmIsAbs && lowWm >= highWm {
-			// Use config strings in error to present the configured values (as opposed to whatever conversion we get from validation)
-			return errors.Errorf("invalid %s and %s values. The high watermark must be greater than the low "+
-				"watermark. Got %s (low) and %s (high)", param.Cache_LowWaterMark.GetName(), param.Cache_HighWaterMark.GetName(), param.Cache_LowWaterMark.GetString(), param.Cache_HighWaterMark.GetString())
-		}
-	}
-
-	if param.Cache_FilesBaseSize.IsSet() || param.Cache_FilesNominalSize.IsSet() || param.Cache_FilesMaxSize.IsSet() {
-		// Must have high/low watermarks
-		if !param.Cache_LowWaterMark.IsSet() || !param.Cache_HighWaterMark.IsSet() {
-			return errors.Errorf("if any of the parameters %s, %s or %s is set, then %s "+
-				"and %s must also be set", param.Cache_FilesBaseSize.GetName(), param.Cache_FilesNominalSize.GetName(), param.Cache_FilesMaxSize.GetName(), param.Cache_LowWaterMark.GetName(), param.Cache_HighWaterMark.GetName())
-		}
-
-		// Further, if one is set, all three must be set
-		if !param.Cache_FilesBaseSize.IsSet() || !param.Cache_FilesNominalSize.IsSet() || !param.Cache_FilesMaxSize.IsSet() {
-			return errors.Errorf("if any of the parameters %s, %s or %s is set, all three must be set",
-				param.Cache_FilesBaseSize.GetName(), param.Cache_FilesNominalSize.GetName(), param.Cache_FilesMaxSize.GetName())
-		}
-
-		// Like the watermarks, each of these may be given as an integer percentage
-		// of total disk or as an absolute size with a k|m|g|t suffix, so accept both.
-		base, baseIsAbs, err := utils.ValidateWatermark(param.Cache_FilesBaseSize.GetString(), param.Cache_FilesBaseSize.GetName(), false)
-		if err != nil {
-			return err
-		}
-		nominal, nominalIsAbs, err := utils.ValidateWatermark(param.Cache_FilesNominalSize.GetString(), param.Cache_FilesNominalSize.GetName(), false)
-		if err != nil {
-			return err
-		}
-		max, maxIsAbs, err := utils.ValidateWatermark(param.Cache_FilesMaxSize.GetString(), param.Cache_FilesMaxSize.GetName(), false)
-		if err != nil {
-			return err
-		}
-		// Enforce base < nominal < max. Two values are only directly comparable when
-		// expressed the same way (both percentages or both absolute sizes); a percentage
-		// and an absolute size can't be ordered without the disk total, which may span
-		// multiple disks and isn't known here. xrootd resolves everything to bytes against
-		// the real disk size and re-checks this ordering at startup, so deferring the
-		// mixed case to it is safe.
-		if (baseIsAbs == nominalIsAbs && base >= nominal) ||
-			(nominalIsAbs == maxIsAbs && nominal >= max) ||
-			(baseIsAbs == maxIsAbs && base >= max) {
-			return errors.Errorf("invalid %s/%s/%s values. The base size must be less than the nominal size, and the "+
-				"nominal size must be less than the max size. Got %s (base), %s (nominal), and %s (max)",
-				param.Cache_FilesBaseSize.GetName(), param.Cache_FilesNominalSize.GetName(), param.Cache_FilesMaxSize.GetName(),
-				param.Cache_FilesBaseSize.GetString(), param.Cache_FilesNominalSize.GetString(), param.Cache_FilesMaxSize.GetString())
-		}
-
-		// xrootd additionally requires FilesMaxSize to be below LowWaterark.
-		// FilesMaxSize bounds the cache's own data while LowWatermark bounds total
-		// disk usage, and the cache's data is necessarily a subset of total disk
-		// usage; keeping FilesMaxSize below LowWatermark leaves headroom under
-		// LowWatermark for metadata and any other tenant sharing the disk. When
-		// FilesMaxSize and LowWatermark are expressed the same way we verify it here
-		// against a common basis; the mixed case needs the disk total, so we defer
-		// it to xrootd.
-		lowWm, lwmIsAbs, err := utils.ValidateWatermark(param.Cache_LowWaterMark.GetString(), param.Cache_LowWaterMark.GetName(), false)
-		if err != nil {
-			return err
-		}
-		if maxIsAbs == lwmIsAbs && max >= lowWm {
-			return errors.Errorf("invalid %s value. It must be less than %s so the cache's file-usage purge band stays "+
-				"below the disk low watermark. Got %s (%s) and %s (%s)",
-				param.Cache_FilesMaxSize.GetName(), param.Cache_LowWaterMark.GetName(),
-				param.Cache_FilesMaxSize.GetString(), param.Cache_FilesMaxSize.GetName(),
-				param.Cache_LowWaterMark.GetString(), param.Cache_LowWaterMark.GetName())
-		}
-	}
-	if param.Cache_EnableLotman.GetBool() {
-		// pfc.diskusage file directives _must_ be set.
-		// We already validate that one means all three, but I'm duplicating that here to make this safer in the case we switch orders
-		// in the future.
-		if !param.Cache_FilesBaseSize.IsSet() || !param.Cache_FilesNominalSize.IsSet() || !param.Cache_FilesMaxSize.IsSet() ||
-			!param.Cache_LowWaterMark.IsSet() || !param.Cache_HighWaterMark.IsSet() {
-			return errors.Errorf("if %s is true, the following Cache parameters must also be set: %s, %s, "+
-				"%s, %s, %s", param.Cache_EnableLotman.GetName(), param.Cache_HighWaterMark.GetName(), param.Cache_LowWaterMark.GetName(),
-				param.Cache_FilesBaseSize.GetName(), param.Cache_FilesNominalSize.GetName(), param.Cache_FilesMaxSize.GetName())
-		}
-		// Lotman boundary checks. These were previously scattered across
-		// the lotman package and xrootd config builder; consolidating
-		// them here means an operator sees one batch of errors at boot
-		// rather than discovering them only when the renewal scheduler
-		// or xrootd config is built.
-		const (
-			minPurgeAge = time.Hour
-			maxPurgeAge = 360 * 24 * time.Hour
-		)
-		if maxLife := param.Lotman_MaxLotLifetime.GetDuration(); maxLife > 0 {
-			// pfc.diskusage purgecoldfiles age must be in [1h, 360d]
-			// because Lotman.MaxLotLifetime is propagated verbatim to
-			// that xrootd directive when Cache.EnableLotman is true.
-			if maxLife < minPurgeAge {
-				return errors.Errorf("%s (%s) is below the minimum allowed value of 1h",
-					param.Lotman_MaxLotLifetime.GetName(), maxLife)
+	// Everything below validates the disk-management knobs that only the cache
+	// module consumes (xrootd's pfc.diskusage directives and Lotman's quota
+	// bounds).  Their IsSet() checks are true for every server because the
+	// generated defaults register a value for each one, so running them
+	// unconditionally made an origin validate -- and log about -- settings it
+	// will never use.
+	if currentServers.IsEnabled(server_structs.CacheType) {
+		if param.Cache_LowWaterMark.IsSet() || param.Cache_HighWaterMark.IsSet() {
+			lowWm, lwmIsAbs, err := utils.ValidateWatermark(param.Cache_LowWaterMark.GetString(), param.Cache_LowWaterMark.GetName(), false)
+			if err != nil {
+				return err
 			}
-			if maxLife > maxPurgeAge {
-				return errors.Errorf("%s (%s) exceeds the maximum allowed value of 360d",
-					param.Lotman_MaxLotLifetime.GetName(), maxLife)
+			highWm, hwmIsAbs, err := utils.ValidateWatermark(param.Cache_HighWaterMark.GetString(), param.Cache_HighWaterMark.GetName(), false)
+			if err != nil {
+				return err
+			}
+			if lwmIsAbs == hwmIsAbs && lowWm >= highWm {
+				// Use config strings in error to present the configured values (as opposed to whatever conversion we get from validation)
+				return errors.Errorf("invalid %s and %s values. The high watermark must be greater than the low "+
+					"watermark. Got %s (low) and %s (high)", param.Cache_LowWaterMark.GetName(), param.Cache_HighWaterMark.GetName(), param.Cache_LowWaterMark.GetString(), param.Cache_HighWaterMark.GetString())
 			}
 		}
-		// SchedulingHorizon should be ≥ DefaultLotExpirationLifetime and
-		// ≥ RenewalCheckInterval. Warn (don't reject) — the runtime
-		// planner additionally clamps up so a misconfigured value
-		// degrades gracefully rather than producing a coverage gap.
-		horizon := param.Lotman_SchedulingHorizon.GetDuration()
-		defLife := param.Lotman_DefaultLotExpirationLifetime.GetDuration()
-		interval := param.Lotman_RenewalCheckInterval.GetDuration()
-		if horizon > 0 && defLife > 0 && horizon < defLife {
-			log.Warnf("%s (%s) is shorter than %s (%s); the planner will treat the horizon as %s. Consider raising %s to at least %s.",
-				param.Lotman_SchedulingHorizon.GetName(), horizon,
-				param.Lotman_DefaultLotExpirationLifetime.GetName(), defLife,
-				defLife,
-				param.Lotman_SchedulingHorizon.GetName(),
-				param.Lotman_DefaultLotExpirationLifetime.GetName())
+
+		if param.Cache_FilesBaseSize.IsSet() || param.Cache_FilesNominalSize.IsSet() || param.Cache_FilesMaxSize.IsSet() {
+			// Must have high/low watermarks
+			if !param.Cache_LowWaterMark.IsSet() || !param.Cache_HighWaterMark.IsSet() {
+				return errors.Errorf("if any of the parameters %s, %s or %s is set, then %s "+
+					"and %s must also be set", param.Cache_FilesBaseSize.GetName(), param.Cache_FilesNominalSize.GetName(), param.Cache_FilesMaxSize.GetName(), param.Cache_LowWaterMark.GetName(), param.Cache_HighWaterMark.GetName())
+			}
+
+			// Further, if one is set, all three must be set
+			if !param.Cache_FilesBaseSize.IsSet() || !param.Cache_FilesNominalSize.IsSet() || !param.Cache_FilesMaxSize.IsSet() {
+				return errors.Errorf("if any of the parameters %s, %s or %s is set, all three must be set",
+					param.Cache_FilesBaseSize.GetName(), param.Cache_FilesNominalSize.GetName(), param.Cache_FilesMaxSize.GetName())
+			}
+
+			// Like the watermarks, each of these may be given as an integer percentage
+			// of total disk or as an absolute size with a k|m|g|t suffix, so accept both.
+			base, baseIsAbs, err := utils.ValidateWatermark(param.Cache_FilesBaseSize.GetString(), param.Cache_FilesBaseSize.GetName(), false)
+			if err != nil {
+				return err
+			}
+			nominal, nominalIsAbs, err := utils.ValidateWatermark(param.Cache_FilesNominalSize.GetString(), param.Cache_FilesNominalSize.GetName(), false)
+			if err != nil {
+				return err
+			}
+			max, maxIsAbs, err := utils.ValidateWatermark(param.Cache_FilesMaxSize.GetString(), param.Cache_FilesMaxSize.GetName(), false)
+			if err != nil {
+				return err
+			}
+			// Enforce base < nominal < max. Two values are only directly comparable when
+			// expressed the same way (both percentages or both absolute sizes); a percentage
+			// and an absolute size can't be ordered without the disk total, which may span
+			// multiple disks and isn't known here. xrootd resolves everything to bytes against
+			// the real disk size and re-checks this ordering at startup, so deferring the
+			// mixed case to it is safe.
+			if (baseIsAbs == nominalIsAbs && base >= nominal) ||
+				(nominalIsAbs == maxIsAbs && nominal >= max) ||
+				(baseIsAbs == maxIsAbs && base >= max) {
+				return errors.Errorf("invalid %s/%s/%s values. The base size must be less than the nominal size, and the "+
+					"nominal size must be less than the max size. Got %s (base), %s (nominal), and %s (max)",
+					param.Cache_FilesBaseSize.GetName(), param.Cache_FilesNominalSize.GetName(), param.Cache_FilesMaxSize.GetName(),
+					param.Cache_FilesBaseSize.GetString(), param.Cache_FilesNominalSize.GetString(), param.Cache_FilesMaxSize.GetString())
+			}
+
+			// xrootd additionally requires FilesMaxSize to be below LowWaterark.
+			// FilesMaxSize bounds the cache's own data while LowWatermark bounds total
+			// disk usage, and the cache's data is necessarily a subset of total disk
+			// usage; keeping FilesMaxSize below LowWatermark leaves headroom under
+			// LowWatermark for metadata and any other tenant sharing the disk. When
+			// FilesMaxSize and LowWatermark are expressed the same way we verify it here
+			// against a common basis; the mixed case needs the disk total, so we defer
+			// it to xrootd.
+			lowWm, lwmIsAbs, err := utils.ValidateWatermark(param.Cache_LowWaterMark.GetString(), param.Cache_LowWaterMark.GetName(), false)
+			if err != nil {
+				return err
+			}
+			if maxIsAbs == lwmIsAbs && max >= lowWm {
+				return errors.Errorf("invalid %s value. It must be less than %s so the cache's file-usage purge band stays "+
+					"below the disk low watermark. Got %s (%s) and %s (%s)",
+					param.Cache_FilesMaxSize.GetName(), param.Cache_LowWaterMark.GetName(),
+					param.Cache_FilesMaxSize.GetString(), param.Cache_FilesMaxSize.GetName(),
+					param.Cache_LowWaterMark.GetString(), param.Cache_LowWaterMark.GetName())
+			}
 		}
-		if horizon > 0 && interval > 0 && horizon < interval {
-			log.Warnf("%s (%s) is shorter than %s (%s); the planner will treat the horizon as %s. Consider raising %s to at least %s.",
-				param.Lotman_SchedulingHorizon.GetName(), horizon,
-				param.Lotman_RenewalCheckInterval.GetName(), interval,
-				interval,
-				param.Lotman_SchedulingHorizon.GetName(),
-				param.Lotman_RenewalCheckInterval.GetName())
+		if param.Cache_EnableLotman.GetBool() {
+			// pfc.diskusage file directives _must_ be set.
+			// We already validate that one means all three, but I'm duplicating that here to make this safer in the case we switch orders
+			// in the future.
+			if !param.Cache_FilesBaseSize.IsSet() || !param.Cache_FilesNominalSize.IsSet() || !param.Cache_FilesMaxSize.IsSet() ||
+				!param.Cache_LowWaterMark.IsSet() || !param.Cache_HighWaterMark.IsSet() {
+				return errors.Errorf("if %s is true, the following Cache parameters must also be set: %s, %s, "+
+					"%s, %s, %s", param.Cache_EnableLotman.GetName(), param.Cache_HighWaterMark.GetName(), param.Cache_LowWaterMark.GetName(),
+					param.Cache_FilesBaseSize.GetName(), param.Cache_FilesNominalSize.GetName(), param.Cache_FilesMaxSize.GetName())
+			}
+			// Lotman boundary checks. These were previously scattered across
+			// the lotman package and xrootd config builder; consolidating
+			// them here means an operator sees one batch of errors at boot
+			// rather than discovering them only when the renewal scheduler
+			// or xrootd config is built.
+			const (
+				minPurgeAge = time.Hour
+				maxPurgeAge = 360 * 24 * time.Hour
+			)
+			if maxLife := param.Lotman_MaxLotLifetime.GetDuration(); maxLife > 0 {
+				// pfc.diskusage purgecoldfiles age must be in [1h, 360d]
+				// because Lotman.MaxLotLifetime is propagated verbatim to
+				// that xrootd directive when Cache.EnableLotman is true.
+				if maxLife < minPurgeAge {
+					return errors.Errorf("%s (%s) is below the minimum allowed value of 1h",
+						param.Lotman_MaxLotLifetime.GetName(), maxLife)
+				}
+				if maxLife > maxPurgeAge {
+					return errors.Errorf("%s (%s) exceeds the maximum allowed value of 360d",
+						param.Lotman_MaxLotLifetime.GetName(), maxLife)
+				}
+			}
+			// SchedulingHorizon should be ≥ DefaultLotExpirationLifetime and
+			// ≥ RenewalCheckInterval. Warn (don't reject) — the runtime
+			// planner additionally clamps up so a misconfigured value
+			// degrades gracefully rather than producing a coverage gap.
+			horizon := param.Lotman_SchedulingHorizon.GetDuration()
+			defLife := param.Lotman_DefaultLotExpirationLifetime.GetDuration()
+			interval := param.Lotman_RenewalCheckInterval.GetDuration()
+			if horizon > 0 && defLife > 0 && horizon < defLife {
+				log.Warnf("%s (%s) is shorter than %s (%s); the planner will treat the horizon as %s. Consider raising %s to at least %s.",
+					param.Lotman_SchedulingHorizon.GetName(), horizon,
+					param.Lotman_DefaultLotExpirationLifetime.GetName(), defLife,
+					defLife,
+					param.Lotman_SchedulingHorizon.GetName(),
+					param.Lotman_DefaultLotExpirationLifetime.GetName())
+			}
+			if horizon > 0 && interval > 0 && horizon < interval {
+				log.Warnf("%s (%s) is shorter than %s (%s); the planner will treat the horizon as %s. Consider raising %s to at least %s.",
+					param.Lotman_SchedulingHorizon.GetName(), horizon,
+					param.Lotman_RenewalCheckInterval.GetName(), interval,
+					interval,
+					param.Lotman_SchedulingHorizon.GetName(),
+					param.Lotman_RenewalCheckInterval.GetName())
+			}
 		}
 	}
 
