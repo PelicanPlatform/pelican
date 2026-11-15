@@ -2037,6 +2037,67 @@ type: string
 default: none
 components: ["origin"]
 ---
+name: Origin.StorageCacheLocation
+description: |+
+  A directory on local disk where the origin keeps copies of objects it reads from remote storage
+  (storage types `s3v2`, `httpsv2` and `globusv2`), so that repeated reads do not pay the provider's
+  egress again.  Leaving it unset disables the storage cache; other storage types ignore it.
+
+  The directory must be empty or hold an earlier storage cache, and must not be shared with anything
+  else.  Use Origin.StorageCacheSize to bound how much it holds.
+
+  A copy is served without contacting the backend while it is fresh, as the backend's Cache-Control
+  (S3 object metadata, or an HTTPS backend's response header) and Origin.StorageCacheDefaultMaxAge
+  allow.  Objects the backend marks `no-store` or `private`, and objects for which the backend
+  reports no strong ETag, are always read from the backend.  Writes through the origin take effect
+  immediately; objects changed directly in the backend are seen once their copies go stale.
+
+  This setting cannot be combined with Origin.HttpAuthTokenPassthrough, where the backend authorizes
+  each client's own token; the origin refuses to start with both.
+type: filename
+default: none
+components: ["origin"]
+---
+name: Origin.StorageCacheDefaultMaxAge
+description: |+
+  How long a copy in the origin's storage cache (see Origin.StorageCacheLocation) is served without
+  contacting the backend, when the backend gives no Cache-Control.  After that, the origin checks
+  with the backend before serving the copy again, and fetches the object anew only if it changed.
+
+  This is also the longest a backend's own Cache-Control can make a copy fresh.  Set it to 0 to
+  check with the backend on every read.
+type: duration
+default: 24h
+components: ["origin"]
+---
+name: Origin.StorageCacheRevalidationJitter
+description: |+
+  A percentage (0-100) by which Origin.StorageCacheDefaultMaxAge varies from object to object, so
+  that objects cached together do not all go stale together.
+type: int
+default: 10
+hidden: true
+components: ["origin"]
+---
+name: Origin.StorageCacheMaxConcurrentFetches
+description: |+
+  The most reads of the backend the origin's storage cache (see Origin.StorageCacheLocation) makes at
+  once to fill its copies.  A request for an object the cache does not fully hold, made while the
+  cache is at this limit, is served directly from the backend.
+type: int
+default: 32
+components: ["origin"]
+---
+name: Origin.StorageCacheSize
+description: |+
+  The most the origin's storage cache (see Origin.StorageCacheLocation) holds, with units (e.g.
+  `500GB`); a number without units is bytes.  When the cache reaches 90% of this size, the
+  least-recently-read objects are evicted until it is at 80%.  If unset or 0, the size is that of
+  the filesystem holding the cache.
+type: string
+default: 0
+components: ["origin"]
+---
 name: Origin.HttpServiceUrl
 description: |+
   If Origin.StorageType is set to `https`, the service URL is used as the base for requests to the backend.  To generate the

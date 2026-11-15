@@ -118,7 +118,7 @@ func setupE2ETestServer(t *testing.T) (*httptest.Server, string, func()) {
 	}
 
 	// Initialize handlers
-	err = InitializeHandlers(t.Context(), exports)
+	err = InitializeHandlers(t.Context(), nil, exports)
 	require.NoError(t, err)
 
 	// Initialize auth config for the test (required even for public reads)
@@ -283,7 +283,7 @@ func TestMetricsRecordedForAuthRejection(t *testing.T) {
 		},
 	}
 
-	require.NoError(t, InitializeHandlers(context.Background(), exports))
+	require.NoError(t, InitializeHandlers(context.Background(), nil, exports))
 
 	ac := &authConfig{}
 	ac.exports.Store(&exports)

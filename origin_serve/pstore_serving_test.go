@@ -125,7 +125,7 @@ func newServedOrigin(t *testing.T, exports []server_utils.OriginExport, storageD
 		_ = egrp.Wait()
 	})
 
-	require.NoError(t, InitializeHandlers(ctx, exports))
+	require.NoError(t, InitializeHandlers(ctx, nil, exports))
 	require.NoError(t, InitAuthConfig(ctx, egrp, exports))
 
 	gin.SetMode(gin.TestMode)

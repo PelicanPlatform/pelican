@@ -34,6 +34,7 @@ import (
 
 	"github.com/pkg/errors"
 
+	"github.com/pelicanplatform/pelican/cache_control"
 	"github.com/pelicanplatform/pelican/param"
 	"github.com/pelicanplatform/pelican/utils"
 )
@@ -193,6 +194,9 @@ const (
 	StoreModeCache StoreMode = "cache"
 	// StoreModePStore marks a database owned by a pstore origin backend.
 	StoreModePStore StoreMode = "pstore"
+	// StoreModeSourcedCache marks a database owned by a SourcedCache, such
+	// as an origin's cache of its remote storage.
+	StoreModeSourcedCache StoreMode = "sourced-cache"
 )
 
 // StorageID identifies a storage location.  0 means inline (data in BadgerDB),
@@ -668,14 +672,11 @@ func (m *CacheMetadata) SetCacheControl(header string) {
 
 // GetCacheDirectives returns the parsed cache directives
 func (m *CacheMetadata) GetCacheDirectives() CacheDirectives {
-	cd := CacheDirectives{
-		flags: m.CCFlags & 0x0F, // restore boolean flags
+	// Restore the boolean flags; a positive CCMaxAge implies ccMaxAgeSet,
+	// which is why that bit is not persisted separately.
+	return CacheDirectives{
+		cache_control.FromFlags(m.CCFlags&0x0F, time.Duration(m.CCMaxAge)*time.Second),
 	}
-	if m.CCMaxAge > 0 {
-		cd.maxAge = time.Duration(m.CCMaxAge) * time.Second
-		cd.flags |= ccMaxAgeSet
-	}
-	return cd
 }
 
 // GetCacheControlHeader reconstructs the Cache-Control header string for HTTP responses.

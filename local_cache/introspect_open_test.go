@@ -210,8 +210,16 @@ func TestOpenCacheDBReadOnlyRefusesWrites(t *testing.T) {
 			_, err := db.MergeExistingMetadata(instHash, &CacheMetadata{ETag: "nope"})
 			return err
 		},
+		"UpdateExistingMetadata": func() error {
+			_, err := db.UpdateExistingMetadata(instHash, func(*CacheMetadata) {})
+			return err
+		},
 		"DeleteMetadata": func() error { return db.DeleteMetadata(instHash) },
 		"SetLatestETag":  func() error { return db.SetLatestETag(objHash, "nope", time.Now()) },
+		"SetLatestETagIfNewer": func() error {
+			_, err := db.SetLatestETagIfNewer(objHash, "nope", time.Now())
+			return err
+		},
 		"DeleteLatestETag": func() error {
 			return db.DeleteLatestETag(objHash)
 		},
