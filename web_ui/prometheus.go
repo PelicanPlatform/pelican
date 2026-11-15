@@ -279,6 +279,48 @@ func configDirectorPromScraper(ctx context.Context) (*config.ScrapeConfig, error
 	return &scrapeConfig, nil
 }
 
+// prometheusLogKey identifies one message the embedded Prometheus emits, by the
+// component that logged it and its (constant) text.
+type prometheusLogKey struct {
+	component string
+	msg       string
+}
+
+// demotedPrometheusLogs lowers the level of embedded-Prometheus messages that
+// describe Prometheus's own internals rather than anything a Pelican operator
+// configured or can act on.  Prometheus logs them for someone running a
+// standalone Prometheus who can tune the TSDB; here they only make a server's
+// startup look broken when it isn't.  A message is listed only when it is
+// genuinely benign -- its level is lowered, never raised, and nothing is
+// dropped, so the detail is still there at a debug level.
+//
+// The keys are the message strings verbatim, so an upstream rewording stops the
+// demotion and the message returns at its original level.  That is the safe
+// direction to fail -- noise rather than silence -- but it does mean this table
+// is worth a glance when the prometheus dependency moves; each entry names the
+// source it was taken from.
+var demotedPrometheusLogs = map[prometheusLogKey]logrus.Level{
+	// Emitted when replaying the write-ahead log finds samples whose series
+	// records did not survive the last checkpoint, which is what an unclean
+	// shutdown of the embedded TSDB leaves behind.  Prometheus recovers on its
+	// own; at most a few monitoring samples from just before the shutdown are
+	// lost.  (tsdb/head_wal.go, loadWAL)
+	{component: "tsdb", msg: "Unknown series references"}: logrus.DebugLevel,
+
+	// The same condition on the out-of-order WAL, reported separately.  Pelican
+	// does not enable out-of-order ingestion today, so this is here to keep the
+	// pair together rather than to quiet anything currently seen.
+	// (tsdb/head_wal.go, loadWBL)
+	{component: "tsdb", msg: "Unknown series references for ooo WAL replay"}: logrus.DebugLevel,
+}
+
+// fieldString returns the named logrus field as a string, or "" when it is
+// absent or not a string.
+func fieldString(fields logrus.Fields, key string) string {
+	str, _ := fields[key].(string)
+	return str
+}
+
 // Log method which satisfies the kitlog.Logger interface.
 // It also propragates field level and field message to top level log
 func (a LogrusAdapter) Log(keyvals ...interface{}) error {
@@ -331,6 +373,10 @@ func (a LogrusAdapter) Log(keyvals ...interface{}) error {
 
 	// Set the log level and log the message with the fields.
 	entry := a.WithFields(fields)
+	// logrus orders levels by decreasing severity, so a demotion raises the value.
+	if demoted, ok := demotedPrometheusLogs[prometheusLogKey{component: fieldString(fields, "component"), msg: msg}]; ok && logLevel < demoted {
+		logLevel = demoted
+	}
 	switch logLevel {
 	case logrus.WarnLevel:
 		entry.Warn(msg)
