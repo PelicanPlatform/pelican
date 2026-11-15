@@ -36,6 +36,7 @@ import (
 	"golang.org/x/oauth2"
 
 	"github.com/pelicanplatform/pelican/config"
+	"github.com/pelicanplatform/pelican/local_cache"
 	"github.com/pelicanplatform/pelican/server_utils"
 )
 
@@ -537,6 +538,51 @@ func (fs *httpsFileSystem) Stat(ctx context.Context, name string) (os.FileInfo, 
 		etag:         resp.Header.Get("ETag"),
 		cacheControl: resp.Header.Get("Cache-Control"),
 	}, nil
+}
+
+// ReadVersionRange implements versionRangeReader: it writes bytes start
+// through end of version etag of name to w, with a ranged GET conditional on
+// the entity tag.  Unlike httpsReadFile it insists on getting what it asked
+// for: a server that ignores the Range header answers 200 with the object
+// from its first byte, which is only the requested bytes when the range
+// starts there.
+func (fs *httpsFileSystem) ReadVersionRange(ctx context.Context, name string, w io.Writer, start, end int64, etag string) error {
+	quoted := etag
+	if !strings.HasPrefix(quoted, `"`) {
+		// gowebdav reports a PROPFIND getetag without its quotes.
+		quoted = `"` + quoted + `"`
+	}
+	resp, err := fs.doRequest(ctx, http.MethodGet, fs.upstreamURL(name), nil, map[string]string{
+		"Range":    fmt.Sprintf("bytes=%d-%d", start, end),
+		"If-Match": quoted,
+	})
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	switch resp.StatusCode {
+	case http.StatusPartialContent:
+		var gotStart int64
+		if _, err := fmt.Sscanf(resp.Header.Get("Content-Range"), "bytes %d-", &gotStart); err != nil || gotStart != start {
+			return fmt.Errorf("https range get of %s returned Content-Range %q for bytes %d-%d",
+				name, resp.Header.Get("Content-Range"), start, end)
+		}
+	case http.StatusOK:
+		if start != 0 {
+			return fmt.Errorf("https range get of %s: the server ignored the range", name)
+		}
+	case http.StatusPreconditionFailed, http.StatusNotFound:
+		return fmt.Errorf("https range get of %s: %w", name, local_cache.ErrSourceVersionChanged)
+	default:
+		return fmt.Errorf("https range get of %s failed with status %d", name, resp.StatusCode)
+	}
+	// A server that does not evaluate If-Match still says which version
+	// it sent.
+	if got := strings.Trim(resp.Header.Get("ETag"), `"`); got != "" && got != strings.Trim(etag, `"`) {
+		return fmt.Errorf("https range get of %s: %w", name, local_cache.ErrSourceVersionChanged)
+	}
+	_, err = io.CopyN(w, resp.Body, end-start+1)
+	return err
 }
 
 // ---------------------------------------------------------------------------

@@ -31,12 +31,16 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/aws/aws-sdk-go-v2/aws"
+	"github.com/aws/aws-sdk-go-v2/service/s3"
 	log "github.com/sirupsen/logrus"
 	"gocloud.dev/blob"
 	_ "gocloud.dev/blob/memblob" // register mem:// URL opener (useful for testing); blobstore registers the rest
+	"gocloud.dev/gcerrors"
 	"golang.org/x/net/webdav"
 
 	"github.com/pelicanplatform/pelican/blobstore"
+	"github.com/pelicanplatform/pelican/local_cache"
 	"github.com/pelicanplatform/pelican/server_utils"
 	"github.com/pelicanplatform/pelican/utils"
 )
@@ -319,6 +323,47 @@ func (fs *blobFileSystem) OpenFile(ctx context.Context, name string, flag int, _
 		size:   reader.Size(),
 		mod:    reader.ModTime(),
 	}, nil
+}
+
+// ReadVersionRange implements versionRangeReader: it writes bytes start
+// through end of version etag of name to w.
+//
+// On S3 the read is conditional (If-Match), so the bytes come from that
+// version or not at all.  Other providers' drivers offer no such hook here,
+// so the version is checked against the object's attributes once the read is
+// open; an overwrite landing between the two is not caught, which is why the
+// cache only goes this way for those providers.
+func (fs *blobFileSystem) ReadVersionRange(ctx context.Context, name string, w io.Writer, start, end int64, etag string) error {
+	key := blobKey(name)
+	conditional := false
+	r, err := fs.bucket.NewRangeReader(ctx, key, start, end-start+1, &blob.ReaderOptions{
+		BeforeRead: func(as func(any) bool) error {
+			var in *s3.GetObjectInput
+			if as(&in) {
+				in.IfMatch = aws.String(etag)
+				conditional = true
+			}
+			return nil
+		},
+	})
+	if err != nil {
+		if blobstore.IsNotFound(err) || gcerrors.Code(err) == gcerrors.FailedPrecondition {
+			return fmt.Errorf("blob read %q: %w", key, local_cache.ErrSourceVersionChanged)
+		}
+		return fmt.Errorf("blob read %q: %w", key, err)
+	}
+	defer r.Close()
+	if !conditional {
+		attrs, err := fs.bucket.Attributes(ctx, key)
+		if err != nil {
+			return fmt.Errorf("blob attributes %q: %w", key, err)
+		}
+		if attrs.ETag != etag {
+			return fmt.Errorf("blob read %q: %w", key, local_cache.ErrSourceVersionChanged)
+		}
+	}
+	_, err = io.CopyN(w, r, end-start+1)
+	return err
 }
 
 // RemoveAll implements webdav.FileSystem.

@@ -38,6 +38,7 @@ import (
 	"github.com/spf13/afero"
 	"golang.org/x/net/webdav"
 	"golang.org/x/oauth2"
+	"golang.org/x/sync/errgroup"
 
 	"github.com/pelicanplatform/pelican/blobstore"
 	"github.com/pelicanplatform/pelican/config"
@@ -700,8 +701,11 @@ func xrdMonitoringMiddleware() gin.HandlerFunc {
 	}
 }
 
-// InitializeHandlers initializes the WebDAV handlers for each export
-func InitializeHandlers(ctx context.Context, exports []server_utils.OriginExport) error {
+// InitializeHandlers initializes the WebDAV handlers for each export.  egrp
+// owns any background task the handlers start (currently the storage cache's
+// janitor) so it is awaited at shutdown; it may be nil in tests that do not
+// exercise those tasks.
+func InitializeHandlers(ctx context.Context, egrp *errgroup.Group, exports []server_utils.OriginExport) error {
 	// Validate that if DisableDirectClients is enabled, no exports have DirectReads
 	if param.Origin_DisableDirectClients.GetBool() {
 		for _, export := range exports {
@@ -827,6 +831,59 @@ func InitializeHandlers(ctx context.Context, exports []server_utils.OriginExport
 
 	// Determine storage type for filesystem creation
 	storageType := server_structs.OriginStorageType(param.Origin_StorageType.GetString())
+
+	// The storage cache keeps local copies of objects fetched from remote
+	// backends (avoiding repeated provider egress).  It is shared across
+	// exports so the configured size bound applies to the whole tree.
+	var storageCacheMgr *storageCache
+	if loc := param.Origin_StorageCacheLocation.GetString(); loc != "" {
+		switch storageType {
+		case server_structs.OriginStorageS3v2, server_structs.OriginStorageHTTPSv2, server_structs.OriginStorageGlobusv2:
+			// With token passthrough the upstream, not Pelican, decides what
+			// each client may read, and it decides per credential.  A shared
+			// cache has no credential dimension: one user's copy would be
+			// served to every other user who clears the origin's own
+			// namespace check.  Refuse the combination rather than silently
+			// widening access.
+			if param.Origin_HttpAuthTokenPassthrough.GetBool() {
+				return fmt.Errorf("Origin.StorageCacheLocation cannot be used with Origin.HttpAuthTokenPassthrough: " +
+					"the cache is shared across clients, but passthrough makes the upstream authorize each client's " +
+					"token individually; unset one of the two")
+			}
+			if egrp == nil {
+				return fmt.Errorf("the origin storage cache needs a server error group")
+			}
+			cfg := storageCacheConfig{
+				Dir:                  loc,
+				DefaultMaxAge:        param.Origin_StorageCacheDefaultMaxAge.GetDuration(),
+				JitterPercent:        param.Origin_StorageCacheRevalidationJitter.GetInt(),
+				MaxConcurrentFetches: param.Origin_StorageCacheMaxConcurrentFetches.GetInt(),
+			}
+			if sizeStr := param.Origin_StorageCacheSize.GetString(); sizeStr != "" {
+				size, err := utils.ParseBytes(sizeStr)
+				if err != nil {
+					return fmt.Errorf("failed to parse Origin.StorageCacheSize %q: %w", sizeStr, err)
+				}
+				cfg.MaxSize = size
+			}
+			if cfg.JitterPercent < 0 || cfg.JitterPercent > 100 {
+				return fmt.Errorf("Origin.StorageCacheRevalidationJitter must be a percentage between 0 and 100, got %d", cfg.JitterPercent)
+			}
+			if cfg.DefaultMaxAge < 0 {
+				return fmt.Errorf("Origin.StorageCacheDefaultMaxAge must not be negative, got %s", cfg.DefaultMaxAge)
+			}
+			if cfg.MaxConcurrentFetches <= 0 {
+				return fmt.Errorf("Origin.StorageCacheMaxConcurrentFetches must be positive, got %d", cfg.MaxConcurrentFetches)
+			}
+			var err error
+			if storageCacheMgr, err = newStorageCache(ctx, egrp, cfg); err != nil {
+				return err
+			}
+			log.Infof("Origin storage cache enabled at %s (up to %d concurrent fetches)", loc, cfg.MaxConcurrentFetches)
+		default:
+			log.Warningf("Origin.StorageCacheLocation is set but storage type %q does not support the origin storage cache; ignoring it", storageType)
+		}
+	}
 
 	for _, export := range exports {
 		var backend server_utils.OriginBackend
@@ -1110,6 +1167,23 @@ func InitializeHandlers(ctx context.Context, exports []server_utils.OriginExport
 			backend = newLocalBackend(fs, export.StoragePrefix)
 		}
 
+		// Interpose the storage cache between the handler and the backend.
+		// The backend identity folded into the cache scope covers everything
+		// that changes which bytes a given object path resolves to, so
+		// repointing an export at other storage cannot serve entries cached
+		// from the previous one.
+		if storageCacheMgr != nil {
+			backendID := fmt.Sprintf("%s\x00%s\x00%s\x00%s", storageType, export.StoragePrefix,
+				param.Origin_S3ServiceUrl.GetString()+param.Origin_HttpServiceUrl.GetString(),
+				export.S3Bucket+export.GlobusCollectionID)
+			layer, err := storageCacheMgr.newLayer(export.FederationPrefix, backendID, backend.FileSystem())
+			if err != nil {
+				return err
+			}
+			backend = newCachedBackend(backend, layer)
+			log.Infof("Storage cache layered over backend for %s", export.FederationPrefix)
+		}
+
 		// Create a WebDAV handler
 		handler := &webdav.Handler{
 			FileSystem: backend.FileSystem(),
@@ -1202,6 +1276,9 @@ func exportRequestHandler(backend server_utils.OriginBackend, handler *webdav.Ha
 		// X-Pelican-Timeout) in the request context so backends
 		// that forward requests can propagate them.
 		modifiedReq = server_utils.StashPelicanHeaders(modifiedReq)
+
+		// Tell the storage cache, if any, which bytes a read wants.
+		modifiedReq = withReadHint(modifiedReq)
 
 		// For PUT requests, pass the Content-Length as a size hint
 		// so the blob backend can optimize upload part sizes.

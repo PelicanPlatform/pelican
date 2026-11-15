@@ -128,8 +128,11 @@ func checkPutPreconditions(c *gin.Context, backend server_utils.OriginBackend, r
 // expose an object's generation) and falls back to the same size-and-mtime
 // formula the WebDAV handler would use, so the value a client compares against
 // is the one it was given.
+//
+// It asks the storage itself, beneath any storage cache: a cached copy may be
+// older than the object a write would replace.
 func currentEntityTag(ctx context.Context, backend server_utils.OriginBackend, relativePath string) (string, bool, error) {
-	info, err := backend.FileSystem().Stat(ctx, relativePath)
+	info, err := uncachedBackend(backend).FileSystem().Stat(ctx, relativePath)
 	if err != nil {
 		if os.IsNotExist(err) {
 			return "", false, nil
