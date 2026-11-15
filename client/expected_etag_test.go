@@ -307,3 +307,29 @@ func TestExpectedETagRefusedWhereItDoesNothing(t *testing.T) {
 	_, err = tc.NewTransferJob(ctx, remote(""), t.TempDir(), false, false, opt)
 	assert.NotErrorIs(t, err, errExpectedETagNotApplicable, "single-object download")
 }
+
+// TestTransferJobInheritsClientOptions: a transfer job starts from its
+// client's options, so one given only to NewClient -- here an expected
+// entity tag, which only a job reads -- still reaches the job.  Downloads
+// used to lose such options: their callers gave them to NewClient alone,
+// so DoGet ignored WithByteRange and object get ignored --inplace.
+func TestTransferJobInheritsClientOptions(t *testing.T) {
+	test_utils.InitClient(t, map[param.Param]any{})
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	te, err := NewTransferEngine(ctx)
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, te.Shutdown()) })
+	tc, err := te.NewClient(WithExpectedETag(`"v1"`))
+	require.NoError(t, err)
+
+	down := httptest.NewServer(http.NotFoundHandler())
+	host := down.Listener.Addr().String()
+	down.Close()
+	remote := &url.URL{Scheme: "pelican", Host: host, Path: "/test/object"}
+
+	_, err = tc.NewTransferJob(ctx, remote, t.TempDir(), true, false)
+	assert.ErrorIs(t, err, errExpectedETagNotApplicable, "upload")
+	_, err = tc.NewTransferJob(ctx, remote, t.TempDir(), false, true)
+	assert.ErrorIs(t, err, errExpectedETagNotApplicable, "recursive download")
+}
