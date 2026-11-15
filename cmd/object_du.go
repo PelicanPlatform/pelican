@@ -276,7 +276,19 @@ func (a *duAccumulator) observe(info client.FileInfo) {
 	a.observed = true
 	// Normalize to an absolute, //-free path so ancestor math is stable
 	// regardless of how the origin formats entries.
-	p := normalizeEntryPath(info.Name)
+	// EscapedPath, not Name: the root is normalizeCollectionPath over the
+	// user's argument, which it takes verbatim, so it carries whatever
+	// escaping the user typed.  The escaped spelling is the one that
+	// matches for an argument written as a proper URL; the decoded one
+	// matches nothing, because an entry would stop being a descendant of
+	// its own root.
+	//
+	// A root the user typed with raw reserved characters (url.Parse allows
+	// a bare space) still will not match, since normalizeCollectionPath
+	// never escapes it.  That predates the split and is not addressed
+	// here; fixing it means normalizing the root through the same escaper,
+	// which changes how du reports paths.
+	p := normalizeEntryPath(info.EscapedPath)
 	if info.IsCollection {
 		a.ensure(p)
 		// Every enclosing collection (up through the root) gains one toward

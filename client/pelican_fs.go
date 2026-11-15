@@ -735,8 +735,13 @@ func (pf *PelicanFile) ReadDir(n int) ([]fs.DirEntry, error) {
 		// Convert FileInfo to DirEntry
 		pf.dirEntries = make([]fs.DirEntry, 0, len(fileInfos))
 		for _, fi := range fileInfos {
+			// EscapedPath, not Name: io/fs requires that a name ReadDir
+			// returns be one Open accepts, and openFile parses what it is
+			// given as a URL.  A decoded "a#b.txt" would parse into a
+			// different object with a fragment, and "a%zz.txt" would not
+			// parse at all.
 			pf.dirEntries = append(pf.dirEntries, &pelicanDirEntry{
-				name:  path.Base(fi.Name),
+				name:  path.Base(fi.EscapedPath),
 				isDir: fi.IsCollection,
 				size:  fi.Size,
 				mtime: fi.ModTime,

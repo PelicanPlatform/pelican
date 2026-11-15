@@ -150,7 +150,10 @@ type StatRequest struct {
 
 // StatResponse represents file stat information
 type StatResponse struct {
+	// Name is the decoded path; EscapedPath is the addressable spelling.
+	// See ListItem for why both are sent.
 	Name         string            `json:"name"`
+	EscapedPath  string            `json:"escaped_path"`
 	Size         int64             `json:"size"`
 	IsCollection bool              `json:"is_collection"`
 	ModTime      time.Time         `json:"mod_time"`
@@ -165,7 +168,12 @@ type ListRequest struct {
 
 // ListItem represents an item in a directory listing
 type ListItem struct {
+	// Name is the decoded path, for display.  EscapedPath is the same
+	// path in the form to hand back to this API -- callers are out of
+	// process and have no other way to recover it, since a decoded name
+	// holding '%' or '#' will not parse back into the same object.
 	Name         string    `json:"name"`
+	EscapedPath  string    `json:"escaped_path"`
 	Size         int64     `json:"size"`
 	IsCollection bool      `json:"is_collection"`
 	ModTime      time.Time `json:"mod_time"`

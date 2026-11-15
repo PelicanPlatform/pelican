@@ -6394,6 +6394,29 @@ func classifyReadDirErr(cli *gowebdav.Client, remotePath string, err error) (fs.
 	return nil, errors.Wrap(err, "failed to read remote collection")
 }
 
+// escapeNamespacePath renders a decoded namespace path in the form a URL
+// needs, by handing it to net/url and asking what the path looks like.
+//
+// It replaces url.JoinPath, which was wrong here twice over.  JoinPath
+// escapes what it is given, so joining an already-decoded name produced a
+// path no client would take back; and it returns an error for a name
+// holding an invalid escape such as "a%zz.txt", which the old code
+// discarded, so those objects were emitted with an empty name and vanished
+// from the listing.  Setting Path and reading EscapedPath cannot fail, so
+// there is no error left to drop.
+//
+// Escaping each segment with url.PathEscape instead looks equivalent and is
+// not: PathEscape encodes a path *segment*, where ';' and ',' are reserved,
+// while a path may carry both literally.  That one-character difference is
+// enough to matter, because the escaped form is compared against paths
+// spelled by other code -- the stat path reads EscapedPath off a *url.URL,
+// and `object du` derives its root from the user's own argument.  Going
+// through url.URL here keeps every such spelling identical by construction
+// rather than by agreement.
+func escapeNamespacePath(p string) string {
+	return (&url.URL{Path: p}).EscapedPath()
+}
+
 // listHttpFlatEmit performs the non-recursive listing at remotePath. It reads
 // the immediate children (or, if remotePath is a plain object, emits a single
 // entry for it) via emit.
@@ -6410,6 +6433,7 @@ func listHttpFlatEmit(client *gowebdav.Client, remotePath string, emit func(File
 			// The path is a plain object, not a collection; emit it once.
 			return emit(FileInfo{
 				Name:         remotePath,
+				EscapedPath:  escapeNamespacePath(remotePath),
 				Size:         statInfo.Size(),
 				ModTime:      statInfo.ModTime(),
 				IsCollection: false,
@@ -6419,7 +6443,7 @@ func listHttpFlatEmit(client *gowebdav.Client, remotePath string, emit func(File
 		// whether to skip or abort. For the flat listing the "subtree" is the
 		// entire request, so SkipSubtree and a plain nil return both mean
 		// "done here"; only SkipAll and real errors matter as distinct outputs.
-		emitErr := emit(FileInfo{Name: remotePath, IsCollection: true}, classified)
+		emitErr := emit(FileInfo{Name: remotePath, EscapedPath: escapeNamespacePath(remotePath), IsCollection: true}, classified)
 		if emitErr == nil || errors.Is(emitErr, SkipSubtree) {
 			return nil
 		}
@@ -6427,9 +6451,10 @@ func listHttpFlatEmit(client *gowebdav.Client, remotePath string, emit func(File
 	}
 
 	for _, info := range infos {
-		jPath, _ := url.JoinPath(remotePath, info.Name())
+		entryPath := path.Join(remotePath, info.Name())
 		emitErr := emit(FileInfo{
-			Name:         jPath,
+			Name:         entryPath,
+			EscapedPath:  escapeNamespacePath(entryPath),
 			Size:         info.Size(),
 			ModTime:      info.ModTime(),
 			IsCollection: info.IsDir(),
@@ -6467,6 +6492,7 @@ func listHttpRecursiveEmit(client *gowebdav.Client, remotePath string, currentDe
 		if classified == nil && statInfo != nil {
 			return emit(FileInfo{
 				Name:         remotePath,
+				EscapedPath:  escapeNamespacePath(remotePath),
 				Size:         statInfo.Size(),
 				ModTime:      statInfo.ModTime(),
 				IsCollection: false,
@@ -6476,7 +6502,7 @@ func listHttpRecursiveEmit(client *gowebdav.Client, remotePath string, currentDe
 		// unwinds this level cleanly (there's no subtree left to walk); any
 		// other error, including SkipAll, propagates so the outer walk can
 		// react.
-		emitErr := emit(FileInfo{Name: remotePath, IsCollection: true}, classified)
+		emitErr := emit(FileInfo{Name: remotePath, EscapedPath: escapeNamespacePath(remotePath), IsCollection: true}, classified)
 		if emitErr == nil || errors.Is(emitErr, SkipSubtree) {
 			return nil
 		}
@@ -6484,9 +6510,10 @@ func listHttpRecursiveEmit(client *gowebdav.Client, remotePath string, currentDe
 	}
 
 	for _, info := range infos {
-		jPath, _ := url.JoinPath(remotePath, info.Name())
+		entryPath := path.Join(remotePath, info.Name())
 		fi := FileInfo{
-			Name:         jPath,
+			Name:         entryPath,
+			EscapedPath:  escapeNamespacePath(entryPath),
 			Size:         info.Size(),
 			ModTime:      info.ModTime(),
 			IsCollection: info.IsDir(),
@@ -6504,7 +6531,10 @@ func listHttpRecursiveEmit(client *gowebdav.Client, remotePath string, currentDe
 		// Recurse into subcollections. maxDepth < 0 means unlimited; otherwise
 		// only descend when the next level would still be within budget.
 		if info.IsDir() && (maxDepth < 0 || currentDepth+1 < maxDepth) {
-			if err := listHttpRecursiveEmit(client, jPath, currentDepth+1, maxDepth, emit); err != nil {
+			// entryPath, not the escaped form: gowebdav escapes what it is
+			// given, so handing it an already-escaped path double-encodes
+			// and the origin answers 404.
+			if err := listHttpRecursiveEmit(client, entryPath, currentDepth+1, maxDepth, emit); err != nil {
 				// SkipAll aborts every enclosing loop up to Walk; SkipSubtree
 				// at the child level doesn't reach us (it's consumed there),
 				// so anything non-nil here is a real error or SkipAll.
@@ -6921,6 +6951,7 @@ func statHttpImpl(ctx context.Context, dest *pelican_url.PelicanURL, dirResp ser
 
 			resultsChan <- statResults{FileInfo{
 				Name:         endpoint.Path,
+				EscapedPath:  escapeNamespacePath(endpoint.Path),
 				Size:         info.Size,
 				IsCollection: info.IsCollection,
 				ModTime:      info.ModTime,
@@ -6974,7 +7005,9 @@ func statHttpImpl(ctx context.Context, dest *pelican_url.PelicanURL, dirResp ser
 	// which is how the cache came to store a listing as the object.
 	if !success && sawConflict {
 		success = true
-		info = FileInfo{Name: dest.Path, IsCollection: true}
+		// pelican_url.PelicanURL keeps only the decoded path, so the escaped
+		// form is rebuilt rather than read off the URL.
+		info = FileInfo{Name: dest.Path, EscapedPath: escapeNamespacePath(dest.Path), IsCollection: true}
 	}
 	if success {
 		err = nil
