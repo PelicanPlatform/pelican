@@ -43,6 +43,9 @@ var namesWorthEscaping = []string{
 	"plus+sign.txt",
 	"amp&eq=1.txt",
 	"semi;colon.txt",
+	"comma,name.txt",
+	"at@sign.txt",
+	"colon:name.txt",
 	"star*name.txt",
 	"quote'single.txt",
 	"brack[et].txt",
@@ -110,5 +113,22 @@ func TestEscapedPathBaseIsStillAddressable(t *testing.T) {
 			"base of %q reaches the wrong object", name)
 		assert.Empty(t, parsed.Fragment, "%q leaked a fragment", name)
 		assert.Empty(t, parsed.RawQuery, "%q leaked a query", name)
+	}
+}
+
+// TestEscapeNamespacePathMatchesURLEscaping pins the property that the
+// listing's escaped spelling is the SAME one every other part of the client
+// produces -- the stat path builds it off a *url.URL, and a caller comparing
+// a DoStat result against a DoList result has to see one string, not two.
+//
+// This is the regression guard for escaping per segment with url.PathEscape,
+// which looks equivalent and is not: PathEscape encodes a path *segment*,
+// where ';' and ',' are reserved, so it renders "semi;colon.txt" as
+// "semi%3Bcolon.txt" while a URL path carries the ';' literally.
+func TestEscapeNamespacePathMatchesURLEscaping(t *testing.T) {
+	for _, name := range namesWorthEscaping {
+		decoded := "/my-namespace/" + name
+		assert.Equal(t, (&url.URL{Path: decoded}).EscapedPath(), escapeNamespacePath(decoded),
+			"listing and stat disagree on how to spell %q", name)
 	}
 }

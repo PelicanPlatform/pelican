@@ -6365,22 +6365,26 @@ func classifyReadDirErr(cli *gowebdav.Client, remotePath string, err error) (fs.
 }
 
 // escapeNamespacePath renders a decoded namespace path in the form a URL
-// needs, one segment at a time so the separators survive -- url.PathEscape
-// would escape them too.
+// needs, by handing it to net/url and asking what the path looks like.
 //
 // It replaces url.JoinPath, which was wrong here twice over.  JoinPath
 // escapes what it is given, so joining an already-decoded name produced a
 // path no client would take back; and it returns an error for a name
 // holding an invalid escape such as "a%zz.txt", which the old code
 // discarded, so those objects were emitted with an empty name and vanished
-// from the listing.  Escaping a segment cannot fail, so there is no error
-// left to drop.
+// from the listing.  Setting Path and reading EscapedPath cannot fail, so
+// there is no error left to drop.
+//
+// Escaping each segment with url.PathEscape instead looks equivalent and is
+// not: PathEscape encodes a path *segment*, where ';' and ',' are reserved,
+// while a path may carry both literally.  That one-character difference is
+// enough to matter, because the escaped form is compared against paths
+// spelled by other code -- the stat path reads EscapedPath off a *url.URL,
+// and `object du` derives its root from the user's own argument.  Going
+// through url.URL here keeps every such spelling identical by construction
+// rather than by agreement.
 func escapeNamespacePath(p string) string {
-	segments := strings.Split(p, "/")
-	for i, segment := range segments {
-		segments[i] = url.PathEscape(segment)
-	}
-	return strings.Join(segments, "/")
+	return (&url.URL{Path: p}).EscapedPath()
 }
 
 // listHttpFlatEmit performs the non-recursive listing at remotePath. It reads
@@ -6917,7 +6921,7 @@ func statHttpImpl(ctx context.Context, dest *pelican_url.PelicanURL, dirResp ser
 
 			resultsChan <- statResults{FileInfo{
 				Name:         endpoint.Path,
-				EscapedPath:  endpoint.EscapedPath(),
+				EscapedPath:  escapeNamespacePath(endpoint.Path),
 				Size:         info.Size,
 				IsCollection: info.IsCollection,
 				ModTime:      info.ModTime,
