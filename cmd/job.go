@@ -29,7 +29,11 @@ var (
 		Use:   "job",
 		Short: "Manage asynchronous transfer jobs",
 		Long: `Manage asynchronous transfer jobs created with the --async flag.
-Jobs can contain one or more file transfers and can be monitored, listed, and cancelled.`,
+Jobs can contain one or more file transfers and can be monitored, listed, and cancelled.
+
+These jobs run locally, in this machine's client agent.  Jobs submitted to a
+remote transfer server with "pelican object copy --transfer-server" are a
+different set, managed with "pelican transfer job".`,
 		SilenceUsage: true,
 	}
 )

@@ -314,7 +314,12 @@ func handleGetTransferJob(db *gorm.DB, tm *client_agent.TransferManager) gin.Han
 			CompletedAt:        job.CompletedAt,
 			SourceCredentialID: derefStringPtr(dbJob.SourceCredentialID),
 			DestCredentialID:   derefStringPtr(dbJob.DestCredentialID),
-			Error:              errorToString(job.Error),
+			// The job is still in memory, so its byte counts are real and
+			// may legitimately be zero. The evicted branch above leaves
+			// Progress nil instead, which is how a reader tells "no bytes
+			// yet" from "no longer knowable".
+			Progress: tm.GetJobProgress(job),
+			Error:    errorToString(job.Error),
 		})
 	}
 }
@@ -368,8 +373,10 @@ func handleListTransferJobs(db *gorm.DB, tm *client_agent.TransferManager) gin.H
 			// Prefer live status from the transfer manager; fall back to
 			// metadata-derived status for evicted jobs.
 			jobStatus := deriveJobStatus(job)
+			var progress *client_agent.JobProgress
 			if liveJob, err := tm.GetJob(job.ID); err == nil {
 				jobStatus = liveJob.Status
+				progress = tm.GetJobProgress(liveJob)
 			}
 
 			// If the caller filtered by status, skip non-matching jobs.
@@ -384,6 +391,7 @@ func handleListTransferJobs(db *gorm.DB, tm *client_agent.TransferManager) gin.H
 				CompletedAt:        job.CompletedAt,
 				SourceCredentialID: derefStringPtr(job.SourceCredentialID),
 				DestCredentialID:   derefStringPtr(job.DestCredentialID),
+				Progress:           progress,
 				Error:              job.Error,
 			})
 		}

@@ -2862,9 +2862,43 @@ definitions:
         type: string
       dest_credential_id:
         type: string
+      progress:
+        $ref: "#/definitions/TransferJobProgress"
       error:
         type: string
         description: Error message if the job failed
+
+  TransferJobProgress:
+    type: object
+    description: >
+      Live byte and transfer counts for a job, aggregated across its transfers.
+      Omitted entirely when the job is no longer held in the transfer manager's
+      memory and its status was reconstructed from the durable record, which
+      carries no byte counts: an absent object means the counts are unknowable,
+      whereas a present object with bytes_transferred 0 means no bytes have
+      moved yet.
+    properties:
+      bytes_transferred:
+        type: integer
+        format: int64
+      total_bytes:
+        type: integer
+        format: int64
+        description: >
+          Total size of the job's transfers, or 0 when the sizes are not known
+          (for example before the sources have been stat'ed).
+      percentage:
+        type: number
+        format: double
+      transfer_rate_mbps:
+        type: number
+        format: double
+      transfers_completed:
+        type: integer
+      transfers_total:
+        type: integer
+      transfers_failed:
+        type: integer
 
   TransferJobListResponse:
     type: object
