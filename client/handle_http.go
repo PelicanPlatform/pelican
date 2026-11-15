@@ -3508,14 +3508,39 @@ func sortAttempts(ctx context.Context, path string, attempts []transferAttemptDe
 	// 0 -> pending.
 	// -1 -> error.
 	finished := make(map[int]int)
+	// The first collection verdict and who gave it, so a later contradiction
+	// can name both sides of the disagreement. These only drive the log line;
+	// the verdict acted on is collection.isCollection.
+	answeredBy := -1
+	firstVerdict := false
+	warnedDisagreement := false
 	for ctr := 0; ctr != len(attempts); ctr++ {
 		result := <-headChan
 		// Recorded before the health check below, because the two are
 		// independent: any endpoint that answered the question answers it for
 		// the object as a whole -- they are all describing the same path --
 		// even if that same endpoint turned out not to be usable.
+		//
+		// Whether a path is a collection is a property of the path, so two
+		// endpoints that disagree are not a question to resolve by vote: one
+		// of them is wrong -- stale, or serving something it should not -- and
+		// nothing here can tell which. The merge below still takes the
+		// collection reading, because of what the two mistakes cost: refusing
+		// an object the caller can retry with --recursive, against saving a
+		// directory listing as though it were their file.
 		if result.answeredCollection {
-			collection.answered = true
+			if !collection.answered {
+				collection.answered = true
+				firstVerdict = result.isCollection
+				answeredBy = result.idx
+			} else if firstVerdict != result.isCollection && !warnedDisagreement {
+				warnedDisagreement = true
+				log.Warningf("Object servers disagree about whether %s is a collection: %s says %s, %s says %s. "+
+					"One of them is wrong; refusing the download is the safer reading.",
+					path,
+					attempts[answeredBy].Url.Host, collectionWord(firstVerdict),
+					attempts[result.idx].Url.Host, collectionWord(result.isCollection))
+			}
 			if result.isCollection {
 				collection.isCollection = true
 			}
@@ -3546,6 +3571,11 @@ func sortAttempts(ctx context.Context, path string, attempts []transferAttemptDe
 			// but not while the collection question is still open: the caller
 			// refuses the download if nobody answers it, so silencing the
 			// endpoints that might have is how a good download gets refused.
+			// Note this closes on any answer, including "not a collection",
+			// so an index-0 endpoint that answers first can still cut off an
+			// endpoint that would have called the path a collection. Closing
+			// that window means waiting for every endpoint on every download;
+			// see the discussion on #3964.
 			if result.idx == 0 && result.err == nil && (!wantCollectionInfo || collection.answered) {
 				cancel()
 				// If the first responds successfully, we want to return immediately instead of giving
@@ -7121,6 +7151,14 @@ func probeToken(token *tokenGenerator, fedToken TokenProvider) *tokenGenerator {
 // collection. `answered` is separate from `isCollection` because not knowing is
 // not the same as knowing it is an object: a caller that refuses collections
 // refuses on either, rather than downloading something it cannot describe.
+// collectionWord renders a collection verdict for a log line.
+func collectionWord(isCollection bool) string {
+	if isCollection {
+		return "collection"
+	}
+	return "object"
+}
+
 type collectionAnswer struct {
 	answered     bool
 	isCollection bool

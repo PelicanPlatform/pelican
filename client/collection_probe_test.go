@@ -352,27 +352,45 @@ func TestCollectionProbeRangeNotSatisfiable(t *testing.T) {
 	assert.True(t, collection.isCollection)
 }
 
-// TestCollectionProbeMixedAnswersRefuseWins: when two endpoints both answer and
-// they disagree, the merged answer is "collection" -- the reading that refuses
-// the download.
+// TestCollectionProbeMixedAnswersRefuseWins: when two endpoints both answer
+// and they disagree, the merged answer is "collection" -- the reading that
+// refuses the download -- and the disagreement is logged, because one of the
+// endpoints is wrong and wants fixing.
 //
-// The object endpoint's probe is gated on the collection endpoint having
-// already answered.  Without the gate, an endpoint at index 0 that succeeds
-// cancels the remaining probes, and the test would race on whether the second
-// answer was ever heard.  The gate is a channel, not a sleep.
+// Both answers have to be heard for the merge to be exercised at all, and an
+// endpoint at index 0 that answers cancels the rest. So the endpoint at index
+// 1 answers first, and index 0 waits for it: a channel, not a sleep, so the
+// ordering is forced rather than hoped for.
+//
+// The endpoint that calls the path a collection is the one at index 0, which
+// is what keeps the gate honest. The gate decides which answers are heard, not
+// what the merge does with them -- had index 0 answered first instead, its own
+// verdict is already the one asserted, so the assertion cannot be an artifact
+// of the ordering the gate imposes.
+//
+// This test used to gate the other way round, with the refusing endpoint at
+// index 1. That hid the ordering this cannot cover: an index-0 endpoint
+// answering "not a collection" first cancels an endpoint that would have
+// refused. That window is real and is tracked in #3964; it is not something to
+// paper over with a gate here.
 func TestCollectionProbeMixedAnswersRefuseWins(t *testing.T) {
 	t.Cleanup(test_utils.SetupTestLogging(t))
 	ctx, cancel, _ := test_utils.TestContext(context.Background(), t)
 	defer cancel()
 
-	collectionAnswered := make(chan struct{})
+	objectAnswered := make(chan struct{})
 	var once sync.Once
 
+	// Index 0 calls the path a collection, and holds its answer until the
+	// other endpoint has given one, so that both are heard.
 	_, collectionUrl, _ := newProbeServer(t, func(w http.ResponseWriter, r *http.Request) {
 		switch r.Method {
 		case "PROPFIND":
+			select {
+			case <-objectAnswered:
+			case <-ctx.Done():
+			}
 			writeMultistatus(t, w, "/path", true, 0)
-			once.Do(func() { close(collectionAnswered) })
 		case http.MethodGet:
 			w.WriteHeader(http.StatusOK)
 		default:
@@ -380,22 +398,20 @@ func TestCollectionProbeMixedAnswersRefuseWins(t *testing.T) {
 		}
 	})
 
+	// Index 1 calls it an object and answers straight away.
 	_, objectUrl, _ := newProbeServer(t, func(w http.ResponseWriter, r *http.Request) {
 		switch r.Method {
 		case "PROPFIND":
 			writeMultistatus(t, w, "/path", false, 99)
+			once.Do(func() { close(objectAnswered) })
 		case http.MethodGet:
-			select {
-			case <-collectionAnswered:
-			case <-ctx.Done():
-			}
 			w.WriteHeader(http.StatusOK)
 		default:
 			w.WriteHeader(http.StatusMethodNotAllowed)
 		}
 	})
 
-	attempts := []transferAttemptDetails{{Url: objectUrl}, {Url: collectionUrl}}
+	attempts := []transferAttemptDetails{{Url: collectionUrl}, {Url: objectUrl}}
 	_, collection, results := sortAttempts(ctx, "/path", attempts, probeTestToken(), true)
 
 	require.Len(t, results, 2)

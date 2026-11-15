@@ -1,0 +1,92 @@
+import { Callout } from 'nextra/components'
+
+# Running a Transfer Server
+
+A transfer server accepts transfer jobs from authenticated users, stores the storage credentials those jobs need, and runs the transfers server-side.
+It is what backs the `--transfer-server` and `--dest-origin` flags described in "[Using a Transfer Server](../../getting-data-with-pelican/transfer-server)".
+
+There are two ways to run one.
+
+## Embedded in an origin
+
+Set `Origin.EnableTransferAPI` on the origin:
+
+```yaml filename="/etc/pelican/pelican.yaml"
+Origin:
+  EnableTransferAPI: true
+```
+
+An origin-embedded transfer server is **confined to the origin's own namespaces**: every submitted transfer must have its source or its destination under one of the prefixes this origin exports.
+It therefore cannot be used as a general-purpose transfer service for unrelated namespaces.
+
+This is the mode `pelican object copy --dest-origin` discovers.
+
+## Standalone
+
+Run the transfer module on its own:
+
+```bash copy
+pelican-server serve --module transfer
+```
+
+A standalone transfer server will run any transfer it can reach.
+Restrict who may use it with `Transfer.EnabledGroups`, and read the note on group gating below before relying on it.
+
+## Configuration
+
+| Parameter                        | Default | Effect                                                                            |
+| -------------------------------- | ------- | --------------------------------------------------------------------------------- |
+| `Origin.EnableTransferAPI`       | `false` | Serve the transfer API from an origin, confined to that origin's exports.         |
+| `Transfer.MaxConcurrentJobs`     | `5`     | How many jobs run at once. `0` or negative restores the default.                  |
+| `Transfer.CredentialIdleTimeout` | `168h`  | Delete stored credentials idle this long. `0` disables cleanup.                   |
+| `Transfer.EnabledGroups`         | empty   | Restrict access to members of these groups. Empty means any authenticated user with the `pelican.transfer` scope. |
+| `Transfer.EnableOAuth2Clients`   | `false` | Allow registering external issuers' OAuth2 clients. Required for token exchange and authorization-code credential bootstrap. |
+
+A credential that has never been used is aged from when it was created, so `Transfer.CredentialIdleTimeout` also reaps credentials that were stored and then abandoned.
+
+## Credential handling
+
+Users do not send storage tokens with each job.
+They store a credential once, and the server uses it when the transfer runs, so a job can sit in a queue and still start with a usable token.
+
+All secrets and tokens are encrypted in the database.
+The API never returns them: a user can list a credential's name, issuer, and scopes, but cannot read the token back.
+
+Credentials belong to the user who stored them, and are removed if that user is deleted.
+
+## Registering OAuth2 clients
+
+For the server to obtain credentials *on a user's behalf*, it needs a confidential OAuth2 client registered with each external issuer it will talk to.
+This is off by default; set `Transfer.EnableOAuth2Clients` to enable the registry, then register the issuer's client:
+
+```bash copy
+pelican-server transfer oauth-client add --server https://transfer.example.com:8447 \
+	--name example-issuer \
+	--issuer-url https://issuer.example.com \
+	--client-id <id> --client-secret-file /path/to/secret \
+	--grant-types "authorization_code,urn:ietf:params:oauth:grant-type:token-exchange"
+```
+
+`--grant-types` is the part that decides what the client can do: the server picks a registered client by the grant the flow needs, so a client registered for only one grant serves only that flow.
+Give `authorization_code` for the browser flow, `urn:ietf:params:oauth:grant-type:token-exchange` for the RFC 8693 exchange, or both.
+
+`--scopes` is optional and narrows which requests the client is chosen for; a client registered without it is eligible for any scope, as a fallback.
+
+With a client registered, the server advertises the matching bootstrap methods to clients and can complete the exchange itself.
+Without one, users can still store tokens they obtain by other means.
+
+<Callout type="warning">
+Registering a client lets this server's users obtain credentials at that issuer, through the flows it is registered for and within the scopes that issuer grants it.
+Register clients only for issuers whose credentials you intend this server's users to be able to obtain, and protect the client secret as you would any other.
+</Callout>
+
+## Operational notes
+
+**Group gating applies to browser sessions only.**
+`Transfer.EnabledGroups` is checked for cookie-authenticated (web UI) sessions.
+A bearer token presented to the API is not re-checked against the group list, and the API accepts tokens from more than one issuer.
+If group confinement has to hold for programmatic access as well, do not have those issuers mint the `pelican.transfer` scope broadly.
+
+**Two separate kinds of authorization.**
+A `pelican.transfer` token authorizes use of the API and conveys no storage rights; storage rights live only in the stored credentials.
+Granting someone API access therefore does not grant them any data access, and revoking their credentials does not lock them out of the API.
