@@ -39,30 +39,40 @@
         "type": "prometheus",
         "uid": "<YOUR-DATA-SOURCE-UID>"
       },
-      "description": "1: Critical\n2: Warning\n3: OK\n4: Unknown\n\n\"web-ui\":       Web interface\n\"xrootd\"*:      XRootD process\n\"cmsd\"*:        CMSD process\n\"federation\"*:  Advertisement to central service\n\"director\"*:    File transfer test (health test) with the director\n\"topology\":     Data fetch from Topology server\n*: only available at origin and cache servers",
+      "description": "1: Shutting Down\n2: Critical\n3: Degraded\n4: Warning\n5: OK\n6: Unknown\n\n\"web-ui\":       Web interface\n\"xrootd\"*:      XRootD process\n\"cmsd\"*:        CMSD process\n\"federation\"*:  Advertisement to central service\n\"director\"*:    File transfer test (health test) with the director\n\"topology\":     Data fetch from Topology server\n*: only available at origin and cache servers",
       "fieldConfig": {
         "defaults": {
           "mappings": [
             {
               "options": {
                 "1": {
-                  "color": "dark-red",
+                  "color": "dark-purple",
                   "index": 0,
+                  "text": "Shutting Down"
+                }
+                "2": {
+                  "color": "dark-red",
+                  "index": 1,
                   "text": "Critical"
                 },
-                "2": {
-                  "color": "dark-orange",
-                  "index": 1,
-                  "text": "Warning"
-                },
                 "3": {
-                  "color": "dark-green",
+                  "color": "dark-orange",
                   "index": 2,
-                  "text": "OK"
+                  "text": "Degraded"
                 },
                 "4": {
-                  "color": "dark-purple",
+                  "color": "dark-yellow",
                   "index": 3,
+                  "text": "Warning"
+                },
+                "5": {
+                  "color": "dark-green",
+                  "index": 4,
+                  "text": "OK"
+                },
+                "6": {
+                  "color": "dark-purple",
+                  "index": 5,
                   "text": "Unknown"
                 }
               },
