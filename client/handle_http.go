@@ -435,6 +435,9 @@ type (
 		results           chan *TransferResults
 		finalResults      chan TransferResults
 		setupResults      sync.Once
+
+		// The client's options, which each of its transfer jobs starts from.
+		options []TransferOption
 	}
 
 	TransferOption                              = option.Interface
@@ -1737,6 +1740,9 @@ func WithRejectCollections(reject bool) TransferOption {
 }
 
 // Create a new client to work with an engine
+//
+// The options apply to every transfer job the client creates, as if each
+// job had been given them first; a job's own options override them.
 func (te *TransferEngine) NewClient(options ...TransferOption) (client *TransferClient, err error) {
 	log.Debugln("Making new clients")
 	id, err := uuid.NewV7()
@@ -1749,6 +1755,7 @@ func (te *TransferEngine) NewClient(options ...TransferOption) (client *Transfer
 		id:      id,
 		results: make(chan *TransferResults),
 		work:    make(chan *TransferJob),
+		options: slices.Clone(options),
 	}
 	client.ctx, client.cancel = context.WithCancel(te.ctx)
 
@@ -2167,6 +2174,12 @@ func uploadTokenOperation() config.TokenOperation {
 // The returned object can be further customized as desired.
 // This function does not "submit" the job for execution.
 func (tc *TransferClient) NewTransferJob(ctx context.Context, remoteUrl *url.URL, localPath string, upload bool, recursive bool, options ...TransferOption) (tj *TransferJob, err error) {
+	// The client's options come first, so that the job's own override them.
+	// Much of what a job reads -- a byte range, in-place writing, checksum
+	// choices, non-interactive token acquisition -- NewClient does not, so
+	// this is what lets a caller give them to NewClient alone.
+	options = append(slices.Clone(tc.options), options...)
+
 	// Checked before anything else, so the refusal costs no discovery or
 	// director round trip.  A recursive download may also be asked for
 	// with the ?recursive query, which the parsed URL keeps.
@@ -4092,6 +4105,22 @@ func downloadObject(transfer *transferFile) (transferResults TransferResults, er
 
 	transferResults.TransferStartTime = transferStartTime
 	transferResults.TransferredBytes = downloaded
+
+	// The file was created empty for this transfer, so it must now hold
+	// exactly what all the attempts received.  Each attempt checks only the
+	// bytes it added; this also catches bytes an attempt wrote but did not
+	// count, which the next attempt's resume would leave inside the file.
+	var sizeErr error
+	if success {
+		sizeErr = verifyFileSize(writeDestination, downloaded, log.Fields{
+			"url": transfer.remoteURL.String(),
+			"job": transfer.job.ID(),
+		})
+		if sizeErr != nil {
+			success = false
+			sizeErr = errors.Wrapf(sizeErr, "failed to verify size of downloaded file (%s) on disk", writeDestination)
+		}
+	}
 	if success {
 		// Clear any previous errors (e.g., from failed prestage attempts)
 		transferResults.Error = nil
@@ -4185,6 +4214,8 @@ func downloadObject(transfer *transferFile) (transferResults TransferResults, er
 				transferResults.Error = verifyErr
 			}
 		}
+	} else if sizeErr != nil {
+		transferResults.Error = sizeErr
 	} else {
 		transferResults.Error = xferErrors
 	}
@@ -4382,6 +4413,19 @@ func parseDigestHeader(header http.Header, fields log.Fields) (result []Checksum
 	return
 }
 
+// regularFileSize is the size of the regular file at path, or 0 when there
+// is none: no path, nothing there yet, or something verifyFileSize skips.
+func regularFileSize(path string) int64 {
+	if path == "" || path == os.DevNull {
+		return 0
+	}
+	fi, err := os.Stat(path)
+	if err != nil || !fi.Mode().IsRegular() {
+		return 0
+	}
+	return fi.Size()
+}
+
 // Verify that a file on disk matches the expected size. We ignore directories
 // and generic stat failures unless the file doesn't exist.
 func verifyFileSize(dest string, expectedSize int64, fields log.Fields) error {
@@ -4547,6 +4591,12 @@ func downloadHTTP(ctx context.Context, te *TransferEngine, callback TransferCall
 
 	// Negative cache age indicates no Age response header was received
 	cacheAge = -1
+
+	// What dest held before this attempt: the bytes received now are added
+	// to it.  It is not bytesSoFar, which is an offset into the object --
+	// for a byte range, the file starts at the range, not at the object's
+	// first byte.
+	sizeBefore := regularFileSize(dest)
 
 	// Ensure we always invoke the callback at the start and the deferred
 	// function will invoke it at the end.
@@ -5155,8 +5205,8 @@ Loop:
 			return
 		}
 
-		// Second sanity check to verify the file size as it appears on disk.
-		if err = verifyFileSize(dest, totalSize, fields); err != nil {
+		// Second sanity check: what was received is on disk.
+		if err = verifyFileSize(dest, sizeBefore+downloaded, fields); err != nil {
 			err = errors.Wrapf(err, "failed to verify size of downloaded file (%s) on disk", dest)
 			return
 		}
