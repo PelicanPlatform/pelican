@@ -194,6 +194,9 @@ const (
 	StoreModeCache StoreMode = "cache"
 	// StoreModePStore marks a database owned by a pstore origin backend.
 	StoreModePStore StoreMode = "pstore"
+	// StoreModeSourcedCache marks a database owned by a SourcedCache, such
+	// as an origin's cache of its remote storage.
+	StoreModeSourcedCache StoreMode = "sourced-cache"
 )
 
 // StorageID identifies a storage location.  0 means inline (data in BadgerDB),

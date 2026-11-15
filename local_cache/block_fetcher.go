@@ -76,6 +76,11 @@ type BlockFetcherV2 struct {
 	meta         *CacheMetadata
 	tc           *client.TransferClient
 
+	// source, when set, is where the fetcher reads blocks from instead of
+	// the federation (see NewSourcedBlockFetcher); originURL then only
+	// names it in logs, and tc, token and fedToken are unused.
+	source BlockSource
+
 	// Prefetch configuration
 	prefetchTimeout time.Duration
 	prefetchSem     chan struct{} // Shared semaphore to limit concurrent prefetches across all fetchers
@@ -151,6 +156,22 @@ type BlockFetcherV2Config struct {
 	PrefetchSem chan struct{}
 }
 
+// BlockSource is where a fetcher made with NewSourcedBlockFetcher reads the
+// blocks it is missing, in place of the federation.
+type BlockSource interface {
+	// ReadRange writes bytes start through end (inclusive) of the object's
+	// version etag to w.  If the source no longer serves that version it
+	// fails with an error wrapping ErrSourceVersionChanged, before writing
+	// anything, so that no other version's bytes are spliced into the
+	// object's blocks.  It returns promptly once ctx is done.
+	ReadRange(ctx context.Context, w io.Writer, start, end int64, etag string) error
+}
+
+// ErrSourceVersionChanged is how a BlockSource says that the version a fetch
+// asked for is gone; the fetcher then drops the cached instance (see
+// dropIfCondemned).
+var ErrSourceVersionChanged = errors.New("the source no longer serves the version being cached")
+
 // NewBlockFetcherV2 creates a new block fetcher using the Pelican transfer client.
 // It creates its own TransferClient from the given TransferEngine to avoid
 // sharing Results() channels with other callers.
@@ -161,6 +182,45 @@ func NewBlockFetcherV2(
 	te *client.TransferEngine,
 	cfg BlockFetcherV2Config,
 ) (*BlockFetcherV2, error) {
+	bf, err := newBlockFetcher(storage, instanceHash, cfg)
+	if err != nil {
+		return nil, err
+	}
+
+	// Create a dedicated TransferClient so this fetcher's doFetch goroutines
+	// have their own Results() channel and cannot steal results intended for
+	// other callers sharing the same TransferEngine.
+	tc, err := te.NewClient(client.WithAcquireToken(false), client.WithCacheEmbeddedClientMode(useEmbeddedCacheMode()))
+	if err != nil {
+		return nil, errors.Wrap(err, "failed to create transfer client for block fetcher")
+	}
+	bf.originURL = originURL
+	bf.token = token
+	bf.fedToken = fedToken
+	bf.tc = tc
+	return bf, nil
+}
+
+// NewSourcedBlockFetcher creates a block fetcher that reads the blocks it is
+// missing from source; label names the object in logs.
+func NewSourcedBlockFetcher(
+	storage *StorageManager,
+	instanceHash InstanceHash,
+	source BlockSource, label string,
+	cfg BlockFetcherV2Config,
+) (*BlockFetcherV2, error) {
+	bf, err := newBlockFetcher(storage, instanceHash, cfg)
+	if err != nil {
+		return nil, err
+	}
+	bf.source = source
+	bf.originURL = label
+	return bf, nil
+}
+
+// newBlockFetcher makes the parts of a fetcher that do not depend on where
+// it fetches from.
+func newBlockFetcher(storage *StorageManager, instanceHash InstanceHash, cfg BlockFetcherV2Config) (*BlockFetcherV2, error) {
 	meta, err := storage.GetMetadata(instanceHash)
 	if err != nil {
 		return nil, errors.Wrap(err, "failed to get metadata")
@@ -194,23 +254,11 @@ func NewBlockFetcherV2(
 		return nil, errors.Wrap(err, "failed to get block state")
 	}
 
-	// Create a dedicated TransferClient so this fetcher's doFetch goroutines
-	// have their own Results() channel and cannot steal results intended for
-	// other callers sharing the same TransferEngine.
-	tc, err := te.NewClient(client.WithAcquireToken(false), client.WithCacheEmbeddedClientMode(useEmbeddedCacheMode()))
-	if err != nil {
-		return nil, errors.Wrap(err, "failed to create transfer client for block fetcher")
-	}
-
 	return &BlockFetcherV2{
 		storage:         storage,
 		blockState:      blockState,
 		instanceHash:    instanceHash,
-		originURL:       originURL,
-		token:           token,
-		fedToken:        fedToken,
 		meta:            meta,
-		tc:              tc,
 		prefetchTimeout: cfg.PrefetchTimeout,
 		prefetchSem:     prefetchSem,
 		activeFetches:   make(map[fetchKey]*fetchOperation),
@@ -638,6 +686,12 @@ func (bf *BlockFetcherV2) runFetch(ctx context.Context, op *fetchOperation, key 
 	// writer is closed (or aborted) by awaitTransfer once the transfer is
 	// under way; until then every early return aborts it.
 
+	if bf.source != nil {
+		bf.awaitSource(ctx, op, writer, startOffset, endOffset, meta.ETag, idleCancel)
+		bf.dropIfCondemned(fence, op.err, op.bytesDownloaded.Load() > 0)
+		return
+	}
+
 	// Parse the origin URL and set up the transfer
 	sourceURL, err := url.Parse(bf.originURL)
 	if err != nil {
@@ -726,7 +780,7 @@ func (bf *BlockFetcherV2) dropIfCondemned(fence *writeFence, err error, wrote bo
 	if err == nil || transferStopKeepsData(err) {
 		return
 	}
-	if errors.Is(err, client.ErrObjectVersionChanged) {
+	if errors.Is(err, client.ErrObjectVersionChanged) || errors.Is(err, ErrSourceVersionChanged) {
 		log.Warnf("The origin no longer serves the version of %s being cached (%v); dropping the cached copy so it is fetched again",
 			bf.originURL, err)
 	} else if wrote {
@@ -746,6 +800,56 @@ func (bf *BlockFetcherV2) dropIfCondemned(fence *writeFence, err error, wrote bo
 	} else if !dropped {
 		log.Debugf("Not dropping %s: it was deleted while it was being fetched", bf.instanceHash)
 	}
+}
+
+// awaitSource reads bytes start through end of version etag from the
+// fetcher's source into writer, as awaitTransfer does for a transfer: it
+// cancels the read once the object has no reader (with idleCancel), and ends
+// writer according to how the read ended.  Unlike a transfer, which the
+// engine stops on its own, the read runs on this goroutine's behalf, so
+// writer is only ended once ReadRange has returned and can write no more.
+func (bf *BlockFetcherV2) awaitSource(ctx context.Context, op *fetchOperation, writer *blockWriter, start, end int64, etag string, idleCancel bool) {
+	readCtx, cancelRead := context.WithCancel(ctx)
+	defer cancelRead()
+	done := make(chan error, 1)
+	go func() {
+		done <- bf.source.ReadRange(readCtx, writer, start, end, etag)
+	}()
+
+	idleTicker := time.NewTicker(bf.idleCheckInterval())
+	defer idleTicker.Stop()
+
+	var stopErr error
+	for stopErr == nil {
+		select {
+		case err := <-done:
+			if err == nil && op.bytesDownloaded.Load() < end-start+1 {
+				// A source that ends early without saying so has still
+				// not delivered the range.
+				err = io.ErrUnexpectedEOF
+			}
+			op.err = err
+			if err := endWrite(writer, op.err); err != nil {
+				log.Warnf("Failed to finish writing blocks of %s: %v", bf.instanceHash, err)
+			}
+			bf.notifyAllChunks(op)
+			return
+		case <-idleTicker.C:
+			if idleCancel && bf.idle() {
+				log.Debugf("Fill of %s idle for %v, cancelling", bf.instanceHash, bf.idleSince())
+				stopErr = errPrefetchIdle
+			}
+		case <-ctx.Done():
+			stopErr = ctx.Err()
+		}
+	}
+	cancelRead()
+	<-done
+	op.err = stopErr
+	if err := endWrite(writer, op.err); err != nil {
+		log.Warnf("Failed to finish writing blocks of %s: %v", bf.instanceHash, err)
+	}
+	bf.notifyAllChunks(op)
 }
 
 // awaitTransfer drives an in-flight transfer to completion.
