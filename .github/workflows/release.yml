@@ -140,8 +140,6 @@ jobs:
     # It is built here so the release carries it, and the binaries it produces
     # are handed to GoReleaser below as extra release files.
     uses: ./.github/workflows/build-lotman-rpm.yml
-    with:
-      all_platforms: true
 
   goreleaser:
     name: GoReleaser
