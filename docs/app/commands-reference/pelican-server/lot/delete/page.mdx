@@ -1,0 +1,40 @@
+---
+title: pelican server lot delete
+---
+
+## pelican-server lot delete
+
+Delete a lot and its descendants
+
+### Synopsis
+
+Delete a storage lot from a Pelican cache. Deletion is recursive: the named
+lot and all of its descendant lots are removed. Requires an administrative
+token for the cache.
+
+```
+pelican-server lot delete <lotName> [flags]
+```
+
+### Options
+
+```
+  -h, --help   help for delete
+```
+
+### Options inherited from parent commands
+
+```
+      --config string       config file (default is $HOME/.config/pelican/pelican.yaml)
+  -d, --debug               Enable debug log messages
+  -f, --federation string   Pelican federation to utilize
+      --json                output results in JSON format
+  -L, --log string          Specified log output file
+  -s, --server string       Web URL of the Pelican cache (e.g. https://my-cache.com:8447)
+  -t, --token string        Path to an admin token file
+      --version             Print the version and exit
+```
+
+### SEE ALSO
+
+* [pelican-server lot](/commands-reference/pelican-server/lot/)	 - Manage storage lots (reservations) on a Pelican cache
