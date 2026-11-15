@@ -17,20 +17,11 @@ name: Build the libLotMan RPM
 #
 # Each architecture is built on a native runner. The pelican binaries
 # cross-compile because they are CGO-free; -buildmode=c-shared is not. That is
-# also why the release carries only x86_64 and aarch64 while GoReleaser ships
-# pelican for ppc64le too: GitHub offers no ppc64le runner.
+# also why this carries only x86_64 and aarch64 while GoReleaser ships pelican
+# for ppc64le too: GitHub offers no ppc64le runner.
 
 on:
   workflow_call:
-    inputs:
-      all_platforms:
-        description: >-
-          Build every architecture the release ships rather than x86_64 alone.
-          A pull request only needs one, which is the default; the release
-          passes true.
-        required: false
-        type: boolean
-        default: false
   # The paths are repeated under each trigger because GitHub Actions does not
   # support YAML anchors in workflow files.
   pull_request:
@@ -64,9 +55,16 @@ defaults:
     shell: bash
 
 jobs:
-  # The matrix is built here rather than inline, both to match
-  # build-and-test.yml and because a `strategy` block cannot read `env` or
-  # apply a default to an input that only workflow_call supplies.
+  # The matrix is built here rather than inline to match build-and-test.yml,
+  # which cannot express a JSON list in a `strategy` block either.
+  #
+  # Both architectures build on every trigger, unlike build-and-test.yml, which
+  # drops to amd64 alone when it is not pushing. That workflow is saving several
+  # minutes per architecture on a job that runs for every change; this one takes
+  # about a minute, and the paths filter already keeps it to changes that touch
+  # the library. Building only amd64 here would mean the aarch64 package is
+  # first built on the day of a release, which is a bad day to learn that it
+  # does not build.
   params:
     name: Set build parameters
     outputs:
@@ -75,22 +73,14 @@ jobs:
     steps:
       - name: Determine which architectures to build
         id: params
-        env:
-          ALL_PLATFORMS: ${{ inputs.all_platforms }}
         run: |
           set -eu
 
           # 'id' is for where the slash in 'platform' is prohibited.
           PLATFORMS='[
-            { "arch": "x86_64", "id": "linux-amd64", "platform": "linux/amd64", "runner": "ubuntu-latest" }
+            { "arch": "x86_64",  "id": "linux-amd64", "platform": "linux/amd64", "runner": "ubuntu-latest" },
+            { "arch": "aarch64", "id": "linux-arm64", "platform": "linux/arm64", "runner": "ubuntu-24.04-arm" }
           ]'
-
-          if [ "${ALL_PLATFORMS:-false}" = "true" ]; then
-            PLATFORMS='[
-              { "arch": "x86_64",  "id": "linux-amd64", "platform": "linux/amd64", "runner": "ubuntu-latest" },
-              { "arch": "aarch64", "id": "linux-arm64", "platform": "linux/arm64", "runner": "ubuntu-24.04-arm" }
-            ]'
-          fi
 
           printf 'PLATFORMS<<EOF\n%s\nEOF\n' "${PLATFORMS}" >> "${GITHUB_OUTPUT}"
 
