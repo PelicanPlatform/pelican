@@ -69,6 +69,9 @@ export type ParameterInputProps = ParameterMetadata & {
   focused?: boolean;
   value?: ParameterValue;
   onChange: (patch: any) => void;
+  // When true the field renders its value but refuses edits, e.g. because the
+  // server has Server.ConfigReadOnly enabled.
+  readOnly?: boolean;
 };
 
 export type DurationString =
