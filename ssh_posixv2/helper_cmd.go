@@ -43,6 +43,7 @@ import (
 	"golang.org/x/net/webdav"
 	"golang.org/x/sync/errgroup"
 
+	pelican_config "github.com/pelicanplatform/pelican/config"
 	"github.com/pelicanplatform/pelican/server_utils"
 )
 
@@ -120,19 +121,27 @@ func RunHelper(ctx context.Context) error {
 		return errors.Wrap(err, "failed to read helper config from stdin")
 	}
 
-	// Use JSON formatter so the origin can reliably parse our log output
-	// from stderr and relay it with structured fields (daemon=ssh-helper).
-	log.SetFormatter(&log.JSONFormatter{})
-
-	// Apply the log level from the origin, if provided
+	// Apply the log level from the origin, if provided. Route it through
+	// pelican_config.SetLogging rather than logrus's SetLevel so the
+	// effective-level cache agrees with logrus's gate in this process:
+	// the helper never runs InitClient/InitServer, so nothing else writes
+	// that cache, and consumers like the GORM logger (database/utils) pick
+	// their verbosity from it.
 	if config.LogLevel != "" {
 		if lvl, err := log.ParseLevel(config.LogLevel); err == nil {
-			log.SetLevel(lvl)
+			pelican_config.SetLogging(lvl)
 			sshLog.Debugf("Log level set to %s (from origin)", lvl)
 		} else {
 			sshLog.Warnf("Ignoring unrecognized log level %q from origin: %v", config.LogLevel, err)
 		}
 	}
+
+	// Use JSON formatter so the origin can reliably parse our log output
+	// from stderr and relay it with structured fields (daemon=ssh-helper).
+	// Must be set AFTER SetLogging above: SetLogging installs the default
+	// text formatter on its first use in a process, which would otherwise
+	// override the JSON formatter.
+	log.SetFormatter(&log.JSONFormatter{})
 
 	sshLog.Infof("Helper configured with %d exports", len(config.Exports))
 
