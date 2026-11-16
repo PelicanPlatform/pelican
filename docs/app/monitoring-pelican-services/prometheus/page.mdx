@@ -735,6 +735,12 @@ The name of the server.
 
 Whether the server was discovered from the topology.
 
+### `pelican_director_registry_namespaces`
+
+The number of namespaces the Director advertises from the Registry rather than from a live Origin: those whose owner stored an auth state in the Registry, as counted by the Director's last successful poll of the Registry. The value stays at its last reading while a poll fails, and reads 0 against a Registry that does not serve the endpoint.
+
+> **Note**: This is a gauge metric with no labels. Query directly to see the current count.
+
 ### `pelican_director_client_requests_total`
 
 The total number of requests from clients.

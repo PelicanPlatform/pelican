@@ -87,6 +87,11 @@ var (
 		Help: "The number of servers currently recognized by the Director, delineated by pelican/non-pelican and origin/cache",
 	}, []string{"server_name", "server_type", "from_topology"})
 
+	PelicanDirectorRegistryNamespaces = promauto.NewGauge(prometheus.GaugeOpts{
+		Name: "pelican_director_registry_namespaces",
+		Help: "The number of namespaces the director advertises from the auth state their owners stored in the registry, as of its last successful poll of the registry",
+	})
+
 	PelicanDirectorClientRequestsTotal = promauto.NewCounterVec(prometheus.CounterOpts{
 		Name: "pelican_director_client_requests_total",
 		Help: "The total number of requests from clients.",
