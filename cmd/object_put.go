@@ -49,6 +49,7 @@ import (
 	"github.com/pelicanplatform/pelican/config"
 	"github.com/pelicanplatform/pelican/param"
 	"github.com/pelicanplatform/pelican/pelican_url"
+	"github.com/pelicanplatform/pelican/utils/unix_cksum"
 )
 
 var (
@@ -134,7 +135,7 @@ func verifyFileChecksum(filePath, expectedChecksum string, alg client.ChecksumTy
 	case client.AlgSHA1:
 		h = sha1.New()
 	case client.AlgCRC32:
-		h = crc32.NewIEEE()
+		h = unix_cksum.NewCksum()
 	case client.AlgCRC32C:
 		crc32cTable := crc32.MakeTable(crc32.Castagnoli)
 		h = crc32.New(crc32cTable)
