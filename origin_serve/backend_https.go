@@ -37,6 +37,7 @@ import (
 
 	"github.com/pelicanplatform/pelican/config"
 	"github.com/pelicanplatform/pelican/server_utils"
+	"github.com/pelicanplatform/pelican/tracing"
 )
 
 // ---------------------------------------------------------------------------
@@ -306,7 +307,7 @@ func (fs *httpsFileSystem) doRequest(ctx context.Context, method, urlStr string,
 			req.Header.Set("X-Pelican-Timeout", ph.Timeout)
 		}
 	}
-	return fs.httpClient.Do(req)
+	return tracing.Client(fs.httpClient).Do(req)
 }
 
 // ---------------------------------------------------------------------------

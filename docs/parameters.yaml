@@ -754,6 +754,23 @@ default: none
 direct_access: false
 components: ["origin"]
 ---
+name: Federation.TracingEndpoint
+description: |+
+  The federation's shared OpenTelemetry collector, as an OTLP/HTTP base URL such as
+  `https://collector.example.org:4318`.
+
+  Set this on the director to advertise the endpoint as `tracing_endpoint` in the federation discovery
+  document. Clients, origins and caches learn it from discovery; setting it locally overrides the
+  discovered value. A server that has the federation's director, registry and key URLs all set locally
+  skips discovery and so never learns the advertised value; set `Tracing.Endpoint` on such a server.
+
+  It is used only by processes that have `Tracing.Enabled` set to true, and only when neither
+  `Tracing.Endpoint` nor the standard `OTEL_EXPORTER_OTLP_TRACES_ENDPOINT` / `OTEL_EXPORTER_OTLP_ENDPOINT`
+  environment variables name an endpoint. Advertising an endpoint never enables tracing by itself.
+type: url
+default: none
+components: ["*"]
+---
 ############################
 #   Client-Level Configs   #
 ############################
@@ -6019,6 +6036,74 @@ description: |+
 type: int
 default: 97
 components: ["origin", "cache", "director", "registry", "broker", "localcache"]
+---
+############################
+#   Tracing-level configs  #
+############################
+name: Tracing.Enabled
+description: |+
+  Turn on OpenTelemetry distributed tracing for this process.
+
+  When enabled, Pelican records spans for object downloads (the client, director, cache and origin
+  each record their own part) and passes the W3C `traceparent` header to the next hop so the parts
+  join into one trace. Spans are exported over OTLP/HTTP to the endpoint chosen as described in
+  `Tracing.Endpoint`.
+
+  When disabled (the default), Pelican creates no spans, adds no `traceparent` header to any request,
+  and opens no connection to a collector. Advertising a collector through `Federation.TracingEndpoint`
+  never enables tracing by itself; each operator opts in with this setting.
+type: bool
+default: false
+components: ["*"]
+---
+name: Tracing.Endpoint
+description: |+
+  The OTLP/HTTP base URL this process exports spans to, for example `https://collector.example.org:4318`.
+  Pelican appends `/v1/traces` itself. An `https` endpoint is verified with the same TLS settings as
+  other Pelican connections (including `TLSSkipVerify` and the configured CA certificates); an `http`
+  endpoint is used without TLS.
+
+  The endpoint is chosen in this order, and the first one found wins:
+
+  1. `Tracing.Endpoint`.
+  2. The standard `OTEL_EXPORTER_OTLP_TRACES_ENDPOINT` or `OTEL_EXPORTER_OTLP_ENDPOINT` environment
+     variables, which the OTLP exporter reads itself (as it does `OTEL_EXPORTER_OTLP_HEADERS`).
+  3. `Federation.TracingEndpoint`, set locally or learned from federation discovery.
+
+  If tracing is enabled and no endpoint is found, spans are still created and trace context still
+  propagates (so trace IDs reach logs and downstream services), but nothing is exported.
+
+  Has no effect unless `Tracing.Enabled` is true.
+type: url
+default: none
+components: ["*"]
+---
+name: Tracing.SamplePercentage
+description: |+
+  The percentage (0 to 100) of traces this process records. Values outside that range are clamped.
+
+  The decision is a deterministic function of the trace ID, so every Pelican process configured with
+  the same percentage records the same traces. A span whose parent is in the same process follows its
+  parent's decision. For a request that arrives with a `traceparent` header, see `Tracing.TrustRemoteSampling`.
+
+  Has no effect unless `Tracing.Enabled` is true.
+type: int
+default: 100
+components: ["*"]
+---
+name: Tracing.TrustRemoteSampling
+description: |+
+  Whether a server follows the sampling decision carried in an incoming `traceparent` header.
+
+  By default (false) a server ignores the incoming "sampled" flag and applies its own
+  `Tracing.SamplePercentage` to the trace ID; otherwise any client could force every one of its requests
+  to be recorded and flood the collector. Set this to true for the usual parent-based behaviour, for
+  federations that trust their clients or while debugging.
+
+  Has no effect unless `Tracing.Enabled` is true.
+type: bool
+default: false
+components: ["director", "origin", "cache", "localcache"]
 ---
 ############################
 #   Shoveler-level configs   #

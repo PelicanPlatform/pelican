@@ -1,0 +1,1070 @@
+{
+  "uid": "pelican-downloads",
+  "title": "Pelican object downloads",
+  "description": "Downloads through the demo federation, from span metrics and traces.",
+  "tags": [
+    "pelican",
+    "tracing"
+  ],
+  "timezone": "browser",
+  "editable": true,
+  "graphTooltip": 1,
+  "refresh": "15s",
+  "schemaVersion": 41,
+  "time": {
+    "from": "now-30m",
+    "to": "now"
+  },
+  "templating": {
+    "list": []
+  },
+  "annotations": {
+    "list": []
+  },
+  "links": [
+    {
+      "title": "What Pelican tracing answers",
+      "type": "link",
+      "icon": "dashboard",
+      "url": "/d/pelican-questions/what-pelican-tracing-answers",
+      "keepTime": true
+    },
+    {
+      "title": "Pelican download lookup",
+      "type": "link",
+      "icon": "dashboard",
+      "url": "/d/pelican-trace/pelican-download-lookup",
+      "keepTime": true
+    },
+    {
+      "title": "Jaeger",
+      "type": "link",
+      "url": "http://localhost:16686/search?service=pelican-client",
+      "targetBlank": true
+    }
+  ],
+  "panels": [
+    {
+      "type": "row",
+      "title": "Downloads (span metrics from the client's client.transfer span)",
+      "id": 1,
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 0
+      },
+      "panels": []
+    },
+    {
+      "type": "stat",
+      "title": "Downloads / s",
+      "description": "Rate of client.transfer spans: one per `pelican object get`.",
+      "id": 2,
+      "datasource": {
+        "type": "prometheus",
+        "uid": "pelican-metrics"
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 6,
+        "x": 0,
+        "y": 1
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "pelican-metrics"
+          },
+          "expr": "sum(rate(traces_span_metrics_calls_total{service_name=\"pelican-client\", span_name=\"client.transfer\"}[$__rate_interval]))",
+          "legendFormat": "",
+          "refId": "A",
+          "range": true,
+          "exemplar": false
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "reqps",
+          "color": {
+            "mode": "thresholds"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "blue",
+                "value": null
+              }
+            ]
+          },
+          "decimals": 2
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "colorMode": "value",
+        "graphMode": "area",
+        "textMode": "auto"
+      }
+    },
+    {
+      "type": "stat",
+      "title": "Failed downloads",
+      "description": "Share of client.transfer spans with error status, over the last 5 minutes.",
+      "id": 3,
+      "datasource": {
+        "type": "prometheus",
+        "uid": "pelican-metrics"
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 6,
+        "x": 6,
+        "y": 1
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "pelican-metrics"
+          },
+          "expr": "sum(rate(traces_span_metrics_calls_total{service_name=\"pelican-client\", span_name=\"client.transfer\", status_code=\"STATUS_CODE_ERROR\"}[5m])) / sum(rate(traces_span_metrics_calls_total{service_name=\"pelican-client\", span_name=\"client.transfer\"}[5m]))",
+          "legendFormat": "",
+          "refId": "A",
+          "range": true,
+          "exemplar": false
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit",
+          "color": {
+            "mode": "thresholds"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "orange",
+                "value": 0.05
+              },
+              {
+                "color": "red",
+                "value": 0.2
+              }
+            ]
+          },
+          "decimals": 1
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "colorMode": "value",
+        "graphMode": "area",
+        "textMode": "auto"
+      }
+    },
+    {
+      "type": "stat",
+      "title": "Cache hit ratio",
+      "description": "Share of cache.serve_object spans with pelican.cache.result=hit, last 5 minutes.",
+      "id": 4,
+      "datasource": {
+        "type": "prometheus",
+        "uid": "pelican-metrics"
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 6,
+        "x": 12,
+        "y": 1
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "pelican-metrics"
+          },
+          "expr": "sum(rate(traces_span_metrics_calls_total{span_name=\"cache.serve_object\", pelican_cache_result=\"hit\"}[5m])) / sum(rate(traces_span_metrics_calls_total{span_name=\"cache.serve_object\", pelican_cache_result=~\"hit|miss\"}[5m]))",
+          "legendFormat": "",
+          "refId": "A",
+          "range": true,
+          "exemplar": false
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit",
+          "color": {
+            "mode": "thresholds"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "red",
+                "value": null
+              },
+              {
+                "color": "orange",
+                "value": 0.5
+              },
+              {
+                "color": "green",
+                "value": 0.8
+              }
+            ]
+          },
+          "decimals": 1
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "colorMode": "value",
+        "graphMode": "area",
+        "textMode": "auto"
+      }
+    },
+    {
+      "type": "stat",
+      "title": "Download p95",
+      "description": "95th percentile duration of client.transfer, last 5 minutes.",
+      "id": 5,
+      "datasource": {
+        "type": "prometheus",
+        "uid": "pelican-metrics"
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 6,
+        "x": 18,
+        "y": 1
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "pelican-metrics"
+          },
+          "expr": "histogram_quantile(0.95, sum by (le) (rate(traces_span_metrics_duration_milliseconds_bucket{service_name=\"pelican-client\", span_name=\"client.transfer\"}[5m])))",
+          "legendFormat": "",
+          "refId": "A",
+          "range": true,
+          "exemplar": false
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ms",
+          "color": {
+            "mode": "thresholds"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "blue",
+                "value": null
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "colorMode": "value",
+        "graphMode": "area",
+        "textMode": "auto"
+      }
+    },
+    {
+      "type": "timeseries",
+      "title": "Download rate and error rate",
+      "description": "client.transfer spans per second, split by span status.",
+      "id": 6,
+      "datasource": {
+        "type": "prometheus",
+        "uid": "pelican-metrics"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 5
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "pelican-metrics"
+          },
+          "expr": "sum(rate(traces_span_metrics_calls_total{service_name=\"pelican-client\", span_name=\"client.transfer\", status_code!=\"STATUS_CODE_ERROR\"}[$__rate_interval]))",
+          "legendFormat": "ok",
+          "refId": "A",
+          "range": true,
+          "exemplar": false
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "pelican-metrics"
+          },
+          "expr": "sum(rate(traces_span_metrics_calls_total{service_name=\"pelican-client\", span_name=\"client.transfer\", status_code=\"STATUS_CODE_ERROR\"}[$__rate_interval]))",
+          "legendFormat": "failed",
+          "refId": "B",
+          "range": true,
+          "exemplar": false
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "reqps",
+          "custom": {
+            "drawStyle": "line",
+            "lineWidth": 1,
+            "fillOpacity": 10,
+            "showPoints": "never",
+            "spanNulls": true,
+            "stacking": {
+              "mode": "normal",
+              "group": "A"
+            }
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      }
+    },
+    {
+      "type": "timeseries",
+      "title": "Download duration by stage (p50, p95)",
+      "description": "Client spans by name: discovery, director query, token, probing (client.sort_attempts), each attempt, checksum. Points are exemplars; click one to open its trace.",
+      "id": 7,
+      "datasource": {
+        "type": "prometheus",
+        "uid": "pelican-metrics"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 5
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "pelican-metrics"
+          },
+          "expr": "histogram_quantile(0.95, sum by (le, span_name) (rate(traces_span_metrics_duration_milliseconds_bucket{service_name=\"pelican-client\", span_name=~\"client\\\\..*\"}[$__rate_interval])))",
+          "legendFormat": "p95 {{span_name}}",
+          "refId": "A",
+          "range": true,
+          "exemplar": true
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "pelican-metrics"
+          },
+          "expr": "histogram_quantile(0.5, sum by (le, span_name) (rate(traces_span_metrics_duration_milliseconds_bucket{service_name=\"pelican-client\", span_name=~\"client\\\\..*\"}[$__rate_interval])))",
+          "legendFormat": "p50 {{span_name}}",
+          "refId": "B",
+          "range": true,
+          "exemplar": false
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ms",
+          "custom": {
+            "drawStyle": "line",
+            "lineWidth": 1,
+            "fillOpacity": 10,
+            "showPoints": "never",
+            "spanNulls": true,
+            "stacking": {
+              "mode": "none",
+              "group": "A"
+            }
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      }
+    },
+    {
+      "type": "row",
+      "title": "Cache",
+      "id": 8,
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 13
+      },
+      "panels": []
+    },
+    {
+      "type": "timeseries",
+      "title": "Cache requests by result",
+      "description": "cache.serve_object spans per second by pelican.cache.result.",
+      "id": 9,
+      "datasource": {
+        "type": "prometheus",
+        "uid": "pelican-metrics"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 14
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "pelican-metrics"
+          },
+          "expr": "sum by (pelican_cache_result) (rate(traces_span_metrics_calls_total{span_name=\"cache.serve_object\"}[$__rate_interval]))",
+          "legendFormat": "{{pelican_cache_result}}",
+          "refId": "A",
+          "range": true,
+          "exemplar": false
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "reqps",
+          "custom": {
+            "drawStyle": "line",
+            "lineWidth": 1,
+            "fillOpacity": 10,
+            "showPoints": "never",
+            "spanNulls": true,
+            "stacking": {
+              "mode": "normal",
+              "group": "A"
+            }
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      }
+    },
+    {
+      "type": "timeseries",
+      "title": "Cache request duration, hit against miss (p50, p95)",
+      "description": "cache.serve_object duration by pelican.cache.result; the gap is what a miss costs. cache.fetch_origin is the origin fetch on a miss.",
+      "id": 10,
+      "datasource": {
+        "type": "prometheus",
+        "uid": "pelican-metrics"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 14
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "pelican-metrics"
+          },
+          "expr": "histogram_quantile(0.95, sum by (le, pelican_cache_result) (rate(traces_span_metrics_duration_milliseconds_bucket{span_name=\"cache.serve_object\"}[$__rate_interval])))",
+          "legendFormat": "p95 {{pelican_cache_result}}",
+          "refId": "A",
+          "range": true,
+          "exemplar": true
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "pelican-metrics"
+          },
+          "expr": "histogram_quantile(0.5, sum by (le, pelican_cache_result) (rate(traces_span_metrics_duration_milliseconds_bucket{span_name=\"cache.serve_object\"}[$__rate_interval])))",
+          "legendFormat": "p50 {{pelican_cache_result}}",
+          "refId": "B",
+          "range": true,
+          "exemplar": false
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "pelican-metrics"
+          },
+          "expr": "histogram_quantile(0.95, sum by (le, span_name) (rate(traces_span_metrics_duration_milliseconds_bucket{span_name=\"cache.fetch_origin\"}[$__rate_interval])))",
+          "legendFormat": "p95 cache.fetch_origin",
+          "refId": "C",
+          "range": true,
+          "exemplar": false
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ms",
+          "custom": {
+            "drawStyle": "line",
+            "lineWidth": 1,
+            "fillOpacity": 10,
+            "showPoints": "never",
+            "spanNulls": true,
+            "stacking": {
+              "mode": "none",
+              "group": "A"
+            }
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      }
+    },
+    {
+      "type": "row",
+      "title": "Director",
+      "id": 11,
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 22
+      },
+      "panels": []
+    },
+    {
+      "type": "timeseries",
+      "title": "Director redirects by target",
+      "description": "director.redirect spans per second by pelican.director.redirect_target (cache or origin).",
+      "id": 12,
+      "datasource": {
+        "type": "prometheus",
+        "uid": "pelican-metrics"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 23
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "pelican-metrics"
+          },
+          "expr": "sum by (pelican_director_redirect_target) (rate(traces_span_metrics_calls_total{span_name=\"director.redirect\"}[$__rate_interval]))",
+          "legendFormat": "{{pelican_director_redirect_target}}",
+          "refId": "A",
+          "range": true,
+          "exemplar": false
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "reqps",
+          "custom": {
+            "drawStyle": "line",
+            "lineWidth": 1,
+            "fillOpacity": 10,
+            "showPoints": "never",
+            "spanNulls": true,
+            "stacking": {
+              "mode": "normal",
+              "group": "A"
+            }
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      }
+    },
+    {
+      "type": "timeseries",
+      "title": "Director time by stage (p95)",
+      "description": "director.redirect and its stages: namespace matching, stat requests to origins and caches, sorting.",
+      "id": 13,
+      "datasource": {
+        "type": "prometheus",
+        "uid": "pelican-metrics"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 23
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "pelican-metrics"
+          },
+          "expr": "histogram_quantile(0.95, sum by (le, span_name) (rate(traces_span_metrics_duration_milliseconds_bucket{service_name=\"pelican-director\", span_name=~\"director\\\\..*\"}[$__rate_interval])))",
+          "legendFormat": "{{span_name}}",
+          "refId": "A",
+          "range": true,
+          "exemplar": true
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ms",
+          "custom": {
+            "drawStyle": "line",
+            "lineWidth": 1,
+            "fillOpacity": 10,
+            "showPoints": "never",
+            "spanNulls": true,
+            "stacking": {
+              "mode": "none",
+              "group": "A"
+            }
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      }
+    },
+    {
+      "type": "row",
+      "title": "Origin and attempts",
+      "id": 14,
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 31
+      },
+      "panels": []
+    },
+    {
+      "type": "timeseries",
+      "title": "Origin request duration: authorize against read (p50, p95)",
+      "description": "origin.serve_object and its two stages, origin.authorize (token check) and origin.read (storage).",
+      "id": 15,
+      "datasource": {
+        "type": "prometheus",
+        "uid": "pelican-metrics"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 32
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "pelican-metrics"
+          },
+          "expr": "histogram_quantile(0.95, sum by (le, span_name) (rate(traces_span_metrics_duration_milliseconds_bucket{span_name=~\"origin\\\\.(serve_object|authorize|read)\"}[$__rate_interval])))",
+          "legendFormat": "p95 {{span_name}}",
+          "refId": "A",
+          "range": true,
+          "exemplar": true
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "pelican-metrics"
+          },
+          "expr": "histogram_quantile(0.5, sum by (le, span_name) (rate(traces_span_metrics_duration_milliseconds_bucket{span_name=~\"origin\\\\.(serve_object|authorize|read)\"}[$__rate_interval])))",
+          "legendFormat": "p50 {{span_name}}",
+          "refId": "B",
+          "range": true,
+          "exemplar": false
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ms",
+          "custom": {
+            "drawStyle": "line",
+            "lineWidth": 1,
+            "fillOpacity": 10,
+            "showPoints": "never",
+            "spanNulls": true,
+            "stacking": {
+              "mode": "none",
+              "group": "A"
+            }
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      }
+    },
+    {
+      "type": "timeseries",
+      "title": "Attempts by number and outcome",
+      "description": "client.attempt spans by pelican.attempt.number and status, for the clients and for the cache's own client (its fetches from the origin).",
+      "id": 16,
+      "datasource": {
+        "type": "prometheus",
+        "uid": "pelican-metrics"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 32
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "pelican-metrics"
+          },
+          "expr": "sum by (service_name, pelican_attempt_number, status_code) (increase(traces_span_metrics_calls_total{span_name=\"client.attempt\"}[$__rate_interval]))",
+          "legendFormat": "{{service_name}} attempt {{pelican_attempt_number}} {{status_code}}",
+          "refId": "A",
+          "range": true,
+          "exemplar": false
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "custom": {
+            "drawStyle": "bars",
+            "lineWidth": 1,
+            "fillOpacity": 60,
+            "showPoints": "never",
+            "spanNulls": true,
+            "stacking": {
+              "mode": "normal",
+              "group": "A"
+            }
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      }
+    },
+    {
+      "type": "row",
+      "title": "Traces",
+      "id": 17,
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 40
+      },
+      "panels": []
+    },
+    {
+      "type": "table",
+      "title": "Recent downloads (traces)",
+      "description": "The latest client.transfer traces in Jaeger. Click a trace ID to open the download lookup page for it: its spans from every service, and how to find its log lines on each service.",
+      "id": 18,
+      "datasource": {
+        "type": "jaeger",
+        "uid": "pelican-traces"
+      },
+      "gridPos": {
+        "h": 10,
+        "w": 24,
+        "x": 0,
+        "y": 41
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "jaeger",
+            "uid": "pelican-traces"
+          },
+          "refId": "A",
+          "queryType": "search",
+          "service": "pelican-client",
+          "operation": "client.transfer",
+          "limit": 20
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {},
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "traceID"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "Trace ID"
+              },
+              {
+                "id": "links",
+                "value": [
+                  {
+                    "title": "Analyze this download",
+                    "url": "/d/pelican-trace/pelican-download-lookup?var-trace_id=${__value.raw}&${__url_time_range}"
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      },
+      "options": {
+        "showHeader": true,
+        "sortBy": [
+          {
+            "displayName": "Start time",
+            "desc": true
+          }
+        ]
+      }
+    },
+    {
+      "type": "row",
+      "title": "Pelican's own metrics (scraped from /metrics; work without tracing)",
+      "id": 20,
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 51
+      },
+      "panels": []
+    },
+    {
+      "type": "timeseries",
+      "title": "Scrape targets up",
+      "description": "1 when Prometheus can scrape the server's /metrics.",
+      "id": 21,
+      "datasource": {
+        "type": "prometheus",
+        "uid": "pelican-metrics"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 52
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "pelican-metrics"
+          },
+          "expr": "up{job=\"pelican\"}",
+          "legendFormat": "{{pelican_server}}",
+          "refId": "A",
+          "range": true,
+          "exemplar": false
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "custom": {
+            "drawStyle": "line",
+            "lineWidth": 1,
+            "fillOpacity": 10,
+            "showPoints": "never",
+            "spanNulls": true,
+            "stacking": {
+              "mode": "none",
+              "group": "A"
+            }
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      }
+    },
+    {
+      "type": "timeseries",
+      "title": "Director redirects by destination (pelican_director_redirects_total)",
+      "description": "The director's own redirect counter, for comparison with the span-derived panel above.",
+      "id": 22,
+      "datasource": {
+        "type": "prometheus",
+        "uid": "pelican-metrics"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 52
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "pelican-metrics"
+          },
+          "expr": "sum by (destination) (rate(pelican_director_redirects_total[$__rate_interval]))",
+          "legendFormat": "{{destination}}",
+          "refId": "A",
+          "range": true,
+          "exemplar": false
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "reqps",
+          "custom": {
+            "drawStyle": "line",
+            "lineWidth": 1,
+            "fillOpacity": 10,
+            "showPoints": "never",
+            "spanNulls": true,
+            "stacking": {
+              "mode": "normal",
+              "group": "A"
+            }
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      }
+    }
+  ]
+}

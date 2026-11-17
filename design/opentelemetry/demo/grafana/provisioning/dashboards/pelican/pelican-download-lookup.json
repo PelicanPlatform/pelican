@@ -1,0 +1,825 @@
+{
+  "uid": "pelican-trace",
+  "title": "Pelican download lookup",
+  "description": "Everything recorded for one download: its spans from every service, and how to find its log lines on each service.",
+  "tags": [
+    "pelican",
+    "tracing"
+  ],
+  "timezone": "browser",
+  "editable": true,
+  "graphTooltip": 0,
+  "refresh": "",
+  "schemaVersion": 41,
+  "time": {
+    "from": "now-1h",
+    "to": "now"
+  },
+  "templating": {
+    "list": [
+      {
+        "name": "trace_id",
+        "label": "Trace ID",
+        "type": "textbox",
+        "query": "",
+        "current": {
+          "text": "",
+          "value": ""
+        },
+        "options": [
+          {
+            "selected": true,
+            "text": "",
+            "value": ""
+          }
+        ],
+        "hide": 0,
+        "description": "The download to analyze. Click a trace ID in the table, or paste one, such as the trace_id field of a Pelican log line."
+      },
+      {
+        "name": "find",
+        "label": "Find by attribute",
+        "type": "textbox",
+        "query": "",
+        "current": {
+          "text": "",
+          "value": ""
+        },
+        "options": [
+          {
+            "selected": true,
+            "text": "",
+            "value": ""
+          }
+        ],
+        "hide": 0,
+        "description": "Narrows the table of downloads, as key=value pairs, e.g. pelican.object.path=/demo/fixed/obj-1.bin"
+      }
+    ]
+  },
+  "annotations": {
+    "list": []
+  },
+  "links": [
+    {
+      "title": "What Pelican tracing answers",
+      "type": "link",
+      "icon": "dashboard",
+      "url": "/d/pelican-questions/what-pelican-tracing-answers",
+      "keepTime": true
+    },
+    {
+      "title": "Pelican object downloads",
+      "type": "link",
+      "icon": "dashboard",
+      "url": "/d/pelican-downloads/pelican-object-downloads",
+      "keepTime": true
+    }
+  ],
+  "panels": [
+    {
+      "type": "row",
+      "id": 1,
+      "title": "Find a download",
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 0
+      },
+      "panels": []
+    },
+    {
+      "type": "text",
+      "id": 2,
+      "title": "How to use this page",
+      "gridPos": {
+        "h": 9,
+        "w": 8,
+        "x": 0,
+        "y": 1
+      },
+      "options": {
+        "mode": "markdown",
+        "content": "This page shows everything recorded for **one download**: its spans from every service, and how to find the log lines those services wrote for it.\n\n**Pick a download** in either of two ways:\n\n1. Click a trace ID in the table on the right.\n2. Paste a trace ID into the **Trace ID** box at the top: the `trace_id=` field of an origin, cache or client log line.\n\n**Narrow the table** with **Find by attribute**, e.g. `pelican.object.path=/demo/fixed/obj-1.bin`, `pelican.job_id=<X-Pelican-JobId>` or `error=true`.\n\nLogs stay on each service; the section at the bottom shows how to search them."
+      }
+    },
+    {
+      "type": "table",
+      "id": 3,
+      "title": "Downloads (newest first) — click a trace ID to analyze it",
+      "description": "client.transfer traces from Jaeger, filtered by the Find by attribute box. A download whose client did not trace has no row here; paste a server's trace ID from its log instead.",
+      "datasource": {
+        "type": "jaeger",
+        "uid": "pelican-traces"
+      },
+      "gridPos": {
+        "h": 9,
+        "w": 16,
+        "x": 8,
+        "y": 1
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "jaeger",
+            "uid": "pelican-traces"
+          },
+          "queryType": "search",
+          "service": "pelican-client",
+          "operation": "client.transfer",
+          "tags": "${find}",
+          "limit": 50
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {},
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "traceID"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "Trace ID"
+              },
+              {
+                "id": "links",
+                "value": [
+                  {
+                    "title": "Analyze this download",
+                    "url": "/d/pelican-trace/pelican-download-lookup?var-trace_id=${__value.raw}&${find:queryparam}&${__url_time_range}"
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "traceName"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "Trace"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "startTime"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "Start time"
+              },
+              {
+                "id": "unit",
+                "value": "dateTimeAsIso"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "duration"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "Duration"
+              },
+              {
+                "id": "unit",
+                "value": "µs"
+              }
+            ]
+          }
+        ]
+      },
+      "options": {
+        "showHeader": true,
+        "sortBy": [
+          {
+            "displayName": "Start time",
+            "desc": true
+          }
+        ]
+      }
+    },
+    {
+      "type": "row",
+      "id": 4,
+      "title": "Download ${trace_id}",
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 10
+      },
+      "panels": []
+    },
+    {
+      "type": "stat",
+      "id": 5,
+      "title": "Spans",
+      "description": "Spans recorded for this download, by every service.",
+      "datasource": {
+        "type": "jaeger",
+        "uid": "pelican-traces"
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 8,
+        "x": 0,
+        "y": 11
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "jaeger",
+            "uid": "pelican-traces"
+          },
+          "query": "${trace_id}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "thresholds"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "blue",
+                "value": null
+              }
+            ]
+          },
+          "noValue": "0"
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "values": false,
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "/^spanID \\(count\\)$/"
+        },
+        "colorMode": "value",
+        "graphMode": "none",
+        "justifyMode": "center",
+        "textMode": "value"
+      },
+      "transformations": [
+        {
+          "id": "groupBy",
+          "options": {
+            "fields": {
+              "traceID": {
+                "aggregations": [],
+                "operation": "groupby"
+              },
+              "spanID": {
+                "aggregations": [
+                  "count"
+                ],
+                "operation": "aggregate"
+              },
+              "serviceName": {
+                "aggregations": [
+                  "distinctCount"
+                ],
+                "operation": "aggregate"
+              },
+              "duration": {
+                "aggregations": [
+                  "max"
+                ],
+                "operation": "aggregate"
+              }
+            }
+          }
+        }
+      ]
+    },
+    {
+      "type": "stat",
+      "id": 6,
+      "title": "Services",
+      "description": "Distinct services that recorded a span. Four means client, director, cache and origin all took part.",
+      "datasource": {
+        "type": "jaeger",
+        "uid": "pelican-traces"
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 8,
+        "x": 8,
+        "y": 11
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "jaeger",
+            "uid": "pelican-traces"
+          },
+          "query": "${trace_id}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "thresholds"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "blue",
+                "value": null
+              }
+            ]
+          },
+          "noValue": "0"
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "values": false,
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "/^serviceName \\(distinctCount\\)$/"
+        },
+        "colorMode": "value",
+        "graphMode": "none",
+        "justifyMode": "center",
+        "textMode": "value"
+      },
+      "transformations": [
+        {
+          "id": "groupBy",
+          "options": {
+            "fields": {
+              "traceID": {
+                "aggregations": [],
+                "operation": "groupby"
+              },
+              "spanID": {
+                "aggregations": [
+                  "count"
+                ],
+                "operation": "aggregate"
+              },
+              "serviceName": {
+                "aggregations": [
+                  "distinctCount"
+                ],
+                "operation": "aggregate"
+              },
+              "duration": {
+                "aggregations": [
+                  "max"
+                ],
+                "operation": "aggregate"
+              }
+            }
+          }
+        }
+      ]
+    },
+    {
+      "type": "stat",
+      "id": 7,
+      "title": "Total duration",
+      "description": "The longest span, which is the client's client.transfer when the client traced the download.",
+      "datasource": {
+        "type": "jaeger",
+        "uid": "pelican-traces"
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 8,
+        "x": 16,
+        "y": 11
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "jaeger",
+            "uid": "pelican-traces"
+          },
+          "query": "${trace_id}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "thresholds"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "blue",
+                "value": null
+              }
+            ]
+          },
+          "noValue": "0",
+          "unit": "ms"
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "values": false,
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "/^duration \\(max\\)$/"
+        },
+        "colorMode": "value",
+        "graphMode": "none",
+        "justifyMode": "center",
+        "textMode": "value"
+      },
+      "transformations": [
+        {
+          "id": "groupBy",
+          "options": {
+            "fields": {
+              "traceID": {
+                "aggregations": [],
+                "operation": "groupby"
+              },
+              "spanID": {
+                "aggregations": [
+                  "count"
+                ],
+                "operation": "aggregate"
+              },
+              "serviceName": {
+                "aggregations": [
+                  "distinctCount"
+                ],
+                "operation": "aggregate"
+              },
+              "duration": {
+                "aggregations": [
+                  "max"
+                ],
+                "operation": "aggregate"
+              }
+            }
+          }
+        }
+      ]
+    },
+    {
+      "type": "traces",
+      "id": 11,
+      "title": "Timeline",
+      "datasource": {
+        "type": "jaeger",
+        "uid": "pelican-traces"
+      },
+      "gridPos": {
+        "h": 18,
+        "w": 24,
+        "x": 0,
+        "y": 15
+      },
+      "description": "Every span of the download. Click a span for its attributes (pelican.*), its events (exception, director.decision) and a 'Logs for this span' link.",
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "jaeger",
+            "uid": "pelican-traces"
+          },
+          "query": "${trace_id}"
+        }
+      ]
+    },
+    {
+      "type": "table",
+      "id": 12,
+      "title": "Time by service and stage",
+      "datasource": {
+        "type": "jaeger",
+        "uid": "pelican-traces"
+      },
+      "gridPos": {
+        "h": 12,
+        "w": 10,
+        "x": 0,
+        "y": 33
+      },
+      "description": "Spans grouped by service and name. Parent spans include their children's time, so the totals overlap.",
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "jaeger",
+            "uid": "pelican-traces"
+          },
+          "query": "${trace_id}"
+        }
+      ],
+      "transformations": [
+        {
+          "id": "groupBy",
+          "options": {
+            "fields": {
+              "serviceName": {
+                "aggregations": [],
+                "operation": "groupby"
+              },
+              "operationName": {
+                "aggregations": [],
+                "operation": "groupby"
+              },
+              "spanID": {
+                "aggregations": [
+                  "count"
+                ],
+                "operation": "aggregate"
+              },
+              "duration": {
+                "aggregations": [
+                  "sum",
+                  "max"
+                ],
+                "operation": "aggregate"
+              }
+            }
+          }
+        },
+        {
+          "id": "organize",
+          "options": {
+            "renameByName": {
+              "serviceName": "Service",
+              "operationName": "Span",
+              "spanID (count)": "Count",
+              "duration (sum)": "Total",
+              "duration (max)": "Longest"
+            }
+          }
+        },
+        {
+          "id": "sortBy",
+          "options": {
+            "sort": [
+              {
+                "field": "Total",
+                "desc": true
+              }
+            ]
+          }
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {},
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byRegexp",
+              "options": "/^(Total|Longest)$/"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "ms"
+              },
+              {
+                "id": "custom.cellOptions",
+                "value": {
+                  "type": "gauge",
+                  "mode": "basic",
+                  "valueDisplayMode": "text"
+                }
+              }
+            ]
+          }
+        ]
+      },
+      "options": {
+        "showHeader": true
+      }
+    },
+    {
+      "type": "table",
+      "id": 13,
+      "title": "Spans",
+      "datasource": {
+        "type": "jaeger",
+        "uid": "pelican-traces"
+      },
+      "gridPos": {
+        "h": 12,
+        "w": 14,
+        "x": 10,
+        "y": 33
+      },
+      "description": "One row per span, in start order, with its attributes. Filter a column to find, for example, every span of one service.",
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "jaeger",
+            "uid": "pelican-traces"
+          },
+          "query": "${trace_id}"
+        }
+      ],
+      "transformations": [
+        {
+          "id": "convertFieldType",
+          "options": {
+            "conversions": [
+              {
+                "targetField": "startTime",
+                "destinationType": "time"
+              }
+            ]
+          }
+        },
+        {
+          "id": "organize",
+          "options": {
+            "excludeByName": {
+              "traceID": true,
+              "serviceTags": true,
+              "logs": true,
+              "references": true,
+              "warnings": true,
+              "stackTraces": true
+            },
+            "indexByName": {
+              "startTime": 0,
+              "serviceName": 1,
+              "operationName": 2,
+              "duration": 3,
+              "tags": 4,
+              "spanID": 5,
+              "parentSpanID": 6
+            },
+            "renameByName": {
+              "startTime": "Start",
+              "serviceName": "Service",
+              "operationName": "Span",
+              "duration": "Duration",
+              "tags": "Attributes",
+              "spanID": "Span ID",
+              "parentSpanID": "Parent span ID"
+            }
+          }
+        },
+        {
+          "id": "sortBy",
+          "options": {
+            "sort": [
+              {
+                "field": "Start",
+                "desc": false
+              }
+            ]
+          }
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "filterable": true
+          }
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Duration"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "ms"
+              },
+              {
+                "id": "custom.width",
+                "value": 100
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Start"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "time:HH:mm:ss.SSS"
+              },
+              {
+                "id": "custom.width",
+                "value": 110
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Service"
+            },
+            "properties": [
+              {
+                "id": "custom.width",
+                "value": 130
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Attributes"
+            },
+            "properties": [
+              {
+                "id": "custom.cellOptions",
+                "value": {
+                  "type": "json-view"
+                }
+              },
+              {
+                "id": "custom.inspect",
+                "value": true
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byRegexp",
+              "options": "/span ID$/i"
+            },
+            "properties": [
+              {
+                "id": "custom.width",
+                "value": 150
+              }
+            ]
+          }
+        ]
+      },
+      "options": {
+        "showHeader": true,
+        "cellHeight": "sm"
+      }
+    },
+    {
+      "type": "row",
+      "id": 14,
+      "title": "Logs for this download (on each service)",
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 45
+      },
+      "panels": []
+    },
+    {
+      "type": "text",
+      "id": 15,
+      "title": "",
+      "gridPos": {
+        "h": 10,
+        "w": 24,
+        "x": 0,
+        "y": 46
+      },
+      "options": {
+        "mode": "markdown",
+        "content": "Logs are not collected centrally.\nEach service keeps its own log, as it would on its own host in a real federation, and the origin, the cache and the client write the trace ID on their request lines.\nRun these from `design/opentelemetry/demo`:\n\n```\nmake trace-logs id=${trace_id}\n```\n\nor, on one service:\n\n```\ndocker compose exec cache grep 'trace_id=${trace_id}' /var/log/pelican/cache.log\ndocker compose exec origin grep 'trace_id=${trace_id}' /var/log/pelican/origin.log\ndocker compose exec exerciser grep 'trace_id=${trace_id}' /var/log/pelican/client.log\n```\n\nThe director's lines carry its own request ID instead, which is `pelican.job_id` on its `director.redirect` span."
+      }
+    }
+  ]
+}

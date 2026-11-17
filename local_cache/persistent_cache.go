@@ -55,6 +55,7 @@ import (
 
 	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
+	"go.opentelemetry.io/otel/trace"
 	"golang.org/x/sync/errgroup"
 	"golang.org/x/sync/singleflight"
 
@@ -64,6 +65,7 @@ import (
 	"github.com/pelicanplatform/pelican/param"
 	"github.com/pelicanplatform/pelican/server_structs"
 	"github.com/pelicanplatform/pelican/token_scopes"
+	"github.com/pelicanplatform/pelican/tracing"
 	"github.com/pelicanplatform/pelican/utils"
 )
 
@@ -293,6 +295,11 @@ type persistentDownload struct {
 	// Reused by newFetchingRangeReader so concurrent readers share
 	// the same fetcher instead of creating duplicate transfers.
 	fetcher *BlockFetcherV2
+
+	// fetchSpan identifies the cache.fetch_origin span of this download,
+	// for waiters to link to.  Set before the download is published in
+	// activeDownloads and never changed; invalid when it is not traced.
+	fetchSpan trace.SpanContext
 }
 
 // revalidation carries no-store streaming data from revalidateObject back
@@ -1111,6 +1118,9 @@ type objectResolution struct {
 	dl           *persistentDownload // non-nil when a background download was started
 	noStoreRC    *noStoreBody        // non-nil when the origin says no-store
 	noStoreMeta  *CacheMetadata      // metadata for no-store streaming responses
+	// requestSpan is the span of the request this resolution was made for,
+	// if it is traced; a fill started for its reader is recorded under it.
+	requestSpan trace.Span
 }
 
 // resolveObject performs the shared lookup + download/init/revalidate
@@ -1126,10 +1136,13 @@ func (pc *PersistentCache) resolveObject(
 	objectPath, token string,
 	tryRangeInit bool,
 ) (*objectResolution, error) {
+	ctx, span := tracing.StartChild(ctx, spanResolveObject)
+	defer span.End()
 	pelicanURL := pc.normalizePath(objectPath)
 	objectHash := pc.db.ObjectHash(pelicanURL)
 
 	if ok, reason := pc.ac.authorize(token_scopes.Wlcg_Storage_Read, objectPath, token); !ok {
+		span.SetAttributes(decisionDenied)
 		return nil, newAuthorizationDenied(reason)
 	}
 
@@ -1175,8 +1188,10 @@ func (pc *PersistentCache) resolveObject(
 				log.Debugf("initObjectFromStat failed, falling back to full download: %v", err)
 				meta = nil
 			}
+			span.SetAttributes(decisionRangeInit) // replaced below if it falls back to a download
 		}
 		if meta == nil || meta.ContentLength < 0 {
+			span.SetAttributes(decisionDownload)
 			instanceHash, dl, err = pc.downloadObject(ctx, pelicanURL, objectHash, namespaceID, token)
 			if errors.Is(err, ErrNoStore) && dl != nil && dl.noStoreReader != nil {
 				return &objectResolution{
@@ -1217,6 +1232,7 @@ func (pc *PersistentCache) resolveObject(
 			}
 		}
 	} else {
+		setCachedDecision(span, meta)
 		var rv *revalidation
 		instanceHash, meta, rv, err = pc.revalidateObject(ctx, instanceHash, objectHash, pelicanURL, namespaceID, token, meta)
 		if err != nil {
@@ -1469,7 +1485,12 @@ func (pc *PersistentCache) startFill(res *objectResolution, state *ObjectBlockSt
 			defer unpin()
 			defer state.endFill(fill)
 			defer bf.Close()
-			if err := bf.Fill(pc.downloadCtx, fill.start, fill.end); err != nil {
+			// The fill runs for as long as pc.downloadCtx and its readers
+			// let it; fillCtx adds only the span of the request it started for.
+			fillCtx, fillSpan := startFillSpan(pc.downloadCtx, res)
+			err := bf.Fill(fillCtx, fill.start, fill.end)
+			endFillSpan(fillSpan, err)
+			if err != nil {
 				log.Debugf("Background fill of blocks %d-%d of %s ended early: %v", fill.start, fill.end, res.instanceHash, err)
 			}
 		}()
@@ -1506,6 +1527,7 @@ func (pc *PersistentCache) GetSeekableReader(ctx context.Context, objectPath, be
 		if err != nil {
 			return nil, nil, err
 		}
+		res.requestSpan = trace.SpanFromContext(ctx)
 
 		// Handle no-store streaming response
 		if res.noStoreRC != nil {
@@ -2113,6 +2135,7 @@ func (pc *PersistentCache) downloadObject(ctx context.Context, pelicanURL string
 				// caller to start its own download.
 				return "", nil, ErrNoStoreRetry
 			}
+			joinFetch(ctx, dl.fetchSpan)
 			return instanceHash, dl, err
 		}
 		dl.waiters = append(dl.waiters, waiter)
@@ -2130,18 +2153,22 @@ func (pc *PersistentCache) downloadObject(ctx context.Context, pelicanURL string
 				// Stream already consumed by first caller — retry.
 				return "", nil, ErrNoStoreRetry
 			}
+			joinFetch(ctx, dlRef.fetchSpan)
 			return instanceHash, dlRef, err
 		case <-ctx.Done():
 			return "", nil, ctx.Err()
 		}
 	}
 
-	// Create new download (keyed by objectHash)
+	// Create new download (keyed by objectHash).  Its fetch span starts
+	// before the entry is published, so every waiter finds it.
+	ctx, fetchSpan := startFetchSpan(ctx, pelicanURL)
 	dl := &persistentDownload{
 		objectHash:     objectHash,
 		sourceURL:      pelicanURL,
 		namespaceID:    namespaceID,
 		completionDone: make(chan struct{}),
+		fetchSpan:      fetchSpan.SpanContext(),
 	}
 	pc.activeDownloads[objectHash] = dl
 	pc.activeDownloadsMu.Unlock()
@@ -2184,6 +2211,7 @@ func (pc *PersistentCache) downloadObject(ctx context.Context, pelicanURL string
 	// benefit from deduplication.
 	go func() {
 		<-dl.completionDone
+		endFetchSpan(fetchSpan, dl, err)
 		pc.activeDownloadsMu.Lock()
 		delete(pc.activeDownloads, objectHash)
 		pc.activeDownloadsMu.Unlock()
@@ -2297,6 +2325,7 @@ func (pc *PersistentCache) performDownload(ctx context.Context, dl *persistentDo
 	// AdoptTransfer) can also cancel this individual context when no
 	// clients remain.
 	dlCtx, dlCancel := context.WithCancel(pc.downloadCtx)
+	dlCtx = tracing.CarrySpan(dlCtx, ctx) // the fetch span only; cancellation stays pc.downloadCtx's
 	dl.cancelFn = dlCancel
 	// A transfer that nothing adopts is stopped on the way out: otherwise
 	// one whose hand-off failed runs on -- from a stalled origin, until the

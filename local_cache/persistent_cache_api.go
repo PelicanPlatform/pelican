@@ -50,6 +50,7 @@ import (
 	"github.com/pelicanplatform/pelican/server_structs"
 	"github.com/pelicanplatform/pelican/token"
 	"github.com/pelicanplatform/pelican/token_scopes"
+	"github.com/pelicanplatform/pelican/tracing"
 	"github.com/pelicanplatform/pelican/utils"
 	"github.com/pelicanplatform/pelican/web_ui"
 )
@@ -436,7 +437,10 @@ func (pc *PersistentCache) serveObject(w http.ResponseWriter, r *http.Request) {
 	// Extract client request ID for end-to-end tracing.  The same ID is
 	// forwarded to the origin on cache-miss fetches and proxy requests.
 	requestId := r.Header.Get("X-Pelican-JobId")
-	reqLog := requestLogger(r, objectPath)
+	// GET and HEAD only; r is rebound so that everything below sees the span.
+	r, serveSpan := startServeSpan(r, objectPath, requestId)
+	defer tracing.EndServerDeferred(serveSpan, statusOf(w))
+	reqLog := tracing.WithLogFields(requestLogger(r, objectPath), r.Context())
 	startTime := time.Now()
 
 	// Handle PROPFIND requests.
@@ -515,6 +519,7 @@ func (pc *PersistentCache) serveObject(w http.ResponseWriter, r *http.Request) {
 				w.WriteHeader(http.StatusGatewayTimeout)
 				return
 			} else if statErr != nil {
+				tracing.NoteError(serveSpan, statErr)
 				pc.handleError(w, statErr, objectPath, sendTrailer, reqLog)
 				return
 			}
@@ -527,6 +532,7 @@ func (pc *PersistentCache) serveObject(w http.ResponseWriter, r *http.Request) {
 		// Plain HEAD — stat only, no download.
 		result, headErr := pc.HeadObject(objectPath, bearerToken)
 		if headErr != nil {
+			tracing.NoteError(serveSpan, headErr)
 			pc.handleError(w, headErr, objectPath, sendTrailer, reqLog)
 			return
 		}
@@ -566,6 +572,7 @@ func (pc *PersistentCache) serveObject(w http.ResponseWriter, r *http.Request) {
 			w.WriteHeader(http.StatusGatewayTimeout)
 			return
 		} else if statErr != nil {
+			tracing.NoteError(serveSpan, statErr)
 			pc.handleError(w, statErr, objectPath, sendTrailer, reqLog)
 			return
 		}
@@ -579,6 +586,7 @@ func (pc *PersistentCache) serveObject(w http.ResponseWriter, r *http.Request) {
 	// are self-authenticating; the client's bearer token is dropped on the
 	// cross-host hop, which is exactly what we want.
 	if pc.tryTierRedirect(w, r, objectPath, bearerToken, reqLog, startTime) {
+		setServeResult(serveSpan, "hit-redirect", noBodyServed) // the bytes come from tier storage
 		return
 	}
 
@@ -607,6 +615,8 @@ func (pc *PersistentCache) serveObject(w http.ResponseWriter, r *http.Request) {
 		if requestId != "" {
 			dlCtx = client.ContextWithRequestId(dlCtx, requestId)
 		}
+		// Only the request's span, never its cancellation.
+		dlCtx = tracing.CarrySpan(dlCtx, r.Context())
 		rd, md, err := pc.GetSeekableReader(dlCtx, objectPath, bearerToken, r.Header.Get("Range") != "")
 		resCh <- readerResult{rd, md, err}
 	}()
@@ -637,6 +647,7 @@ func (pc *PersistentCache) serveObject(w http.ResponseWriter, r *http.Request) {
 		reader, meta, getErr = res.reader, res.meta, res.err
 	}
 	if getErr != nil {
+		tracing.NoteError(serveSpan, getErr)
 		pc.handleError(w, getErr, objectPath, sendTrailer, reqLog)
 		return
 	}
@@ -695,6 +706,7 @@ func (pc *PersistentCache) serveObject(w http.ResponseWriter, r *http.Request) {
 						// ETag matches, return 304 Not Modified
 						w.Header().Set("Cache-Control", meta.ResponseCacheControl())
 						w.WriteHeader(http.StatusNotModified)
+						setServeResult(serveSpan, "hit", noBodyServed)
 						reqLog.WithFields(log.Fields{
 							"status":   304,
 							"cache":    "hit",
@@ -745,6 +757,7 @@ func (pc *PersistentCache) serveObject(w http.ResponseWriter, r *http.Request) {
 			w.Header().Set("X-Transfer-Status", trailerVal)
 		}
 		pc.emitTransferMonitoring(r, objectPath, nServed, startTime, bearerToken)
+		setServeResult(serveSpan, "pass-through", nServed)
 		reqLog.WithFields(log.Fields{
 			"status":   200,
 			"cache":    "pass-through",
@@ -813,6 +826,7 @@ func (pc *PersistentCache) serveObject(w http.ResponseWriter, r *http.Request) {
 		cacheStatus = "hit"
 	}
 	pc.emitTransferMonitoring(r, objectPath, wrappedWriter.bytesWritten, startTime, bearerToken)
+	setServeResult(serveSpan, cacheStatus, wrappedWriter.bytesWritten)
 	reqLog.WithFields(log.Fields{
 		"cache":    cacheStatus,
 		"duration": time.Since(startTime).Round(time.Millisecond).String(),

@@ -154,6 +154,8 @@ func stashPluginMain(args []string) {
 		log.Errorf("Problem initializing the Pelican client config: %v", configErr)
 		configErr = errors.Wrap(configErr, "Problem initializing the Pelican Client configuration")
 		isConfigErr = true
+	} else {
+		client.InitTracing(context.Background())
 	}
 
 	// Want to try to force logging to stderr because that is how we can see logging in condor starter log
@@ -385,6 +387,7 @@ func stashPluginMain(args []string) {
 		err = waitErr
 	}
 
+	client.FlushTracing()
 	tmpSuccess, retryable, err := writeOutfile(err, resultAds, outputFile)
 	if err != nil {
 		os.Exit(FailedOutfile)

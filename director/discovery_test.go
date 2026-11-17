@@ -63,6 +63,9 @@ func TestFederationDiscoveryHandler(t *testing.T) {
 		expectedDir string
 		expectedReg string
 		statusCode  int
+		// tracingEndpoint, when non-empty, is set as Federation.TracingEndpoint and
+		// must be echoed as tracing_endpoint; when empty, the key must be absent.
+		tracingEndpoint string
 	}{
 		{
 			name:        "reg-dir-without-port",
@@ -121,6 +124,26 @@ func TestFederationDiscoveryHandler(t *testing.T) {
 			expectedReg: mockRegUrlWoPort,
 			statusCode:  200,
 		},
+		// tracing endpoint tests
+		{
+			name:            "tracing-endpoint-https",
+			dirUrl:          mockDirUrlWoPort,
+			regUrl:          mockRegUrlWoPort,
+			expectedDir:     mockDirUrlWoPort,
+			expectedReg:     mockRegUrlWoPort,
+			statusCode:      200,
+			tracingEndpoint: "https://otel.example.org:4318",
+		},
+		{
+			// An http collector URL is advertised untouched (no https upgrade).
+			name:            "tracing-endpoint-http",
+			dirUrl:          mockDirUrlWoPort,
+			regUrl:          mockRegUrlWoPort,
+			expectedDir:     mockDirUrlWoPort,
+			expectedReg:     mockRegUrlWoPort,
+			statusCode:      200,
+			tracingEndpoint: "http://otel.example.org:4318",
+		},
 	}
 
 	for _, tc := range tests {
@@ -128,12 +151,16 @@ func TestFederationDiscoveryHandler(t *testing.T) {
 			server_utils.ResetTestState()
 			fedInfo := pelican_url.FederationDiscovery{DirectorEndpoint: tc.dirUrl, RegistryEndpoint: tc.regUrl}
 			test_utils.MockFederationRoot(t, &fedInfo, nil)
-			test_utils.InitClient(t, map[param.Param]any{
+			params := map[param.Param]any{
 				param.Federation_DiscoveryUrl: param.Federation_DiscoveryUrl.GetString(),
 				param.Federation_DirectorUrl:  tc.dirUrl,
 				param.Federation_RegistryUrl:  tc.regUrl,
 				param.TLSSkipVerify:           true,
-			})
+			}
+			if tc.tracingEndpoint != "" {
+				params[param.Federation_TracingEndpoint] = tc.tracingEndpoint
+			}
+			test_utils.InitClient(t, params)
 
 			// Enable federation metadata hosting for the test -- must be done _after_
 			// the test client initialization because that function blows out any existing params
@@ -150,6 +177,19 @@ func TestFederationDiscoveryHandler(t *testing.T) {
 			require.NoError(t, err)
 			assert.Equal(t, tc.expectedDir, dis.DirectorEndpoint)
 			assert.Equal(t, tc.expectedReg, dis.RegistryEndpoint)
+
+			// The tracing endpoint is optional: present only when configured, and
+			// otherwise entirely absent so the document is unchanged for federations
+			// that do not advertise a collector.
+			raw := map[string]json.RawMessage{}
+			require.NoError(t, json.Unmarshal(body, &raw))
+			if tc.tracingEndpoint != "" {
+				assert.Equal(t, tc.tracingEndpoint, dis.TracingEndpoint)
+				assert.Contains(t, raw, "tracing_endpoint")
+			} else {
+				assert.Empty(t, dis.TracingEndpoint)
+				assert.NotContains(t, raw, "tracing_endpoint")
+			}
 		})
 	}
 }

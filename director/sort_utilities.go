@@ -466,6 +466,7 @@ func getClientCoordinate(ctx context.Context, addr netip.Addr, ginCtx *gin.Conte
 		var pelicanCoord server_structs.XPelCoordinate
 		if err := pelicanCoord.ParseRawHeader(&ginCtx.Request.Header); err == nil {
 			coord = pelicanCoord.Coordinate
+			recordCoordinateSource(ctx, coordSourceHeader)
 			log.Tracef("Using client-provided coordinate from %s header: lat=%f long=%f",
 				pelicanCoord.GetName(), coord.Lat, coord.Long)
 			return
@@ -475,6 +476,7 @@ func getClientCoordinate(ctx context.Context, addr netip.Addr, ginCtx *gin.Conte
 	if overrideCoord, exists := checkOverrides(addr); exists {
 		// All coordinate provenance fields should have been handled on GeoOverride unmarshal or cache insertion
 		coord = overrideCoord
+		recordCoordinateSource(ctx, coordSourceOverride)
 		log.Tracef("Overriding Geolocation of detected client IP (%s) (lat:long %f:%f) based on configured overrides",
 			addr.String(), coord.Lat, coord.Long)
 		return
@@ -503,6 +505,7 @@ func getClientCoordinate(ctx context.Context, addr netip.Addr, ginCtx *gin.Conte
 
 		// Similarly, provenance fields should have been handled on cache insertion
 		coord = cached.Value()
+		recordCoordinateSource(ctx, coordSourceCachedRandom)
 		log.Tracef("Grabbing coordinate of detected client IP (%s) from random assignment cache (lat:long %f:%f). This assignment will be cached for %v",
 			addr.String(), coord.Lat, coord.Long, time.Until(cached.ExpiresAt()))
 		return
@@ -512,6 +515,7 @@ func getClientCoordinate(ctx context.Context, addr netip.Addr, ginCtx *gin.Conte
 	mmCoord, err := getMaxMindCoordinate(addr)
 	if err == nil {
 		coord = mmCoord
+		recordCoordinateSource(ctx, coordSourceMaxMind)
 		return
 	}
 
@@ -524,6 +528,7 @@ func getClientCoordinate(ctx context.Context, addr netip.Addr, ginCtx *gin.Conte
 	coord.Lat, coord.Long = assignRandBoundedCoord(usLatMin, usLatMax, usLongMin, usLongMax)
 	coord.AccuracyRadius = 0
 	coord.Source = server_structs.CoordinateSourceRandom
+	recordCoordinateSource(ctx, coordSourceRandom)
 	// Set the coord's TTL cache field to true so cached value is accurate, but reset it on return
 	// because this value wasn't cached when we generated it.
 	coord.FromTTLCache = true

@@ -228,6 +228,7 @@ var runtimeConfigurableMap = map[string]bool{
 	"Federation.TopologyNamespaceUrl": false,
 	"Federation.TopologyReloadInterval": false,
 	"Federation.TopologyUrl": false,
+	"Federation.TracingEndpoint": false,
 	"GeoIPOverrides": false,
 	"GeoLocation": false,
 	"Issuer.AccessTokenLifetime": false,
@@ -592,6 +593,10 @@ var runtimeConfigurableMap = map[string]bool{
 	"Topology.DisableDowntime": false,
 	"Topology.DisableOriginX509": false,
 	"Topology.DisableOrigins": false,
+	"Tracing.Enabled": false,
+	"Tracing.Endpoint": false,
+	"Tracing.SamplePercentage": false,
+	"Tracing.TrustRemoteSampling": false,
 	"Transfer.CredentialIdleTimeout": false,
 	"Transfer.EnableOAuth2Clients": false,
 	"Transfer.EnabledGroups": false,
@@ -702,6 +707,7 @@ var stringAccessors = map[string]func(*Config) string{
 	"Federation.TopologyDowntimeUrl": func(c *Config) string { return c.Federation.TopologyDowntimeUrl },
 	"Federation.TopologyNamespaceUrl": func(c *Config) string { return c.Federation.TopologyNamespaceUrl },
 	"Federation.TopologyUrl": func(c *Config) string { return c.Federation.TopologyUrl },
+	"Federation.TracingEndpoint": func(c *Config) string { return c.Federation.TracingEndpoint },
 	"GeoLocation": func(c *Config) string { return c.GeoLocation },
 	"IssuerKey": func(c *Config) string { return c.IssuerKey },
 	"IssuerKeysDirectory": func(c *Config) string { return c.IssuerKeysDirectory },
@@ -860,6 +866,7 @@ var stringAccessors = map[string]func(*Config) string{
 	"StagePlugin.MountPrefix": func(c *Config) string { return c.StagePlugin.MountPrefix },
 	"StagePlugin.OriginPrefix": func(c *Config) string { return c.StagePlugin.OriginPrefix },
 	"StagePlugin.ShadowOriginPrefix": func(c *Config) string { return c.StagePlugin.ShadowOriginPrefix },
+	"Tracing.Endpoint": func(c *Config) string { return c.Tracing.Endpoint },
 	"Xrootd.Authfile": func(c *Config) string { return c.Xrootd.Authfile },
 	"Xrootd.ConfigFile": func(c *Config) string { return c.Xrootd.ConfigFile },
 	"Xrootd.DetailedMonitoringHost": func(c *Config) string { return c.Xrootd.DetailedMonitoringHost },
@@ -1032,6 +1039,7 @@ var intAccessors = map[string]func(*Config) int{
 	"Server.WebPort": func(c *Config) int { return c.Server.WebPort },
 	"Shoveler.PortHigher": func(c *Config) int { return c.Shoveler.PortHigher },
 	"Shoveler.PortLower": func(c *Config) int { return c.Shoveler.PortLower },
+	"Tracing.SamplePercentage": func(c *Config) int { return c.Tracing.SamplePercentage },
 	"Transfer.MaxConcurrentJobs": func(c *Config) int { return c.Transfer.MaxConcurrentJobs },
 	"Transport.MaxIdleConns": func(c *Config) int { return c.Transport.MaxIdleConns },
 	"Xrootd.DetailedMonitoringPort": func(c *Config) int { return c.Xrootd.DetailedMonitoringPort },
@@ -1210,6 +1218,8 @@ var boolAccessors = map[string]func(*Config) bool{
 	"Topology.DisableDowntime": func(c *Config) bool { return c.Topology.DisableDowntime },
 	"Topology.DisableOriginX509": func(c *Config) bool { return c.Topology.DisableOriginX509 },
 	"Topology.DisableOrigins": func(c *Config) bool { return c.Topology.DisableOrigins },
+	"Tracing.Enabled": func(c *Config) bool { return c.Tracing.Enabled },
+	"Tracing.TrustRemoteSampling": func(c *Config) bool { return c.Tracing.TrustRemoteSampling },
 	"Transfer.EnableOAuth2Clients": func(c *Config) bool { return c.Transfer.EnableOAuth2Clients },
 	"Xrootd.AutoShutdownEnabled": func(c *Config) bool { return c.Xrootd.AutoShutdownEnabled },
 	"Xrootd.DisableLivenessCheck": func(c *Config) bool { return c.Xrootd.DisableLivenessCheck },
@@ -1567,6 +1577,7 @@ var allParameterNames = []string{
 	"Federation.TopologyNamespaceUrl",
 	"Federation.TopologyReloadInterval",
 	"Federation.TopologyUrl",
+	"Federation.TracingEndpoint",
 	"GeoIPOverrides",
 	"GeoLocation",
 	"Issuer.AccessTokenLifetime",
@@ -1931,6 +1942,10 @@ var allParameterNames = []string{
 	"Topology.DisableDowntime",
 	"Topology.DisableOriginX509",
 	"Topology.DisableOrigins",
+	"Tracing.Enabled",
+	"Tracing.Endpoint",
+	"Tracing.SamplePercentage",
+	"Tracing.TrustRemoteSampling",
 	"Transfer.CredentialIdleTimeout",
 	"Transfer.EnableOAuth2Clients",
 	"Transfer.EnabledGroups",
@@ -2014,6 +2029,7 @@ var (
 	Federation_TopologyDowntimeUrl = StringParam{"Federation.TopologyDowntimeUrl"}
 	Federation_TopologyNamespaceUrl = StringParam{"Federation.TopologyNamespaceUrl"}
 	Federation_TopologyUrl = StringParam{"Federation.TopologyUrl"}
+	Federation_TracingEndpoint = StringParam{"Federation.TracingEndpoint"}
 	GeoLocation = StringParam{"GeoLocation"}
 	IssuerKey = StringParam{"IssuerKey"}
 	IssuerKeysDirectory = StringParam{"IssuerKeysDirectory"}
@@ -2172,6 +2188,7 @@ var (
 	StagePlugin_MountPrefix = StringParam{"StagePlugin.MountPrefix"}
 	StagePlugin_OriginPrefix = StringParam{"StagePlugin.OriginPrefix"}
 	StagePlugin_ShadowOriginPrefix = StringParam{"StagePlugin.ShadowOriginPrefix"}
+	Tracing_Endpoint = StringParam{"Tracing.Endpoint"}
 	Xrootd_Authfile = StringParam{"Xrootd.Authfile"}
 	Xrootd_ConfigFile = StringParam{"Xrootd.ConfigFile"}
 	Xrootd_DetailedMonitoringHost = StringParam{"Xrootd.DetailedMonitoringHost"}
@@ -2288,6 +2305,7 @@ var (
 	Server_WebPort = IntParam{"Server.WebPort"}
 	Shoveler_PortHigher = IntParam{"Shoveler.PortHigher"}
 	Shoveler_PortLower = IntParam{"Shoveler.PortLower"}
+	Tracing_SamplePercentage = IntParam{"Tracing.SamplePercentage"}
 	Transfer_MaxConcurrentJobs = IntParam{"Transfer.MaxConcurrentJobs"}
 	Transport_MaxIdleConns = IntParam{"Transport.MaxIdleConns"}
 	Xrootd_DetailedMonitoringPort = IntParam{"Xrootd.DetailedMonitoringPort"}
@@ -2401,6 +2419,8 @@ var (
 	Topology_DisableDowntime = BoolParam{"Topology.DisableDowntime"}
 	Topology_DisableOriginX509 = BoolParam{"Topology.DisableOriginX509"}
 	Topology_DisableOrigins = BoolParam{"Topology.DisableOrigins"}
+	Tracing_Enabled = BoolParam{"Tracing.Enabled"}
+	Tracing_TrustRemoteSampling = BoolParam{"Tracing.TrustRemoteSampling"}
 	Transfer_EnableOAuth2Clients = BoolParam{"Transfer.EnableOAuth2Clients"}
 	Xrootd_AutoShutdownEnabled = BoolParam{"Xrootd.AutoShutdownEnabled"}
 	Xrootd_DisableLivenessCheck = BoolParam{"Xrootd.DisableLivenessCheck"}
@@ -2583,6 +2603,7 @@ func init() {
 		"Federation.TopologyDowntimeUrl": Federation_TopologyDowntimeUrl,
 		"Federation.TopologyNamespaceUrl": Federation_TopologyNamespaceUrl,
 		"Federation.TopologyUrl": Federation_TopologyUrl,
+		"Federation.TracingEndpoint": Federation_TracingEndpoint,
 		"GeoLocation": GeoLocation,
 		"IssuerKey": IssuerKey,
 		"IssuerKeysDirectory": IssuerKeysDirectory,
@@ -2741,6 +2762,7 @@ func init() {
 		"StagePlugin.MountPrefix": StagePlugin_MountPrefix,
 		"StagePlugin.OriginPrefix": StagePlugin_OriginPrefix,
 		"StagePlugin.ShadowOriginPrefix": StagePlugin_ShadowOriginPrefix,
+		"Tracing.Endpoint": Tracing_Endpoint,
 		"Xrootd.Authfile": Xrootd_Authfile,
 		"Xrootd.ConfigFile": Xrootd_ConfigFile,
 		"Xrootd.DetailedMonitoringHost": Xrootd_DetailedMonitoringHost,
@@ -2851,6 +2873,7 @@ func init() {
 		"Server.WebPort": Server_WebPort,
 		"Shoveler.PortHigher": Shoveler_PortHigher,
 		"Shoveler.PortLower": Shoveler_PortLower,
+		"Tracing.SamplePercentage": Tracing_SamplePercentage,
 		"Transfer.MaxConcurrentJobs": Transfer_MaxConcurrentJobs,
 		"Transport.MaxIdleConns": Transport_MaxIdleConns,
 		"Xrootd.DetailedMonitoringPort": Xrootd_DetailedMonitoringPort,
@@ -2958,6 +2981,8 @@ func init() {
 		"Topology.DisableDowntime": Topology_DisableDowntime,
 		"Topology.DisableOriginX509": Topology_DisableOriginX509,
 		"Topology.DisableOrigins": Topology_DisableOrigins,
+		"Tracing.Enabled": Tracing_Enabled,
+		"Tracing.TrustRemoteSampling": Tracing_TrustRemoteSampling,
 		"Transfer.EnableOAuth2Clients": Transfer_EnableOAuth2Clients,
 		"Xrootd.AutoShutdownEnabled": Xrootd_AutoShutdownEnabled,
 		"Xrootd.DisableLivenessCheck": Xrootd_DisableLivenessCheck,

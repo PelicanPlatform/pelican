@@ -1,0 +1,32 @@
+# The two backends, wired so that a span-metrics exemplar opens its trace in
+# Jaeger (exemplarTraceIdDestinations).  There is no log datasource: logs stay
+# on each service (README.md, section 6).
+
+apiVersion: 1
+
+datasources:
+  - name: Prometheus
+    uid: pelican-metrics
+    type: prometheus
+    url: http://prometheus:9090
+    access: proxy
+    isDefault: true
+    editable: true
+    jsonData:
+      timeInterval: 15s
+      exemplarTraceIdDestinations:
+        - name: trace_id
+          datasourceUid: pelican-traces
+        - name: trace_id
+          url: http://localhost:16686/trace/$${__value.raw}
+          urlDisplayLabel: View in Jaeger UI
+
+  - name: Jaeger
+    uid: pelican-traces
+    type: jaeger
+    url: http://jaeger:16686
+    access: proxy
+    editable: true
+    jsonData:
+      nodeGraph:
+        enabled: true

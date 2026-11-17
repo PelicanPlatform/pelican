@@ -65,6 +65,7 @@ import (
 	"github.com/pelicanplatform/pelican/param"
 	"github.com/pelicanplatform/pelican/pelican_url"
 	"github.com/pelicanplatform/pelican/server_structs"
+	"github.com/pelicanplatform/pelican/tracing"
 	"github.com/pelicanplatform/pelican/utils"
 )
 
@@ -355,6 +356,7 @@ type (
 		metadataChan       chan<- TransferMetadata // Optional channel to receive early transfer metadata
 		expectedETag       string                  // Optional entity tag every attempt's response must carry; see WithExpectedETag
 		requestId          string                  // Caller-supplied request ID for end-to-end tracing (X-Pelican-JobId)
+		span               *jobSpan                // The client.transfer span of a traced download; nil otherwise
 		// objectMetadata is the optional client-supplied
 		// X-Pelican-Object-Metadata field-set propagated to all
 		// child transferFiles for upload jobs.
@@ -2010,6 +2012,7 @@ func (te *TransferEngine) runMux() error {
 			id := resultsKeys[chosen-len(workMap)]
 			clientJob := tmpResults[id][0]
 			job := clientJob.job
+			jobResultDelivered(job)
 			job.activeXfer.Add(-1)
 			// Test to see if the transfer job is done (true if job-to-file translation
 			// has completed and there are no remaining active transfers)
@@ -2046,6 +2049,7 @@ func (te *TransferEngine) runMux() error {
 					resultBuffer = make([]*TransferResults, 0)
 				}
 				tmpResults[result.id] = append(resultBuffer, &result.results)
+				jobResultArrived(result.results.job, result.results.Error != nil)
 			}
 		} else if chosen == len(workMap)+len(resultsMap)+2 {
 			// Sent the buffered job to the job-to-objects worker.  Clear
@@ -2060,6 +2064,7 @@ func (te *TransferEngine) runMux() error {
 			// Notification that a job has been processed into files (or failed)
 			job := recv.Interface().(*clientTransferJob)
 			job.job.lookupDone.Store(true)
+			jobLookupFinished(job.job)
 			// A job is finished once its lookup is done AND every transfer the
 			// lookup handed to the workers has reported back.
 			//
@@ -2182,7 +2187,19 @@ func (tc *TransferClient) NewTransferJob(ctx context.Context, remoteUrl *url.URL
 		return
 	}
 
-	pUrl, err := ParseRemoteAsPUrl(ctx, remoteUrl.String())
+	// Downloads are traced: the job span goes on ctx before the merge below,
+	// so the job's context and every transfer derived from it carry it.
+	var jspan *jobSpan
+	if !upload {
+		ctx, jspan = startJobSpan(ctx, remoteUrl)
+		if jspan != nil {
+			defer func() { jspan.endOnError(err) }()
+		}
+	}
+
+	discoverOp := jspan.child(ctx, spanDiscoverFed)
+	pUrl, err := ParseRemoteAsPUrl(discoverOp.carry(ctx), remoteUrl.String())
+	jspan.discovered(discoverOp, pUrl, err)
 	if err != nil {
 		return
 	}
@@ -2215,7 +2232,9 @@ func (tc *TransferClient) NewTransferJob(ctx context.Context, remoteUrl *url.URL
 		project:           project,
 		token:             newTokenGenerator(&copyUrl, nil, operation, !tc.skipAcquire),
 		inPlace:           false, // Default to using temporary files (rsync-style)
+		span:              jspan,
 	}
+	jspan.describe(tj)
 	if upload {
 		tj.xferType = transferTypeUpload
 	}
@@ -2229,6 +2248,7 @@ func (tc *TransferClient) NewTransferJob(ctx context.Context, remoteUrl *url.URL
 	}
 
 	tj.ctx, tj.cancel = mergeCancel(ctx, tc.ctx)
+	jspan.endOnCancel(tj.ctx)
 
 	applyTokenOptions(tj.token, nil, upload, options)
 	applyJobOptions(tj, options)
@@ -2297,6 +2317,7 @@ func (tc *TransferClient) NewTransferJob(ctx context.Context, remoteUrl *url.URL
 	if tj.requestId != "" {
 		tj.ctx = ContextWithRequestId(tj.ctx, tj.requestId)
 	}
+	jspan.setJobID(tj.ctx)
 
 	httpMethod := http.MethodGet
 	if upload {
@@ -2327,7 +2348,9 @@ func (tc *TransferClient) NewTransferJob(ctx context.Context, remoteUrl *url.URL
 		// tj is safe to read here: directorInfo evaluates its arguments now,
 		// and the loader it may leave running captures only those (see
 		// cachedDirectorInfo).
-		dirResp, err = tc.engine.directorInfo(tj.ctx, &copyUrl, httpMethod, "", tj.cacheMode)
+		directorOp := jspan.queryDirector(tj.ctx, &copyUrl, false)
+		dirResp, err = tc.engine.directorInfo(directorOp.carry(tj.ctx), &copyUrl, httpMethod, "", tj.cacheMode)
+		directorOp.end(err)
 	}
 	if err != nil {
 		// If director query failed but we have explicit caches, create a minimal response and continue
@@ -2365,7 +2388,9 @@ func (tc *TransferClient) NewTransferJob(ctx context.Context, remoteUrl *url.URL
 	// For uploads or when director indicates token is required, get a token
 	// If director failed but we have explicit caches, try to get token anyway
 	if upload || (!directorFailed && dirResp.XPelNsHdr.RequireToken) || (directorFailed && len(tj.prefObjServers) > 0) || directorless {
+		tokenOp := jspan.child(tj.ctx, spanAcquireToken)
 		contents, err := tj.token.Get()
+		tokenOp.end(err)
 		if err != nil || contents == "" {
 			// If director failed, token errors are not fatal - we'll try without token
 			if directorFailed || directorless {
@@ -2385,7 +2410,9 @@ func (tc *TransferClient) NewTransferJob(ctx context.Context, remoteUrl *url.URL
 			// token-protected namespace would otherwise spend a director
 			// round trip on every single transfer.  directorInfo keys it by
 			// the credential: another token (or none) never receives it.
-			dirResp, err = tc.engine.directorInfo(tj.ctx, &copyUrl, httpMethod, contents, tj.cacheMode)
+			retryOp := jspan.queryDirector(tj.ctx, &copyUrl, true)
+			dirResp, err = tc.engine.directorInfo(retryOp.carry(tj.ctx), &copyUrl, httpMethod, contents, tj.cacheMode)
+			retryOp.end(err)
 			if err != nil {
 				var sce *StatusCodeError
 				if errors.As(err, &sce) {
@@ -2411,6 +2438,7 @@ func (tc *TransferClient) NewTransferJob(ctx context.Context, remoteUrl *url.URL
 		}
 	}
 
+	jspan.setNamespace(tj.dirResp.XPelNsHdr.Namespace)
 	log.Debugf("Created new transfer job, ID %s client %s, for URL %s", tj.uuid.String(), tc.id.String(), copyUrl.String())
 	return
 }
@@ -3617,6 +3645,9 @@ func sortAttempts(ctx context.Context, path string, attempts []transferAttemptDe
 // err is set _only_ if the function was unable to attempt a transfer (e.g., unable to
 // create the destination directory).
 func downloadObject(transfer *transferFile) (transferResults TransferResults, err error) {
+	// Deferred first so that it runs last and sees the final results.
+	objectOp := startObjectSpan(transfer)
+	defer func() { objectOp.endObject(transferResults, err) }()
 	log.Debugln("Downloading object from", transfer.remoteURL, "to", transfer.localPath)
 	// 'downloaded' tracks bytes received locally; it starts at 0 even for ranged downloads.
 	var downloaded int64
@@ -3641,7 +3672,7 @@ func downloadObject(transfer *transferFile) (transferResults TransferResults, er
 	sorted := false
 	if transfer.job != nil && transfer.job.ctx != nil && transfer.job.rejectCollections && !transfer.job.dryRun {
 		var collection collectionAnswer
-		size, collection, attempts = sortAttempts(transfer.job.ctx, transfer.remoteURL.Path, transfer.attempts, probeToken(transfer.token, transfer.fedToken), true)
+		size, collection, attempts = objectOp.sortAttempts(transfer.job.ctx, transfer.remoteURL.Path, transfer.attempts, probeToken(transfer.token, transfer.fedToken), true)
 		sorted = true
 		if collection.isCollection {
 			err = error_codes.NewParameterError(
@@ -3937,7 +3968,7 @@ func downloadObject(transfer *transferFile) (transferResults TransferResults, er
 	// also discovers the object size. A job that refuses collections has
 	// already done this above.
 	if !sorted && transfer.job != nil && transfer.job.ctx != nil {
-		size, _, attempts = sortAttempts(transfer.job.ctx, transfer.remoteURL.Path, transfer.attempts, transfer.token, false)
+		size, _, attempts = objectOp.sortAttempts(transfer.job.ctx, transfer.remoteURL.Path, transfer.attempts, transfer.token, false)
 	}
 
 	// Create a new transferResults if we don't already have one
@@ -3954,6 +3985,9 @@ func downloadObject(transfer *transferFile) (transferResults TransferResults, er
 	downloadAttemptCount := 0
 	for idx, transferEndpoint := range attempts { // For each transfer attempt (usually 3), try to download via HTTP
 		downloadAttemptCount++
+		// Ended just before the attempt is appended below; nothing in
+		// between leaves the loop.
+		attemptOp := objectOp.startAttempt(idx, transferEndpoint.Url.Host)
 		var attempt TransferResult
 		attempt.CacheAge = -1
 		attempt.Number = idx // Start with 0
@@ -3987,7 +4021,8 @@ func downloadObject(transfer *transferFile) (transferResults TransferResults, er
 			"url": transferEndpoint.Url.String(),
 			"job": transfer.job.ID(),
 		}
-		ctx := context.WithValue(transfer.ctx, logFields("fields"), fields)
+		attemptOp.addLogFields(fields)
+		ctx := context.WithValue(attemptOp.carry(transfer.ctx), logFields("fields"), fields)
 		transferStartTime = time.Now() // Update start time for this attempt
 		tokenContents := ""
 		if transfer.token != nil {
@@ -4102,6 +4137,7 @@ func downloadObject(transfer *transferFile) (transferResults TransferResults, er
 			attempt.Error = newTransferAttemptError(serviceStr, proxyStr, isProxyErr, false, wrappedErr)
 			xferErrors.AddPastError(attempt.Error, endTime)
 		}
+		attemptOp.endAttempt(attempt, err)
 		transferResults.Attempts = append(transferResults.Attempts, attempt)
 
 		if err == nil { // Success
@@ -4143,6 +4179,7 @@ func downloadObject(transfer *transferFile) (transferResults TransferResults, er
 				"job": transfer.job.ID(),
 			}).Debugln("Skipping checksum fetch at the caller's request")
 		} else {
+			checksumOp := objectOp.child(spanVerifyChecksum)
 			// Fetch checksum of the downloaded file, compare it to the calculated.
 			// Use downloadAttemptCount (the number of download-loop iterations)
 			// rather than len(transferResults.Attempts), which may include extra
@@ -4157,7 +4194,7 @@ func downloadObject(transfer *transferFile) (transferResults TransferResults, er
 					"url": url.String(),
 					"job": transfer.job.ID(),
 				}
-				ctx := context.WithValue(transfer.ctx, logFields("fields"), fields)
+				ctx := context.WithValue(checksumOp.carry(transfer.ctx), logFields("fields"), fields)
 				tokenContents := ""
 				if transfer.token != nil {
 					tokenContents, _ = transfer.token.Get()
@@ -4211,6 +4248,7 @@ func downloadObject(transfer *transferFile) (transferResults TransferResults, er
 			); verifyErr != nil {
 				transferResults.Error = verifyErr
 			}
+			checksumOp.end(transferResults.Error)
 		}
 	} else {
 		transferResults.Error = xferErrors
@@ -4296,7 +4334,7 @@ func fetchChecksum(ctx context.Context, types []ChecksumType, url *url.URL, toke
 		request.Header.Set("X-Pelican-JobId", val)
 	}
 	request.Header.Set("Want-Digest", wantDigestValue(types))
-	client := config.GetClient()
+	client := tracing.Client(config.GetClient())
 	response, err := client.Do(request)
 	if err != nil {
 		return
@@ -4691,6 +4729,8 @@ func downloadHTTP(ctx context.Context, te *TransferEngine, callback TransferCall
 	log.WithFields(fields).Debugln("Starting the HTTP transfer...")
 	downloadStart := time.Now()
 	var resp *http.Response
+	// Wrapped last: withFileRedirects above needs the bare *http.Transport.
+	client = tracing.Client(client)
 	if resp, err = client.Do(req); err != nil {
 		var cam syscall.Errno
 		if errors.As(err, &cam) && cam == syscall.ENOMEM {
@@ -4994,6 +5034,7 @@ func downloadHTTP(ctx context.Context, te *TransferEngine, callback TransferCall
 		// Now that the goroutine is done, get the final byte count
 		finalDownloaded := pw.BytesComplete()
 		downloaded = finalDownloaded
+		recordTimeToFirstByte(ctx, downloadStart, pw.FirstByteTime())
 
 		// If the function is returning an error that contains byte counts, update it
 		var ste *SlowTransferError
@@ -6839,7 +6880,7 @@ func statHttpImpl(ctx context.Context, dest *pelican_url.PelicanURL, dirResp ser
 					log.Debugln("Performing request", endpoint.String())
 					transport = config.GetTransport()
 				}
-				client.SetTransport(boundPropfindBody(transport))
+				client.SetTransport(tracing.Transport(boundPropfindBody(transport)))
 
 				fsinfo, err := client.Stat(endpoint.Path)
 				if err == nil {
@@ -7023,7 +7064,7 @@ func propfindObject(ctx context.Context, objectUrl *url.URL, unixSocket string, 
 		base.Host = "localhost"
 	}
 	client := gowebdav.NewAuthClient(base.String(), &bearerAuth{token: token})
-	client.SetTransport(transport)
+	client.SetTransport(tracing.Transport(transport))
 	query := objectUrl.RawQuery
 	client.SetInterceptor(func(_ string, r *http.Request) {
 		*r = *r.WithContext(ctx)
@@ -7186,7 +7227,7 @@ func objectCached(ctx context.Context, objectUrl *url.URL, token *tokenGenerator
 
 	age = -1
 
-	headClient := config.GetClient()
+	headClient := tracing.Client(config.GetClient())
 	headRequest, err := http.NewRequestWithContext(ctx, http.MethodGet, objectUrl.String(), nil)
 	if err != nil {
 		return

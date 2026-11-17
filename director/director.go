@@ -49,6 +49,7 @@ import (
 	"github.com/pelicanplatform/pelican/server_utils"
 	"github.com/pelicanplatform/pelican/token"
 	"github.com/pelicanplatform/pelican/token_scopes"
+	"github.com/pelicanplatform/pelican/tracing"
 	"github.com/pelicanplatform/pelican/utils"
 	"github.com/pelicanplatform/pelican/web_ui"
 )
@@ -786,6 +787,10 @@ func processSortedAdsErr(ginCtx *gin.Context, err error, requestId uuid.UUID) {
 }
 
 func redirectToCache(ginCtx *gin.Context) {
+	// Deferred first so that it runs after the metrics below have read the response.
+	span := startRedirectSpan(ginCtx)
+	defer tracing.EndServerDeferred(span, ginCtx.Writer)
+
 	// Later we'll collect metrics for which service we sent the user to. For now, assume
 	// we're sending them to a cache.
 	chosenService := "cache"
@@ -797,10 +802,12 @@ func redirectToCache(ginCtx *gin.Context) {
 	// Assign this request an ID (which may come from the client) so we can use it to track
 	// the request through the Director.
 	requestId := getRequestID(ginCtx)
+	recordRequestID(span, requestId)
 
 	// Make sure the user hasn't asked us to do anything too goofy
 	if err := validateIncomingRequest(ginCtx); err != nil {
 		log.Debugf("Failed to validate incoming request: %v", err)
+		tracing.NoteError(span, err)
 		ginCtx.JSON(http.StatusBadRequest, server_structs.SimpleApiResp{
 			Status: server_structs.RespFailed,
 			Msg:    fmt.Sprintf("Failed to validate incoming request: %v: Request ID: %s", err, requestId.String()),
@@ -812,6 +819,7 @@ func redirectToCache(ginCtx *gin.Context) {
 	// as matchmaking is handled within.
 	oAds, cAds, err := getSortedAds(ginCtx, requestId)
 	if err != nil {
+		tracing.NoteError(span, err)
 		processSortedAdsErr(ginCtx, err, requestId)
 		return
 	}
@@ -829,6 +837,7 @@ func redirectToCache(ginCtx *gin.Context) {
 		if len(cAds) == 0 {
 			msg := "No caches can fulfill this request and no fallback origins with the 'DirectReads' capability found for this object. Request ID: " + requestId.String()
 			log.Debugln(msg)
+			noteRedirectFailure(span, msg)
 			ginCtx.JSON(http.StatusNotFound, server_structs.SimpleApiResp{
 				Status: server_structs.RespFailed,
 				Msg:    msg,
@@ -855,6 +864,7 @@ func redirectToCache(ginCtx *gin.Context) {
 
 	// Validate client token if required for this namespace
 	if status, err := validateClientToken(ginCtx, requestId); err != nil {
+		tracing.NoteError(span, err)
 		ginCtx.JSON(status, server_structs.SimpleApiResp{
 			Status: server_structs.RespFailed,
 			Msg:    fmt.Sprintf("%v: Request ID: %s", err, requestId.String()),
@@ -863,10 +873,15 @@ func redirectToCache(ginCtx *gin.Context) {
 	}
 
 	redirectSucceeded = true
+	recordRedirectChoice(span, ginCtx, chosenServers, oAds[0].NamespaceAd)
 	generateRedirectResponse(ginCtx, chosenServers, oServers, oAds[0].NamespaceAd, requestId)
 }
 
 func redirectToOrigin(ginCtx *gin.Context) {
+	// Deferred first so that it runs after the metrics below have read the response.
+	span := startRedirectSpan(ginCtx)
+	defer tracing.EndServerDeferred(span, ginCtx.Writer)
+
 	chosenService := "origin"
 	redirectSucceeded := false
 	defer func(chosenService *string, redirectSucceeded *bool) {
@@ -876,10 +891,12 @@ func redirectToOrigin(ginCtx *gin.Context) {
 	// Assign this request an ID (which may come from the client) so we can use it to track
 	// the request through the Director.
 	requestId := getRequestID(ginCtx)
+	recordRequestID(span, requestId)
 
 	// Make sure the user hasn't asked us to do anything too goofy
 	if err := validateIncomingRequest(ginCtx); err != nil {
 		log.Debugf("Failed to validate incoming request: %v", err)
+		tracing.NoteError(span, err)
 		ginCtx.JSON(http.StatusBadRequest, server_structs.SimpleApiResp{
 			Status: server_structs.RespFailed,
 			Msg:    fmt.Sprintf("Failed to validate incoming request: %v: Request ID: %s", err, requestId.String()),
@@ -926,6 +943,7 @@ func redirectToOrigin(ginCtx *gin.Context) {
 	// as matchmaking is handled here.
 	oAds, cAds, err := getSortedAds(ginCtx, requestId)
 	if err != nil {
+		tracing.NoteError(span, err)
 		processSortedAdsErr(ginCtx, err, requestId)
 		return
 	}
@@ -958,6 +976,7 @@ func redirectToOrigin(ginCtx *gin.Context) {
 
 	// Validate client token if required for this namespace
 	if status, err := validateClientToken(ginCtx, requestId); err != nil {
+		tracing.NoteError(span, err)
 		ginCtx.JSON(status, server_structs.SimpleApiResp{
 			Status: server_structs.RespFailed,
 			Msg:    fmt.Sprintf("%v: Request ID: %s", err, requestId.String()),
@@ -966,6 +985,7 @@ func redirectToOrigin(ginCtx *gin.Context) {
 	}
 
 	redirectSucceeded = true
+	recordRedirectChoice(span, ginCtx, chosenServers, oAds[0].NamespaceAd)
 	generateRedirectResponse(ginCtx, chosenServers, oServers, oAds[0].NamespaceAd, requestId)
 }
 

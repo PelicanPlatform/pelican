@@ -1,0 +1,56 @@
+# Go-native cache (no XRootD):
+#   pelican-server cache serve
+#
+# No tracing endpoint here: the cache learns it from the director.
+
+TLSSkipVerify: true
+
+Logging:
+  Level: info
+  LogLocation: /var/log/pelican/cache.log
+
+Server:
+  Hostname: cache
+  WebPort: 8444
+  EnableUI: false
+  RegistrationCompletionLinkFile: ""
+  SSRFProtection:
+    SkipDefaultBlocks: true
+
+Federation:
+  DiscoveryUrl: https://director:8444
+
+Monitoring:
+  MetricAuthorization: false
+  EnablePrometheus: false
+
+Cache:
+  EnableV2: true
+  # Objects go under <StorageLocation>/persistent-cache.
+  StorageLocation: /var/lib/pelican/cache
+  EnableVoms: false
+  # The default, /etc/pelican/cache-fed-token, is written through a temporary
+  # directory two levels up (/etc/fed-token-temp) and then renamed.  With
+  # /etc/pelican on its own volume that rename crosses filesystems and fails
+  # ("invalid cross-device link").  Keep both on the state volume.
+  FedTokenLocation: /var/lib/pelican/fed-token/cache-fed-token
+  # The director's test downloads every 15 s end with a request to evict the
+  # test file, which the Go-native cache refuses (403), so each test logs
+  # warnings in both the director's and the cache's log.  Not needed here.
+  DirectorTest: false
+
+LocalCache:
+  # The Go-native cache sizes itself from the filesystem when this is unset,
+  # which inside Docker is the whole VM disk.  Cap it so eviction starts at
+  # Cache.HighWaterMark (89%) of 1 GB; the demo then needs at most about 1 GB
+  # of the Docker disk for cached objects.
+  Size: 1GB
+
+Xrootd:
+  # The cache registers as /caches/<Sitename>.  Name it explicitly; a second
+  # cache would need a different name or its registration would merge with
+  # this one's.
+  Sitename: demo-cache
+
+Tracing:
+  Enabled: true

@@ -28,6 +28,7 @@ import (
 	"net/http"
 	"net/url"
 	"path"
+	"strings"
 	"time"
 
 	"github.com/pkg/errors"
@@ -62,6 +63,13 @@ const (
 
 const MonitoringBaseNs string = "/pelican/monitoring" // The base namespace for monitoring objects
 const DirectorTestDir string = "directorTest"         // Subdirectory under MonitoringBaseNs for director test files
+
+// IsMonitoringPath reports whether an object path is MonitoringBaseNs itself
+// or lies under it: the objects the director's and the servers' own health
+// tests read and write.
+func IsMonitoringPath(objectPath string) bool {
+	return objectPath == MonitoringBaseNs || strings.HasPrefix(objectPath, MonitoringBaseNs+"/")
+}
 
 const (
 	SelfTestBody     string = "This object was created by the Pelican self-test functionality"

@@ -167,6 +167,7 @@ type Config struct {
 		TopologyNamespaceUrl string `mapstructure:"topologynamespaceurl" yaml:"TopologyNamespaceUrl"`
 		TopologyReloadInterval time.Duration `mapstructure:"topologyreloadinterval" yaml:"TopologyReloadInterval"`
 		TopologyUrl string `mapstructure:"topologyurl" yaml:"TopologyUrl"`
+		TracingEndpoint string `mapstructure:"tracingendpoint" yaml:"TracingEndpoint"`
 	} `mapstructure:"federation" yaml:"Federation"`
 	GeoIPOverrides any `mapstructure:"geoipoverrides" yaml:"GeoIPOverrides"`
 	GeoLocation string `mapstructure:"geolocation" yaml:"GeoLocation"`
@@ -580,6 +581,12 @@ type Config struct {
 		DisableOriginX509 bool `mapstructure:"disableoriginx509" yaml:"DisableOriginX509"`
 		DisableOrigins bool `mapstructure:"disableorigins" yaml:"DisableOrigins"`
 	} `mapstructure:"topology" yaml:"Topology"`
+	Tracing struct {
+		Enabled bool `mapstructure:"enabled" yaml:"Enabled"`
+		Endpoint string `mapstructure:"endpoint" yaml:"Endpoint"`
+		SamplePercentage int `mapstructure:"samplepercentage" yaml:"SamplePercentage"`
+		TrustRemoteSampling bool `mapstructure:"trustremotesampling" yaml:"TrustRemoteSampling"`
+	} `mapstructure:"tracing" yaml:"Tracing"`
 	Transfer struct {
 		CredentialIdleTimeout time.Duration `mapstructure:"credentialidletimeout" yaml:"CredentialIdleTimeout"`
 		EnableOAuth2Clients bool `mapstructure:"enableoauth2clients" yaml:"EnableOAuth2Clients"`
@@ -772,6 +779,7 @@ type configWithType struct {
 		TopologyNamespaceUrl struct { Type string; Value string }
 		TopologyReloadInterval struct { Type string; Value time.Duration }
 		TopologyUrl struct { Type string; Value string }
+		TracingEndpoint struct { Type string; Value string }
 	}
 	GeoIPOverrides struct { Type string; Value any }
 	GeoLocation struct { Type string; Value string }
@@ -1184,6 +1192,12 @@ type configWithType struct {
 		DisableDowntime struct { Type string; Value bool }
 		DisableOriginX509 struct { Type string; Value bool }
 		DisableOrigins struct { Type string; Value bool }
+	}
+	Tracing struct {
+		Enabled struct { Type string; Value bool }
+		Endpoint struct { Type string; Value string }
+		SamplePercentage struct { Type string; Value int }
+		TrustRemoteSampling struct { Type string; Value bool }
 	}
 	Transfer struct {
 		CredentialIdleTimeout struct { Type string; Value time.Duration }

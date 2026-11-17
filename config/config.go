@@ -777,6 +777,10 @@ func discoverFederationImpl(ctx context.Context) (fedInfo pelican_url.Federation
 	fedInfo.RegistryEndpoint = viper.GetString("Federation.RegistryUrl")
 	fedInfo.JwksUri = viper.GetString("Federation.JwkUrl")
 	fedInfo.BrokerEndpoint = viper.GetString("Federation.BrokerUrl")
+	// The tracing endpoint is optional and is deliberately not part of the
+	// "skip discovery" check below, nor normalized like the other URLs: an
+	// http:// collector URL must survive untouched.
+	fedInfo.TracingEndpoint = param.Federation_TracingEndpoint.GetString()
 
 	// The only time we'll ever skip discovery is if we already have all the values.
 	// Note that the discovery endpoint itself is required because it acts as the
@@ -866,6 +870,10 @@ func discoverFederationImpl(ctx context.Context) (fedInfo pelican_url.Federation
 	if fedInfo.DirectorAdvertiseEndpoints == nil && metadata.DirectorAdvertiseEndpoints != nil {
 		fedInfo.DirectorAdvertiseEndpoints = metadata.DirectorAdvertiseEndpoints
 	}
+	if fedInfo.TracingEndpoint == "" && metadata.TracingEndpoint != "" {
+		log.Debugln("Setting global tracing endpoint to", metadata.TracingEndpoint)
+		fedInfo.TracingEndpoint = metadata.TracingEndpoint
+	}
 
 	return
 }
@@ -924,15 +932,22 @@ func GetFederation(ctx context.Context) (pelican_url.FederationDiscovery, error)
 // values without re-running discovery. Callers are responsible for providing
 // correct and complete federation info.
 func SetFederation(fd pelican_url.FederationDiscovery) {
-	// Best-effort update of config state; this should not fail under normal circumstances
-	if err := param.MultiSet(map[string]interface{}{
+	values := map[string]interface{}{
 		param.Federation_DiscoveryUrl.GetName(): fd.DiscoveryEndpoint,
 		"Federation.DirectorUrl":                fd.DirectorEndpoint,
 		"Federation.RegistryUrl":                fd.RegistryEndpoint,
 		"Federation.BrokerUrl":                  fd.BrokerEndpoint,
 		"Federation.JwkUrl":                     fd.JwksUri,
 		"Federation.DirectorAdvertiseEndpoints": fd.DirectorAdvertiseEndpoints,
-	}); err != nil {
+	}
+	// The tracing endpoint is optional; record it only when one is supplied so
+	// that callers which do not know about it cannot clobber a locally
+	// configured value with an empty string.
+	if fd.TracingEndpoint != "" {
+		values[param.Federation_TracingEndpoint.GetName()] = fd.TracingEndpoint
+	}
+	// Best-effort update of config state; this should not fail under normal circumstances
+	if err := param.MultiSet(values); err != nil {
 		log.WithError(err).Warn("Failed to update federation configuration")
 	}
 
