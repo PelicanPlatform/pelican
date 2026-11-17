@@ -66,6 +66,7 @@ import (
 	"github.com/pelicanplatform/pelican/pelican_url"
 	"github.com/pelicanplatform/pelican/server_structs"
 	"github.com/pelicanplatform/pelican/utils"
+	"github.com/pelicanplatform/pelican/utils/unix_cksum"
 )
 
 var (
@@ -650,7 +651,7 @@ func createAllChecksumHashes() (writers []io.Writer, types []ChecksumType) {
 		var w io.Writer
 		switch t {
 		case AlgCRC32:
-			w = crc32.NewIEEE()
+			w = unix_cksum.NewCksum()
 		case AlgCRC32C:
 			w = crc32.New(crc32cTable)
 		case AlgMD5:
