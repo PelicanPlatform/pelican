@@ -452,12 +452,18 @@ func queryOrigins(ctx *gin.Context) {
 				Status: server_structs.RespFailed,
 				Msg:    fmt.Sprintf("%v: Request ID: %s", err, requestId.String()),
 			})
+		case noCopyInOutageErr:
+			ctx.JSON(http.StatusNotFound, server_structs.SimpleApiResp{
+				Status: server_structs.RespFailed,
+				Msg:    fmt.Sprintf("%v: Request ID: %s", err, requestId.String()),
+			})
 		default:
 			ctx.JSON(http.StatusInternalServerError, server_structs.SimpleApiResp{
 				Status: server_structs.RespFailed,
 				Msg:    fmt.Sprintf("Failed to get/sort origin ads for the requested path: %v: Request ID: %s", err, requestId.String()),
 			})
 		}
+		return
 	}
 
 	origins := make([]server_structs.ServerAd, 0, len(oAds))

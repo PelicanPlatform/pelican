@@ -27,6 +27,9 @@ type (
 	MetricSimpleStatus    string
 	DirectorFTXTestStatus MetricSimpleStatus
 	DirectorStatResult    string
+	// The outcome of a request for a registry-backed namespace handled while
+	// none of its origins was online
+	DirectorOriginlessResult string
 )
 
 const (
@@ -39,6 +42,10 @@ const (
 	StatCancelled  DirectorStatResult = "Cancelled"
 	StatForbidden  DirectorStatResult = "Forbidden"
 	StatUnknownErr DirectorStatResult = "UnknownErr"
+
+	OriginlessRedirected DirectorOriginlessResult = "redirected"
+	OriginlessUnchecked  DirectorOriginlessResult = "unchecked"
+	OriginlessNoCopy     DirectorOriginlessResult = "no_copy"
 )
 
 var (
@@ -91,6 +98,11 @@ var (
 		Name: "pelican_director_registry_namespaces",
 		Help: "The number of namespaces the director advertises from the auth state their owners stored in the registry, as of its last successful poll of the registry",
 	})
+
+	PelicanDirectorOriginlessRedirectsTotal = promauto.NewCounterVec(prometheus.CounterOpts{
+		Name: "pelican_director_originless_redirects_total",
+		Help: "The number of requests for a registry-backed namespace handled while none of its origins was online, by outcome: redirected (at least one cache confirmed a copy; the client got a 307 to those caches), unchecked (the request carried no token for a namespace that needs one, usually a client's first request, or asked to skip the presence check; it got a 307 to the closest caches), or no_copy (every cache asked answered and none has a copy; a 404)",
+	}, []string{"result"}) // result: see enums for DirectorOriginlessResult
 
 	PelicanDirectorClientRequestsTotal = promauto.NewCounterVec(prometheus.CounterOpts{
 		Name: "pelican_director_client_requests_total",

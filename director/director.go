@@ -106,6 +106,12 @@ type (
 	directorStartupErr struct {
 		ns string
 	}
+	// A registry-backed namespace has no origin online and the director found
+	// no cache that confirms a copy of the object
+	noCopyInOutageErr struct {
+		ns     string
+		reason string
+	}
 )
 
 func (e noOriginsForNsErr) Error() string {
@@ -119,6 +125,9 @@ func (e objectNotFoundErr) Error() string {
 }
 func (e directorStartupErr) Error() string {
 	return fmt.Sprintf("no servers were found for the requested path '%s'; director just restarted, try again shortly", e.ns)
+}
+func (e noCopyInOutageErr) Error() string {
+	return fmt.Sprintf("namespace '%s' is registered but no origin is online and no cache reports a copy (%s)", e.ns, e.reason)
 }
 
 const (
@@ -772,6 +781,13 @@ func processSortedAdsErr(ginCtx *gin.Context, err error, requestId uuid.UUID) {
 		msg := fmt.Sprintf("%v: Request ID: %s", err, requestId.String())
 		log.Debugln(msg)
 		ginCtx.JSON(http.StatusTooManyRequests, server_structs.SimpleApiResp{
+			Status: server_structs.RespFailed,
+			Msg:    msg,
+		})
+	case noCopyInOutageErr:
+		msg := fmt.Sprintf("%v: Request ID: %s", err, requestId.String())
+		log.Debugln(msg)
+		ginCtx.JSON(http.StatusNotFound, server_structs.SimpleApiResp{
 			Status: server_structs.RespFailed,
 			Msg:    msg,
 		})
