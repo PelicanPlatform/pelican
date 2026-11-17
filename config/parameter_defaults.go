@@ -950,6 +950,12 @@ func SetParameterDefaults(v *viper.Viper, isRoot bool, isOSDF bool) {
 	v.SetDefault(param.Topology_DisableOriginX509.GetName(), false)
 	// Topology.DisableOrigins
 	v.SetDefault(param.Topology_DisableOrigins.GetName(), false)
+	// Tracing.Enabled
+	v.SetDefault(param.Tracing_Enabled.GetName(), false)
+	// Tracing.SamplePercentage
+	v.SetDefault(param.Tracing_SamplePercentage.GetName(), 100)
+	// Tracing.TrustRemoteSampling
+	v.SetDefault(param.Tracing_TrustRemoteSampling.GetName(), false)
 	// Transfer.CredentialIdleTimeout
 	v.SetDefault(param.Transfer_CredentialIdleTimeout.GetName(), "168h")
 	// Transfer.EnableOAuth2Clients

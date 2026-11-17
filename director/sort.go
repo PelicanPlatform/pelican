@@ -36,6 +36,7 @@ import (
 	"github.com/pelicanplatform/pelican/param"
 	"github.com/pelicanplatform/pelican/pelican_url"
 	"github.com/pelicanplatform/pelican/server_structs"
+	"github.com/pelicanplatform/pelican/tracing"
 	"github.com/pelicanplatform/pelican/utils"
 )
 
@@ -87,6 +88,8 @@ func sortServerAds(ctx context.Context, ginCtx *gin.Context, clientAddr netip.Ad
 	sortMethod := server_structs.SortType(param.Director_CacheSortMethod.GetString())
 	redirectInfo.DirectorSortMethod = sortMethod.String()
 	redirectInfo.ClientInfo.IpAddr = clientAddr.String()
+	ctx, span := startSortSpan(ctx, isOriginSort, len(ads), sortMethod)
+	defer span.End()
 
 	sortContext := SortContext{
 		Ctx:             ctx,
@@ -111,7 +114,7 @@ func sortServerAds(ctx context.Context, ginCtx *gin.Context, clientAddr netip.Ad
 	default:
 		// Never say never, but this should never get hit because we validate the value on Director startup.
 		// The only real way to get here is through writing bad unit tests.
-		return nil, errors.Errorf("invalid sort method '%s' set in %s", param.Director_CacheSortMethod.GetString(), param.Director_CacheSortMethod.GetName())
+		return nil, recordSortError(span, errors.Errorf("invalid sort method '%s' set in %s", param.Director_CacheSortMethod.GetString(), param.Director_CacheSortMethod.GetName()))
 	}
 
 	sortedAds, err := sortAlg.Sort(ads, sortContext)
@@ -125,13 +128,15 @@ func sortServerAds(ctx context.Context, ginCtx *gin.Context, clientAddr netip.Ad
 			fallbackMethod = server_structs.RandomType
 			sortAlg = &RandomSort{}
 		} else {
-			return nil, errors.Wrapf(err, "failed to sort server ads using %s", sortMethod.String())
+			return nil, recordSortError(span, errors.Wrapf(err, "failed to sort server ads using %s", sortMethod.String()))
 		}
 
+		sortErr := err
 		sortedAds, err = sortAlg.Sort(ads, sortContext)
 		if err != nil {
-			return nil, errors.Wrapf(err, "failed to sort server ads using both %s and fallback %s algorithms", sortMethod.String(), fallbackMethod.String())
+			return nil, recordSortError(span, errors.Wrapf(err, "failed to sort server ads using both %s and fallback %s algorithms", sortMethod.String(), fallbackMethod.String()))
 		}
+		recordSortFallback(span, sortErr, fallbackMethod)
 	}
 
 	return truncateAds(sortedAds, sourceServerAdsLimit), nil
@@ -425,12 +430,15 @@ func getSortedAds(ctx *gin.Context, requestId uuid.UUID) (sortedOrigins, sortedC
 	reqPath := getObjectPathFromRequest(ctx)
 	reqParams := getRequestParameters(ctx.Request)
 	reqVerb := ctx.Request.Method
+	matchSpan := startMatchNamespaceSpan(ctx)
 	originAds, cacheAds := getAdsForPath(reqPath)
+	recordNamespace(ctx, matchSpan, originAds)
 
 	// If there are no matching origin ads, then we also assume no caches should be serving the object as shutting
 	// down the origin(s) is the same as unplugging from the federation.
 	if len(originAds) == 0 {
 		// If the director restarted recently, tell the client to try again soon by sending a 429
+		matchSpan.End()
 		if inStartupSequence() {
 			return nil, nil, directorStartupErr{reqPath}
 		} else {
@@ -449,6 +457,7 @@ func getSortedAds(ctx *gin.Context, requestId uuid.UUID) (sortedOrigins, sortedC
 	if len(sortedOrigins) == 0 {
 		// Since caches are supposed to act on behalf of origins, the fact that there are no
 		// origins capable of supporting the request means we can fail early.
+		matchSpan.End()
 		return nil, nil, noOriginsForReqErr{verb: mapHTTPVerbToPelVerbWithContext(reqVerb, ctx), queries: mapQueriesToCaps(ctx)}
 	}
 
@@ -472,6 +481,7 @@ func getSortedAds(ctx *gin.Context, requestId uuid.UUID) (sortedOrigins, sortedC
 	supportedPredicates := []AdPredicate{cacheSupportsFeature(requiredFeatures)}
 	unknownPredicates := []AdPredicate{cacheMightSupportFeature(requiredFeatures)}
 	sortedCaches, unknownCaches := filterCaches(ctx, cacheAds, commonPredicates, supportedPredicates, unknownPredicates)
+	matchSpan.End()
 
 	// Avoid sorting any slices we don't need to
 	shouldSortOrigins := isOriginRequest(ctx)
@@ -549,7 +559,8 @@ func getSortedAds(ctx *gin.Context, requestId uuid.UUID) (sortedOrigins, sortedC
 	}
 
 	// Finally, sort everything as needed
-	pCtx := context.WithValue(context.Background(), ProjectContextKey{},
+	recordCandidates(ctx, len(sortedOrigins), len(sortedCaches)+len(unknownCaches))
+	pCtx := context.WithValue(tracing.CarrySpan(context.Background(), ctx.Request.Context()), ProjectContextKey{},
 		utils.ExtractProjectFromUserAgent(ctx.Request.Header.Values("User-Agent")))
 	var wg sync.WaitGroup
 	var lastError error
@@ -613,6 +624,7 @@ func getSortedAds(ctx *gin.Context, requestId uuid.UUID) (sortedOrigins, sortedC
 	if lastError != nil {
 		return nil, nil, lastError
 	}
+	addDecisionEvent(ctx, redirectInfo)
 
 	// Provide redirect debugging info if asked to. This gets set in the context and should be retrieved
 	// by redirectTo{Cache/Origin}

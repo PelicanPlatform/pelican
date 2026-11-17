@@ -1,0 +1,42 @@
+# Go-native origin (no XRootD):
+#   pelican-server origin serve
+#
+# No tracing endpoint here: the origin learns it from the director.
+
+TLSSkipVerify: true
+
+Logging:
+  Level: info
+  LogLocation: /var/log/pelican/origin.log
+
+Server:
+  Hostname: origin
+  WebPort: 8444
+  EnableUI: false
+  RegistrationCompletionLinkFile: ""
+  SSRFProtection:
+    SkipDefaultBlocks: true
+
+Federation:
+  DiscoveryUrl: https://director:8444
+
+Monitoring:
+  MetricAuthorization: false
+  EnablePrometheus: false
+
+Origin:
+  StorageType: posixv2
+  EnableVoms: false
+  # The director's periodic upload test writes to /pelican/monitoring, which
+  # a posixv2 origin does not export, so every test fails with a 404 and a
+  # warning in the director's log.  It is not needed for the demo.
+  DirectorTest: false
+  Exports:
+    # /data/demo is a volume shared with the exerciser, which creates the
+    # objects it downloads.
+    - FederationPrefix: /demo
+      StoragePrefix: /data/demo
+      Capabilities: ["PublicReads", "Reads", "DirectReads", "Listings"]
+
+Tracing:
+  Enabled: true

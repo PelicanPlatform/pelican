@@ -1,0 +1,1415 @@
+{
+  "uid": "pelican-questions",
+  "title": "What Pelican tracing answers",
+  "description": "Questions about downloads that Pelican's existing monitoring cannot answer, each beside the answer computed from traces.",
+  "tags": [
+    "pelican",
+    "tracing"
+  ],
+  "timezone": "browser",
+  "editable": true,
+  "graphTooltip": 0,
+  "refresh": "30s",
+  "schemaVersion": 41,
+  "time": {
+    "from": "now-30m",
+    "to": "now"
+  },
+  "templating": {
+    "list": []
+  },
+  "annotations": {
+    "list": []
+  },
+  "links": [
+    {
+      "title": "Pelican download lookup",
+      "type": "link",
+      "icon": "dashboard",
+      "url": "/d/pelican-trace/pelican-download-lookup",
+      "keepTime": true
+    },
+    {
+      "title": "Pelican object downloads",
+      "type": "link",
+      "icon": "dashboard",
+      "url": "/d/pelican-downloads/pelican-object-downloads",
+      "keepTime": true
+    }
+  ],
+  "panels": [
+    {
+      "type": "text",
+      "title": "",
+      "options": {
+        "mode": "markdown",
+        "content": "## What tracing answers that today's monitoring cannot\n\nEach row below is a question an operator or a user asks about a download.\n\n- **Left**: the question, and why it cannot be answered today.\n- **Middle**: the closest thing Pelican's existing monitoring offers (its Prometheus `/metrics`).\n- **Right**: the answer, computed from the spans every service now records.\n\nThe federation behind this page is the demo's: one director, one Go-native origin, one Go-native cache, and an exerciser downloading objects in a loop.\nTo follow one download from end to end, open the **Pelican download lookup** page (top right) or click any trace ID below."
+      },
+      "id": 1,
+      "gridPos": {
+        "h": 6,
+        "w": 24,
+        "x": 0,
+        "y": 0
+      }
+    },
+    {
+      "type": "row",
+      "title": "1. A download was slow. Where did the time go?",
+      "collapsed": false,
+      "panels": [],
+      "id": 2,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 6
+      }
+    },
+    {
+      "type": "text",
+      "title": "",
+      "options": {
+        "mode": "markdown",
+        "content": "**The question.** A user says a download took too long. Was it finding the federation, asking the director, probing caches, waiting on the cache, or checking the checksum?\n\n**Today.** Each server measures only its own requests. Nothing measures the client, and nothing ties one server's request to another's. The transfer ad has a total, and its time to first byte is always 0.\n\n**With tracing.** The client's own spans divide each download into stages."
+      },
+      "id": 3,
+      "gridPos": {
+        "h": 9,
+        "w": 6,
+        "x": 0,
+        "y": 7
+      }
+    },
+    {
+      "type": "timeseries",
+      "title": "Today: average request time, per server",
+      "description": "pelican_http_request_duration_seconds. Only the origin exports it; it says nothing about the client, the director or the cache, and nothing about any one download.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "pelican-metrics"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "pelican-metrics"
+          },
+          "expr": "sum by (server_type) (rate(pelican_http_request_duration_seconds_sum[5m])) / sum by (server_type) (rate(pelican_http_request_duration_seconds_count[5m]))",
+          "legendFormat": "{{server_type}} request"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "min": 0,
+          "custom": {
+            "lineWidth": 2,
+            "fillOpacity": 15,
+            "showPoints": "never",
+            "stacking": {
+              "mode": "none"
+            }
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      },
+      "id": 4,
+      "gridPos": {
+        "h": 9,
+        "w": 6,
+        "x": 6,
+        "y": 7
+      }
+    },
+    {
+      "type": "bargauge",
+      "title": "With tracing: average time per stage of a download",
+      "description": "Average duration of each client stage over the last 5 minutes. client.attempt is the transfer itself; the rest is overhead.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "pelican-metrics"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "pelican-metrics"
+          },
+          "expr": "sum by (span_name) (rate(traces_span_metrics_duration_milliseconds_sum{service_name=\"pelican-client\",span_name=~\"client\\\\.(discover_federation|query_director|acquire_token|sort_attempts|attempt|verify_checksum)\"}[5m])) / sum by (span_name) (rate(traces_span_metrics_duration_milliseconds_count{service_name=\"pelican-client\",span_name=~\"client\\\\.(discover_federation|query_director|acquire_token|sort_attempts|attempt|verify_checksum)\"}[5m]))",
+          "legendFormat": "{{span_name}}",
+          "instant": true,
+          "range": false
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ms",
+          "min": 0,
+          "color": {
+            "mode": "palette-classic"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "blue",
+                "value": null
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "orientation": "horizontal",
+        "displayMode": "basic",
+        "valueMode": "color",
+        "showUnfilled": true,
+        "namePlacement": "left",
+        "reduceOptions": {
+          "values": false,
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": ""
+        },
+        "minVizHeight": 16,
+        "maxVizHeight": 40,
+        "text": {
+          "titleSize": 13,
+          "valueSize": 18
+        }
+      },
+      "id": 5,
+      "gridPos": {
+        "h": 9,
+        "w": 12,
+        "x": 12,
+        "y": 7
+      }
+    },
+    {
+      "type": "row",
+      "title": "2. Was it a cache hit or a miss, and what does a miss cost?",
+      "collapsed": false,
+      "panels": [],
+      "id": 6,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 16
+      }
+    },
+    {
+      "type": "text",
+      "title": "",
+      "options": {
+        "mode": "markdown",
+        "content": "**The question.** Is the cache doing its job? How many requests does it serve from disk, and how much slower is one it has to fetch?\n\n**Today.** The director counts how many clients it *sent* to a cache. The Go-native cache exports no request metric at all, so nothing says whether those requests were hits.\n\n**With tracing.** Every cache request records its result, so hits and misses can be counted and timed separately."
+      },
+      "id": 7,
+      "gridPos": {
+        "h": 9,
+        "w": 6,
+        "x": 0,
+        "y": 17
+      }
+    },
+    {
+      "type": "timeseries",
+      "title": "Today: clients the director sent to a cache",
+      "description": "pelican_director_redirects_total. A count of redirects; what the cache then did is invisible.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "pelican-metrics"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "pelican-metrics"
+          },
+          "expr": "sum by (destination) (rate(pelican_director_redirects_total[$__rate_interval]))",
+          "legendFormat": "redirected to {{destination}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "reqps",
+          "min": 0,
+          "custom": {
+            "lineWidth": 2,
+            "fillOpacity": 15,
+            "showPoints": "never",
+            "stacking": {
+              "mode": "none"
+            }
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      },
+      "id": 8,
+      "gridPos": {
+        "h": 9,
+        "w": 6,
+        "x": 6,
+        "y": 17
+      }
+    },
+    {
+      "type": "timeseries",
+      "title": "With tracing: cache requests by result",
+      "description": "cache.serve_object spans by pelican.cache.result.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "pelican-metrics"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "pelican-metrics"
+          },
+          "expr": "sum by (pelican_cache_result) (rate(traces_span_metrics_calls_total{span_name=\"cache.serve_object\",pelican_cache_result!=\"\"}[$__rate_interval]))",
+          "legendFormat": "{{pelican_cache_result}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "reqps",
+          "min": 0,
+          "custom": {
+            "lineWidth": 2,
+            "fillOpacity": 15,
+            "showPoints": "never",
+            "stacking": {
+              "mode": "normal"
+            }
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      },
+      "id": 9,
+      "gridPos": {
+        "h": 9,
+        "w": 6,
+        "x": 12,
+        "y": 17
+      }
+    },
+    {
+      "type": "bargauge",
+      "title": "With tracing: what a miss costs",
+      "description": "Average duration of a cache request, by result, over the last 5 minutes.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "pelican-metrics"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "pelican-metrics"
+          },
+          "expr": "sum by (pelican_cache_result) (rate(traces_span_metrics_duration_milliseconds_sum{span_name=\"cache.serve_object\",pelican_cache_result!=\"\"}[5m])) / sum by (pelican_cache_result) (rate(traces_span_metrics_duration_milliseconds_count{span_name=\"cache.serve_object\",pelican_cache_result!=\"\"}[5m]))",
+          "legendFormat": "{{pelican_cache_result}}",
+          "instant": true,
+          "range": false
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ms",
+          "min": 0,
+          "color": {
+            "mode": "palette-classic"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "blue",
+                "value": null
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "orientation": "horizontal",
+        "displayMode": "basic",
+        "valueMode": "color",
+        "showUnfilled": true,
+        "namePlacement": "left",
+        "reduceOptions": {
+          "values": false,
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": ""
+        },
+        "minVizHeight": 16,
+        "maxVizHeight": 40,
+        "text": {
+          "titleSize": 13,
+          "valueSize": 18
+        }
+      },
+      "id": 10,
+      "gridPos": {
+        "h": 9,
+        "w": 6,
+        "x": 18,
+        "y": 17
+      }
+    },
+    {
+      "type": "row",
+      "title": "3. On a miss, what does the cache do to get the object?",
+      "collapsed": false,
+      "panels": [],
+      "id": 11,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 26
+      }
+    },
+    {
+      "type": "text",
+      "title": "",
+      "options": {
+        "mode": "markdown",
+        "content": "**The question.** A miss was slow. Did the cache spend its time asking the director for an origin, checking the object exists, or pulling the bytes from the origin?\n\n**Today.** The cache's fetch from the origin is a separate request on a separate server. Nothing links it to the client request that caused it.\n\n**With tracing.** The cache's own steps and the origin's part appear beneath the client's request, in the same trace."
+      },
+      "id": 12,
+      "gridPos": {
+        "h": 9,
+        "w": 6,
+        "x": 0,
+        "y": 27
+      }
+    },
+    {
+      "type": "text",
+      "title": "",
+      "options": {
+        "mode": "markdown",
+        "content": "### Today: nothing\n\nThe cache exports no metric for its fetches from the origin.\n\nThe origin's request metrics include those fetches, mixed with everything else it serves, and with no way to tell which client request each one was for."
+      },
+      "id": 13,
+      "gridPos": {
+        "h": 9,
+        "w": 6,
+        "x": 6,
+        "y": 27
+      }
+    },
+    {
+      "type": "bargauge",
+      "title": "With tracing: the cache's steps on a miss",
+      "description": "Average duration, over the last 5 minutes, of what the cache does to fetch an object, and of the origin's part.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "pelican-metrics"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "pelican-metrics"
+          },
+          "expr": "sum by (span_name) (rate(traces_span_metrics_duration_milliseconds_sum{service_name=\"pelican-cache\",span_name=~\"cache\\\\.(resolve_object|fetch_origin)|client\\\\.(stat|query_director|attempt|verify_checksum)\"}[5m])) / sum by (span_name) (rate(traces_span_metrics_duration_milliseconds_count{service_name=\"pelican-cache\",span_name=~\"cache\\\\.(resolve_object|fetch_origin)|client\\\\.(stat|query_director|attempt|verify_checksum)\"}[5m]))",
+          "legendFormat": "cache: {{span_name}}",
+          "instant": true,
+          "range": false
+        },
+        {
+          "refId": "B",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "pelican-metrics"
+          },
+          "expr": "sum by (span_name) (rate(traces_span_metrics_duration_milliseconds_sum{service_name=\"pelican-origin\",span_name=~\"origin\\\\.(serve_object|authorize|read)\"}[5m])) / sum by (span_name) (rate(traces_span_metrics_duration_milliseconds_count{service_name=\"pelican-origin\",span_name=~\"origin\\\\.(serve_object|authorize|read)\"}[5m]))",
+          "legendFormat": "origin: {{span_name}}",
+          "instant": true,
+          "range": false
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ms",
+          "min": 0,
+          "color": {
+            "mode": "palette-classic"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "blue",
+                "value": null
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "orientation": "horizontal",
+        "displayMode": "basic",
+        "valueMode": "color",
+        "showUnfilled": true,
+        "namePlacement": "left",
+        "reduceOptions": {
+          "values": false,
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": ""
+        },
+        "minVizHeight": 16,
+        "maxVizHeight": 40,
+        "text": {
+          "titleSize": 13,
+          "valueSize": 18
+        }
+      },
+      "id": 14,
+      "gridPos": {
+        "h": 9,
+        "w": 12,
+        "x": 12,
+        "y": 27
+      }
+    },
+    {
+      "type": "row",
+      "title": "4. Why did the director send the client to that server?",
+      "collapsed": false,
+      "panels": [],
+      "id": 15,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 36
+      }
+    },
+    {
+      "type": "text",
+      "title": "",
+      "options": {
+        "mode": "markdown",
+        "content": "**The question.** A client was sent somewhere unexpected. Which servers did the director consider, how did it rank them, and where did it think the client was?\n\n**Today.** The director counts redirects by destination. Its reasoning is returned only to a client that sends `X-Pelican-Debug`, and is kept nowhere.\n\n**With tracing.** Every recorded redirect keeps the decision. Click a trace ID, open the `director.redirect` span, and read its `director.decision` event and its `pelican.director.*` attributes."
+      },
+      "id": 16,
+      "gridPos": {
+        "h": 9,
+        "w": 6,
+        "x": 0,
+        "y": 37
+      }
+    },
+    {
+      "type": "timeseries",
+      "title": "Today: redirects by destination",
+      "description": "pelican_director_redirects_total: how many, not why.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "pelican-metrics"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "pelican-metrics"
+          },
+          "expr": "sum by (destination, status_code) (rate(pelican_director_redirects_total[$__rate_interval]))",
+          "legendFormat": "{{destination}} ({{status_code}})"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "reqps",
+          "min": 0,
+          "custom": {
+            "lineWidth": 2,
+            "fillOpacity": 15,
+            "showPoints": "never",
+            "stacking": {
+              "mode": "none"
+            }
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      },
+      "id": 17,
+      "gridPos": {
+        "h": 9,
+        "w": 6,
+        "x": 6,
+        "y": 37
+      }
+    },
+    {
+      "type": "bargauge",
+      "title": "With tracing: the director's time by stage",
+      "description": "Average duration of each stage of a redirect over the last 5 minutes. director.stat_servers appears only when the director checks servers for the object.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "pelican-metrics"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "pelican-metrics"
+          },
+          "expr": "label_replace(sum by (span_name) (rate(traces_span_metrics_duration_milliseconds_sum{service_name=\"pelican-director\",span_name=~\"director\\\\..*\"}[5m])) / sum by (span_name) (rate(traces_span_metrics_duration_milliseconds_count{service_name=\"pelican-director\",span_name=~\"director\\\\..*\"}[5m])), \"stage\", \"$1\", \"span_name\", \"director\\\\.(.*)\")",
+          "legendFormat": "{{stage}}",
+          "instant": true,
+          "range": false
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ms",
+          "min": 0,
+          "color": {
+            "mode": "palette-classic"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "blue",
+                "value": null
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "orientation": "horizontal",
+        "displayMode": "basic",
+        "valueMode": "color",
+        "showUnfilled": true,
+        "namePlacement": "left",
+        "reduceOptions": {
+          "values": false,
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": ""
+        },
+        "minVizHeight": 16,
+        "maxVizHeight": 40,
+        "text": {
+          "titleSize": 13,
+          "valueSize": 18
+        }
+      },
+      "id": 18,
+      "gridPos": {
+        "h": 9,
+        "w": 6,
+        "x": 12,
+        "y": 37
+      }
+    },
+    {
+      "type": "table",
+      "title": "With tracing: recent redirects",
+      "description": "director.redirect traces. Click a trace ID: in the lookup page, the director.redirect span lists the chosen servers, the candidates and the decision event.",
+      "datasource": {
+        "type": "jaeger",
+        "uid": "pelican-traces"
+      },
+      "targets": [
+        {
+          "service": "pelican-director",
+          "operation": "director.redirect",
+          "limit": 20,
+          "refId": "A",
+          "datasource": {
+            "type": "jaeger",
+            "uid": "pelican-traces"
+          },
+          "queryType": "search"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {},
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "traceID"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "Trace ID"
+              },
+              {
+                "id": "links",
+                "value": [
+                  {
+                    "title": "Analyze this download",
+                    "url": "/d/pelican-trace/pelican-download-lookup?var-trace_id=${__value.raw}&${__url_time_range}"
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "traceName"
+            },
+            "properties": [
+              {
+                "id": "custom.hidden",
+                "value": true
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "startTime"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "Start time"
+              },
+              {
+                "id": "unit",
+                "value": "time:HH:mm:ss"
+              },
+              {
+                "id": "custom.width",
+                "value": 90
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "duration"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "Duration"
+              },
+              {
+                "id": "unit",
+                "value": "µs"
+              },
+              {
+                "id": "custom.width",
+                "value": 90
+              }
+            ]
+          }
+        ]
+      },
+      "options": {
+        "showHeader": true,
+        "sortBy": [
+          {
+            "displayName": "Start time",
+            "desc": true
+          }
+        ]
+      },
+      "id": 19,
+      "gridPos": {
+        "h": 9,
+        "w": 6,
+        "x": 18,
+        "y": 37
+      }
+    },
+    {
+      "type": "row",
+      "title": "5. A download failed. Which hop failed, and with what error?",
+      "collapsed": false,
+      "panels": [],
+      "id": 20,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 46
+      }
+    },
+    {
+      "type": "text",
+      "title": "",
+      "options": {
+        "mode": "markdown",
+        "content": "**The question.** A user reports a failed download. Did the director refuse it, did the cache fail, or did the origin not have the object?\n\n**Today.** Each server counts its own error responses. The origin's 404s below could be a user's typo or a broken federation; nothing says which downloads they belong to.\n\n**With tracing.** A failed download is one trace. The spans that failed are marked, with the error attached, down to the hop that returned it."
+      },
+      "id": 21,
+      "gridPos": {
+        "h": 9,
+        "w": 6,
+        "x": 0,
+        "y": 47
+      }
+    },
+    {
+      "type": "timeseries",
+      "title": "Today: error responses, per server",
+      "description": "pelican_http_requests_total with a 4xx or 5xx code. Counts, with no link to a download.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "pelican-metrics"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "pelican-metrics"
+          },
+          "expr": "sum by (server_type, method, code) (rate(pelican_http_requests_total{code=~\"4..|5..\"}[$__rate_interval]))",
+          "legendFormat": "{{server_type}} {{method}} {{code}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "reqps",
+          "min": 0,
+          "custom": {
+            "lineWidth": 2,
+            "fillOpacity": 15,
+            "showPoints": "never",
+            "stacking": {
+              "mode": "none"
+            }
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      },
+      "id": 22,
+      "gridPos": {
+        "h": 9,
+        "w": 6,
+        "x": 6,
+        "y": 47
+      }
+    },
+    {
+      "type": "table",
+      "title": "With tracing: where failures happen",
+      "description": "Failed spans in the selected time range, by service and span. A failed client.transfer is a failed download; the rows below it show which step failed.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "pelican-metrics"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "pelican-metrics"
+          },
+          "expr": "sort_desc(sum by (service_name, span_name) (increase(traces_span_metrics_calls_total{status_code=\"STATUS_CODE_ERROR\"}[$__range])))",
+          "legendFormat": "",
+          "instant": true,
+          "range": false,
+          "format": "table"
+        }
+      ],
+      "transformations": [
+        {
+          "id": "organize",
+          "options": {
+            "excludeByName": {
+              "Time": true
+            },
+            "renameByName": {
+              "service_name": "Service",
+              "span_name": "Span",
+              "Value": "Failed"
+            }
+          }
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {},
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Failed"
+            },
+            "properties": [
+              {
+                "id": "decimals",
+                "value": 0
+              },
+              {
+                "id": "custom.width",
+                "value": 70
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Service"
+            },
+            "properties": [
+              {
+                "id": "custom.width",
+                "value": 125
+              }
+            ]
+          }
+        ]
+      },
+      "options": {
+        "showHeader": true
+      },
+      "id": 23,
+      "gridPos": {
+        "h": 9,
+        "w": 6,
+        "x": 12,
+        "y": 47
+      }
+    },
+    {
+      "type": "table",
+      "title": "With tracing: recent failed downloads",
+      "description": "client.transfer traces marked as failed. Click a trace ID: the lookup page shows the failing hop and the log lines it wrote.",
+      "datasource": {
+        "type": "jaeger",
+        "uid": "pelican-traces"
+      },
+      "targets": [
+        {
+          "service": "pelican-client",
+          "operation": "client.transfer",
+          "tags": "error=true",
+          "limit": 20,
+          "refId": "A",
+          "datasource": {
+            "type": "jaeger",
+            "uid": "pelican-traces"
+          },
+          "queryType": "search"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {},
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "traceID"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "Trace ID"
+              },
+              {
+                "id": "links",
+                "value": [
+                  {
+                    "title": "Analyze this download",
+                    "url": "/d/pelican-trace/pelican-download-lookup?var-trace_id=${__value.raw}&${__url_time_range}"
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "traceName"
+            },
+            "properties": [
+              {
+                "id": "custom.hidden",
+                "value": true
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "startTime"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "Start time"
+              },
+              {
+                "id": "unit",
+                "value": "time:HH:mm:ss"
+              },
+              {
+                "id": "custom.width",
+                "value": 90
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "duration"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "Duration"
+              },
+              {
+                "id": "unit",
+                "value": "µs"
+              },
+              {
+                "id": "custom.width",
+                "value": 90
+              }
+            ]
+          }
+        ]
+      },
+      "options": {
+        "showHeader": true,
+        "sortBy": [
+          {
+            "displayName": "Start time",
+            "desc": true
+          }
+        ]
+      },
+      "id": 24,
+      "gridPos": {
+        "h": 9,
+        "w": 6,
+        "x": 18,
+        "y": 47
+      }
+    },
+    {
+      "type": "row",
+      "title": "6. How long does the origin spend authorizing, and how long reading storage?",
+      "collapsed": false,
+      "panels": [],
+      "id": 25,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 56
+      }
+    },
+    {
+      "type": "text",
+      "title": "",
+      "options": {
+        "mode": "markdown",
+        "content": "**The question.** The origin is slow. Is it the token check or the storage behind it?\n\n**Today.** The origin times its storage calls and its requests as a whole. The authorization step is not measured, and a storage read is not tied to the request it served.\n\n**With tracing.** Each origin request is split into `origin.authorize` and `origin.read`."
+      },
+      "id": 26,
+      "gridPos": {
+        "h": 9,
+        "w": 6,
+        "x": 0,
+        "y": 57
+      }
+    },
+    {
+      "type": "timeseries",
+      "title": "Today: average storage read time",
+      "description": "pelican_storage_read_time_seconds: one storage read call, not one request, and nothing about authorization.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "pelican-metrics"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "pelican-metrics"
+          },
+          "expr": "sum(rate(pelican_storage_read_time_seconds_sum[$__rate_interval])) / sum(rate(pelican_storage_read_time_seconds_count[$__rate_interval]))",
+          "legendFormat": "one read call"
+        },
+        {
+          "refId": "B",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "pelican-metrics"
+          },
+          "expr": "sum(rate(pelican_storage_open_time_seconds_sum[$__rate_interval])) / sum(rate(pelican_storage_open_time_seconds_count[$__rate_interval]))",
+          "legendFormat": "one open call"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "min": 0,
+          "custom": {
+            "lineWidth": 2,
+            "fillOpacity": 15,
+            "showPoints": "never",
+            "stacking": {
+              "mode": "none"
+            }
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      },
+      "id": 27,
+      "gridPos": {
+        "h": 9,
+        "w": 6,
+        "x": 6,
+        "y": 57
+      }
+    },
+    {
+      "type": "timeseries",
+      "title": "With tracing: an origin request, authorize against read (p95)",
+      "description": "95th percentile duration of origin.authorize and origin.read.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "pelican-metrics"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "pelican-metrics"
+          },
+          "expr": "histogram_quantile(0.95, sum by (le, span_name) (rate(traces_span_metrics_duration_milliseconds_bucket{service_name=\"pelican-origin\",span_name=~\"origin\\\\.(authorize|read)\"}[$__rate_interval])))",
+          "legendFormat": "p95 {{span_name}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ms",
+          "min": 0,
+          "custom": {
+            "lineWidth": 2,
+            "fillOpacity": 15,
+            "showPoints": "never",
+            "stacking": {
+              "mode": "none"
+            }
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      },
+      "id": 28,
+      "gridPos": {
+        "h": 9,
+        "w": 12,
+        "x": 12,
+        "y": 57
+      }
+    },
+    {
+      "type": "row",
+      "title": "7. How much of a download is overhead, not moving data?",
+      "collapsed": false,
+      "panels": [],
+      "id": 29,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 66
+      }
+    },
+    {
+      "type": "text",
+      "title": "",
+      "options": {
+        "mode": "markdown",
+        "content": "**The question.** For small objects, does Pelican spend more time arranging a transfer than doing it? This decides whether to work on discovery, the director, or the data path.\n\n**Today.** No measurement spans the whole download, so the share cannot be computed.\n\n**With tracing.** Overhead is the time in `client.transfer` that is not inside `client.attempt`."
+      },
+      "id": 30,
+      "gridPos": {
+        "h": 9,
+        "w": 6,
+        "x": 0,
+        "y": 67
+      }
+    },
+    {
+      "type": "text",
+      "title": "",
+      "options": {
+        "mode": "markdown",
+        "content": "### Today: nothing\n\nNo existing metric covers a download from start to finish.\n\nThe servers each see one request of it; the client reports only a total."
+      },
+      "id": 31,
+      "gridPos": {
+        "h": 9,
+        "w": 6,
+        "x": 6,
+        "y": 67
+      }
+    },
+    {
+      "type": "stat",
+      "title": "With tracing: overhead share",
+      "description": "Share of total download time spent outside the transfer itself, over the last 5 minutes.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "pelican-metrics"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "pelican-metrics"
+          },
+          "expr": "1 - sum(rate(traces_span_metrics_duration_milliseconds_sum{service_name=\"pelican-client\",span_name=\"client.attempt\"}[5m])) / sum(rate(traces_span_metrics_duration_milliseconds_sum{service_name=\"pelican-client\",span_name=\"client.transfer\"}[5m]))",
+          "legendFormat": "",
+          "instant": true,
+          "range": false
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit",
+          "decimals": 0,
+          "color": {
+            "mode": "thresholds"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "blue",
+                "value": null
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "values": false,
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": ""
+        },
+        "colorMode": "value",
+        "graphMode": "none",
+        "textMode": "value"
+      },
+      "id": 32,
+      "gridPos": {
+        "h": 9,
+        "w": 5,
+        "x": 12,
+        "y": 67
+      }
+    },
+    {
+      "type": "timeseries",
+      "title": "With tracing: overhead share over time",
+      "description": "The exerciser mixes small objects, where overhead dominates, with 100 MB ones, where the transfer does.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "pelican-metrics"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "pelican-metrics"
+          },
+          "expr": "1 - sum(rate(traces_span_metrics_duration_milliseconds_sum{service_name=\"pelican-client\",span_name=\"client.attempt\"}[$__rate_interval])) / sum(rate(traces_span_metrics_duration_milliseconds_sum{service_name=\"pelican-client\",span_name=\"client.transfer\"}[$__rate_interval]))",
+          "legendFormat": "overhead share"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit",
+          "min": 0,
+          "custom": {
+            "lineWidth": 2,
+            "fillOpacity": 15,
+            "showPoints": "never",
+            "stacking": {
+              "mode": "none"
+            }
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      },
+      "id": 33,
+      "gridPos": {
+        "h": 9,
+        "w": 7,
+        "x": 17,
+        "y": 67
+      }
+    },
+    {
+      "type": "row",
+      "title": "8. Which log lines belong to this download?",
+      "collapsed": false,
+      "panels": [],
+      "id": 34,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 76
+      }
+    },
+    {
+      "type": "text",
+      "title": "",
+      "options": {
+        "mode": "markdown",
+        "content": "**The question.** Something went wrong with one download. What did each server log about it?\n\n**Today.** Search each server's log by time and object path, and hope the clocks agree and nothing else touched that object.\n\n**With tracing.** The origin, the cache and the client write the trace ID on their request log lines. Logs are not collected centrally, but on each server one search for the trace ID finds that server's lines exactly."
+      },
+      "id": 35,
+      "gridPos": {
+        "h": 9,
+        "w": 6,
+        "x": 0,
+        "y": 77
+      }
+    },
+    {
+      "type": "text",
+      "title": "",
+      "options": {
+        "mode": "markdown",
+        "content": "### Today: nothing\n\nLogs are per server and carry no shared identifier for a plain download.\n\n`X-Pelican-JobId` joins them only for HTCondor jobs, and not at the director, which replaces it with its own ID."
+      },
+      "id": 36,
+      "gridPos": {
+        "h": 9,
+        "w": 6,
+        "x": 6,
+        "y": 77
+      }
+    },
+    {
+      "type": "text",
+      "id": 37,
+      "title": "With tracing: one download's log lines, on each service",
+      "gridPos": {
+        "h": 9,
+        "w": 12,
+        "x": 12,
+        "y": 77
+      },
+      "options": {
+        "mode": "markdown",
+        "content": "Take a trace ID from any table above, then:\n\n```\nmake trace-logs id=<trace id>\n```\n\nor, on one service:\n\n```\ndocker compose exec cache grep 'trace_id=<trace id>' /var/log/pelican/cache.log\ndocker compose exec origin grep 'trace_id=<trace id>' /var/log/pelican/origin.log\ndocker compose exec exerciser grep 'trace_id=<trace id>' /var/log/pelican/client.log\n```\n\nThe director's lines carry its own request ID instead, which is `pelican.job_id` on its `director.redirect` span."
+      }
+    }
+  ]
+}

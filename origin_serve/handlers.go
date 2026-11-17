@@ -50,6 +50,7 @@ import (
 	"github.com/pelicanplatform/pelican/ssh_posixv2"
 	"github.com/pelicanplatform/pelican/token"
 	"github.com/pelicanplatform/pelican/token_scopes"
+	"github.com/pelicanplatform/pelican/tracing"
 	"github.com/pelicanplatform/pelican/utils"
 )
 
@@ -358,9 +359,12 @@ func authMiddleware() gin.HandlerFunc {
 		if reqId := c.Request.Header.Get("X-Pelican-JobId"); reqId != "" {
 			reqLog = reqLog.WithField("reqId", reqId)
 		}
+		reqLog = tracing.WithLogFields(reqLog, c.Request.Context())
 		reqLog.Info("Request received")
 
+		authzSpan := startAuthorize(c.Request.Context())
 		tokens := extractTokens(c.Request)
+		defer finishAuthorize(authzSpan, len(tokens), false)
 		action := getActionFromMethod(c.Request.Method)
 		// Clean the request path to prevent path-traversal attacks
 		// via URL-encoded dot segments (e.g., %2e%2e). Gin and Go's
@@ -413,6 +417,7 @@ func authMiddleware() gin.HandlerFunc {
 			fedInfo, err := config.GetFederation(c.Request.Context())
 			if err != nil {
 				reqLog.Errorf("DisableDirectClients enabled but failed to get federation info: %v", err)
+				noteRequestError(c, err)
 				c.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{
 					"error":  "internal_error",
 					"detail": "failed to retrieve federation info",
@@ -539,6 +544,7 @@ func authMiddleware() gin.HandlerFunc {
 			c.Request = c.Request.WithContext(ctx)
 		}
 
+		finishAuthorize(authzSpan, len(tokens), true)
 		c.Next()
 	}
 }
@@ -1156,6 +1162,7 @@ func exportRequestHandler(backend server_utils.OriginBackend, handler *webdav.Ha
 			if sc, ok := err.(server_utils.HTTPStatusCoder); ok {
 				statusCode = sc.HTTPStatusCode()
 			}
+			noteRequestError(c, err)
 			c.AbortWithStatusJSON(statusCode, gin.H{"error": err.Error()})
 			return
 		}
@@ -1250,7 +1257,9 @@ func exportRequestHandler(backend server_utils.OriginBackend, handler *webdav.Ha
 			handleHeadWithChecksum(c, handler, modifiedReq, relPath, backend)
 		} else if c.Request.Method == http.MethodGet {
 			// For GET requests, add ETag header based on file metadata
-			handleGetWithETag(c, handler, modifiedReq, relPath, backend, exportPrefixMap[federationPrefix])
+			readReq, readSpan := startRead(modifiedReq)
+			defer readSpan.End()
+			handleGetWithETag(c, handler, readReq, relPath, backend, exportPrefixMap[federationPrefix])
 		} else if c.Request.Method == http.MethodPut {
 			// Refuse a PUT that cannot fit before the client streams a
 			// body the backend would only discard.  The WebDAV handler
@@ -1346,6 +1355,9 @@ func RegisterHandlers(engine *gin.Engine, directorEnabled bool) error {
 		return nil
 	}
 
+	// The storage type is origin-wide; it is recorded on each export's spans.
+	storageType := param.Origin_StorageType.GetString()
+
 	// Register handlers for each export
 	for prefix, handler := range webdavHandlers {
 		backend := backends[prefix]
@@ -1367,6 +1379,7 @@ func RegisterHandlers(engine *gin.Engine, directorEnabled bool) error {
 
 		// Create a route group for this prefix
 		group := engine.Group(routePrefix)
+		group.Use(tracingMiddleware(prefix, storageType))
 		group.Use(httpMetricsMiddleware())
 		group.Use(authMiddleware())
 		group.Use(xrdMonitoringMiddleware())

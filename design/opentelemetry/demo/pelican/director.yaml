@@ -1,0 +1,51 @@
+# Director and registry, in one process:
+#   pelican-server serve --module director,registry
+#
+# This is the only Pelican process that knows where the collector is
+# (Federation.TracingEndpoint).  It advertises the endpoint in
+# /.well-known/pelican-configuration, and the origin, cache and clients
+# learn it from there.
+
+TLSSkipVerify: true
+
+Logging:
+  Level: info
+  LogLocation: /var/log/pelican/director.log
+
+Server:
+  Hostname: director
+  WebPort: 8444
+  EnableUI: false
+  # Registrations made here are never "completed" by a person; an empty
+  # path turns off the reminder that would otherwise nag in the log.
+  RegistrationCompletionLinkFile: ""
+  # Compose networks use RFC 1918 addresses, which the SSRF-resistant
+  # transport refuses by default.
+  SSRFProtection:
+    SkipDefaultBlocks: true
+
+Federation:
+  DiscoveryUrl: https://director:8444
+  DirectorUrl: https://director:8444
+  RegistryUrl: https://director:8444
+  TracingEndpoint: http://otel-collector:4318
+
+Monitoring:
+  MetricAuthorization: false
+  # /metrics is served without the embedded Prometheus.
+  EnablePrometheus: false
+
+Registry:
+  RequireOriginApproval: false
+  RequireCacheApproval: false
+
+Director:
+  # There is no MaxMind GeoIP database in the demo, so distance-based
+  # sorting has no client location to work with.  With one cache the order
+  # does not matter; "random" needs nothing.
+  CacheSortMethod: random
+  # Do not drop the cache from redirects while it is still settling in.
+  FilterCachesInErrorState: false
+
+Tracing:
+  Enabled: true

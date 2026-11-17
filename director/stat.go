@@ -40,6 +40,7 @@ import (
 	"github.com/pelicanplatform/pelican/param"
 	"github.com/pelicanplatform/pelican/pelican_url"
 	"github.com/pelicanplatform/pelican/server_structs"
+	"github.com/pelicanplatform/pelican/tracing"
 	"github.com/pelicanplatform/pelican/version"
 )
 
@@ -212,7 +213,8 @@ func NewObjectStat() *ObjectStat {
 
 // Implementation of sending a HEAD request to an origin for an object
 func (stat *ObjectStat) sendHeadReq(ctx context.Context, objectName string, dataUrl url.URL, digest bool, token string, timeout time.Duration) (*objectMetadata, error) {
-	client := config.GetClient()
+	// Traced as a child of director.stat_servers; see the notes in tracing.go.
+	client := tracing.Client(config.GetClient())
 	reqUrl := dataUrl.JoinPath(objectName)
 	ctx, cancelFunc := context.WithTimeout(ctx, timeout)
 	defer cancelFunc()
@@ -685,8 +687,10 @@ func generateAvailabilityMaps(ctx *gin.Context, origins, caches []server_structs
 		cAdsToQuery = nil
 	}
 
-	qr := q.Query(context.Background(), reqPath, st, 1, len(oAdsToQuery)+len(cAdsToQuery),
+	statCtx, statSpan := startStatSpan(ctx, len(oAdsToQuery)+len(cAdsToQuery))
+	qr := q.Query(statCtx, reqPath, st, 1, len(oAdsToQuery)+len(cAdsToQuery),
 		withOriginAds(oAdsToQuery), withCacheAds(cAdsToQuery), WithToken(reqParams.Get("authz")))
+	endStatSpan(statSpan, qr)
 
 	if qr.Status == queryFailed {
 		if qr.ErrorType != queryNoSourcesErr && qr.ErrorType != queryInsufficientResErr {

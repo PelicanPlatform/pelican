@@ -52,6 +52,9 @@ type (
 		RegistryEndpoint           string   `json:"namespace_registration_endpoint"`
 		JwksUri                    string   `json:"jwks_uri"`
 		BrokerEndpoint             string   `json:"broker_endpoint"`
+		// TracingEndpoint is the federation's shared OTLP/HTTP collector, if one
+		// is advertised.  It never enables tracing by itself.
+		TracingEndpoint string `json:"tracing_endpoint,omitempty"`
 	}
 
 	discoveryOptions struct {

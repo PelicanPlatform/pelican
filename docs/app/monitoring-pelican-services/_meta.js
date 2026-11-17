@@ -1,4 +1,5 @@
 export default {
   "prometheus": "Prometheus",
-  "grafana": "Grafana"
+  "grafana": "Grafana",
+  "tracing": "Tracing"
 }

@@ -1,0 +1,106 @@
+# OpenTelemetry Collector (contrib 0.160.0) for the Pelican tracing demo.
+#
+#   traces:  OTLP ─► redact ─► Jaeger
+#                           └► span_metrics ─► Prometheus (OTLP)
+#
+# Logs are not collected.  A federation's origins and caches run at other
+# sites, where no central collector can read their log files, so each service
+# keeps its own log; the origin, cache and client tag request lines with
+# trace_id and span_id when tracing is on (see README.md, section 6).
+#
+# Component names follow 0.160.0: `span_metrics`, `otlp_grpc`,
+# `otlp_http`; batching is the exporters' `sending_queue.batch`.
+
+extensions:
+  health_check:
+    endpoint: 0.0.0.0:13133
+
+receivers:
+  otlp:
+    protocols:
+      grpc:
+        endpoint: 0.0.0.0:4317
+      http:
+        endpoint: 0.0.0.0:4318
+
+processors:
+  memory_limiter:
+    check_interval: 5s
+    limit_percentage: 80
+    spike_limit_percentage: 25
+
+  # Second line of defence against secrets in spans.  Pelican is designed
+  # never to record a token, header or query string (design §1, constraint 3);
+  # if one slips through anyway, it stops here, before any backend:
+  #  - attributes whose key names a credential are dropped (the counter
+  #    pelican.origin.token_count is not a credential and is kept);
+  #  - attribute values that look like a JWT, a bearer header or a token
+  #    query parameter are replaced with "[redacted]".
+  transform/redact:
+    error_mode: ignore
+    trace_statements:
+      - context: span
+        statements:
+          - delete_matching_keys(span.attributes, "(?i)^(.*authorization.*|.*access_token.*|.*authz.*|.*bearer.*|.*password.*|.*secret.*|.*\\.token|token)$")
+          - replace_all_patterns(span.attributes, "value", "eyJ[A-Za-z0-9_-]+\\.[A-Za-z0-9_-]+\\.[A-Za-z0-9_-]*", "[redacted]")
+          - replace_all_patterns(span.attributes, "value", "(?i)bearer\\s+\\S+", "[redacted]")
+          - replace_all_patterns(span.attributes, "value", "(?i)(authz|access_token)=[^&\\s]+", "[redacted]")
+      - context: spanevent
+        statements:
+          - delete_matching_keys(spanevent.attributes, "(?i)^(.*authorization.*|.*access_token.*|.*authz.*|.*bearer.*|.*password.*|.*secret.*|.*\\.token|token)$")
+          - replace_all_patterns(spanevent.attributes, "value", "eyJ[A-Za-z0-9_-]+\\.[A-Za-z0-9_-]+\\.[A-Za-z0-9_-]*", "[redacted]")
+
+connectors:
+  # Request rate, error rate and latency per service and span name, plus the
+  # low-cardinality Pelican attributes below.  In Prometheus:
+  #   traces_span_metrics_calls_total
+  #   traces_span_metrics_duration_milliseconds_{bucket,sum,count}
+  # with labels service_name, span_name, span_kind, status_code and each
+  # dimension with dots turned into underscores (pelican_cache_result, ...).
+  span_metrics:
+    histogram:
+      unit: ms
+      explicit:
+        buckets: [2ms, 5ms, 10ms, 25ms, 50ms, 100ms, 250ms, 500ms, 1s, 2.5s, 5s, 10s, 30s, 60s, 120s]
+    dimensions:
+      - name: pelican.cache.result
+      - name: pelican.director.redirect_target
+      - name: pelican.attempt.number
+      - name: pelican.namespace
+      - name: http.response.status_code
+    exemplars:
+      enabled: true
+    metrics_flush_interval: 15s
+
+exporters:
+  debug:
+    verbosity: basic
+
+  otlp_grpc/jaeger:
+    endpoint: jaeger:4317
+    tls:
+      insecure: true
+    sending_queue:
+      batch:
+
+  otlp_http/prometheus:
+    endpoint: http://prometheus:9090/api/v1/otlp
+    tls:
+      insecure: true
+    sending_queue:
+      batch:
+
+service:
+  extensions: [health_check]
+  pipelines:
+    traces:
+      receivers: [otlp]
+      processors: [memory_limiter, transform/redact]
+      exporters: [otlp_grpc/jaeger, span_metrics]
+    metrics:
+      receivers: [span_metrics]
+      processors: [memory_limiter]
+      exporters: [otlp_http/prometheus]
+  telemetry:
+    logs:
+      level: info

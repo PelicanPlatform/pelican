@@ -1,0 +1,29 @@
+# Build context filter for design/opentelemetry/demo/Dockerfile, whose context
+# is the repository root.  BuildKit uses this file instead of /.dockerignore.
+# Only the Go build needs the context, so keep everything else out.
+
+**/.git
+**/.DS_Store
+**/*.swp
+/.idea/
+/.vscode/
+/.devcontainer/
+/.claude/
+/dist/
+/local/
+/images/
+
+# The web UI is not built for the demo.  Keep only the tracked placeholder,
+# which satisfies `//go:embed frontend/out/*` in web_ui/ui.go.
+/web_ui/frontend/*
+!/web_ui/frontend/out/
+/web_ui/frontend/out/*
+!/web_ui/frontend/out/placeholder
+
+# docs/ is a Go package: docs/docs.go embeds docs/parameters.yaml.
+/docs/*
+!/docs/docs.go
+!/docs/parameters.yaml
+
+# The demo itself (changes to it should not invalidate the Go build cache).
+/design/

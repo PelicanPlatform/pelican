@@ -46,6 +46,7 @@ import (
 	"github.com/pelicanplatform/pelican/param"
 	"github.com/pelicanplatform/pelican/pelican_url"
 	"github.com/pelicanplatform/pelican/server_structs"
+	"github.com/pelicanplatform/pelican/tracing"
 )
 
 // Number of caches to attempt to use in any invocation
@@ -136,7 +137,7 @@ func ParseRemoteAsPUrl(ctx context.Context, rp string) (*pelican_url.PelicanURL,
 	// Unknown query params are allowed through (with a warning) for the same reason DoGet and DoPut allow them:
 	// an older client must keep working against a newer director/origin/cache that has added a parameter it does
 	// not recognize.  Callers also feed URLs from GetRawUrl() back through here, which preserves the raw query.
-	client := config.GetClient()
+	client := tracing.Client(config.GetClient())
 	pOptions := []pelican_url.ParseOption{pelican_url.ShouldDiscover(true), pelican_url.ValidateQueryParams(true), pelican_url.AllowUnknownQueryParams(true)}
 	dOptions := []pelican_url.DiscoveryOption{pelican_url.UseCached(true), pelican_url.WithContext(ctx), pelican_url.WithClient(client), pelican_url.WithUserAgent(getUserAgent(""))}
 
@@ -152,6 +153,7 @@ func ParseRemoteAsPUrl(ctx context.Context, rp string) (*pelican_url.PelicanURL,
 	if err != nil {
 		return nil, err
 	}
+	offerTracingEndpoint(pUrl)
 
 	return pUrl, nil
 }
@@ -177,7 +179,9 @@ func DoStat(ctx context.Context, destination string, options ...TransferOption) 
 // difference is that the engine's director responses are reused rather than
 // re-queried, which is the whole of what an engine has to offer a stat.
 func (te *TransferEngine) Stat(ctx context.Context, destination string, options ...TransferOption) (fileInfo *FileInfo, err error) {
-	return stat(ctx, te, destination, options...)
+	statOp := startStatSpan(ctx, destination, options)
+	defer func() { statOp.end(err) }()
+	return stat(statOp.carry(ctx), te, destination, options...)
 }
 
 // stat is the body of both. te may be nil, in which case the Director is
@@ -1221,7 +1225,8 @@ func doGet(ctx context.Context, te *TransferEngine, remoteObject string, localDe
 	if err != nil {
 		return
 	}
-	tj, err := tc.NewTransferJob(context.Background(), plan.RemoteURL, plan.LocalPath, false, plan.Recursive)
+	// Only the caller's span is carried over; cancellation stays detached.
+	tj, err := tc.NewTransferJob(tracing.CarrySpan(context.Background(), ctx), plan.RemoteURL, plan.LocalPath, false, plan.Recursive)
 	if err != nil {
 		return
 	}

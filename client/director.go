@@ -41,6 +41,7 @@ import (
 	"github.com/pelicanplatform/pelican/param"
 	"github.com/pelicanplatform/pelican/pelican_url"
 	"github.com/pelicanplatform/pelican/server_structs"
+	"github.com/pelicanplatform/pelican/tracing"
 	"github.com/pelicanplatform/pelican/utils"
 )
 
@@ -93,7 +94,7 @@ func queryDirector(ctx context.Context, verb string, pUrl *pelican_url.PelicanUR
 	// Here we use http.Transport to prevent the client from following the director's
 	// redirect. We use the Location url elsewhere (plus we still need to do the token
 	// dance!)
-	client := config.GetClientNoRedirect()
+	client := tracing.Client(config.GetClientNoRedirect())
 
 	var errMsg string
 	var body []byte

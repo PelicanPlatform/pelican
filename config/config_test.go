@@ -1359,6 +1359,74 @@ func TestDiscoverFederationImpl(t *testing.T) {
 	}
 }
 
+// TestDiscoverFederationTracingEndpoint checks how the optional tracing
+// endpoint is merged: a locally configured Federation.TracingEndpoint wins, a
+// discovered tracing_endpoint is used otherwise, and with neither the field is
+// empty.  An http:// endpoint is not rewritten to https.
+func TestDiscoverFederationTracingEndpoint(t *testing.T) {
+	testCases := []struct {
+		name       string
+		local      string
+		discovered string
+		expected   string
+	}{
+		{
+			name:       "local value wins over discovered",
+			local:      "http://local-collector.example.org:4318",
+			discovered: "https://discovered-collector.example.org:4318",
+			expected:   "http://local-collector.example.org:4318",
+		},
+		{
+			name:       "discovered value used when local unset",
+			discovered: "http://discovered-collector.example.org:4318",
+			expected:   "http://discovered-collector.example.org:4318",
+		},
+		{
+			name:     "absent everywhere is empty",
+			expected: "",
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			ResetConfig()
+			t.Cleanup(func() {
+				ResetConfig()
+			})
+
+			server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if r.URL.Path != "/.well-known/pelican-configuration" {
+					w.WriteHeader(http.StatusNotFound)
+					return
+				}
+				w.Header().Set("Content-Type", "application/json")
+				_ = json.NewEncoder(w).Encode(pelican_url.FederationDiscovery{
+					DiscoveryEndpoint: "https://fake-discovery.com",
+					DirectorEndpoint:  "https://fake-director.com",
+					RegistryEndpoint:  "https://fake-registry.com",
+					BrokerEndpoint:    "https://fake-broker.com",
+					JwksUri:           "https://fake-discovery/.well-known/issuer.jwks",
+					TracingEndpoint:   tc.discovered,
+				})
+			}))
+			t.Cleanup(server.Close)
+
+			require.NoError(t, param.TLSSkipVerify.Set(true))
+			require.NoError(t, param.Federation_DiscoveryUrl.Set(server.URL))
+			require.NoError(t, param.Server_ExternalWebUrl.Set(""))
+			if tc.local != "" {
+				require.NoError(t, param.Federation_TracingEndpoint.Set(tc.local))
+			}
+
+			result, err := discoverFederationImpl(testConfigContext(t))
+			require.NoError(t, err)
+			assert.Equal(t, tc.expected, result.TracingEndpoint)
+			// Discovery still ran for the other fields.
+			assert.Equal(t, "https://fake-registry.com", result.RegistryEndpoint)
+		})
+	}
+}
+
 // TestEnvVarConfigMapping tests that environment variables are correctly
 // mapped into Pelican config structs for both the client and server
 // initialization paths. In particular, the PELICAN env var prefix should

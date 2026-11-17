@@ -1,0 +1,46 @@
+# Jaeger v2, in-memory storage.  The collector sends traces here over OTLP
+# gRPC; the UI is at http://localhost:16686/ (no base path, no front proxy).
+
+service:
+  extensions: [jaeger_storage, jaeger_query, healthcheckv2]
+  pipelines:
+    traces:
+      receivers: [otlp]
+      processors: [batch]
+      exporters: [jaeger_storage_exporter]
+  telemetry:
+    resource:
+      service.name: jaeger
+    logs:
+      level: info
+
+extensions:
+  healthcheckv2:
+    use_v2: true
+    http:
+      endpoint: 0.0.0.0:13133
+  jaeger_query:
+    storage:
+      traces: memory_backend
+    http:
+      endpoint: 0.0.0.0:16686
+    grpc:
+      endpoint: 0.0.0.0:16685
+  jaeger_storage:
+    backends:
+      memory_backend:
+        memory:
+          max_traces: ${env:MEMORY_MAX_TRACES}
+
+receivers:
+  otlp:
+    protocols:
+      grpc:
+        endpoint: 0.0.0.0:4317
+
+processors:
+  batch:
+
+exporters:
+  jaeger_storage_exporter:
+    trace_storage: memory_backend

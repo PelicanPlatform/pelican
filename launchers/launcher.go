@@ -48,6 +48,7 @@ import (
 	"github.com/pelicanplatform/pelican/param"
 	"github.com/pelicanplatform/pelican/server_structs"
 	"github.com/pelicanplatform/pelican/server_utils"
+	"github.com/pelicanplatform/pelican/tracing"
 	"github.com/pelicanplatform/pelican/transfer"
 	"github.com/pelicanplatform/pelican/web_ui"
 )
@@ -77,6 +78,27 @@ func LaunchModules(ctx context.Context, modules server_structs.ServerType) (serv
 	if err = config.InitServer(ctx, modules); err != nil {
 		err = errors.Wrap(err, "Failure when configuring the server")
 		return
+	}
+
+	// Tracing is set up before any route is registered.  It is a no-op unless
+	// Tracing.Enabled is set, and a tracing problem never stops the server.
+	// A server only continues traces that requests bring to it, so it has no
+	// use for a per-module default service.
+	stopTracing, tracingErr := tracing.Init(ctx, tracing.ServiceServer)
+	if tracingErr != nil {
+		log.Warningf("Failed to initialize tracing; continuing without it: %v", tracingErr)
+	}
+	if stopTracing != nil {
+		egrp.Go(func() error {
+			<-ctx.Done()
+			sctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+			// An unreachable collector must not turn a clean exit into a failure.
+			if shutdownErr := stopTracing(sctx); shutdownErr != nil {
+				log.Debugf("Error flushing traces at shutdown: %v", shutdownErr)
+			}
+			return nil
+		})
 	}
 
 	var engine *gin.Engine
@@ -354,6 +376,13 @@ func LaunchModules(ctx context.Context, modules server_structs.ServerType) (serv
 	fedInfo, err := config.GetFederation(ctx)
 	if err != nil {
 		return
+	}
+
+	// Use the federation's advertised tracing endpoint if none was configured.
+	// This waits for the discovery the server already does here rather than
+	// forcing discovery earlier; spans started before now are held until then.
+	if stopTracing != nil {
+		tracing.OfferEndpoint(fedInfo.TracingEndpoint)
 	}
 
 	// Launch the broker listener.  Needs the federation information to determine the broker endpoint.

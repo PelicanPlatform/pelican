@@ -12,6 +12,7 @@ This document describes the custom HTTP headers used throughout the Pelican plat
   - [X-Transfer-Status](#x-transfer-status)
   - [X-Pelican-Object-Metadata](#x-pelican-object-metadata)
   - [X-Pelican-Accept-Redirect](#x-pelican-accept-redirect)
+  - [traceparent](#traceparent)
 - [Response Headers](#response-headers)
   - [X-Pelican-Authorization](#x-pelican-authorization)
   - [X-Pelican-Token-Generation](#x-pelican-token-generation)
@@ -207,6 +208,29 @@ X-Pelican-Accept-Redirect: file
 - The Pelican client sends `file` only when `Client.FileRedirectRoots` is non-empty, and refuses to read a path outside those roots even if a cache sends one anyway.
 - This is an assertion by the client about itself and cannot be verified by the cache, which is why it is required rather than inferred: a cache must never direct a client to read an unrelated local file.
 - Enabling it grants the cache a say in which local paths the client reads, so it is off by default. See `Client.FileRedirectRoots` for the full rationale.
+
+---
+
+### traceparent
+
+**Direction:** Client → Director/Cache/Origin; Cache → Director/Origin (the cache's own fetch of an object); Director → Origin/Cache (stat requests)
+
+**Purpose:** Carries OpenTelemetry trace context from one hop of a download to the next, so that the spans each service records join into one trace.
+
+**Format:** W3C Trace Context (<https://www.w3.org/TR/trace-context/>): `<version>-<trace-id>-<parent-id>-<trace-flags>`, where the trace ID is 32 hex digits, the parent ID is the 16-hex-digit ID of the sending span, and the flags are `01` when the sender recorded the trace and `00` otherwise.
+
+**Description:** This is a standard header, not a Pelican one; Pelican sends and reads no other trace context header (no `tracestate`, no baggage). It is sent only when tracing is enabled (`Tracing.Enabled`) on the sending process, and only on requests that belong to a traced object download: the client's federation discovery, director query, probes, download and checksum requests; the cache's director query, stat and fetch from the origin; the director's stat requests; and an `httpsv2` origin's request to its upstream storage. A process with tracing disabled never adds it. A server with tracing enabled starts its own span as a child of the incoming one; by default it applies its own `Tracing.SamplePercentage` rather than the incoming flags (see `Tracing.TrustRemoteSampling`). A server with tracing disabled, or an XRootD-based origin or cache, ignores the header and does not pass it on.
+
+**Example:**
+
+```
+traceparent: 00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01
+```
+
+**Notes:**
+
+- `X-Pelican-JobId` is unchanged and independent of this header. Both may be sent on the same request; tracing records the job ID as the `pelican.job_id` span attribute so that a trace and the job's log lines can be joined.
+- Operator documentation: [Tracing](https://docs.pelicanplatform.org/monitoring-pelican-services/tracing).
 
 ---
 

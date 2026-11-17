@@ -1,0 +1,175 @@
+import { Callout } from 'nextra/components'
+
+# Trace Object Downloads with OpenTelemetry
+
+Pelican can record a distributed trace of each object download and send it to an [OpenTelemetry](https://opentelemetry.io/) collector.
+A trace shows one download from start to finish: the client, the director, the cache and the origin each record their own part, and the parts join into one timeline.
+You view traces in any tracing backend that reads from the collector, such as Jaeger, Grafana Tempo or a commercial service.
+
+## What tracing tells you
+
+With tracing on, you can answer questions such as:
+
+- A download was slow: how much of the time went on finding the federation, asking the director, getting a token, waiting for the first byte, moving the data, and checking the checksum?
+- Which servers did the client try, in what order, and what did each one return?
+- Why did the director send the client to this cache, which servers did it consider, and where did it think the client was?
+- Was it a cache hit or a miss, and on a miss, how long did the cache take to fetch the object from the origin?
+- How long did the origin spend authorizing the request and reading from storage?
+- A download failed: which hop failed, and with what error?
+
+Metrics derived from many traces (for example, by the collector's span metrics) answer the same questions across all downloads, such as the cache hit ratio or how often the first attempt fails.
+
+## What is traced
+
+Tracing covers object **downloads** (`GET` requests, and the `HEAD` requests made along the way) through:
+
+- the client: `pelican object get`, the HTCondor transfer plugin, and the client inside a cache;
+- the director;
+- the Go-native origin, that is, an origin whose [`Origin.StorageType`](/parameters#Origin-StorageType) is `posixv2`, `s3v2`, `httpsv2`, `globusv2`, `ssh` or `pstore`;
+- the Go-native cache, enabled with [`Cache.EnableV2`](/parameters#Cache-EnableV2), and the local cache, which shares its code.
+
+It does not cover:
+
+- XRootD-based origins and caches (for example, `Origin.StorageType: posix`, or a cache without `Cache.EnableV2`).
+  They produce no spans and do not pass trace context on, so a trace through one shows the client's and the director's side in full but not what happened inside the server, nor a cache's fetch from its origin.
+- Uploads, listings, deletes and third-party copies.
+- The web UI and its APIs, health checks and metrics scrapes.
+
+## Turn tracing on
+
+Tracing is off by default.
+Five parameters control it; see the [parameter reference](/parameters#Tracing-Enabled) for their full descriptions.
+
+| Parameter | Default | Meaning |
+|---|---|---|
+| [`Tracing.Enabled`](/parameters#Tracing-Enabled) | `false` | Turn tracing on for this process. |
+| [`Tracing.Endpoint`](/parameters#Tracing-Endpoint) | none | The collector this process sends spans to. |
+| [`Tracing.SamplePercentage`](/parameters#Tracing-SamplePercentage) | `100` | The percentage of traces this process records. |
+| [`Tracing.TrustRemoteSampling`](/parameters#Tracing-TrustRemoteSampling) | `false` | Whether a server follows the sampling decision of its caller. |
+| [`Federation.TracingEndpoint`](/parameters#Federation-TracingEndpoint) | none | The federation's shared collector, advertised by the director. |
+
+Each process opts in separately.
+A complete trace needs tracing on in the client and in every server the download passes through.
+A server that has tracing on but receives a request from a client that does not still records its own part, as a separate trace.
+
+For a server, add the settings to its configuration file:
+
+```yaml filename="pelican.yaml" copy
+Tracing:
+  Enabled: true
+  Endpoint: https://collector.example.org:4318
+```
+
+For a client, set the same parameters through the environment, which follows the usual `PELICAN_` naming:
+
+```bash copy
+PELICAN_TRACING_ENABLED=true pelican object get pelican://example.org/namespace/object ./object
+```
+
+If tracing cannot be set up (for example, because the endpoint is not a valid URL), Pelican logs a warning and carries on without it.
+
+## Choose where spans go
+
+The endpoint is an OTLP/HTTP base URL, such as `https://collector.example.org:4318`; Pelican adds the `/v1/traces` path itself.
+An `https` endpoint is verified with the same TLS settings as Pelican's other connections; an `http` endpoint is used without TLS.
+
+Each process picks its endpoint in this order, and the first one found wins:
+
+1. [`Tracing.Endpoint`](/parameters#Tracing-Endpoint).
+1. The standard `OTEL_EXPORTER_OTLP_TRACES_ENDPOINT` or `OTEL_EXPORTER_OTLP_ENDPOINT` environment variable.
+1. [`Federation.TracingEndpoint`](/parameters#Federation-TracingEndpoint), set locally or learned from the federation's discovery document.
+
+The exporter also honours `OTEL_EXPORTER_OTLP_HEADERS`, so you can add, for example, an authentication header that your collector requires.
+`OTEL_RESOURCE_ATTRIBUTES` adds extra resource attributes to every span.
+
+If no endpoint is configured, a process holds its spans (up to 2048) until federation discovery supplies one.
+If none ever arrives, the spans are discarded, but trace context is still passed to the next hop and trace IDs still appear in the logs.
+
+### Advertise a collector for the whole federation
+
+A federation operator can run one shared collector and tell everyone about it by setting `Federation.TracingEndpoint` on the director:
+
+```yaml filename="pelican.yaml" copy
+Federation:
+  TracingEndpoint: https://collector.example.org:4318
+```
+
+The director then publishes it as `tracing_endpoint` in `/.well-known/pelican-configuration`.
+Origins, caches and clients that have tracing on, and no endpoint of their own, send their spans there.
+A server that has the director, registry and key URLs all set in its own configuration skips federation discovery, so it does not learn the advertised endpoint; give it `Tracing.Endpoint` instead.
+
+<Callout type="info">
+Advertising an endpoint never turns tracing on for anyone.
+Each client and server exports spans only if its own operator sets `Tracing.Enabled: true`.
+</Callout>
+
+<Callout type="warning">
+The collector accepts spans from anyone who can reach it.
+Unless you protect it, for example by requiring a header that your own servers send through `OTEL_EXPORTER_OTLP_HEADERS`, any client can send it spans.
+</Callout>
+
+## Sampling
+
+[`Tracing.SamplePercentage`](/parameters#Tracing-SamplePercentage) is the percentage of traces a process records; the rest are not recorded or exported.
+The decision is a fixed function of the trace ID, so every Pelican process with the same percentage records the same traces.
+A download that the client does not record still carries its trace ID to the servers.
+
+By default a server ignores whether its caller recorded the trace and applies its own percentage to the trace ID.
+Otherwise any client could ask for every one of its requests to be recorded and flood the collector.
+Set [`Tracing.TrustRemoteSampling`](/parameters#Tracing-TrustRemoteSampling) to `true` on the director, origins and caches when you trust the federation's clients, or while debugging, so that servers record exactly the downloads their callers recorded.
+
+## What is recorded
+
+Each service reports its spans under its own `service.name`.
+Every span also carries `service.version` (the Pelican version) and `host.name` (the host it runs on).
+
+| Service | Spans |
+|---|---|
+| `pelican-client` | `client.transfer` (one per download), `client.discover_federation`, `client.query_director`, `client.acquire_token`, `client.download_object` (one per object), `client.sort_attempts`, `client.attempt` (one per server tried), `client.verify_checksum` |
+| `pelican-director` | `director.redirect`, `director.match_namespace`, `director.stat_servers` (when the director asks servers whether they hold the object), `director.sort_servers`, and a `director.decision` event on `director.redirect` |
+| `pelican-cache` | `cache.serve_object`, `cache.resolve_object`, `cache.fetch_origin` (on a miss); the cache's fetch from the origin appears below `cache.fetch_origin` as `client.*` spans reported under `pelican-cache` |
+| `pelican-origin` | `origin.serve_object`, `origin.authorize`, `origin.read` |
+
+Each HTTP request between services also gets a span named after its method (`GET`, `HEAD`, `PROPFIND`), with the server address, the URL without its query string, and the response status.
+
+Some attributes that help most when reading a trace:
+
+- `pelican.object.path`: the object's path in the federation, on the top span of each service.
+- `pelican.cache.result` on `cache.serve_object`: `hit`, `miss`, or `pass-through` for a response the cache streamed without storing.
+- `pelican.director.redirect_target` (`cache` or `origin`) and `pelican.director.chosen` (the servers offered, in order) on `director.redirect`.
+- `pelican.attempt.endpoint`, `pelican.attempt.time_to_first_byte_ms` and `pelican.attempt.retryable` on `client.attempt`.
+
+A span is marked as failed only when the service that recorded it failed.
+A server's span is failed by a `5xx` response and not by a `4xx`: an expired token, an unknown namespace or a missing object is the request's problem, not the server's.
+The error behind any response is attached to the span as an `exception` event either way.
+
+### Finding a trace from a job or a log line
+
+`pelican.job_id` holds the `X-Pelican-JobId` of the request.
+The client sends one when it runs inside an HTCondor job (the job's `GlobalJobId`), and the cache passes it on to the origin.
+The director records the request ID it uses, which is the client's job ID only when that is a UUID; otherwise the director generates its own.
+
+For a download that is recorded, request log lines carry `trace_id` and `span_id` fields: the origin's "Request received" line, the cache's request log lines, and the client's per-attempt debug lines.
+Search your logs for a trace ID to find every line that belongs to that download.
+The director's log lines carry its request ID, which is the `pelican.job_id` on its span.
+
+### Privacy
+
+Pelican never records tokens, request headers or query strings in spans, and it removes anything that looks like a token from error messages before recording them.
+Spans do record object paths, namespace prefixes, server hostnames, and the client's `User-Agent`.
+
+The `director.decision` event includes the client's location as the director estimated it, rounded to one decimal place of latitude and longitude (about 11 km), and the client's IP address masked to its network: the last octet of an IPv4 address and the last 64 bits of an IPv6 address are set to zero.
+Consider who can read your tracing backend before you turn tracing on.
+
+## Cost and safety
+
+- Tracing never fails or blocks a transfer.
+  Spans are exported in the background, and export failures are logged at debug level and dropped.
+- With tracing off, Pelican creates no spans, adds no header to any request, and opens no connection to a collector.
+- A client command (`pelican object get` or the transfer plugin) waits at most two seconds when it finishes to hand off its spans, so an unreachable collector delays a job by no more than that.
+- A server waits at most five seconds at shutdown to send its remaining spans.
+
+## Try it locally
+
+The Pelican repository includes a demo in `design/opentelemetry/demo/` that runs a small Go-native federation, downloads objects in a loop, and shows the traces in Jaeger and Grafana.
+Its `README.md` explains how to run it.

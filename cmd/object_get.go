@@ -84,6 +84,7 @@ func getMain(cmd *cobra.Command, args []string) {
 			os.Exit(1)
 		}
 	}
+	client.InitTracing(ctx)
 
 	// Check for async mode
 	isAsync, _ := cmd.Flags().GetBool("async")
@@ -346,6 +347,7 @@ func getMain(cmd *cobra.Command, args []string) {
 			}
 			return tc.NewTransferJob(ctx, plan.RemoteURL, plan.LocalPath, false, plan.Recursive)
 		})
+	client.FlushTracing()
 
 	lastSrc := ""
 	if failedIdx >= 0 {
