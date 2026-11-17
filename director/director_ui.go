@@ -428,7 +428,7 @@ func queryOrigins(ctx *gin.Context) {
 		token = strings.TrimPrefix(authHeader, "Bearer ")
 	}
 
-	oAds, _, err := getSortedAds(ctx, requestId)
+	oAds, _, _, err := getSortedAds(ctx, requestId)
 	if err != nil {
 		switch err.(type) {
 		case noOriginsForNsErr:

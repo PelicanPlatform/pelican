@@ -810,7 +810,7 @@ func redirectToCache(ginCtx *gin.Context) {
 
 	// Get the sorted origins/caches for the request. All returned ads should be capable of serving the request,
 	// as matchmaking is handled within.
-	oAds, cAds, err := getSortedAds(ginCtx, requestId)
+	oAds, cAds, nsAd, err := getSortedAds(ginCtx, requestId)
 	if err != nil {
 		processSortedAdsErr(ginCtx, err, requestId)
 		return
@@ -863,7 +863,7 @@ func redirectToCache(ginCtx *gin.Context) {
 	}
 
 	redirectSucceeded = true
-	generateRedirectResponse(ginCtx, chosenServers, oServers, oAds[0].NamespaceAd, requestId)
+	generateRedirectResponse(ginCtx, chosenServers, oServers, nsAd, requestId)
 }
 
 func redirectToOrigin(ginCtx *gin.Context) {
@@ -924,7 +924,7 @@ func redirectToOrigin(ginCtx *gin.Context) {
 
 	// Get the sorted origins/caches for the request. All returned ads should be capable of serving the request,
 	// as matchmaking is handled here.
-	oAds, cAds, err := getSortedAds(ginCtx, requestId)
+	oAds, cAds, nsAd, err := getSortedAds(ginCtx, requestId)
 	if err != nil {
 		processSortedAdsErr(ginCtx, err, requestId)
 		return
@@ -966,7 +966,7 @@ func redirectToOrigin(ginCtx *gin.Context) {
 	}
 
 	redirectSucceeded = true
-	generateRedirectResponse(ginCtx, chosenServers, oServers, oAds[0].NamespaceAd, requestId)
+	generateRedirectResponse(ginCtx, chosenServers, oServers, nsAd, requestId)
 }
 
 func checkHostnameRedirects(c *gin.Context, incomingHost string) {

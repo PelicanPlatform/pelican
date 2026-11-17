@@ -417,8 +417,9 @@ func filterCaches(
 }
 
 // Find and return a sorted list of all the origins/caches that may
-// be able to fulfill the request.
-func getSortedAds(ctx *gin.Context, requestId uuid.UUID) (sortedOrigins, sortedCaches []copyAd, err error) {
+// be able to fulfill the request, together with the namespace ad the
+// request resolved to.
+func getSortedAds(ctx *gin.Context, requestId uuid.UUID) (sortedOrigins, sortedCaches []copyAd, nsAd server_structs.NamespaceAd, err error) {
 	// Start off by getting all ads that support the given request path. In this case, an "ad" is a struct
 	// containing the server ad and the namespace ad for the request path. We track both to treat matchmaking
 	// as a function over the coupling of server+namespace.
@@ -432,9 +433,9 @@ func getSortedAds(ctx *gin.Context, requestId uuid.UUID) (sortedOrigins, sortedC
 	if len(originAds) == 0 {
 		// If the director restarted recently, tell the client to try again soon by sending a 429
 		if inStartupSequence() {
-			return nil, nil, directorStartupErr{reqPath}
+			return nil, nil, server_structs.NamespaceAd{}, directorStartupErr{reqPath}
 		} else {
-			return nil, nil, noOriginsForNsErr{reqPath}
+			return nil, nil, server_structs.NamespaceAd{}, noOriginsForNsErr{reqPath}
 		}
 	}
 
@@ -449,7 +450,7 @@ func getSortedAds(ctx *gin.Context, requestId uuid.UUID) (sortedOrigins, sortedC
 	if len(sortedOrigins) == 0 {
 		// Since caches are supposed to act on behalf of origins, the fact that there are no
 		// origins capable of supporting the request means we can fail early.
-		return nil, nil, noOriginsForReqErr{verb: mapHTTPVerbToPelVerbWithContext(reqVerb, ctx), queries: mapQueriesToCaps(ctx)}
+		return nil, nil, server_structs.NamespaceAd{}, noOriginsForReqErr{verb: mapHTTPVerbToPelVerbWithContext(reqVerb, ctx), queries: mapQueriesToCaps(ctx)}
 	}
 
 	// Some of the Origins we're keeping track of up to this point may require specific features
@@ -498,7 +499,7 @@ func getSortedAds(ctx *gin.Context, requestId uuid.UUID) (sortedOrigins, sortedC
 	}
 
 	// All sorted Origins share the same namespace prefix by definition; grab it once.
-	nsAd := sortedOrigins[0].NamespaceAd
+	nsAd = sortedOrigins[0].NamespaceAd
 
 	// Generate availability maps for Origins eagerly (before sorting). This is needed because:
 	//  1. For read requests, Origins that don't have the object must be filtered out entirely.
@@ -511,7 +512,7 @@ func getSortedAds(ctx *gin.Context, requestId uuid.UUID) (sortedOrigins, sortedC
 	originAvailabilityMap, _, err := generateAvailabilityMaps(ctx, oServAds, nil, nsAd, requestId)
 	if err != nil {
 		if _, ok := err.(objectNotFoundErr); ok {
-			return nil, nil, err
+			return nil, nil, server_structs.NamespaceAd{}, err
 		}
 		// Non-objectNotFound stat errors should not be surfaced to the client.
 		// Log the error and proceed with a neutral (all-available) map so the sort
@@ -611,7 +612,7 @@ func getSortedAds(ctx *gin.Context, requestId uuid.UUID) (sortedOrigins, sortedC
 	}
 	wg.Wait()
 	if lastError != nil {
-		return nil, nil, lastError
+		return nil, nil, server_structs.NamespaceAd{}, lastError
 	}
 
 	// Provide redirect debugging info if asked to. This gets set in the context and should be retrieved
@@ -624,5 +625,5 @@ func getSortedAds(ctx *gin.Context, requestId uuid.UUID) (sortedOrigins, sortedC
 	// function or not.
 	sortedCaches = append(sortedCaches, unknownCaches...)
 
-	return sortedOrigins, sortedCaches, nil
+	return sortedOrigins, sortedCaches, nsAd, nil
 }
