@@ -170,6 +170,7 @@ func namespaceAdToResponse(ns *server_structs.NamespaceAd) server_structs.Namesp
 		Path:         ns.Path,
 		Caps:         ns.Caps,
 		FromTopology: ns.FromTopology,
+		FromRegistry: ns.FromRegistry,
 	}
 	for _, gen := range ns.Generation {
 		res.Generation = append(res.Generation, server_structs.TokenGenResponse{
@@ -193,12 +194,14 @@ func namespaceAdToResponse(ns *server_structs.NamespaceAd) server_structs.Namesp
 func namespaceAdToMappedResponse(ns *server_structs.NamespaceAd) server_structs.NamespaceAdMappedResponse {
 	nsRes := namespaceAdToResponse(ns)
 	return server_structs.NamespaceAdMappedResponse{
-		Path:       nsRes.Path,
-		Caps:       nsRes.Caps,
-		Generation: nsRes.Generation,
-		Issuer:     nsRes.Issuer,
-		Origins:    []string{},
-		Caches:     []string{},
+		Path:         nsRes.Path,
+		Caps:         nsRes.Caps,
+		Generation:   nsRes.Generation,
+		Issuer:       nsRes.Issuer,
+		FromTopology: nsRes.FromTopology,
+		FromRegistry: nsRes.FromRegistry,
+		Origins:      []string{},
+		Caches:       []string{},
 	}
 }
 
@@ -341,25 +344,55 @@ func listServerNamespaces(ctx *gin.Context) {
 func listNamespaceResponses() []server_structs.NamespaceAdMappedResponse {
 
 	namespaceMap := make(map[string]server_structs.NamespaceAdMappedResponse)
+	originNs := []server_structs.NamespaceAd{}
 
 	for _, a := range listAdvertisement([]server_structs.ServerType{server_structs.OriginType, server_structs.CacheType}) {
 		s := a.ServerAd
 		for _, ns := range a.NamespaceAds {
+			nsRes, ok := namespaceMap[ns.Path]
+			isOrigin := s.Type == server_structs.OriginType.String()
 
-			// If the namespace is not in the map, add it
-			if _, ok := namespaceMap[ns.Path]; !ok {
-				namespaceMap[ns.Path] = namespaceAdToMappedResponse(&ns)
+			// The first server to report a path creates the map entry. An online
+			// origin's ad is authoritative for the namespace fields, so an origin
+			// always rebuilds the entry from its own ad, while a cache's ad never
+			// does. This keeps the result independent of the order the server ads
+			// are iterated in, which is not fixed: a cache re-advertises the list it
+			// last fetched from the director, which can still be the registry's copy
+			// of a path whose origin has since come back.
+			if !ok || isOrigin {
+				fresh := namespaceAdToMappedResponse(&ns)
+				if ok {
+					fresh.Origins = nsRes.Origins
+					fresh.Caches = nsRes.Caches
+				}
+				nsRes = fresh
 			}
 
 			// Add the server name to its type
-			nsRes := namespaceMap[ns.Path]
-			if s.Type == server_structs.OriginType.String() {
+			if isOrigin {
 				nsRes.Origins = append(nsRes.Origins, s.Name)
+				originNs = append(originNs, ns)
 			} else if s.Type == server_structs.CacheType.String() {
 				nsRes.Caches = append(nsRes.Caches, s.Name)
 			}
 			namespaceMap[ns.Path] = nsRes
 		}
+	}
+
+	// Add the namespaces that come from the registry. An online origin always
+	// wins, so listNamespacesFromRegistry has already removed every path an
+	// origin serves. What is left falls into two cases:
+	//   - only caches report the path: keep that list of caches, but take the
+	//     namespace fields from the registry's ad, because that is the ad the
+	//     director hands out for the path
+	//   - nobody serves the path: list it with no origins and no caches
+	for _, ns := range listNamespacesFromRegistry(originNs) {
+		nsRes := namespaceAdToMappedResponse(&ns)
+		if existing, ok := namespaceMap[ns.Path]; ok {
+			nsRes.Origins = existing.Origins
+			nsRes.Caches = existing.Caches
+		}
+		namespaceMap[ns.Path] = nsRes
 	}
 
 	return utils.MapToSlice(namespaceMap)

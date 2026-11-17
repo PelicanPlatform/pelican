@@ -468,3 +468,127 @@ func TestGetNamespaces(t *testing.T) {
 		}
 	})
 }
+
+// A cache re-advertises the namespace list it last fetched from the director,
+// so right after an origin comes back the cache can still carry the registry's
+// copy of the path, flagged from-registry. The listing must show the origin's
+// ad whichever server the snapshot yields first; that order is random, so the
+// listing is built many times.
+func TestListNamespaceResponsesOriginAdWins(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
+	serverAds.DeleteAll()
+	t.Cleanup(serverAds.DeleteAll)
+	resetRegistryQueryState()
+	t.Cleanup(resetRegistryQueryState)
+
+	authenticated := server_structs.Capabilities{Reads: true}
+	issuerAt := func(host string) []server_structs.TokenIssuer {
+		return []server_structs.TokenIssuer{{IssuerUrl: url.URL{Scheme: "https", Host: host}, BasePaths: []string{"/ns"}}}
+	}
+	serverAd := func(host, serverType string) server_structs.ServerAd {
+		ad := server_structs.ServerAd{URL: url.URL{Host: host, Scheme: "https"}, Type: serverType}
+		ad.Initialize(host)
+		return ad
+	}
+	origin := serverAd("origin.com", server_structs.OriginType.String())
+	cache := serverAd("cache.com", server_structs.CacheType.String())
+
+	originNs := server_structs.NamespaceAd{Path: "/ns", Caps: authenticated, Issuer: issuerAt("origin-issuer.example.org")}
+	registryNs := server_structs.NamespaceAd{Path: "/ns", Caps: authenticated, Issuer: issuerAt("registry-issuer.example.org")}
+	// The registry still holds the owner's auth state for the path
+	registry := ingestRegistryNamespaceAds([]server_structs.NamespaceAd{registryNs})
+	registryNamespaceAds.Store(&registry)
+	// The cache's last fetch happened while the origin was offline, so it
+	// re-advertises the registry's copy, flag included
+	staleCopy := registry[0]
+	serverAds.Set(origin.URL.String(), &server_structs.Advertisement{ServerAd: origin, NamespaceAds: []server_structs.NamespaceAd{originNs}}, ttlcache.DefaultTTL)
+	serverAds.Set(cache.URL.String(), &server_structs.Advertisement{ServerAd: cache, NamespaceAds: []server_structs.NamespaceAd{staleCopy}}, ttlcache.DefaultTTL)
+
+	for i := 0; i < 20; i++ {
+		list := listNamespaceResponses()
+		require.Len(t, list, 1, "iteration %d", i)
+		got := list[0]
+		assert.False(t, got.FromRegistry, "iteration %d", i)
+		require.Len(t, got.Issuer, 1, "iteration %d", i)
+		assert.Equal(t, "https://origin-issuer.example.org", got.Issuer[0].IssuerUrl, "iteration %d", i)
+		assert.Equal(t, []string{origin.Name}, got.Origins, "iteration %d", i)
+		assert.Equal(t, []string{cache.Name}, got.Caches, "iteration %d", i)
+	}
+}
+
+func TestGetNamespacesRegistryProvenance(t *testing.T) {
+	setGinTestMode()
+	t.Cleanup(test_utils.SetupTestLogging(t))
+	serverAds.DeleteAll()
+	t.Cleanup(serverAds.DeleteAll)
+	resetRegistryQueryState()
+	t.Cleanup(resetRegistryQueryState)
+
+	public := server_structs.Capabilities{PublicReads: true, Reads: true}
+	authenticated := server_structs.Capabilities{Reads: true}
+	issuerFor := func(path string) []server_structs.TokenIssuer {
+		return []server_structs.TokenIssuer{{IssuerUrl: url.URL{Scheme: "https", Host: "issuer.example.org"}, BasePaths: []string{path}}}
+	}
+	serverAd := func(host, serverType string, fromTopology bool) server_structs.ServerAd {
+		ad := server_structs.ServerAd{URL: url.URL{Host: host, Scheme: "https"}, Type: serverType, FromTopology: fromTopology}
+		ad.Initialize(host)
+		return ad
+	}
+	topoOrigin := serverAd("topo-origin.com", server_structs.OriginType.String(), true)
+	origin := serverAd("origin.com", server_structs.OriginType.String(), false)
+	cache := serverAd("cache.com", server_structs.CacheType.String(), false)
+
+	topoNs := server_structs.NamespaceAd{Path: "/topo", Caps: public, FromTopology: true}
+	servedNs := server_structs.NamespaceAd{Path: "/served", Caps: public}
+	cachedNs := server_structs.NamespaceAd{Path: "/cached", Caps: authenticated} // the cache's own view, without the issuer
+	serverAds.Set(topoOrigin.URL.String(), &server_structs.Advertisement{ServerAd: topoOrigin, NamespaceAds: []server_structs.NamespaceAd{topoNs}}, ttlcache.DefaultTTL)
+	serverAds.Set(origin.URL.String(), &server_structs.Advertisement{ServerAd: origin, NamespaceAds: []server_structs.NamespaceAd{servedNs}}, ttlcache.DefaultTTL)
+	serverAds.Set(cache.URL.String(), &server_structs.Advertisement{ServerAd: cache, NamespaceAds: []server_structs.NamespaceAd{servedNs, cachedNs}}, ttlcache.DefaultTTL)
+
+	registry := ingestRegistryNamespaceAds([]server_structs.NamespaceAd{
+		{Path: "/served", Caps: public},                                        // a live origin advertises it: the origin wins
+		{Path: "/cached", Caps: authenticated, Issuer: issuerFor("/cached")},   // only a cache holds it
+		{Path: "/offline", Caps: authenticated, Issuer: issuerFor("/offline")}, // nobody serves it
+	})
+	registryNamespaceAds.Store(&registry)
+
+	router := gin.New()
+	router.GET("/namespaces", listNamespacesHandler)
+	w := httptest.NewRecorder()
+	req, err := http.NewRequest(http.MethodGet, "/namespaces", nil)
+	require.NoError(t, err)
+	router.ServeHTTP(w, req)
+	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+
+	var list []server_structs.NamespaceAdMappedResponse
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &list))
+	got := make(map[string]server_structs.NamespaceAdMappedResponse, len(list))
+	for _, ns := range list {
+		got[ns.Path] = ns
+	}
+	require.Len(t, got, 4, "one entry per path: %s", w.Body.String())
+
+	// A topology origin's namespace reports its provenance; the converter
+	// used to drop fromTopology on the way to this listing
+	assert.True(t, got["/topo"].FromTopology)
+	assert.False(t, got["/topo"].FromRegistry)
+	assert.Equal(t, []string{topoOrigin.Name}, got["/topo"].Origins)
+
+	// The live origin's entry is the one listed; the registry's copy is not
+	assert.False(t, got["/served"].FromRegistry)
+	assert.Equal(t, []string{origin.Name}, got["/served"].Origins)
+	assert.Equal(t, []string{cache.Name}, got["/served"].Caches)
+
+	// A path only caches hold shows the registry's ad together with the caches
+	assert.True(t, got["/cached"].FromRegistry)
+	assert.Empty(t, got["/cached"].Origins)
+	assert.Equal(t, []string{cache.Name}, got["/cached"].Caches)
+	require.Len(t, got["/cached"].Issuer, 1, "the descriptive fields come from the registry")
+	assert.Equal(t, "https://issuer.example.org", got["/cached"].Issuer[0].IssuerUrl)
+
+	// A path nobody serves is listed from the registry alone
+	assert.True(t, got["/offline"].FromRegistry)
+	assert.Empty(t, got["/offline"].Origins)
+	assert.Empty(t, got["/offline"].Caches)
+	assert.Equal(t, authenticated, got["/offline"].Caps)
+}

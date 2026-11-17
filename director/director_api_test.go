@@ -19,15 +19,23 @@
 package director
 
 import (
+	"context"
+	"encoding/json"
 	"fmt"
+	"net/http"
+	"net/http/httptest"
 	"net/url"
+	"slices"
 	"testing"
 
+	"github.com/gin-gonic/gin"
 	"github.com/jellydator/ttlcache/v3"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
 	"github.com/pelicanplatform/pelican/server_structs"
+	"github.com/pelicanplatform/pelican/server_utils"
+	"github.com/pelicanplatform/pelican/test_utils"
 )
 
 const mockPathPreix string = "/foo/bar/"
@@ -309,4 +317,95 @@ func TestFilteredServersSnapshotIsDetached(t *testing.T) {
 	snapshot["injected"] = permFiltered
 	injected, _ := checkFilter("injected")
 	assert.False(t, injected, "the snapshot aliased the live filteredServers map")
+}
+
+func TestListNamespacesFromRegistry(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
+	resetRegistryQueryState()
+	t.Cleanup(resetRegistryQueryState)
+
+	public := server_structs.Capabilities{PublicReads: true, Reads: true}
+	ns := func(path string) server_structs.NamespaceAd {
+		return server_structs.NamespaceAd{Path: path, Caps: public}
+	}
+	// What the poller stores for three registry-backed namespaces
+	registry := ingestRegistryNamespaceAds([]server_structs.NamespaceAd{ns("/foo"), ns("/foo/bar"), ns("/baz/")})
+	all := []string{"/foo", "/foo/bar", "/baz/"}
+
+	tests := []struct {
+		name    string
+		origins []server_structs.NamespaceAd
+		want    []string
+	}{
+		{name: "no-origins-lists-every-registry-namespace", want: all},
+		{name: "a-live-origin-shadows-its-path", origins: []server_structs.NamespaceAd{ns("/foo")}, want: []string{"/foo/bar", "/baz/"}},
+		{name: "a-trailing-slash-on-either-side-still-shadows", origins: []server_structs.NamespaceAd{ns("/foo/"), ns("/baz")}, want: []string{"/foo/bar"}},
+		{name: "a-parent-or-child-path-is-a-different-namespace", origins: []server_structs.NamespaceAd{ns("/foo/bar")}, want: []string{"/foo", "/baz/"}},
+		{name: "an-unrelated-origin-shadows-nothing", origins: []server_structs.NamespaceAd{ns("/other")}, want: all},
+		{name: "two-origins-with-the-same-path-shadow-it-once", origins: []server_structs.NamespaceAd{ns("/foo"), ns("/foo")}, want: []string{"/foo/bar", "/baz/"}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			registryNamespaceAds.Store(&registry)
+			origins := slices.Clone(tt.origins)
+
+			got := listNamespacesFromRegistry(origins)
+
+			assert.Equal(t, tt.want, adPaths(got))
+			for _, ad := range got {
+				assert.True(t, ad.FromRegistry, "%s keeps its provenance", ad.Path)
+			}
+			assert.Equal(t, tt.origins, origins, "the origin list is left untouched")
+			assert.Equal(t, all, adPaths(getRegistryNamespaceAds()), "the snapshot is left untouched")
+		})
+	}
+
+	t.Run("an-empty-snapshot-gives-an-empty-list", func(t *testing.T) {
+		resetRegistryQueryState()
+		assert.Empty(t, listNamespacesFromRegistry([]server_structs.NamespaceAd{ns("/foo")}))
+	})
+}
+
+func TestListNamespacesV2IncludesRegistryAds(t *testing.T) {
+	setGinTestMode()
+	t.Cleanup(test_utils.SetupTestLogging(t))
+	serverAds.DeleteAll()
+	t.Cleanup(serverAds.DeleteAll)
+	resetRegistryQueryState()
+	t.Cleanup(resetRegistryQueryState)
+
+	public := server_structs.Capabilities{PublicReads: true, Reads: true}
+	issuer := server_structs.TokenIssuer{IssuerUrl: url.URL{Scheme: "https", Host: "issuer.example.org"}, BasePaths: []string{"/offline"}}
+
+	origin := server_structs.ServerAd{URL: url.URL{Host: "origin.com", Scheme: "https"}, Type: server_structs.OriginType.String(), FromTopology: true}
+	origin.Initialize("test-origin")
+	originNs := []server_structs.NamespaceAd{{Path: "/served", Caps: public, FromTopology: true}}
+	recordAd(context.Background(), origin, &originNs)
+
+	registry := ingestRegistryNamespaceAds([]server_structs.NamespaceAd{
+		{Path: "/served/", Caps: public}, // the live origin wins, trailing slash or not
+		{Path: "/offline", Caps: server_structs.Capabilities{Reads: true}, Issuer: []server_structs.TokenIssuer{issuer}},
+	})
+	registryNamespaceAds.Store(&registry)
+
+	router := gin.New()
+	router.GET("/listNamespaces", listNamespacesV2)
+	w := httptest.NewRecorder()
+	req, err := http.NewRequest(http.MethodGet, "/listNamespaces", nil)
+	require.NoError(t, err)
+	router.ServeHTTP(w, req)
+	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+
+	// The response round-trips through the same struct caches read it into
+	var got []server_structs.NamespaceAd
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &got))
+	require.Equal(t, []string{"/served", "/offline", server_utils.MonitoringBaseNs}, adPaths(got))
+
+	assert.True(t, got[0].FromTopology, "the origin's provenance survives")
+	assert.False(t, got[0].FromRegistry)
+	assert.True(t, got[1].FromRegistry)
+	assert.False(t, got[1].FromTopology)
+	require.Len(t, got[1].Issuer, 1)
+	assert.Equal(t, "https://issuer.example.org", got[1].Issuer[0].IssuerUrl.String())
+	assert.False(t, got[2].FromRegistry, "the monitoring namespace is the director's own")
 }

@@ -1651,6 +1651,8 @@ func listNamespacesV1Deprecated(ctx *gin.Context) {
 
 func listNamespacesV2(ctx *gin.Context) {
 	namespacesAds := listNamespacesFromOrigins()
+	// The registry advertises a namespace on behalf of its owner while no origin for it is online
+	namespacesAds = append(namespacesAds, listNamespacesFromRegistry(namespacesAds)...)
 	namespacesAds = append(namespacesAds, server_structs.NamespaceAd{
 		Caps: server_structs.Capabilities{
 			PublicReads: true,

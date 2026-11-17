@@ -421,6 +421,10 @@ definitions:
       fromTopology:
         type: boolean
         example: false
+      fromRegistry:
+        type: boolean
+        description: Whether the Director built this namespace from the auth state stored in the Registry; set true only while no Origin advertises the path
+        example: false
   NamespaceAdMapped:
     allOf:
       - $ref: "#/definitions/NamespaceAd"
@@ -4551,6 +4555,8 @@ paths:
       tags:
         - "director_ui"
       summary: Get a list of namespaces advertised to the director
+      description: |
+        Includes the namespaces the Registry advertises on behalf of their owners while no Origin serves them; those carry `fromRegistry: true`.
       produces:
         - application/json
       responses:
