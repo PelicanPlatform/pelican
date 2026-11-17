@@ -20,6 +20,7 @@ package director
 
 import (
 	"context"
+	"fmt"
 	"net/http"
 	"net/netip"
 	"path"
@@ -416,6 +417,104 @@ func filterCaches(
 	return
 }
 
+// sortCachesHoldingObject serves a read for a registry-backed namespace while
+// none of its origins is online. Only caches that confirm a copy of the object
+// are returned: a cache without the copy has no live origin to fetch it from,
+// so the presence check runs regardless of Director.CheckCachePresence.
+func sortCachesHoldingObject(ctx *gin.Context, requestId uuid.UUID, reqPath string, nsAd server_structs.NamespaceAd, cacheAds []copyAd) ([]copyAd, error) {
+	reqParams := getRequestParameters(ctx.Request)
+	reqVerb := ctx.Request.Method
+
+	// Only a read served by a cache can succeed: an origin request, a direct
+	// read, a write or a listing needs the origin itself
+	if isOriginRequest(ctx) || reqParams.Has(pelican_url.QueryDirectRead) || (reqVerb != http.MethodGet && reqVerb != http.MethodHead) {
+		return nil, noOriginsForNsErr{reqPath}
+	}
+
+	outcome := func(result metrics.DirectorOriginlessResult) {
+		metrics.PelicanDirectorOriginlessRedirectsTotal.WithLabelValues(string(result)).Inc()
+	}
+
+	// The presence check is the only way to find a copy, so a request that
+	// forbids it, or that cannot authenticate it, cannot be served
+	if reqParams.Has(pelican_url.QuerySkipStat) {
+		outcome(metrics.OriginlessStatUnavailable)
+		return nil, noCopyInOutageErr{reqPath, "the request asked to skip the presence check that finds a copy"}
+	}
+	token := reqParams.Get("authz")
+	if !nsAd.Caps.PublicReads && token == "" {
+		outcome(metrics.OriginlessStatUnavailable)
+		return nil, noCopyInOutageErr{reqPath, "the namespace requires a token and the request carries none"}
+	}
+
+	// The predicates every cache must pass on the normal path
+	commonPredicates := []AdPredicate{cacheNotFromTopoIfPubReads()}
+	if param.Director_FilterCachesInErrorState.GetBool() {
+		commonPredicates = append(commonPredicates, cacheNotInErrorState())
+	}
+	candidates := make([]server_structs.ServerAd, 0, len(cacheAds))
+	byUrl := make(map[string]copyAd, len(cacheAds))
+	for _, ad := range cacheAds {
+		if !allPredicatesPass(ctx, ad, commonPredicates...) {
+			continue
+		}
+		candidates = append(candidates, ad.ServerAd)
+		byUrl[ad.ServerAd.URL.String()] = ad
+	}
+	if len(candidates) == 0 {
+		outcome(metrics.OriginlessNoCopy)
+		return nil, noCopyInOutageErr{reqPath, "no cache advertises the namespace"}
+	}
+
+	// Closest caches first, and only the working set is asked, as the adaptive
+	// sort does on the normal path
+	clientAddr := utils.ClientIPAddr(ctx)
+	redirectInfo := server_structs.NewRedirectInfoFromIP(clientAddr.String())
+	redirectInfo.DirectorSortMethod = server_structs.DistanceType.String()
+	redirectInfo.ClientInfo.IpAddr = clientAddr.String()
+	sortCtx := SortContext{
+		Ctx:          context.WithValue(context.Background(), ProjectContextKey{}, utils.ExtractProjectFromUserAgent(ctx.Request.Header.Values("User-Agent"))),
+		ClientAddr:   clientAddr,
+		RedirectInfo: redirectInfo,
+		GinCtx:       ctx,
+		NamespaceAd:  nsAd,
+		RequestId:    requestId,
+	}
+	sorted, err := (&DistanceSort{}).Sort(candidates, sortCtx)
+	if err != nil {
+		return nil, errors.Wrap(err, "failed to sort the caches by distance")
+	}
+	workingSet := truncateAds(sorted, param.Director_AdaptiveSortTruncateConstant.GetInt())
+	if ctx.GetHeader("X-Pelican-Debug") == "true" {
+		ctx.Set("redirectInfo", redirectInfo)
+	}
+
+	// A cache holds the object only when its answer carries a positive Age,
+	// the rule generateAvailabilityMaps applies: a cache also answers a HEAD
+	// for an object it would first have to fetch
+	qr := NewObjectStat().Query(context.Background(), reqPath, server_structs.CacheType, 1, len(workingSet), withCacheAds(workingSet), WithToken(token))
+	if qr.Status == queryFailed && qr.ErrorType != queryNoSourcesErr && qr.ErrorType != queryInsufficientResErr {
+		outcome(metrics.OriginlessStatUnavailable)
+		return nil, noCopyInOutageErr{reqPath, "the presence check could not run: " + qr.Msg}
+	}
+	holders := make([]copyAd, 0, len(workingSet))
+	for _, cache := range workingSet {
+		for _, obj := range qr.Objects {
+			if (cache.URL.Host == obj.URL.Host || cache.AuthURL.Host == obj.URL.Host) && obj.CacheAge > 0 {
+				holders = append(holders, byUrl[cache.URL.String()])
+				break
+			}
+		}
+	}
+	if len(holders) == 0 {
+		outcome(metrics.OriginlessNoCopy)
+		return nil, noCopyInOutageErr{reqPath, fmt.Sprintf("none of the %d closest cache(s) confirmed a copy", len(workingSet))}
+	}
+	log.Debugf("Request %s: no origin is online for %s, redirecting to %d cache(s) that confirmed a copy", requestId.String(), reqPath, len(holders))
+	outcome(metrics.OriginlessRedirected)
+	return holders, nil
+}
+
 // Find and return a sorted list of all the origins/caches that may
 // be able to fulfill the request, together with the namespace ad the
 // request resolved to.
@@ -429,14 +528,22 @@ func getSortedAds(ctx *gin.Context, requestId uuid.UUID) (sortedOrigins, sortedC
 	originAds, cacheAds := getAdsForPath(reqPath)
 
 	// If there are no matching origin ads, then we also assume no caches should be serving the object as shutting
-	// down the origin(s) is the same as unplugging from the federation.
+	// down the origin(s) is the same as unplugging from the federation. The one exception is a namespace whose
+	// owner stored an auth state in the registry: it stays served by the caches that hold a copy.
 	if len(originAds) == 0 {
 		// If the director restarted recently, tell the client to try again soon by sending a 429
 		if inStartupSequence() {
 			return nil, nil, server_structs.NamespaceAd{}, directorStartupErr{reqPath}
-		} else {
+		}
+		regNs := server_structs.LongestNSMatch(reqPath, getRegistryNamespaceAds())
+		if regNs == nil {
 			return nil, nil, server_structs.NamespaceAd{}, noOriginsForNsErr{reqPath}
 		}
+		holders, err := sortCachesHoldingObject(ctx, requestId, reqPath, *regNs, cacheAds)
+		if err != nil {
+			return nil, nil, server_structs.NamespaceAd{}, err
+		}
+		return nil, holders, *regNs, nil
 	}
 
 	// Of the origins supporting the path, filter out those that don't support some other

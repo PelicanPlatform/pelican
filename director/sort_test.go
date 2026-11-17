@@ -22,20 +22,28 @@ import (
 	"context"
 	_ "embed"
 	"net/http"
+	"net/http/httptest"
 	"net/url"
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/google/uuid"
+	"github.com/jellydator/ttlcache/v3"
+	"github.com/prometheus/client_golang/prometheus/testutil"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
 	"github.com/pelicanplatform/pelican/features"
 	"github.com/pelicanplatform/pelican/metrics"
+	"github.com/pelicanplatform/pelican/param"
 	"github.com/pelicanplatform/pelican/pelican_url"
 	"github.com/pelicanplatform/pelican/server_structs"
+	"github.com/pelicanplatform/pelican/server_utils"
 	"github.com/pelicanplatform/pelican/test_utils"
+	"github.com/pelicanplatform/pelican/utils"
 )
 
 func hasServerAdWithName(ads []copyAd, name string) bool {
@@ -1087,4 +1095,227 @@ func TestFilterCaches(t *testing.T) {
 			}
 		})
 	}
+}
+
+// A registry-backed namespace whose origins are all offline is served by the
+// caches that confirm a copy of the object, and by nothing else
+func TestOriginlessRedirect(t *testing.T) {
+	setGinTestMode()
+	t.Cleanup(test_utils.SetupTestLogging(t))
+	server_utils.ResetTestState()
+	resetHealthTests()
+	shutdownStatUtils()
+	serverAds.DeleteAll()
+	resetRegistryQueryState()
+	t.Cleanup(func() {
+		shutdownHealthTests()
+		shutdownStatUtils()
+		serverAds.DeleteAll()
+		resetRegistryQueryState()
+		server_utils.ResetTestState()
+	})
+	// The director has been up for longer than its startup window
+	SetStartupTime(time.Now().Add(-10 * time.Minute))
+	t.Cleanup(func() { SetStartupTime(time.Now()) })
+	require.NoError(t, param.Director_StatTimeout.Set(2*time.Second))
+	require.NoError(t, param.Director_CacheSortMethod.Set(server_structs.DistanceType.String()))
+
+	// newCache stands up a cache that answers the presence check either as a
+	// holder of every object (200 with a positive Age) or as an empty one (404)
+	newCache := func(t *testing.T, name string, holds bool) server_structs.ServerAd {
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if !holds {
+				w.WriteHeader(http.StatusNotFound)
+				return
+			}
+			w.Header().Set("Content-Length", "10")
+			w.Header().Set("Age", "42")
+			w.WriteHeader(http.StatusOK)
+		}))
+		t.Cleanup(srv.Close)
+		u, err := url.Parse(srv.URL)
+		require.NoError(t, err)
+		ad := server_structs.ServerAd{URL: *u, Type: server_structs.CacheType.String(), Caps: server_structs.Capabilities{PublicReads: true, Reads: true}}
+		ad.Initialize(name)
+		return ad
+	}
+	// seed replaces the server ads with the given ones, each advertising nsAd,
+	// and gives every one a fresh stat utility so that no presence answer
+	// carries over between subtests. The result caches are started so that
+	// shutdownStatUtils can stop them.
+	seed := func(nsAd server_structs.NamespaceAd, ads ...server_structs.ServerAd) {
+		shutdownStatUtils()
+		serverAds.DeleteAll()
+		statUtilsMutex.Lock()
+		defer statUtilsMutex.Unlock()
+		for _, ad := range ads {
+			serverAds.Set(ad.URL.String(), &server_structs.Advertisement{ServerAd: ad, NamespaceAds: []server_structs.NamespaceAd{nsAd}}, ttlcache.DefaultTTL)
+			ctx, cancel := context.WithCancel(context.Background())
+			results := ttlcache.New(ttlcache.WithTTL[string, *objectMetadata](time.Minute))
+			go results.Start()
+			statUtils[ad.URL.String()] = &serverStatUtil{Context: ctx, Cancel: cancel, Errgroup: &utils.Group{}, ResultCache: results}
+		}
+	}
+	setRegistry := func(ads ...server_structs.NamespaceAd) {
+		ingested := ingestRegistryNamespaceAds(ads)
+		registryNamespaceAds.Store(&ingested)
+	}
+	request := func(method, target string, headers map[string]string) *gin.Context {
+		w := httptest.NewRecorder()
+		c, _ := gin.CreateTestContext(w)
+		c.Request = httptest.NewRequest(method, target, nil)
+		for k, v := range headers {
+			c.Request.Header.Set(k, v)
+		}
+		return c
+	}
+	count := func(result metrics.DirectorOriginlessResult) float64 {
+		return testutil.ToFloat64(metrics.PelicanDirectorOriginlessRedirectsTotal.WithLabelValues(string(result)))
+	}
+	names := func(ads []copyAd) []string {
+		out := make([]string, 0, len(ads))
+		for _, ad := range ads {
+			out = append(out, ad.ServerAd.Name)
+		}
+		return out
+	}
+
+	public := server_structs.NamespaceAd{Path: "/reg", Caps: server_structs.Capabilities{PublicReads: true, Reads: true}}
+	gated := server_structs.NamespaceAd{Path: "/reg", Caps: server_structs.Capabilities{Reads: true}, Issuer: []server_structs.TokenIssuer{{IssuerUrl: url.URL{Scheme: "https", Host: "issuer.example.org"}, BasePaths: []string{"/reg"}}}}
+	const object = "/api/v1.0/director/object/reg/obj.txt"
+
+	t.Run("only-the-cache-that-confirms-a-copy-is-returned", func(t *testing.T) {
+		require.NoError(t, param.Director_CheckCachePresence.Set(true))
+		holder, empty := newCache(t, "holder", true), newCache(t, "empty", false)
+		seed(public, holder, empty)
+		setRegistry(public)
+		before := count(metrics.OriginlessRedirected)
+
+		oAds, cAds, nsAd, err := getSortedAds(request(http.MethodGet, object, nil), uuid.New())
+		require.NoError(t, err)
+		assert.Empty(t, oAds)
+		assert.Equal(t, []string{holder.Name}, names(cAds))
+		assert.Equal(t, "/reg", nsAd.Path)
+		assert.True(t, nsAd.FromRegistry)
+		assert.Equal(t, before+1, count(metrics.OriginlessRedirected))
+	})
+
+	t.Run("the-presence-check-ignores-CheckCachePresence", func(t *testing.T) {
+		require.NoError(t, param.Director_CheckCachePresence.Set(false))
+		t.Cleanup(func() { require.NoError(t, param.Director_CheckCachePresence.Set(true)) })
+		holder, empty := newCache(t, "holder", true), newCache(t, "empty", false)
+		seed(public, holder, empty)
+		setRegistry(public)
+
+		_, cAds, _, err := getSortedAds(request(http.MethodGet, object, nil), uuid.New())
+		require.NoError(t, err)
+		assert.Equal(t, []string{holder.Name}, names(cAds), "the empty cache must still be excluded with the flag off")
+	})
+
+	t.Run("no-cache-confirms-a-copy", func(t *testing.T) {
+		seed(public, newCache(t, "empty-1", false), newCache(t, "empty-2", false))
+		setRegistry(public)
+		before := count(metrics.OriginlessNoCopy)
+
+		_, _, _, err := getSortedAds(request(http.MethodGet, object, nil), uuid.New())
+		require.IsType(t, noCopyInOutageErr{}, err)
+		assert.Contains(t, err.Error(), "no origin is online and no cache reports a copy")
+		assert.Equal(t, before+1, count(metrics.OriginlessNoCopy))
+	})
+
+	t.Run("the-client-skipped-the-presence-check", func(t *testing.T) {
+		seed(public, newCache(t, "holder", true))
+		setRegistry(public)
+		before := count(metrics.OriginlessStatUnavailable)
+
+		_, _, _, err := getSortedAds(request(http.MethodGet, object+"?skipstat", nil), uuid.New())
+		require.IsType(t, noCopyInOutageErr{}, err)
+		assert.Equal(t, before+1, count(metrics.OriginlessStatUnavailable))
+	})
+
+	t.Run("a-token-gated-namespace-needs-the-token", func(t *testing.T) {
+		holder := newCache(t, "holder", true)
+		seed(gated, holder)
+		setRegistry(gated)
+
+		_, _, _, err := getSortedAds(request(http.MethodGet, object, nil), uuid.New())
+		require.IsType(t, noCopyInOutageErr{}, err)
+
+		_, cAds, nsAd, err := getSortedAds(request(http.MethodGet, object, map[string]string{"Authorization": "Bearer not-checked-by-this-test"}), uuid.New())
+		require.NoError(t, err)
+		assert.Equal(t, []string{holder.Name}, names(cAds))
+		assert.False(t, nsAd.Caps.PublicReads)
+	})
+
+	t.Run("anything-but-a-cached-read-still-needs-an-origin", func(t *testing.T) {
+		seed(public, newCache(t, "holder", true))
+		setRegistry(public)
+		for _, tc := range []struct{ name, method, target string }{
+			{"write", http.MethodPut, object},
+			{"listing", "PROPFIND", object},
+			{"origin-request", http.MethodGet, "/api/v1.0/director/origin/reg/obj.txt"},
+			{"direct-read", http.MethodGet, object + "?directread"},
+		} {
+			_, _, _, err := getSortedAds(request(tc.method, tc.target, nil), uuid.New())
+			assert.IsType(t, noOriginsForNsErr{}, err, tc.name)
+		}
+	})
+
+	t.Run("a-namespace-the-registry-does-not-know-keeps-the-old-answer", func(t *testing.T) {
+		seed(public, newCache(t, "holder", true))
+		setRegistry()
+
+		_, _, _, err := getSortedAds(request(http.MethodGet, object, nil), uuid.New())
+		assert.IsType(t, noOriginsForNsErr{}, err)
+	})
+
+	t.Run("a-live-origin-keeps-the-normal-path", func(t *testing.T) {
+		require.NoError(t, param.Director_CheckCachePresence.Set(false))
+		require.NoError(t, param.Director_CheckOriginPresence.Set(false))
+		t.Cleanup(func() {
+			require.NoError(t, param.Director_CheckCachePresence.Set(true))
+			require.NoError(t, param.Director_CheckOriginPresence.Set(true))
+		})
+		origin := server_structs.ServerAd{URL: url.URL{Scheme: "https", Host: "origin.example.org"}, Type: server_structs.OriginType.String(), Caps: server_structs.Capabilities{PublicReads: true, Reads: true}}
+		origin.Initialize("origin")
+		holder, empty := newCache(t, "holder", true), newCache(t, "empty", false)
+		seed(public, origin, holder, empty)
+		setRegistry(public)
+		before := count(metrics.OriginlessRedirected)
+
+		oAds, cAds, nsAd, err := getSortedAds(request(http.MethodGet, object, nil), uuid.New())
+		require.NoError(t, err)
+		assert.Equal(t, []string{origin.Name}, names(oAds))
+		assert.ElementsMatch(t, []string{holder.Name, empty.Name}, names(cAds), "with an origin online and the flag off no cache is excluded")
+		assert.False(t, nsAd.FromRegistry)
+		assert.Equal(t, before, count(metrics.OriginlessRedirected))
+	})
+
+	// The cache redirect handler turns the two answers into a 307 to the
+	// cache that holds the copy, or a 404 that names the outage
+	t.Run("redirectToCache", func(t *testing.T) {
+		router := gin.New()
+		router.GET("/api/v1.0/director/object/*any", redirectToCache)
+		serve := func() *httptest.ResponseRecorder {
+			w := httptest.NewRecorder()
+			router.ServeHTTP(w, httptest.NewRequest(http.MethodGet, object, nil))
+			return w
+		}
+
+		holder := newCache(t, "holder", true)
+		seed(public, holder, newCache(t, "empty", false))
+		setRegistry(public)
+		w := serve()
+		require.Equal(t, http.StatusTemporaryRedirect, w.Code, w.Body.String())
+		location, err := url.Parse(w.Header().Get("Location"))
+		require.NoError(t, err)
+		assert.Equal(t, holder.URL.Host, location.Host, "Location: %s", location)
+		assert.Equal(t, "/reg/obj.txt", location.Path)
+		assert.Contains(t, w.Header().Get("X-Pelican-Namespace"), "namespace=/reg")
+
+		seed(public, newCache(t, "empty", false))
+		w = serve()
+		require.Equal(t, http.StatusNotFound, w.Code, w.Body.String())
+		assert.Contains(t, w.Body.String(), "no origin is online and no cache reports a copy")
+	})
 }

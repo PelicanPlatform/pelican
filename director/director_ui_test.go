@@ -24,6 +24,7 @@ import (
 	"net/http/httptest"
 	"net/url"
 	"testing"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/jellydator/ttlcache/v3"
@@ -591,4 +592,32 @@ func TestGetNamespacesRegistryProvenance(t *testing.T) {
 	assert.Empty(t, got["/offline"].Origins)
 	assert.Empty(t, got["/offline"].Caches)
 	assert.Equal(t, authenticated, got["/offline"].Caps)
+}
+
+// When getSortedAds fails, queryOrigins must answer exactly once. The handler
+// used to write the error response and then fall through to the stat query,
+// which wrote a second body onto the same response.
+func TestQueryOriginsAnswersOnceOnError(t *testing.T) {
+	setGinTestMode()
+	t.Cleanup(test_utils.SetupTestLogging(t))
+	serverAds.DeleteAll()
+	t.Cleanup(serverAds.DeleteAll)
+	resetRegistryQueryState()
+	t.Cleanup(resetRegistryQueryState)
+	// Past the startup window, so a path nobody serves is a plain 404
+	SetStartupTime(time.Now().Add(-10 * time.Minute))
+	t.Cleanup(func() { SetStartupTime(time.Now()) })
+
+	router := gin.New()
+	router.GET("/api/v1.0/director_ui/servers/origins/stat/*path", queryOrigins)
+	w := httptest.NewRecorder()
+	req, err := http.NewRequest(http.MethodGet, "/api/v1.0/director_ui/servers/origins/stat/nobody/serves/this.txt", nil)
+	require.NoError(t, err)
+	router.ServeHTTP(w, req)
+
+	require.Equal(t, http.StatusNotFound, w.Code, w.Body.String())
+	var resp server_structs.SimpleApiResp
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp), "the body must be a single JSON document: %s", w.Body.String())
+	assert.Equal(t, server_structs.RespFailed, resp.Status)
+	assert.Contains(t, resp.Msg, "No origins found for the requested path")
 }

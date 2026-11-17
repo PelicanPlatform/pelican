@@ -741,6 +741,16 @@ The number of namespaces the Director advertises from the Registry rather than f
 
 > **Note**: This is a gauge metric with no labels. Query directly to see the current count.
 
+### `pelican_director_originless_redirects_total`
+
+The number of requests the Director handled for a namespace while none of its Origins was online. Only namespaces with an auth state in the Registry are counted, because those are the ones the Director can still serve from Caches.
+
+> **Note**: This is a counter metric. Use `rate(pelican_director_originless_redirects_total[5m])` to see how often an outage is being served from Caches, or `increase(pelican_director_originless_redirects_total{result="no_copy"}[1h])` to count the requests that found no copy in the last hour.
+
+#### Label: `result`
+
+The outcome: `redirected` when at least one Cache confirmed a copy, `no_copy` when none did, or `stat_unavailable` when the presence check could not run because the request asked to skip it, the namespace requires a token the request did not carry, or the check itself failed.
+
 ### `pelican_director_client_requests_total`
 
 The total number of requests from clients.
