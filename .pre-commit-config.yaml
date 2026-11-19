@@ -85,6 +85,10 @@ repos:
           # collapses each table into a single unreadable line.
           - mdformat-gfm==1.0.0
           - mdformat-simple-breaks==0.1.0
+          # YAML front matter support: without it, mdformat joins the
+          # front matter into one line, which GitHub cannot parse, and
+          # the issue templates in .github/ISSUE_TEMPLATE disappear.
+          - mdformat-frontmatter==2.2.0
         args: [--wrap, "no"]
         files: \.md$
   - repo: https://github.com/crate-ci/typos
