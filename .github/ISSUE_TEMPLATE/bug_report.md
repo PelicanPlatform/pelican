@@ -1,7 +1,9 @@
 ---
-
-name: Bug report about: Create a report to help us improve title: '' labels: bug assignees: ''
-
+name: Bug report
+about: Create a report to help us improve
+title: ''
+labels: bug
+assignees: ''
 ---
 
 Pelican Version: _Run `./pelican --version` to get version number._
