@@ -607,7 +607,7 @@ RUN --mount=type=bind,source=oa4mp/resources,target=/context \
   dnf install -y sssd-client
 
   # OA4MP and Apache Tomcat both require a Java runtime.
-  dnf install -y java-${JAVA_VER}-openjdk-headless
+  dnf install -y "java-${JAVA_VER}-openjdk-headless >= 1:17.0.2.1"
 
   #---------------------------------------------------------------
   # Install Apache Tomcat.
