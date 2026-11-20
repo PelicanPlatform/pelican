@@ -22,11 +22,19 @@ package client
 
 import (
 	"context"
+	"net/http"
+	"net/http/httptest"
+	"net/url"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"golang.org/x/sync/errgroup"
+
+	"github.com/pelicanplatform/pelican/param"
+	"github.com/pelicanplatform/pelican/test_utils"
 )
 
 // TestMonitorTPC tests parsing of TPC performance markers
@@ -180,4 +188,51 @@ func TestSummarizeCopyFailure(t *testing.T) {
 		assert.Empty(t, summarizeCopyFailure(nil))
 		assert.Empty(t, summarizeCopyFailure([]byte("   \n ")))
 	})
+}
+
+// TestCopyHTTPStartStatus covers the status a destination starts a copy
+// with: 201 Created, as XRootD before 6.0.0 and Pelican's own TPC handler
+// answer, and 202 Accepted, which the WLCG HTTP-TPC specification gives for a
+// copy that streams its progress and XRootD 6.0.0 and later send.  Both are
+// followed by the same progress markers and final "success:" line.
+func TestCopyHTTPStartStatus(t *testing.T) {
+	for _, status := range []int{http.StatusCreated, http.StatusAccepted} {
+		t.Run(http.StatusText(status), func(t *testing.T) {
+			test_utils.InitClient(t, map[param.Param]any{})
+			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+			defer cancel()
+
+			src := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.Header().Set("Content-Length", "2048")
+				w.WriteHeader(http.StatusOK)
+			}))
+			defer src.Close()
+			dest := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if r.Method != "COPY" {
+					w.WriteHeader(http.StatusMethodNotAllowed)
+					return
+				}
+				w.WriteHeader(status)
+				_, _ = w.Write([]byte("Perf Marker\n" +
+					"Stripe Index: 0\n" +
+					"Stripe Bytes Transferred: 2048\n" +
+					"Total Stripe Count: 1\n" +
+					"End\n" +
+					"success: Created\n"))
+			}))
+			defer dest.Close()
+
+			srcURL, err := url.Parse(src.URL + "/ns/object")
+			require.NoError(t, err)
+			destURL, err := url.Parse(dest.URL + "/ns/object")
+			require.NoError(t, err)
+
+			xfer := newTPCTestTransfer(ctx, srcURL, destURL)
+			xfer.engine = &TransferEngine{egrp: &errgroup.Group{}}
+			results, err := copyHTTP(xfer)
+			require.NoError(t, err)
+			assert.Equal(t, int64(2048), results.TransferredBytes)
+			require.NoError(t, xfer.engine.egrp.Wait())
+		})
+	}
 }

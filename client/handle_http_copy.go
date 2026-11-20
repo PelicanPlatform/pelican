@@ -266,7 +266,11 @@ func copyHTTP(xfer *transferFile) (transferResults TransferResults, err error) {
 		return
 	}
 	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusCreated {
+	// A destination starts the copy with 201 Created or, as the WLCG HTTP-TPC
+	// specification gives for a copy that streams its progress, 202 Accepted
+	// (XRootD 6.0.0 and later).  Either way the body carries the progress
+	// markers and the final "success:" or "failure:" line.
+	if resp.StatusCode != http.StatusCreated && resp.StatusCode != http.StatusAccepted {
 		var respBytes []byte
 		respBytes, err = io.ReadAll(io.LimitReader(resp.Body, maxErrorBodySize))
 		if err != nil {
@@ -277,13 +281,13 @@ func copyHTTP(xfer *transferFile) (transferResults TransferResults, err error) {
 		} else {
 			statusErr := wrapErrorByStatusCode(resp.StatusCode, fmt.Errorf("destination COPY returned HTTP %d", resp.StatusCode))
 			if resp.StatusCode == http.StatusOK {
-				log.Errorf("TPC COPY to %s returned HTTP 200 instead of 201 Created; the destination origin does not have the TPC module loaded: %q",
+				log.Errorf("TPC COPY to %s returned HTTP 200 instead of 201 Created or 202 Accepted; the destination origin does not have the TPC module loaded: %q",
 					resolvedDestUrl.String(), string(respBytes))
-				err = &HttpErrResp{Code: resp.StatusCode, Str: fmt.Sprintf("TPC COPY to %s failed: the destination origin does not have the TPC module loaded (HTTP 200 instead of 201);"+
+				err = &HttpErrResp{Code: resp.StatusCode, Str: fmt.Sprintf("TPC COPY to %s failed: the destination origin does not have the TPC module loaded (HTTP 200 instead of 201 or 202);"+
 					" for Pelican origins, ensure the origin has a POSIX-like backend that supports third-party copy",
 					resolvedDestUrl.String()), Err: statusErr}
 			} else if resp.StatusCode > 200 && resp.StatusCode < 300 {
-				log.Errorf("TPC COPY to %s returned HTTP %d instead of 201 Created; the destination origin may not support HTTP third-party-copy: %q",
+				log.Errorf("TPC COPY to %s returned HTTP %d instead of 201 Created or 202 Accepted; the destination origin may not support HTTP third-party-copy: %q",
 					resolvedDestUrl.String(), resp.StatusCode, string(respBytes))
 				err = &HttpErrResp{Code: resp.StatusCode, Str: fmt.Sprintf("TPC COPY failed (HTTP status %d)",
 					resp.StatusCode), Err: statusErr}
