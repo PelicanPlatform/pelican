@@ -85,6 +85,45 @@ func TestHandleWildcard(t *testing.T) {
 		assert.Equal(t, "site foo", ns.AdminMetadata.SiteName)
 	})
 
+	t.Run("namespaces-advertised-returns-the-approved-ads", func(t *testing.T) {
+		setupMockRegistryDB(t)
+		defer teardownMockRegistryDB(t)
+
+		approved := mockNamespace("/foo", "pubkey", "", server_structs.AdminMetadata{Status: server_structs.RegApproved})
+		approved.AuthState = mockAuthState()
+		pending := mockNamespace("/pending", "pubkey", "", server_structs.AdminMetadata{Status: server_structs.RegPending})
+		pending.AuthState = mockAuthState()
+		require.NoError(t, insertMockDBData([]server_structs.Registration{approved, pending}))
+
+		req, _ := http.NewRequest("GET", "/registry/namespaces/advertised", nil)
+		w := httptest.NewRecorder()
+		r.ServeHTTP(w, req)
+		require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+
+		// The response round-trips through the same struct a director reads an origin's ad into
+		ads := []server_structs.NamespaceAd{}
+		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &ads))
+		require.Len(t, ads, 1)
+		assert.Equal(t, "/foo", ads[0].Path)
+		assert.Equal(t, server_structs.Capabilities{Reads: true, Listings: true}, ads[0].Caps)
+		require.Len(t, ads[0].Issuer, 1)
+		assert.Equal(t, "https://issuer.example.org", ads[0].Issuer[0].IssuerUrl.String())
+		assert.Equal(t, []string{"/foo"}, ads[0].Issuer[0].BasePaths)
+		require.Len(t, ads[0].Generation, 1)
+		assert.Equal(t, "https://issuer.example.org", ads[0].Generation[0].CredentialIssuer.String())
+	})
+
+	t.Run("namespaces-advertised-empty-db-returns-an-empty-list", func(t *testing.T) {
+		setupMockRegistryDB(t)
+		defer teardownMockRegistryDB(t)
+
+		req, _ := http.NewRequest("GET", "/registry/namespaces/advertised", nil)
+		w := httptest.NewRecorder()
+		r.ServeHTTP(w, req)
+		require.Equal(t, http.StatusOK, w.Code)
+		assert.JSONEq(t, "[]", w.Body.String())
+	})
+
 	t.Run("match-wildcard-metadataHandler", func(t *testing.T) {
 		server_utils.ResetTestState()
 

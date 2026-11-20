@@ -10,6 +10,7 @@ import React, {
 import useSWR from 'swr';
 
 import { RegistryNamespace } from '@/index';
+import type { NamespaceAuthState } from '@/types';
 import CustomRegistrationField from '@/app/registry/components/CustomRegistrationField/index';
 import {
   calculateKeys,
@@ -37,11 +38,14 @@ const OWNER_EDITABLE_APPROVED_FIELDS = [
   'admin_metadata.description',
   'admin_metadata.institution',
   'admin_metadata.security_contact_user_id',
+  'auth_state',
 ];
+
+type FieldValue = string | number | boolean | NamespaceAuthState | null;
 
 const onChange = (
   name: string,
-  value: string | number | boolean | null | undefined,
+  value: FieldValue | undefined,
   setData: Dispatch<SetStateAction<Partial<RegistryNamespace | undefined>>>
 ) => {
   setData((prevData) => {
@@ -157,8 +161,8 @@ const Form = ({ namespace, onSubmit }: FormProps) => {
       {restrictedEdit && (
         <Alert severity={'info'} sx={{ mb: 2 }}>
           This registration is approved. You can update its description,
-          institution, and security contact; the remaining fields are locked and
-          can only be changed by a registry administrator.
+          institution, security contact, and auth state; the remaining fields
+          are locked and can only be changed by a registry administrator.
         </Alert>
       )}
       {adminUserAndExistingRegistration && (
@@ -200,7 +204,7 @@ const Form = ({ namespace, onSubmit }: FormProps) => {
           return (
             <Box key={field.name} pt={index == 0 ? 0 : 2}>
               <CustomRegistrationField
-                onChange={(value: string | number | boolean | null) =>
+                onChange={(value: FieldValue) =>
                   onChange(field.name, value, setFormNamespace)
                 }
                 value={getValue(formNamespace, calculateKeys(field.name))}

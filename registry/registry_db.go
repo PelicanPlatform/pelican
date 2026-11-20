@@ -39,11 +39,12 @@ import (
 )
 
 type NamespaceWOPubkey struct {
-	ID            int                          `json:"id"`
-	Prefix        string                       `json:"prefix"`
-	Pubkey        string                       `json:"-"` // Don't include pubkey in this case
-	Identity      string                       `json:"identity"`
-	AdminMetadata server_structs.AdminMetadata `json:"admin_metadata"`
+	ID            int                                `json:"id"`
+	Prefix        string                             `json:"prefix"`
+	Pubkey        string                             `json:"-"` // Don't include pubkey in this case
+	Identity      string                             `json:"identity"`
+	AdminMetadata server_structs.AdminMetadata       `json:"admin_metadata"`
+	AuthState     *server_structs.NamespaceAuthState `json:"auth_state"`
 }
 
 type Topology struct {
@@ -553,6 +554,37 @@ func getAllowedPrefixesForCaches() (map[string][]string, error) {
 	return allowedPrefixesForCachesMap, nil
 }
 
+// getAdvertisedNamespaceAds returns a NamespaceAd for every approved namespace
+// registration that carries an auth state, in prefix order.
+func getAdvertisedNamespaceAds() ([]server_structs.NamespaceAd, error) {
+	var registrations []server_structs.Registration
+	err := database.ServerDatabase.
+		Where("auth_state IS NOT NULL").
+		Order("prefix ASC").
+		Find(&registrations).Error
+	if err != nil {
+		return nil, errors.Wrap(err, "failed to query the registrations with an auth state")
+	}
+
+	ads := make([]server_structs.NamespaceAd, 0, len(registrations))
+	for _, reg := range registrations {
+		if reg.AdminMetadata.Status != server_structs.RegApproved {
+			continue
+		}
+		if server_structs.IsOriginNS(reg.Prefix) || server_structs.IsCacheNS(reg.Prefix) {
+			continue
+		}
+		ad, err := reg.AuthState.ToNamespaceAd(reg.Prefix)
+		// one bad row does not take every other namespace out of the federation
+		if err != nil {
+			log.Warningf("Not advertising namespace %s from Registry: its stored auth state is invalid: %v", reg.Prefix, err)
+			continue
+		}
+		ads = append(ads, ad)
+	}
+	return ads, nil
+}
+
 // Get a collection of registrations by filtering against various non-default registration fields
 // excluding Registration.ID, Registration.Identity, Registration.Pubkey, and various dates
 //
@@ -560,7 +592,7 @@ func getAllowedPrefixesForCaches() (map[string][]string, error) {
 // the string will be matched using `strings.Contains`. This is too mimic a SQL style `like` match.
 // The rest of the AdminMetadata fields is matched by `==`
 func getRegistrationsByFilter(filterNs server_structs.Registration, pType prefixType, legacy bool) ([]server_structs.Registration, error) {
-	query := `SELECT id, prefix, pubkey, identity, admin_metadata FROM registrations WHERE 1=1 `
+	query := `SELECT id, prefix, pubkey, identity, admin_metadata, auth_state FROM registrations WHERE 1=1 `
 	queryArgs := []interface{}{}
 	if pType == prefixForCache {
 		// Refer to the cache prefix name in cmd/cache_serve
