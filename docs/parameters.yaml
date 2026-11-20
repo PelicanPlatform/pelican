@@ -962,11 +962,19 @@ description: |+
   even when its target is inside the root — and a root reached through a symlinked mount
   point works whichever spelling of the path the cache sends.
 
+  The filesystem must show every host the same inode numbers, as NFS, Lustre, GPFS and
+  CephFS do; on one that does not, such as some FUSE filesystems or CIFS mounted with
+  `noserverino`, the client does not read objects from it.  A client on Windows never
+  follows a `file://` redirect.
+
   Example YAML:
   ```yaml
   Client:
-    FileRedirectRoots: ["/mnt/pelican-cache/objects"]
+    FileRedirectRoots: ["/mnt/shared"]
   ```
+
+  For a cache with a shared-filesystem tiering target (see ${Cache.TieringTargets}), name
+  that target's directory or a directory above it.
 type: stringSlice
 default: none
 components: ["client"]
@@ -3322,14 +3330,16 @@ description: |+
 
   Targets are object stores, reached through the same library the origin's object backends
   use: S3 and S3-compatible services (MinIO, Ceph RGW), Google Cloud Storage, and Azure Blob
-  Storage; or a WebDAV service such as dCache.
+  Storage; a WebDAV service such as dCache; or a directory on a filesystem the cache shares
+  with its clients (see "Shared-filesystem targets" below).
 
   Each entry is an object.  Name the target either with a single provider URL:
 
   - **ProviderURL** (string): the backend in URL form — `s3://bucket`, `gs://bucket`,
-    `azblob://container`.  Takes precedence over the S3-specific keys below.  A target
-    named this way takes its credentials from the provider's ambient credential chain
-    (environment variables, the provider's shared configuration, or an instance role).
+    `azblob://container`, or `file:///absolute/path` for a shared filesystem.  Takes
+    precedence over the S3-specific keys below.  A target named this way takes its
+    credentials from the provider's ambient credential chain (environment variables, the
+    provider's shared configuration, or an instance role).
     **Credentials must not be embedded in the URL**, neither as userinfo
     (`s3://KEY:SECRET@bucket`) nor as query parameters; the cache refuses to start if they
     are.  Embedded credentials do not work in any case — the S3 driver ignores userinfo and
@@ -3394,7 +3404,8 @@ description: |+
   The remaining keys apply to every target:
 
   - **Prefix** (string, optional): a key prefix under which objects are stored (for a
-    WebDAV target, a path below **WebDavUrl**).
+    WebDAV target, a path below **WebDavUrl**; for a `file://` target, a subdirectory path
+    below the named directory, created if missing).
   - **MaxSize** (string, required): maximum bytes of cache data stored on the target
     (e.g. "5TB").  Unlike directory targets it cannot be auto-detected.
   - **HighWaterMarkPercentage** / **LowWaterMarkPercentage** (int, optional): eviction
@@ -3407,6 +3418,20 @@ description: |+
     and the target is genuinely its own.  Without it, the cache refuses to start against
     such a target (see the ownership note below).  Never use it to point two caches at
     one target.
+
+  These keys apply only to a `file://` target:
+
+  - **AllObjects** (bool, optional, default false): tier every object the target may hold,
+    however small, not only those of at least ${Cache.TieringThreshold}.
+  - **NamesView** (string, optional, default `versioned`): how the browsable tree of names
+    under `names/` spells each object: `versioned` (every cached version, plus the current
+    one under its plain name), `exact` (the current version only, under its federation path
+    unchanged), or `none` for no tree.
+  - **ExposedNamespaces** (list of strings, optional): namespace prefixes (e.g. `/ns/data`)
+    whose objects may be tiered to the shared filesystem — and appear in its names view —
+    even though reading them through Pelican requires a token.  Listing a namespace makes
+    the *contents* of its cached objects readable by every user who can read the
+    filesystem, not just their names.
 
   Example YAML:
   ```yaml
@@ -3460,6 +3485,24 @@ description: |+
   server-side encryption plus versioning or object lock.  Operators who need the
   on-disk guarantees for a given namespace should not tier it — raise
   ${Cache.TieringThreshold} above the object sizes involved.
+
+  **Shared-filesystem targets.**  A `file://` target is a directory on a filesystem that
+  the cache and its clients both mount, such as NFS, Lustre, GPFS or CephFS, so that clients
+  at the site can read cached objects straight from it (see ${Client.FileRedirectRoots}).
+  Every user of the filesystem can read what the target holds, so it only takes objects
+  from publicly readable namespaces and those listed in **ExposedNamespaces**.  The cache
+  refuses to start if other users could change the directory, or, while the names view is
+  on, any directory above it.  Shared-filesystem targets are not supported on Windows.
+  [Tiering a Cache to a Shared Filesystem](/operating-a-federation/cache/shared-filesystem-tiering)
+  describes setting one up.
+
+  Example YAML:
+  ```yaml
+  Cache:
+    TieringTargets:
+      - ProviderURL: file:///mnt/shared/pelican-cache
+        MaxSize: 50TB
+  ```
 
   Every minute the cache writes a small object (`.pelican-health`, beside the identity
   object) to each target and reads it back.  A target that fails is not given new uploads

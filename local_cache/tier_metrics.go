@@ -59,6 +59,7 @@ const (
 const (
 	tierSweepRemovedRemoteObject = "remote_object"
 	tierSweepRemovedEntry        = "entry"
+	tierSweepRemovedNameLink     = "name_link"
 )
 
 // Values of the "reason" label on tierRedirectSkippedTotal: why a read of a
@@ -68,6 +69,9 @@ const (
 	tierSkipCannotRedirect = "cannot_redirect"
 	// It can, but its latest redirect self-test failed.
 	tierSkipSelfTestFailing = "self_test_failing"
+	// A shared-filesystem target is failing its liveness probe, which may
+	// mean its path no longer leads to the cache's files.
+	tierSkipTargetDown = "target_down"
 	// The target's URLs use a scheme the client did not say it accepts.
 	tierSkipSchemeNotAccepted = "scheme_not_accepted"
 	// Redirecting would hand the client's Authorization header to the target.
@@ -165,8 +169,19 @@ var (
 	tierSweepRemovedTotal = promauto.NewCounterVec(prometheus.CounterOpts{
 		Name: "pelican_cache_tiering_sweep_removed_total",
 		Help: "Removals by the tiering consistency sweep, by target and kind: remote_object (an object on the " +
-			"target the cache has no record of) or entry (a record whose object is missing from, or changed on, the target)",
+			"target the cache has no record of), entry (a record whose object is missing from, or changed on, the " +
+			"target) or name_link (a stale or foreign link in a shared-filesystem target's names view)",
 	}, []string{"target", "kind"})
+	tierNamesSweepDuration = promauto.NewGaugeVec(prometheus.GaugeOpts{
+		Name: "pelican_cache_tiering_names_sweep_duration_seconds",
+		Help: "How long the latest consistency sweep of a shared-filesystem target's names view took; " +
+			"it runs hourly, so a value approaching an hour means the view is too large for the filesystem's latency",
+	}, []string{"target"})
+	tierNameLinksRestoredTotal = promauto.NewCounterVec(prometheus.CounterOpts{
+		Name: "pelican_cache_tiering_name_links_restored_total",
+		Help: "Links the tiering consistency sweep added to, or corrected in, a shared-filesystem target's names " +
+			"view because they were missing or out of date",
+	}, []string{"target"})
 	tierSweepLastSuccess = promauto.NewGaugeVec(prometheus.GaugeOpts{
 		Name: "pelican_cache_tiering_sweep_last_success_timestamp_seconds",
 		Help: "Unix timestamp when the tiering consistency sweep last completed for a target",
@@ -175,7 +190,7 @@ var (
 	tierRedirectSkippedTotal = promauto.NewCounterVec(prometheus.CounterOpts{
 		Name: "pelican_cache_tiering_redirect_skipped_total",
 		Help: "Reads of objects resident on a tiering target that were not redirected, by target and reason: " +
-			"cannot_redirect, self_test_failing, scheme_not_accepted, credential_forwarding, needs_revalidation, " +
+			"cannot_redirect, self_test_failing, target_down, scheme_not_accepted, credential_forwarding, needs_revalidation, " +
 			"no_credential, mint_failed, destination_mismatch or hold_failed",
 	}, []string{"target", "reason"})
 	tierProxiedBytesTotal = promauto.NewCounterVec(prometheus.CounterOpts{

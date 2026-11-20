@@ -21,6 +21,7 @@ This document describes the custom HTTP headers used throughout the Pelican plat
   - [X-Transfer-Status](#x-transfer-status-trailer)
   - [X-Pelican-Metadata-Status](#x-pelican-metadata-status)
   - [X-Pelican-Metadata-Query-Url / X-Pelican-Metadata-Manage-Url](#x-pelican-metadata-query-url--x-pelican-metadata-manage-url)
+  - [X-Pelican-File-Target](#x-pelican-file-target)
 - [Metadata Webhook Headers (Origin → External Catalog)](#metadata-webhook-headers-origin--external-catalog)
   - [X-Pelican-Idempotency-Key](#x-pelican-idempotency-key)
 - [Other Headers](#other-headers)
@@ -190,7 +191,7 @@ X-Pelican-Object-Metadata: experiment="atlas", run_number=4172, is_test=?0
 
 **Purpose:** Tells a cache which non-HTTP URL schemes this client is able to follow if it is redirected to one.
 
-**Format:** A comma-separated list of URL schemes.
+**Format:** A comma-separated list of URL schemes, or of tokens naming a scheme and a condition. The one defined today is `file-verified`: the client can follow a `file://` redirect, and will first check that the directory it reaches is the one the cache names in [X-Pelican-File-Target](#x-pelican-file-target).
 
 **Description:** A cache that has tiered an object to storage the client also has direct access to can answer a request by redirecting to that storage rather than sending the bytes itself. When the redirect target is `http`/`https` no advertisement is needed, since every client can follow it. Anything else only works if the client is in a position to use it, and nothing observable about a request says whether it is — the same subnet does not imply the same mount, and a containerized client can share a host without sharing a mount namespace. So the client states what it can follow and the cache sends such a redirect only to a client that asked.
 
@@ -199,12 +200,13 @@ Silence means "none", which is what keeps the default behavior unchanged for eve
 **Example:**
 
 ```
-X-Pelican-Accept-Redirect: file
+X-Pelican-Accept-Redirect: file-verified
 ```
 
 **Notes:**
 
-- The Pelican client sends `file` only when `Client.FileRedirectRoots` is non-empty, and refuses to read a path outside those roots even if a cache sends one anyway.
+- The Pelican client sends `file-verified` only when `Client.FileRedirectRoots` is non-empty and the platform reports inodes (not on Windows), and refuses to read a path outside those roots even if a cache sends one anyway.
+- A cache sends a `file://` redirect only to a client that advertises `file-verified`; a bare `file` is not enough. Whoever can rearrange a directory above the cache's could rename it away and put their own in its place, and a client that did not check would read their files.
 - This is an assertion by the client about itself and cannot be verified by the cache, which is why it is required rather than inferred: a cache must never direct a client to read an unrelated local file.
 - Enabling it grants the cache a say in which local paths the client reads, so it is off by default. See `Client.FileRedirectRoots` for the full rationale.
 
@@ -445,6 +447,29 @@ A `GET` that returns `404` means the token is unknown *or* the publish already c
 X-Pelican-Metadata-Query-Url: https://origin.example.org:8447/api/v1.0/origin_ui/metadata_publish/8Zreal0Random1Token2Here
 X-Pelican-Metadata-Manage-Url: https://origin.example.org:8447/api/v1.0/origin_ui/metadata_publish/9OtherRandomManageToken3
 ```
+
+---
+
+### X-Pelican-File-Target
+
+**Direction:** Cache → Client (on a `307` redirect to a `file://` URL)
+
+**Purpose:** Identifies the directory a `file://` redirect points into, so the client can check it is the cache's before reading anything from it.
+
+**Format:** URL query encoding of three fields: `root`, the directory's absolute path as the cache sees it; `inode`, its inode number; and `id`, the ID the cache keeps in `objects/.pelican-cache-id` below it.
+
+**Description:** The client opens `root` within its `Client.FileRedirectRoots`, checks that the directory's inode is `inode` and that its identity file holds `id`, and only then opens the redirected path, relative to that open directory. The inode defeats a directory swapped in at the same path: the original still exists under another name, so the replacement cannot have its inode. The ID tells apart a different filesystem mounted at the same path, whose directory might share the inode number. No device number is sent, since on a network filesystem each host's kernel assigns its own when the filesystem is mounted. Each transfer engine in the client keeps a checked directory open for as long as the engine runs and reads every later object through it, so a swap made after the check never reaches that engine. A redirect naming a different inode or ID, as after the cache's directory is recreated, is checked afresh.
+
+**Example:**
+
+```
+X-Pelican-File-Target: id=0b1e6c1a-4a8e-4d47-9a51-3f3f5b1c2d10&inode=1835012&root=%2Fmnt%2Fshared%2Fpelican-cache
+```
+
+**Notes:**
+
+- A redirect without this header, or whose directory does not match it, is refused, and the client reads nothing.
+- On a filesystem whose clients do not all see the same inode numbers (some FUSE filesystems, CIFS mounted with `noserverino`), the check fails and the object is not read from the filesystem.
 
 ---
 

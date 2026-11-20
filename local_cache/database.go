@@ -73,6 +73,9 @@ type CacheDB struct {
 	// which is what lets Salt hand it out directly.
 	salt      atomic.Pointer[[]byte]
 	closeOnce sync.Once
+	// latestETagObserver, when set, hears about every change of an
+	// object's latest ETag; see ObserveLatestETag.
+	latestETagObserver func(objectHash ObjectHash, oldETag, newETag string)
 
 	// usageMu protects usageMergeOps for lazy creation of merge operators
 	usageMu       sync.RWMutex
@@ -1064,23 +1067,39 @@ func (cdb *CacheDB) SetLatestETag(objectHash ObjectHash, etag string, observedAt
 		return err
 	}
 	key := ETagKey(objectHash)
-	return cdb.db.Update(func(txn *badger.Txn) error {
+	var previous string
+	err := cdb.db.Update(func(txn *badger.Txn) error {
+		previous = ""
 		// Read-modify-write: only update if newer.
 		item, err := txn.Get(key)
 		if err == nil {
 			var existing time.Time
 			_ = item.Value(func(val []byte) error {
-				_, existing = decodeETagEntry(val)
+				previous, existing = decodeETagEntry(val)
 				return nil
 			})
 			if !existing.IsZero() && !observedAt.After(existing) {
-				return nil // existing entry is at least as recent
+				previous = etag // nothing written, so nothing changed
+				return nil      // existing entry is at least as recent
 			}
 		} else if !errors.Is(err, badger.ErrKeyNotFound) {
 			return err
+		} else {
+			previous = etag // a first sighting replaces nothing
 		}
 		return txn.Set(key, encodeETagEntry(etag, observedAt))
 	})
+	if err == nil && previous != etag && cdb.latestETagObserver != nil {
+		cdb.latestETagObserver(objectHash, previous, etag)
+	}
+	return err
+}
+
+// ObserveLatestETag registers fn to be called, after the write commits,
+// whenever SetLatestETag replaces an object's latest ETag with a different
+// one.  It must be set during initialization.
+func (cdb *CacheDB) ObserveLatestETag(fn func(objectHash ObjectHash, oldETag, newETag string)) {
+	cdb.latestETagObserver = fn
 }
 
 // DeleteLatestETag removes the ETag entry for an object
@@ -1603,6 +1622,36 @@ func (cdb *CacheDB) GetInlineData(instanceHash InstanceHash) ([]byte, error) {
 // SetInlineData stores encrypted inline data for a small file.
 // The caller (StoreInline) is responsible for usage accounting via
 // ChargeUsage; this function does NOT adjust usage counters.
+// DeleteRelocatedInlineData removes the inline data an object kept before it
+// was tiered, unless the object's record says it is inline now: deleted and
+// fetched again since, the data belongs to the new copy.  The check and the
+// delete are one transaction, so no new copy can slip in between.
+func (cdb *CacheDB) DeleteRelocatedInlineData(instanceHash InstanceHash) error {
+	if err := cdb.checkWritable(); err != nil {
+		return err
+	}
+	return cdb.db.Update(func(txn *badger.Txn) error {
+		item, err := txn.Get(MetaKey(instanceHash))
+		switch {
+		case errors.Is(err, badger.ErrKeyNotFound):
+		case err != nil:
+			return err
+		default:
+			var meta CacheMetadata
+			if err := item.Value(func(val []byte) error { return msgpack.Unmarshal(val, &meta) }); err != nil {
+				return errors.Wrap(err, "failed to unmarshal metadata")
+			}
+			if meta.IsInline() {
+				return nil
+			}
+		}
+		if err := txn.Delete(InlineKey(instanceHash)); err != nil && !errors.Is(err, badger.ErrKeyNotFound) {
+			return err
+		}
+		return nil
+	})
+}
+
 func (cdb *CacheDB) SetInlineData(instanceHash InstanceHash, encryptedData []byte) error {
 	if err := cdb.checkWritable(); err != nil {
 		return err
@@ -2207,9 +2256,6 @@ func (cdb *CacheDB) RelocateObject(instanceHash InstanceHash, newStorageID Stora
 		if prev.Completed.IsZero() {
 			return errors.New("cannot relocate an incomplete object")
 		}
-		if prev.StorageID == StorageIDInline && !prev.IsChunked() {
-			return errors.New("cannot relocate an inline object")
-		}
 		if prev.StorageID == newStorageID {
 			return errors.New("object already resides on the target storage")
 		}
@@ -2437,6 +2483,10 @@ type evictedObject struct {
 	namespaceID    NamespaceID
 	chunkSizeCode  ChunkSizeCode   // For chunked objects
 	chunkLocations []ChunkLocation // Locations of chunks 1, 2, ...
+	// sourceURL and etag name the object, for withdrawing it from a
+	// shared-filesystem target's names view.
+	sourceURL string
+	etag      string
 }
 
 // evictionSkipBudget bounds how many protected objects the LRU walk (phases 2
@@ -2558,6 +2608,8 @@ func (cdb *CacheDB) EvictByLRU(storageID StorageID, namespaceID NamespaceID, max
 				namespaceID:    meta.NamespaceID,
 				chunkSizeCode:  meta.ChunkSizeCode,
 				chunkLocations: meta.ChunkLocations,
+				sourceURL:      meta.SourceURL,
+				etag:           meta.ETag,
 			})
 			// For chunked objects, decrement usage from each storage
 			// based on the on-disk bytes it holds.  For

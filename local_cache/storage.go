@@ -738,7 +738,7 @@ func (sm *StorageManager) RegisterTierTargets(ctx context.Context, configs []Tie
 	claimedUUIDs := make(map[string]string, len(configs))
 	for i := range configs {
 		cfg := configs[i]
-		if !strings.EqualFold(cfg.TransportScheme(), "https") {
+		if scheme := strings.ToLower(cfg.TransportScheme()); scheme != "https" && scheme != tierFileScheme {
 			log.Warnf("Cache tiering target %s is configured over %s: object data and pre-signed URLs "+
 				"will cross the network in cleartext", cfg.DisplayURL(), cfg.TransportScheme())
 		}
@@ -820,8 +820,24 @@ func (sm *StorageManager) RegisterTierTargets(ctx context.Context, configs []Tie
 		// check, run with each liveness probe, succeeds.
 		_ = target.checkRedirect(ctx)
 		result[id] = cfg
+		if target.names != nil {
+			// A names view's bare names must follow the latest version
+			// as soon as the cache learns of one.
+			sm.db.ObserveLatestETag(sm.onLatestETagChanged)
+		}
 	}
 	return result, nil
+}
+
+// tiersAllObjects reports whether some tiering target takes every object,
+// whatever its size (TierTargetConfig.AllObjects).
+func (sm *StorageManager) tiersAllObjects() bool {
+	for _, target := range sm.tierTargets {
+		if target.cfg.AllObjects {
+			return true
+		}
+	}
+	return false
 }
 
 // IsTiered reports whether the given storage ID is a remote tiering target.
@@ -1182,6 +1198,11 @@ func (sm *StorageManager) DirIDs() []StorageID {
 func (sm *StorageManager) StoreInline(ctx context.Context, instanceHash InstanceHash, meta *CacheMetadata, data []byte) (err error) {
 	// A creation: see instanceFences.create.
 	sm.fences.create(instanceHash, func() { err = sm.storeInline(ctx, instanceHash, meta, data) })
+	// Only a target that takes every object takes an inline one, so the
+	// uploader hears of inline objects only when there is such a target.
+	if err == nil && sm.onObjectComplete != nil && sm.tiersAllObjects() {
+		sm.onObjectComplete(instanceHash)
+	}
 	return err
 }
 
@@ -2344,6 +2365,9 @@ func (sm *StorageManager) deleteExcludedIf(instanceHash InstanceHash, release fu
 	release(true)
 
 	if target != nil {
+		// Withdraw the object's names before the object, so that no link is
+		// left leading to a file that is gone.
+		sm.unpublishTierName(target, instanceHash, meta.SourceURL, meta.ETag)
 		delCtx, delCancel := context.WithTimeout(context.Background(), tierSweepOpTimeout)
 		err := target.deleteObject(delCtx, instanceHash)
 		delCancel()
@@ -2494,6 +2518,7 @@ func (sm *StorageManager) EvictByLRU(storageID StorageID, namespaceID NamespaceI
 		// Delete a tiered object's remote copy; its local files, if any,
 		// went above.
 		if target := sm.getTierTarget(obj.storageID); target != nil {
+			sm.unpublishTierName(target, obj.instanceHash, obj.sourceURL, obj.etag)
 			delCtx, delCancel := context.WithTimeout(context.Background(), tierSweepOpTimeout)
 			err := target.deleteObject(delCtx, obj.instanceHash)
 			delCancel()

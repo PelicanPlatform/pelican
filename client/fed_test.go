@@ -498,6 +498,26 @@ func TestGetPublicRead(t *testing.T) {
 			assert.Equal(t, transferResults[0].TransferredBytes, int64(17))
 		}
 	})
+
+	// A byte range given to DoGet reaches the transfer, and the file holds
+	// just that range.
+	t.Run("testPubObjGetByteRange", func(t *testing.T) {
+		for _, export := range fed.Exports {
+			require.NoError(t, os.WriteFile(filepath.Join(export.StoragePrefix, "range.txt"), []byte("test file content"), 0o644))
+			require.NoError(t, param.Logging_Client_DisableProgressBars.Set(true))
+			objectURL := fmt.Sprintf("pelican://%s:%s%s/range.txt", param.Server_Hostname.GetString(), strconv.Itoa(param.Server_WebPort.GetInt()),
+				export.FederationPrefix)
+
+			dest := filepath.Join(t.TempDir(), "range.txt")
+			transferResults, err := client.DoGet(fed.Ctx, objectURL, dest, false, client.WithByteRange(5, 8))
+			require.NoError(t, err)
+			require.Len(t, transferResults, 1)
+			assert.Equal(t, int64(4), transferResults[0].TransferredBytes)
+			got, err := os.ReadFile(dest)
+			require.NoError(t, err)
+			assert.Equal(t, "file", string(got))
+		}
+	})
 	t.Cleanup(func() {
 		// Throw in a config.Reset for good measure. Keeps our env squeaky clean!
 		server_utils.ResetTestState()
