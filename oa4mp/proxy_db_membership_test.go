@@ -50,8 +50,7 @@ func TestGetUserCollectionScopes_DBMembership(t *testing.T) {
 	// membership does.
 	for _, u := range []struct{ id, name string }{{"u-bob", "bob"}, {"u-carol", "carol"}} {
 		require.NoError(t, db.Create(&database.User{
-			ID: u.id, Username: u.name, Sub: u.name,
-			Issuer: "https://idp.example.com", Status: database.UserStatusActive,
+			ID: u.id, Username: u.name, Status: database.UserStatusActive,
 		}).Error)
 	}
 	require.NoError(t, db.Create(&database.Group{

@@ -660,10 +660,9 @@ func ensureTestUserRow(t *testing.T, userID string) {
 	}
 	_, aupVersion, _ := CurrentAUPVersion()
 	err := database.ServerDatabase.Clauses(clause.OnConflict{DoNothing: true}).Create(&database.User{
-		ID:         userID,
-		Username:   userID,
-		Sub:        userID,
-		Issuer:     "https://example.com",
+		ID:       userID,
+		Username: userID,
+
 		Status:     database.UserStatusActive,
 		AUPVersion: aupVersion,
 	}).Error

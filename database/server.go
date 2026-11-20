@@ -95,19 +95,25 @@ func InitServerDatabase(serverType server_structs.ServerType) error {
 		return errors.Wrapf(err, "failed to run migrations for server type %s", serverType.String())
 	}
 
+	// Move identities that an older release wrote under this server's own URL
+	// onto the constant internal issuer. Must precede ensureBuiltinAdmin,
+	// which identifies the built-in admin by that identity.
+	// TODO: removable once every supported upgrade has passed through this.
+	if err := adoptInternalIssuer(ServerDatabase); err != nil {
+		return errors.Wrap(err, "failed to move local identities onto the internal issuer")
+	}
+
 	if err := ensureBuiltinAdmin(ServerDatabase); err != nil {
 		return errors.Wrap(err, "failed to ensure the built-in admin user")
 	}
 
 	// Post-migration bootstrap: ensure the built-in admin user record
-	// exists and that every group has a real owner. These need to run
-	// at startup rather than as SQL migrations because they depend on
-	// runtime config (Server.ExternalWebUrl). Idempotent.
+	// exists and that every group has a real owner. These run at startup
+	// rather than as SQL migrations because they need the slug generator
+	// and the default-scope machinery. Idempotent.
 	if err := BootstrapAdminAndBackfillOwners(ServerDatabase); err != nil {
-		// Don't fail startup — log and continue. The most common cause
-		// of failure here is ExternalWebUrl not being set yet on a
-		// brand-new install where bootstrap will be retried later
-		// (e.g. on the first admin login via init code).
+		// Don't fail startup — log and continue; bootstrap is retried on
+		// the next start and on the first admin login via init code.
 		log.Warnf("Post-migration bootstrap incomplete: %v", err)
 	}
 

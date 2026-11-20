@@ -43,7 +43,7 @@ import { AlertDispatchContext } from '@/components/AlertProvider';
 import { alertOnError } from '@/helpers/util';
 import { Me, MeService, MyGroup } from '@/helpers/api';
 import ScopeService, { ScopeCatalogEntry } from '@/helpers/api/Scope/service';
-import { UserIdentity } from '@/types';
+import { INTERNAL_ISSUER, UserIdentity } from '@/types';
 
 // Min visible "Saving..." duration so it doesn't flash by on fast responses.
 const MIN_SAVING_MS = 600;
@@ -53,16 +53,6 @@ const ensureMinDuration = async (start: number) => {
     await new Promise((r) => setTimeout(r, MIN_SAVING_MS - elapsed));
   }
 };
-
-// isInternalIdentity reports whether the caller's *primary* (sub, issuer)
-// is the internal one — the one we use to issue cookies for accounts
-// with locally-stored passwords. Per the design contract, on the
-// internal issuer the sub equals the username (CreateLocalUser sets
-// it that way and RenameUser keeps them in lockstep). So we can
-// detect "this is the internal identity" without reading server
-// config: the sub matches the username. Anything else is an external
-// IdP-issued identity worth showing in the linked-identities list.
-const isInternalIdentity = (me: Me) => me.sub === me.username;
 
 const Page = () => {
   return (
@@ -150,7 +140,6 @@ const ProfileContent = () => {
         <Skeleton variant='rounded' height={120} />
       ) : (
         <IdentitiesCard
-          me={me}
           identities={identities ?? []}
           onChanged={mutateIdentities}
         />
@@ -222,12 +211,9 @@ const ScopesCard: React.FC<{
   );
 };
 
-// AccountCard is the username + display-name + password panel. We
-// deliberately do NOT surface the user's primary (sub, issuer) here when
-// it's the internal identity (sub == username, issuer == this server) —
-// that pair is an implementation detail of password login. For OIDC
-// users, the primary identity is shown in the IdentitiesCard below
-// rather than mixed in with editable account fields.
+// AccountCard is the username + display-name + password panel. It
+// deliberately surfaces no (sub, issuer) at all: identities live in the
+// IdentitiesCard below rather than mixed in with editable account fields.
 const AccountCard: React.FC<{
   me: Me;
   onUpdated: () => Promise<Me | undefined> | void;
@@ -530,22 +516,23 @@ const PasswordSection: React.FC<{
   );
 };
 
-// IdentitiesCard renders the user's primary OIDC identity (if it isn't
-// the internal one — see isInternalIdentity for the rationale) plus
-// every secondary identity, with self-unlink for the secondaries.
-// "Linked identity" is a stable concept in the design contract; the
-// internal-issuer entry would just be noise here ("you can log in
-// with your password") and is replaced by the password indicator on
-// the AccountCard above.
+// IdentitiesCard renders every identity an external provider vouches for,
+// each with self-unlink. The internal-issuer entry is left out: it would just
+// be noise here ("you can log in with your password") and is already conveyed
+// by the password indicator on the AccountCard above.
 const IdentitiesCard: React.FC<{
-  me: Me;
   identities: UserIdentity[];
   onChanged: () => Promise<UserIdentity[] | undefined> | void;
-}> = ({ me, identities, onChanged }) => {
-  const showPrimary = !isInternalIdentity(me);
-  const totalRows = (showPrimary ? 1 : 0) + identities.length;
+}> = ({ identities, onChanged }) => {
+  // Every identity now comes from /me/identities (there is no separate
+  // "primary" on the user record any more). The internal identity is noise
+  // here — the password indicator on the account card already conveys it —
+  // so it is filtered out by its issuer rather than by guessing from the sub.
+  const externalIdentities = identities.filter(
+    (id) => id.issuer !== INTERNAL_ISSUER
+  );
 
-  if (totalRows === 0) {
+  if (externalIdentities.length === 0) {
     return (
       <Paper variant='outlined' sx={{ p: 3 }}>
         <Typography variant='body2' color='text.secondary'>
@@ -558,8 +545,7 @@ const IdentitiesCard: React.FC<{
   return (
     <Paper variant='outlined'>
       <Stack divider={<Divider />}>
-        {showPrimary && <IdentityRow sub={me.sub} issuer={me.issuer} primary />}
-        {identities.map((id) => (
+        {externalIdentities.map((id) => (
           <IdentityRow
             key={id.id}
             sub={id.sub}

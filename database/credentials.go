@@ -78,13 +78,14 @@ func (userCredential) TableName() string { return "users" }
 // test-only function in the package's public API.
 func applyPartialIndexesForTests(db *gorm.DB) error {
 	for _, stmt := range []string{
-		// users: a soft-deleted account releases its username and its
-		// (sub, issuer) identity so the person can re-enrol.
+		// users: a soft-deleted account releases its username so the
+		// person can re-enrol. Their identities need no partial index:
+		// DeleteUser hard-deletes them, which is what frees the
+		// (sub, issuer) pair.
 		"DROP INDEX IF EXISTS idx_user_username_live",
 		"CREATE UNIQUE INDEX idx_user_username_live ON users (username) WHERE deleted_at IS NULL",
 		"DROP INDEX IF EXISTS idx_user_issuer",
 		"DROP INDEX IF EXISTS idx_user_sub_issuer",
-		"CREATE UNIQUE INDEX idx_user_sub_issuer ON users (sub, issuer) WHERE deleted_at IS NULL",
 		// groups: a soft-deleted group releases its name; its ID stays
 		// spent because the tombstone keeps the primary key.
 		"DROP INDEX IF EXISTS uni_groups_name",
@@ -124,7 +125,7 @@ func SetUserPassword(db *gorm.DB, userID, plaintext string) error {
 	return nil
 }
 
-// VerifyUserPassword looks up a user by (username, issuer) and verifies
+// VerifyUserPassword looks up a user by username and verifies
 // the supplied plaintext against the stored bcrypt hash. The hash itself
 // never escapes this function. Returns ErrInvalidPassword for any
 // failure mode (unknown user, no password set, inactive, mismatch) so
@@ -133,11 +134,19 @@ func SetUserPassword(db *gorm.DB, userID, plaintext string) error {
 // The returned *User goes through the standard GetUserByID pipeline,
 // which means it carries no PasswordHash field — only the
 // HasPassword bool that callers are allowed to see.
-func VerifyUserPassword(db *gorm.DB, username, plaintext, issuer string) (*User, error) {
+func VerifyUserPassword(db *gorm.DB, username, plaintext string) (*User, error) {
 	var cred userCredential
+	// deleted_at IS NULL is explicit: the userCredential projection carries no
+	// gorm.DeletedAt field, so GORM adds no soft-delete clause on its own, and
+	// username is unique only among LIVE rows. Without this filter a tombstoned
+	// namesake that still holds a password_hash could be returned by LIMIT 1
+	// ahead of the live account, and bcrypt against the wrong hash would then
+	// deny the legitimate user their login. Only one live row per username can
+	// exist, so this cannot return the wrong live account — only exclude the
+	// dead one.
 	res := db.Model(&userCredential{}).
 		Select("id, password_hash").
-		Where("username = ? AND issuer = ?", username, issuer).
+		Where("username = ? AND deleted_at IS NULL", username).
 		Limit(1).
 		Find(&cred)
 	if res.Error != nil {

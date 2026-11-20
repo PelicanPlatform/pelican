@@ -20,9 +20,7 @@ package database
 
 import (
 	"database/sql"
-	"io/fs"
 	"sort"
-	"strconv"
 	"strings"
 	"time"
 
@@ -51,22 +49,7 @@ const liveUsernameIndexName = "idx_user_username_live"
 // globalUniqueUsernameMigrationVersion reads the migration's version from its
 // file name, so a renumber on a release branch cannot desync this step.
 func globalUniqueUsernameMigrationVersion() (int64, error) {
-	entries, err := fs.ReadDir(EmbedUniversalMigrations, "universal_migrations")
-	if err != nil {
-		return 0, errors.Wrap(err, "failed to list the embedded universal migrations")
-	}
-	for _, entry := range entries {
-		name := entry.Name()
-		if !strings.HasSuffix(name, globalUniqueUsernameMigrationSuffix) {
-			continue
-		}
-		version, err := strconv.ParseInt(strings.TrimSuffix(name, globalUniqueUsernameMigrationSuffix), 10, 64)
-		if err != nil {
-			return 0, errors.Wrapf(err, "failed to parse the migration version from %q", name)
-		}
-		return version, nil
-	}
-	return 0, errors.Errorf("no universal migration named *%s was found", globalUniqueUsernameMigrationSuffix)
+	return utils.MigrationVersion(EmbedUniversalMigrations, "universal_migrations", globalUniqueUsernameMigrationSuffix)
 }
 
 func liveUsernameIndexExists(db *gorm.DB) (bool, error) {

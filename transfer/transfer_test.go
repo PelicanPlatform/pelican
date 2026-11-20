@@ -893,3 +893,45 @@ func TestTransferMatchesPrefixes(t *testing.T) {
 		assert.False(t, transferMatchesPrefixes(item, []string{}))
 	})
 }
+
+// TestCookieSessionResolvesToExistingUser covers the web-UI session path: a
+// login cookie names an account this server already has, and the transfer API
+// must attach credentials to THAT account.
+//
+// The cookie's subject is the username (setLoginCookie) and its issuer is the
+// server's own issuer URL, so neither claim is the account's stored identity:
+// a local account's identity is (username, InternalIssuer), and an OIDC
+// account's subject is whatever the IdP assigned. Resolving a session by its
+// (sub, iss) therefore either collides with the username — the built-in admin
+// below — or silently opens a second, parallel account for the same person.
+// The cookie carries an authoritative user_id claim; that is what settles it.
+func TestCookieSessionResolvesToExistingUser(t *testing.T) {
+	engine, db := setupTestEnvironment(t)
+
+	admin, err := database.BuiltinAdminUser(db)
+	require.NoError(t, err)
+
+	tk := token.NewWLCGToken()
+	tk.Issuer = param.Server_ExternalWebUrl.GetString()
+	tk.Subject = admin.Username
+	tk.Lifetime = 5 * time.Minute
+	tk.AddAudienceAny()
+	tk.AddScopes(token_scopes.Pelican_Transfer)
+	tk.Claims = map[string]string{"user_id": admin.ID}
+	tok, err := tk.CreateToken()
+	require.NoError(t, err)
+
+	w := doRequestCookie(t, engine, "POST", "/api/v1.0/transfer/credentials",
+		CredentialCreateRequest{Name: "cookie-cred", AccessToken: "dummy-token"}, tok)
+	require.Equal(t, http.StatusCreated, w.Code, "body: %s", w.Body.String())
+
+	// The credential belongs to the existing account, not to a second one
+	// conjured out of the cookie's claims.
+	var cred TransferCredential
+	require.NoError(t, db.Where("name = ?", "cookie-cred").First(&cred).Error)
+	assert.Equal(t, admin.ID, cred.UserID)
+
+	var users int64
+	require.NoError(t, db.Model(&database.User{}).Where("username = ?", admin.Username).Count(&users).Error)
+	assert.EqualValues(t, 1, users, "the session must not create a parallel account")
+}

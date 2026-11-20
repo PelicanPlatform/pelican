@@ -35,7 +35,7 @@ import (
 // subtests below so each one starts from the same baseline.
 func passwordInviteTestUser(t *testing.T, db *gorm.DB) string {
 	t.Helper()
-	u, err := CreateLocalUser(db, "alice", "Alice", "https://local", CreatorSelf())
+	u, err := CreateLocalUser(db, "alice", "Alice", CreatorSelf())
 	require.NoError(t, err)
 	return u.ID
 }
@@ -114,7 +114,7 @@ func TestRedeemPasswordInviteLink(t *testing.T) {
 		assert.Equal(t, uid, gotUserID)
 
 		// VerifyUserPassword should now succeed with the chosen password.
-		_, err = VerifyUserPassword(db, "alice", newPw, "https://local")
+		_, err = VerifyUserPassword(db, "alice", newPw)
 		require.NoError(t, err)
 
 		// And the link is marked redeemed.
@@ -152,9 +152,9 @@ func TestRedeemPasswordInviteLink(t *testing.T) {
 		// Critical: the conditional UPDATE pattern in the redeem flow
 		// has to claim the link BEFORE writing the hash, so a beaten
 		// race rolls back the hash write too.
-		_, err = VerifyUserPassword(db, "alice", "first-pw-12345", "https://local")
+		_, err = VerifyUserPassword(db, "alice", "first-pw-12345")
 		assert.NoError(t, err, "first redemption's password should still be in effect")
-		_, err = VerifyUserPassword(db, "alice", "second-pw-67890", "https://local")
+		_, err = VerifyUserPassword(db, "alice", "second-pw-67890")
 		assert.ErrorIs(t, err, ErrInvalidPassword,
 			"second redemption must NOT have rewritten the hash")
 	})

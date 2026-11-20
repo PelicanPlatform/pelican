@@ -120,7 +120,6 @@ func LogReadAuthHandler(ctx *gin.Context) {
 		Username: user,
 		Groups:   groups,
 		ID:       ctx.GetString("UserId"),
-		Sub:      ctx.GetString("OIDCSub"),
 	}
 	// server.admin implies all lower scopes -- match the pattern
 	// EffectiveScopesForIdentity uses in the derivation path.
