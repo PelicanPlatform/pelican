@@ -41,6 +41,7 @@ import (
 	log "github.com/sirupsen/logrus"
 
 	"github.com/pelicanplatform/pelican/param"
+	"github.com/pelicanplatform/pelican/utils/unix_cksum"
 )
 
 type (
@@ -225,7 +226,7 @@ func computeChecksumBytes(root *os.Root, filename string, checksumType ChecksumT
 		return hash.Sum(nil), nil
 
 	case ChecksumTypeCRC32:
-		hash := crc32.NewIEEE()
+		hash := unix_cksum.NewCksum()
 		if _, err := io.Copy(hash, file); err != nil {
 			return nil, errors.Wrap(err, "failed to compute CRC32 checksum")
 		}
@@ -342,7 +343,7 @@ func computeAndStoreChecksums(root *os.Root, filename string, types []ChecksumTy
 			writers = append(writers, h)
 
 		case ChecksumTypeCRC32:
-			h := crc32.NewIEEE()
+			h := unix_cksum.NewCksum()
 			hashes = append(hashes, hashResult{
 				checksumType: t,
 				hash:         h,

@@ -40,6 +40,8 @@ import (
 	"strings"
 
 	"github.com/pkg/errors"
+
+	"github.com/pelicanplatform/pelican/utils/unix_cksum"
 )
 
 // ChecksumAlgorithmName returns the RFC 3230 token for a checksum type, as it
@@ -141,7 +143,7 @@ func NewChecksumHasher(t ChecksumType) (hash.Hash, error) {
 	case ChecksumSHA256:
 		return sha256.New(), nil
 	case ChecksumCRC32:
-		return crc32.NewIEEE(), nil
+		return unix_cksum.NewCksum(), nil
 	case ChecksumCRC32C:
 		return crc32.New(crc32.MakeTable(crc32.Castagnoli)), nil
 	default:
