@@ -114,8 +114,8 @@ ARG XROOTD_MULTIUSER_RELEASE=
 # The GitHub Actions workflows read the version from these lines
 # (see .github/scripts/goreleaser/goreleaser_version.sh).
 #################################################################
-FROM --platform=${BUILDPLATFORM} goreleaser/goreleaser:v2.20.0@sha256:19ca96ff782e521af4002ca42dd42021d360a04a8d2a06bb79f720a284c3fee1 AS goreleaser-build
-FROM goreleaser/goreleaser:v2.20.0@sha256:19ca96ff782e521af4002ca42dd42021d360a04a8d2a06bb79f720a284c3fee1 AS goreleaser-target
+FROM --platform=${BUILDPLATFORM} goreleaser/goreleaser:v2.20.1@sha256:3497d4d1bd781b639f3cae70cb6aa0f31734f803bd0216c93c8e6ad5671e6bd1 AS goreleaser-build
+FROM goreleaser/goreleaser:v2.20.1@sha256:3497d4d1bd781b639f3cae70cb6aa0f31734f803bd0216c93c8e6ad5671e6bd1 AS goreleaser-target
 
 #################################################################
 # Pelican Build Base
@@ -592,7 +592,7 @@ ENDRUN
 #################################################################
 # Pelican Client
 #################################################################
-FROM gcr.io/distroless/static-debian13:nonroot@sha256:25ac8f0c3b2334a9eb05452266bd4697864a8c8ef0ef71e5e6480d7f92868329 AS client
+FROM gcr.io/distroless/static-debian13:nonroot@sha256:aafe993665bf6200db38a02c11a9351e782a84b6a45e7f33b6695638c88e3931 AS client
 ARG TARGETOS TARGETARCH
 COPY --from=pelican-build /pelican-build/dist/pelican_${TARGETOS}_${TARGETARCH}/pelican /bin/pelican
 ENTRYPOINT ["/bin/pelican"]
