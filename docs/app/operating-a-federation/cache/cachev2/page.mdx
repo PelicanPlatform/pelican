@@ -1,0 +1,57 @@
+import { Callout } from 'nextra/components'
+
+# Migrate from XRootD Cache (v1) to v2 Cache
+
+We use the term v1 cache to refer to XRootD cache, and v2 cache to refer to the Go-native cache implemented by Pelican itself.
+
+<Callout type="warning">
+  V2 cache is an experimental feature.
+  `Cache.EnableV2` is still a hidden configuration parameter as of this writing.
+</Callout>
+
+## Migration steps
+
+We assume the `pelican-server` process is running as root user and the configuration file is at `/etc/pelican/pelican.yaml`, the default location.
+
+1. Make sure that you are running a v1 cache.
+   Run `pelican-server config dump | grep -in 'EnableV2'`
+   The output should be `EnableV2: false`.
+   If you are already running a v2 cache, there is no need for migration.
+2. Gracefully terminate the cache.
+   Please refrain from using `kill -9 <cache_pid>` to terminate the cache forcefully.
+3. Set `Cache.EnableV2: true` in the configuration file of the cache.
+4. Since v2 cache serves objects from [`Server.WebPort`](/parameters#Server-WebPort), not [`Cache.Port`](/parameters#Cache-Port), adjust your firewall rules accordingly.
+   Close `Cache.Port`, and make sure your firewall rules allow clients to reach `Server.WebPort`.
+5. Restart the cache.
+   The cache should be launched successfully.
+   There is no need to register the cache again.
+6. Optionally delete the data and metadata of cached objects left by v1 cache.
+   See note 4 below for details.
+
+## Notes
+
+1. After switching to v2 cache, the file system path where v2 cache stores the data and metadata of cached objects will be `${Cache.StorageLocation}/persistent-cache`.
+2. V2 cache uses a different storage layout from v1 cache.
+   On v2 cache, the data of each object is stored as a series of chunks on the underlying file system, and its metadata is stored in [BadgerDB](https://github.com/dgraph-io/badger).
+   Given this change, the data formats used by v1 and v2 cache are not compatible with each other.
+3. Since v2 cache cannot inherit cached objects from v1, it will start cold.
+4. The cache will not delete the data and metadata left by v1 cache.
+   If you wish to save the disk space, you will need to delete them manually by yourself.
+   The data and metadata used by v1 cache is under `${Cache.StorageLocation}/{data,meta,namespace}` by default.
+   If you ever changed [`Cache.StorageLocation`](/parameters#Cache-StorageLocation), [`Cache.NamespaceLocation`](/parameters#Cache-NamespaceLocation), [`Cache.MetaLocations`](/parameters#Cache-MetaLocations), or [`Cache.DataLocations`](/parameters#Cache-DataLocations), find and delete the corresponding directories by following them.
+   However, doing so will make the cache become cold if you want to rollback to v1 cache later.
+
+## Rollback
+
+It is possible to rollback to v1 cache from v2:
+
+1. Make sure you are running a v2 cache.
+2. Terminate the cache gracefully.
+3. Set `Cache.EnableV2: false`.
+4. Since v1 cache serves objects from `Cache.Port`, not `Server.WebPort`, adjust your firewall rules accordingly.
+   Make sure `Cache.Port` is reachable from clients, and consider restricting `Server.WebPort`, because clients don't need to reach it now.
+5. Restart the cache.
+   The cache should be able to start successfully.
+   There is no need to register the cache again.
+6. Optionally, delete the data and metadata of the cached objects left by v2 cache.
+   However, by doing so, your v2 cache will start cold if you wish to migrate to v2 again.
