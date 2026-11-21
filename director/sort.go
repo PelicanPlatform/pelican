@@ -500,7 +500,7 @@ func sortCachesHoldingObject(ctx *gin.Context, requestId uuid.UUID, reqPath stri
 	// back on, a copy far away is better than none
 	closest := truncateAds(sorted, param.Director_AdaptiveSortTruncateConstant.GetInt())
 	rounds := [][]server_structs.ServerAd{closest, sorted[len(closest):]}
-	asked := 0
+	asked, denied := 0, 0
 	var holders []copyAd
 	for i, round := range rounds {
 		if len(round) == 0 {
@@ -519,6 +519,7 @@ func sortCachesHoldingObject(ctx *gin.Context, requestId uuid.UUID, reqPath stri
 			log.Warningf("Request %s: the presence check for %s did not run: %s", requestId.String(), reqPath, qr.Msg)
 		}
 		asked += len(round)
+		denied += len(qr.DeniedServers)
 		for _, cache := range round {
 			for _, obj := range qr.Objects {
 				if (cache.URL.Host == obj.URL.Host || cache.AuthURL.Host == obj.URL.Host) && obj.CacheAge > 0 {
@@ -532,6 +533,16 @@ func sortCachesHoldingObject(ctx *gin.Context, requestId uuid.UUID, reqPath stri
 		}
 	}
 	if len(holders) == 0 {
+		// A cache that refuses the check (403) is reported as a denial, not as a missing copy:
+		// it may well hold the object, but this request cannot read it due to lack of permissions.
+		if denied > 0 {
+			outcome(metrics.OriginlessDenied)
+			what := "denied access to the object"
+			if token != "" {
+				what = "rejected the request's token"
+			}
+			return nil, deniedInOutageErr{nsAd.Path, fmt.Sprintf("%d of the %d cache(s) asked %s", denied, asked, what)}
+		}
 		outcome(metrics.OriginlessNoCopy)
 		return nil, noCopyInOutageErr{nsAd.Path, fmt.Sprintf("none of the %d cache(s) asked confirmed a copy", asked)}
 	}

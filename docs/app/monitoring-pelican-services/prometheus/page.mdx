@@ -754,6 +754,7 @@ The outcome of the request:
 - `redirected`: at least one Cache confirmed a copy; the client got a 307 to those Caches.
 - `unchecked`: the request carried no token for a namespace that needs one (usually a client's first request), or asked to skip the presence check with `?skipstat`, so it was sent to the closest Caches without the check; a 307 too. A client without a token learns the token issuer from that response.
 - `no_copy`: every Cache asked answered, and none has a copy; a 404.
+- `denied`: no Cache confirmed a copy and at least one refused the check with a 403, because the token was rejected or a public read was not allowed; a 403.
 
 ### `pelican_director_client_requests_total`
 

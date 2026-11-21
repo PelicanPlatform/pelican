@@ -457,6 +457,11 @@ func queryOrigins(ctx *gin.Context) {
 				Status: server_structs.RespFailed,
 				Msg:    fmt.Sprintf("%v: Request ID: %s", err, requestId.String()),
 			})
+		case deniedInOutageErr:
+			ctx.JSON(http.StatusForbidden, server_structs.SimpleApiResp{
+				Status: server_structs.RespFailed,
+				Msg:    fmt.Sprintf("%v: Request ID: %s", err, requestId.String()),
+			})
 		default:
 			ctx.JSON(http.StatusInternalServerError, server_structs.SimpleApiResp{
 				Status: server_structs.RespFailed,
