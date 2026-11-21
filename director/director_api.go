@@ -21,6 +21,7 @@ package director
 import (
 	"context"
 	"fmt"
+	"path"
 	"strconv"
 	"time"
 
@@ -45,6 +46,28 @@ func listNamespacesFromOrigins() []server_structs.NamespaceAd {
 		}
 	}
 	return namespaces
+}
+
+// listNamespacesFromRegistry retrieves the namespaces advertised by the registry and
+// filters out every path that is already advertised by a live origin.
+func listNamespacesFromRegistry(originNs []server_structs.NamespaceAd) []server_structs.NamespaceAd {
+	registryNs := getRegistryNamespaceAds()
+	if len(registryNs) == 0 {
+		return registryNs
+	}
+	advertised := make(map[string]struct{}, len(originNs))
+	for _, ns := range originNs {
+		advertised[path.Clean(ns.Path)] = struct{}{}
+	}
+	// getRegistryNamespaceAds returned a copy, so filtering it in place is safe
+	kept := registryNs[:0]
+	for _, ns := range registryNs {
+		if _, shadowed := advertised[path.Clean(ns.Path)]; shadowed {
+			continue
+		}
+		kept = append(kept, ns)
+	}
+	return kept
 }
 
 // List all advertisements in the TTL cache that match the serverType array

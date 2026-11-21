@@ -106,6 +106,18 @@ type (
 	directorStartupErr struct {
 		ns string
 	}
+	// A registry-backed namespace has no origin online and the director found
+	// no cache that confirms a copy of the object
+	noCopyInOutageErr struct {
+		ns     string
+		reason string
+	}
+	// A registry-backed namespace has no origin online AND the caches deny
+	// the request instead of saying whether they hold a copy
+	deniedInOutageErr struct {
+		ns     string
+		reason string
+	}
 )
 
 func (e noOriginsForNsErr) Error() string {
@@ -119,6 +131,12 @@ func (e objectNotFoundErr) Error() string {
 }
 func (e directorStartupErr) Error() string {
 	return fmt.Sprintf("no servers were found for the requested path '%s'; director just restarted, try again shortly", e.ns)
+}
+func (e noCopyInOutageErr) Error() string {
+	return fmt.Sprintf("namespace '%s' is registered but no origin is online and no cache reports a copy (%s)", e.ns, e.reason)
+}
+func (e deniedInOutageErr) Error() string {
+	return fmt.Sprintf("namespace '%s' is registered but no origin is online, and %s", e.ns, e.reason)
 }
 
 const (
@@ -775,6 +793,20 @@ func processSortedAdsErr(ginCtx *gin.Context, err error, requestId uuid.UUID) {
 			Status: server_structs.RespFailed,
 			Msg:    msg,
 		})
+	case noCopyInOutageErr:
+		msg := fmt.Sprintf("%v: Request ID: %s", err, requestId.String())
+		log.Debugln(msg)
+		ginCtx.JSON(http.StatusNotFound, server_structs.SimpleApiResp{
+			Status: server_structs.RespFailed,
+			Msg:    msg,
+		})
+	case deniedInOutageErr:
+		msg := fmt.Sprintf("%v: Request ID: %s", err, requestId.String())
+		log.Debugln(msg)
+		ginCtx.JSON(http.StatusForbidden, server_structs.SimpleApiResp{
+			Status: server_structs.RespFailed,
+			Msg:    msg,
+		})
 	default:
 		msg := fmt.Sprintf("Failed to get/sort server ads for the requested path: %v: Request ID: %s", err, requestId.String())
 		log.Debugln(msg)
@@ -810,7 +842,7 @@ func redirectToCache(ginCtx *gin.Context) {
 
 	// Get the sorted origins/caches for the request. All returned ads should be capable of serving the request,
 	// as matchmaking is handled within.
-	oAds, cAds, err := getSortedAds(ginCtx, requestId)
+	oAds, cAds, nsAd, err := getSortedAds(ginCtx, requestId)
 	if err != nil {
 		processSortedAdsErr(ginCtx, err, requestId)
 		return
@@ -863,7 +895,7 @@ func redirectToCache(ginCtx *gin.Context) {
 	}
 
 	redirectSucceeded = true
-	generateRedirectResponse(ginCtx, chosenServers, oServers, oAds[0].NamespaceAd, requestId)
+	generateRedirectResponse(ginCtx, chosenServers, oServers, nsAd, requestId)
 }
 
 func redirectToOrigin(ginCtx *gin.Context) {
@@ -924,7 +956,7 @@ func redirectToOrigin(ginCtx *gin.Context) {
 
 	// Get the sorted origins/caches for the request. All returned ads should be capable of serving the request,
 	// as matchmaking is handled here.
-	oAds, cAds, err := getSortedAds(ginCtx, requestId)
+	oAds, cAds, nsAd, err := getSortedAds(ginCtx, requestId)
 	if err != nil {
 		processSortedAdsErr(ginCtx, err, requestId)
 		return
@@ -966,7 +998,7 @@ func redirectToOrigin(ginCtx *gin.Context) {
 	}
 
 	redirectSucceeded = true
-	generateRedirectResponse(ginCtx, chosenServers, oServers, oAds[0].NamespaceAd, requestId)
+	generateRedirectResponse(ginCtx, chosenServers, oServers, nsAd, requestId)
 }
 
 func checkHostnameRedirects(c *gin.Context, incomingHost string) {
@@ -1651,6 +1683,8 @@ func listNamespacesV1Deprecated(ctx *gin.Context) {
 
 func listNamespacesV2(ctx *gin.Context) {
 	namespacesAds := listNamespacesFromOrigins()
+	// The registry advertises a namespace on behalf of its owner while no origin for it is online
+	namespacesAds = append(namespacesAds, listNamespacesFromRegistry(namespacesAds)...)
 	namespacesAds = append(namespacesAds, server_structs.NamespaceAd{
 		Caps: server_structs.Capabilities{
 			PublicReads: true,
