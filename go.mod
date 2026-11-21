@@ -62,7 +62,7 @@ require (
 	github.com/thomas-tacquet/gormv2-logrus v1.2.3
 	github.com/vbauerster/mpb/v8 v8.6.1
 	github.com/vmihailenco/msgpack/v5 v5.4.1
-	github.com/youmark/pkcs8 v0.0.0-20201027041543-1326539a0a0a
+	github.com/youmark/pkcs8 v0.0.0-20240726163527-a2c0da244d78
 	github.com/zsais/go-gin-prometheus v0.1.0
 	go.uber.org/atomic v1.11.0
 	gocloud.dev v0.45.0
@@ -285,7 +285,7 @@ require (
 	github.com/subosito/gotenv v1.6.0 // indirect
 	github.com/twitchyliquid64/golang-asm v0.15.1 // indirect
 	github.com/ugorji/go/codec v1.2.11 // indirect
-	go.mongodb.org/mongo-driver v1.12.0 // indirect
+	go.mongodb.org/mongo-driver v1.17.7 // indirect
 	go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp v0.63.0 // indirect
 	go.opentelemetry.io/otel v1.44.0 // indirect
 	go.opentelemetry.io/otel/metric v1.44.0 // indirect
