@@ -749,7 +749,7 @@ The number of requests the Director handled for a namespace while none of its Or
 
 #### Label: `result`
 
-The outcome: `redirected` when at least one Cache confirmed a copy, `no_copy` when none did, or `stat_unavailable` when the presence check could not run because the request asked to skip it, the namespace requires a token the request did not carry, or the check itself failed.
+The outcome: `redirected` when at least one Cache confirmed a copy, `no_copy` when none did, `denied` when cache refused the request (the token was rejected, or a public read was not allowed), or `stat_unavailable` when the presence check could not run because the request asked to skip it, the namespace requires a token the request did not carry, or the check itself failed.
 
 ### `pelican_director_client_requests_total`
 

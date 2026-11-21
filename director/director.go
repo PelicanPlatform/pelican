@@ -112,6 +112,12 @@ type (
 		ns     string
 		reason string
 	}
+	// A registry-backed namespace has no origin online AND the caches deny
+	// the request instead of saying whether they hold a copy
+	deniedInOutageErr struct {
+		ns     string
+		reason string
+	}
 )
 
 func (e noOriginsForNsErr) Error() string {
@@ -128,6 +134,9 @@ func (e directorStartupErr) Error() string {
 }
 func (e noCopyInOutageErr) Error() string {
 	return fmt.Sprintf("namespace '%s' is registered but no origin is online and no cache reports a copy (%s)", e.ns, e.reason)
+}
+func (e deniedInOutageErr) Error() string {
+	return fmt.Sprintf("namespace '%s' is registered but no origin is online, and %s", e.ns, e.reason)
 }
 
 const (
@@ -788,6 +797,13 @@ func processSortedAdsErr(ginCtx *gin.Context, err error, requestId uuid.UUID) {
 		msg := fmt.Sprintf("%v: Request ID: %s", err, requestId.String())
 		log.Debugln(msg)
 		ginCtx.JSON(http.StatusNotFound, server_structs.SimpleApiResp{
+			Status: server_structs.RespFailed,
+			Msg:    msg,
+		})
+	case deniedInOutageErr:
+		msg := fmt.Sprintf("%v: Request ID: %s", err, requestId.String())
+		log.Debugln(msg)
+		ginCtx.JSON(http.StatusForbidden, server_structs.SimpleApiResp{
 			Status: server_structs.RespFailed,
 			Msg:    msg,
 		})

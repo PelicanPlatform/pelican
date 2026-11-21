@@ -1120,10 +1120,20 @@ func TestOriginlessRedirect(t *testing.T) {
 	require.NoError(t, param.Director_StatTimeout.Set(2*time.Second))
 	require.NoError(t, param.Director_CacheSortMethod.Set(server_structs.DistanceType.String()))
 
+	// newCacheAnswering stands up a cache whose presence-check answer is the given handler
+	newCacheAnswering := func(t *testing.T, name string, handler http.HandlerFunc) server_structs.ServerAd {
+		srv := httptest.NewServer(handler)
+		t.Cleanup(srv.Close)
+		u, err := url.Parse(srv.URL)
+		require.NoError(t, err)
+		ad := server_structs.ServerAd{URL: *u, Type: server_structs.CacheType.String(), Caps: server_structs.Capabilities{PublicReads: true, Reads: true}}
+		ad.Initialize(name)
+		return ad
+	}
 	// newCache stands up a cache that answers the presence check either as a
 	// holder of every object (200 with a positive Age) or as an empty one (404)
 	newCache := func(t *testing.T, name string, holds bool) server_structs.ServerAd {
-		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		return newCacheAnswering(t, name, func(w http.ResponseWriter, r *http.Request) {
 			if !holds {
 				w.WriteHeader(http.StatusNotFound)
 				return
@@ -1131,13 +1141,13 @@ func TestOriginlessRedirect(t *testing.T) {
 			w.Header().Set("Content-Length", "10")
 			w.Header().Set("Age", "42")
 			w.WriteHeader(http.StatusOK)
-		}))
-		t.Cleanup(srv.Close)
-		u, err := url.Parse(srv.URL)
-		require.NoError(t, err)
-		ad := server_structs.ServerAd{URL: *u, Type: server_structs.CacheType.String(), Caps: server_structs.Capabilities{PublicReads: true, Reads: true}}
-		ad.Initialize(name)
-		return ad
+		})
+	}
+	// newDenyingCache stands up a cache that refuses every presence check (403)
+	newDenyingCache := func(t *testing.T, name string) server_structs.ServerAd {
+		return newCacheAnswering(t, name, func(w http.ResponseWriter, r *http.Request) {
+			w.WriteHeader(http.StatusForbidden)
+		})
 	}
 	// seed replaces the server ads with the given ones, each advertising nsAd,
 	// and gives every one a fresh stat utility so that no presence answer
@@ -1247,6 +1257,26 @@ func TestOriginlessRedirect(t *testing.T) {
 		assert.False(t, nsAd.Caps.PublicReads)
 	})
 
+	t.Run("a-request-the-caches-refuse-is-denied-not-missing", func(t *testing.T) {
+		// The denying cache may hold the object; the empty one does not. Neither
+		// confirms a copy, but the refusal is what the client needs to hear
+		seed(gated, newDenyingCache(t, "denying"), newCache(t, "empty", false))
+		setRegistry(gated)
+		before := count(metrics.OriginlessDenied)
+
+		_, _, _, err := getSortedAds(request(http.MethodGet, object, map[string]string{"Authorization": "Bearer rejected-by-the-caches"}), uuid.New())
+		require.IsType(t, deniedInOutageErr{}, err)
+		assert.Contains(t, err.Error(), "1 of the 2 closest cache(s) rejected the request's token")
+		assert.Equal(t, before+1, count(metrics.OriginlessDenied))
+
+		// A public read the caches refuse is a denial too, with no token to blame
+		seed(public, newDenyingCache(t, "denying"))
+		setRegistry(public)
+		_, _, _, err = getSortedAds(request(http.MethodGet, object, nil), uuid.New())
+		require.IsType(t, deniedInOutageErr{}, err)
+		assert.Contains(t, err.Error(), "1 of the 1 closest cache(s) denied access to the object")
+	})
+
 	t.Run("anything-but-a-cached-read-still-needs-an-origin", func(t *testing.T) {
 		seed(public, newCache(t, "holder", true))
 		setRegistry(public)
@@ -1292,20 +1322,25 @@ func TestOriginlessRedirect(t *testing.T) {
 	})
 
 	// The cache redirect handler turns the two answers into a 307 to the
-	// cache that holds the copy, or a 404 that names the outage
+	// cache that holds the copy, a 404 that names the outage, or a 403 when the
+	// caches refuse the request
 	t.Run("redirectToCache", func(t *testing.T) {
 		router := gin.New()
 		router.GET("/api/v1.0/director/object/*any", redirectToCache)
-		serve := func() *httptest.ResponseRecorder {
+		serve := func(headers map[string]string) *httptest.ResponseRecorder {
 			w := httptest.NewRecorder()
-			router.ServeHTTP(w, httptest.NewRequest(http.MethodGet, object, nil))
+			req := httptest.NewRequest(http.MethodGet, object, nil)
+			for k, v := range headers {
+				req.Header.Set(k, v)
+			}
+			router.ServeHTTP(w, req)
 			return w
 		}
 
 		holder := newCache(t, "holder", true)
 		seed(public, holder, newCache(t, "empty", false))
 		setRegistry(public)
-		w := serve()
+		w := serve(nil)
 		require.Equal(t, http.StatusTemporaryRedirect, w.Code, w.Body.String())
 		location, err := url.Parse(w.Header().Get("Location"))
 		require.NoError(t, err)
@@ -1314,8 +1349,14 @@ func TestOriginlessRedirect(t *testing.T) {
 		assert.Contains(t, w.Header().Get("X-Pelican-Namespace"), "namespace=/reg")
 
 		seed(public, newCache(t, "empty", false))
-		w = serve()
+		w = serve(nil)
 		require.Equal(t, http.StatusNotFound, w.Code, w.Body.String())
 		assert.Contains(t, w.Body.String(), "no origin is online and no cache reports a copy")
+
+		seed(gated, newDenyingCache(t, "denying"))
+		setRegistry(gated)
+		w = serve(map[string]string{"Authorization": "Bearer rejected-by-the-caches"})
+		require.Equal(t, http.StatusForbidden, w.Code, w.Body.String())
+		assert.Contains(t, w.Body.String(), "rejected the request's token")
 	})
 }

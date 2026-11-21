@@ -507,6 +507,16 @@ func sortCachesHoldingObject(ctx *gin.Context, requestId uuid.UUID, reqPath stri
 		}
 	}
 	if len(holders) == 0 {
+		// A cache that refuses the check (403) is reported as a denial, not as a missing copy:
+		// it may well hold the object, but this request cannot read it due to lack of permissions.
+		if len(qr.DeniedServers) > 0 {
+			outcome(metrics.OriginlessDenied)
+			what := "denied access to the object"
+			if token != "" {
+				what = "rejected the request's token"
+			}
+			return nil, deniedInOutageErr{reqPath, fmt.Sprintf("%d of the %d closest cache(s) %s", len(qr.DeniedServers), len(workingSet), what)}
+		}
 		outcome(metrics.OriginlessNoCopy)
 		return nil, noCopyInOutageErr{reqPath, fmt.Sprintf("none of the %d closest cache(s) confirmed a copy", len(workingSet))}
 	}

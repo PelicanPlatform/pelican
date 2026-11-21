@@ -44,6 +44,7 @@ const (
 	StatUnknownErr DirectorStatResult = "UnknownErr"
 
 	OriginlessRedirected      DirectorOriginlessResult = "redirected"
+	OriginlessDenied          DirectorOriginlessResult = "denied"
 	OriginlessNoCopy          DirectorOriginlessResult = "no_copy"
 	OriginlessStatUnavailable DirectorOriginlessResult = "stat_unavailable"
 )
@@ -101,7 +102,7 @@ var (
 
 	PelicanDirectorOriginlessRedirectsTotal = promauto.NewCounterVec(prometheus.CounterOpts{
 		Name: "pelican_director_originless_redirects_total",
-		Help: "The number of requests for a registry-backed namespace handled while none of its origins was online, by outcome: redirected to a cache that confirmed a copy, no_copy when no cache confirmed one, or stat_unavailable when the presence check could not run",
+		Help: "The number of requests for a registry-backed namespace handled while none of its origins was online, by outcome: redirected to a cache that confirmed a copy, no_copy when no cache confirmed one, denied when cache refused the request, or stat_unavailable when the presence check could not run",
 	}, []string{"result"}) // result: see enums for DirectorOriginlessResult
 
 	PelicanDirectorClientRequestsTotal = promauto.NewCounterVec(prometheus.CounterOpts{
