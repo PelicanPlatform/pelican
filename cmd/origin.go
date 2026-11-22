@@ -28,6 +28,34 @@ import (
 	"github.com/spf13/viper"
 )
 
+// missingProfileFlags names each flag that the token profile chosen with
+// --profile requires and that was left empty, one message per flag.
+func missingProfileFlags(cmd *cobra.Command) []string {
+	profile, _ := cmd.Flags().GetString("profile")
+	reqFlags := []string{}
+	reqSlices := []string{}
+	switch profile {
+	case "wlcg":
+		reqFlags = []string{"subject"}
+		reqSlices = []string{"audience"}
+	case "scitokens2":
+		reqSlices = []string{"audience", "scope"}
+	}
+
+	missing := []string{}
+	for _, flag := range reqFlags {
+		if val, _ := cmd.Flags().GetString(flag); val == "" {
+			missing = append(missing, fmt.Sprintf("The --%s flag must be populated for the %s profile", flag, profile))
+		}
+	}
+	for _, flag := range reqSlices {
+		if slice, _ := cmd.Flags().GetStringSlice(flag); len(slice) == 0 {
+			missing = append(missing, fmt.Sprintf("The --%s flag must be populated for the %s profile", flag, profile))
+		}
+	}
+	return missing
+}
+
 var (
 	originCmd = &cobra.Command{
 		Use:   "origin",
@@ -196,32 +224,11 @@ instead.
 
 	// A pre-run hook to enforce flags specific to each profile
 	originTokenCreateCmd.PreRun = func(cmd *cobra.Command, args []string) {
-		profile, _ := cmd.Flags().GetString("profile")
-		reqFlags := []string{}
-		reqSlices := []string{}
-		switch profile {
-		case "wlcg":
-			reqFlags = []string{"subject"}
-			reqSlices = []string{"audience"}
-		case "scitokens2":
-			reqSlices = []string{"audience", "scope"}
+		missing := missingProfileFlags(cmd)
+		for _, line := range missing {
+			fmt.Println(line)
 		}
-
-		shouldCancel := false
-		for _, flag := range reqFlags {
-			if val, _ := cmd.Flags().GetString(flag); val == "" {
-				fmt.Printf("The --%s flag must be populated for the scitokens profile\n", flag)
-				shouldCancel = true
-			}
-		}
-		for _, flag := range reqSlices {
-			if slice, _ := cmd.Flags().GetStringSlice(flag); len(slice) == 0 {
-				fmt.Printf("The --%s flag must be populated for the scitokens profile\n", flag)
-				shouldCancel = true
-			}
-		}
-
-		if shouldCancel {
+		if len(missing) > 0 {
 			os.Exit(1)
 		}
 	}
