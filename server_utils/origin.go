@@ -774,7 +774,7 @@ func CheckOriginSentinelLocations(exports []OriginExport) (ok bool, err error) {
 
 			sentinelUrl, err := url.JoinPath(param.Origin_Url.GetString(), fullPath)
 			if err != nil {
-				return false, errors.Wrapf(err, "unable fo form sentinel URL for Origin.Url %v, sentinel path %v", param.Origin_Url.GetString(), fullPath)
+				return false, errors.Wrapf(err, "unable to form sentinel URL for Origin.Url %v, sentinel path %v", param.Origin_Url.GetString(), fullPath)
 			}
 			req, err := http.NewRequest(http.MethodGet, sentinelUrl, nil)
 			if err != nil {

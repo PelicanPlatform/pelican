@@ -155,7 +155,7 @@ func (plauncher PrivilegedXrootdLauncher) Launch(ctx context.Context) (context.C
 	if err = amb_caps.SetFlag(cap.Inheritable, true, cap.SETUID, cap.SETGID); err != nil {
 		return ctx, -1, err
 	}
-	if err = iab.Fill(cap.Inh, amb_caps, cap.Inheritable); err != nil {
+	if err = iab.Fill(cap.Inh, amb_caps, cap.Inheritable); err != nil { // codespell:ignore inh
 		return ctx, -1, err
 	}
 	if err = iab.Fill(cap.Amb, amb_caps, cap.Inheritable); err != nil {

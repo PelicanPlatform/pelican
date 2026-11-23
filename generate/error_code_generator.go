@@ -84,7 +84,7 @@ func GenErrorCodes() {
 				panic(fmt.Sprintf("Parameter entry '%s' is missing required key '%s'", errorType, keyName))
 			}
 		}
-		// Covert all errors to camel then snake case
+		// Convert all errors to camel then snake case
 		camelErrorName := handleCaseConversion(errorType)
 		errorNameInSnake := strings.ReplaceAll(camelErrorName, ".", "_")
 		displayName := errorNameInSnake

@@ -634,7 +634,7 @@ func CheckXrootdEnv(server server_structs.XRootDServer) error {
 	if err := config.MkdirAll(scitokensCacheDir, 0700, uid, gid); err != nil {
 		log.Warnf("Failed to create scitokens SQLite cache directory %s; leaving JWKS cache on default journal: %v", scitokensCacheDir, err)
 	} else {
-		scitokensCacheDB := filepath.Join(scitokensCacheDir, "scitokens_cpp.sqllite")
+		scitokensCacheDB := filepath.Join(scitokensCacheDir, "scitokens_cpp.sqllite") // codespell:ignore sqllite
 		if err := enableSqliteWAL(scitokensCacheDB); err != nil {
 			log.Warnf("Failed to enable WAL on scitokens SQLite cache %s; leaving on default journal: %v", scitokensCacheDB, err)
 		} else if err := os.Chown(scitokensCacheDB, uid, -1); err != nil {

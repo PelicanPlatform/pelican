@@ -1,7 +1,7 @@
 import { ReactNode } from 'react';
 
 /**
- * MetaLayout is a empty wrapper thats only purpose is to join a metadata object
+ * MetaLayout is an empty wrapper whose only purpose is to join a metadata object
  * on a NextJS layout
  *
  * @param children

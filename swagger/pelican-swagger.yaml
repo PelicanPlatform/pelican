@@ -444,7 +444,7 @@ definitions:
     properties:
       prefix:
         type: string
-        description: The namespace prefix to register. Should be an obsolute paths
+        description: The namespace prefix to register. Should be an absolute path
         example: "/test"
       pubkey:
         type: string

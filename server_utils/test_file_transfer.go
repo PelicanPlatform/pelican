@@ -77,7 +77,7 @@ func (t TestType) String() string {
 // Cleanup of this function and the vestigial interface it's supposed to implement is described in
 // https://github.com/PelicanPlatform/pelican/issues/3107
 //
-// Until that is completed and this comment is removed, tread cautiously when editing this method!
+// Until that is completed and this comment is removed, tread cautiously when editing this method! (codespell:ignore tread)
 //
 // When invoked by the Director, this will generate a token whose issuer is either the Federation's Discovery URL, or the Director's own URL
 // (as determined by the value of `Server.ExternalWebUrl`). This is a fallback mechanism to generate tokens acceptable by both old and new Origins.
