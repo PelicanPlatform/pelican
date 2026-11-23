@@ -98,9 +98,8 @@ repos:
         # Prevent false positives from mangling files.
         # The hook's default behavior is to fix alleged typos.
         args: [--sort, --force-exclude]
-  
   - repo: https://github.com/codespell-project/codespell
-    # Configuration for codespell is in .pre-commit-config.yaml
+    # Configuration for codespell is in .codespellrc
     rev: v2.4.3
     hooks:
-    - id: codespell
+      - id: codespell
