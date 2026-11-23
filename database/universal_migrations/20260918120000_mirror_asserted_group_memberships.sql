@@ -7,7 +7,7 @@
 -- When Issuer.GroupSource names an outside provider, membership lives
 -- there and `group_members` has no row. That works for the immediate
 -- caller, whose asserted names are resolved via the request, and fails
--- for decisions made about a user who is not the requestor.  For example,
+-- for decisions made about a user who is not the requester.  For example,
 -- the share-token logic is based on what the share OWNER may do, not
 -- the current requester.
 --

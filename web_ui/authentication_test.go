@@ -1220,7 +1220,7 @@ func TestUserRecordIsActive(t *testing.T) {
 		}).Error)
 		// Soft-delete via the public deletion path (admin self-driven
 		// is the easiest path that doesn't require a separate
-		// requestor); GORM marks DeletedAt and the default scope
+		// requester); GORM marks DeletedAt and the default scope
 		// hides the row from subsequent reads.
 		require.NoError(t, database.DeleteUser(database.ServerDatabase, "user-deleted", "user-deleted", false))
 		assert.False(t, userRecordIsActive("user-deleted"),

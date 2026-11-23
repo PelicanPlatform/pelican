@@ -808,7 +808,7 @@ func createUpdateNamespace(ctx *gin.Context, isUpdate bool) {
 // Get one namespace by id.
 // Admin can see any namespace detail while non-admin can only see his/her namespace
 //
-// GET /namesapces/:id
+// GET /namespaces/:id
 func getNamespace(ctx *gin.Context) {
 	user, userId, groups, err := web_ui.GetUserGroups(ctx)
 	if err != nil {
