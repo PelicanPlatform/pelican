@@ -1,6 +1,29 @@
 [codespell]
 # Ref: https://github.com/codespell-project/codespell#using-a-config-file
-skip = .git,.gitignore,.gitattributes,*.svg,go.sum,*-lock.yaml,*.css,.codespellrc
+skip = .git,.git-meta,.gitignore,.gitattributes,.*cache,node_modules,.next,.npm,*.svg,*.pdf,*.min.*,go.sum,*-lock.yaml,*.css,.codespellrc
 check-hidden = true
-# ignore-regex = 
-# ignore-words-list =
+# Ignore URLs, camelCase and PascalCase identifiers (common in code), and
+# hyphenated re-/pre- prefixed words (e.g. re-use, pre-select)
+ignore-regex = https?://\S+|\b[a-z]+[A-Z]\w*\b|\b[A-Z][a-z]+[A-Z]\w*\b|\b(?:[Rr]e|[Pp]re)-\w+\b
+ignore-words-list =
+  # variable name for a TransferEngine; also the HTTP "TE" header
+  te,
+  # variable name for a *HeaderTimeoutError
+  hte,
+  # variable name for a *url.Error
+  ue,
+  # variable name for a *HTTPSFileSysInfo
+  hsi,
+  # variable name short for "ancestor"
+  anc,
+  # "dedicated" storage quota: Lotman purge order value and variable name
+  ded,
+  # abbreviation for "does not exist" in comments, test names and paths
+  dne,
+  # XML element in XRootD summary monitoring packets
+  ser,
+  # HTCondor daemon name
+  Startd,
+  STARTD,
+  # possessive of the HTTP GET method ("the GET's classification")
+  get's
