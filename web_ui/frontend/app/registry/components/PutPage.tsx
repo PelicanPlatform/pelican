@@ -30,7 +30,7 @@ import { NamespaceFormPage } from '@/app/registry/components';
 import { AlertDispatchContext } from '@/components/AlertProvider';
 import { alertOnError } from '@/helpers/util';
 
-const PutPage = ({ update }: NamespaceFormPage) => {
+const PutPage = ({ kind, update }: NamespaceFormPage) => {
   const [id, setId] = useState<number | undefined>(undefined);
   const [fromUrl, setFromUrl] = useState<URL | undefined>(undefined);
   const [namespace, setNamespace] = useState<RegistryNamespace | undefined>(
@@ -120,6 +120,7 @@ const PutPage = ({ update }: NamespaceFormPage) => {
         >
           {namespace ? (
             <Form
+              kind={kind}
               namespace={namespace}
               onSubmit={async (data) => {
                 let namespace = { ...data, id: id };

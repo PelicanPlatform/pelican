@@ -64,10 +64,11 @@ type Registration struct {
 	Identity      string                 `json:"identity" post:"exclude"`
 	AdminMetadata AdminMetadata          `json:"admin_metadata" gorm:"serializer:json"`
 	CustomFields  map[string]interface{} `json:"custom_fields" gorm:"serializer:json"`
-	// AuthState, when set on an approved namespace registration, is sent to
-	// director in place of an origin ad while no origin for the prefix is
-	// online. nil (SQL NULL) keeps today's behavior: the namespace exists in the
-	// federation only while an origin advertises it.
+	// AuthState, when set on an approved namespace registration, is served to
+	// a director in place of an origin ad while no origin for the prefix is
+	// online. nil (SQL NULL) means the namespace is advertised only while an
+	// origin serving it is online: every row created before the column existed
+	// behaves this way, and so does any row that never sets an auth state.
 	AuthState *NamespaceAuthState `json:"auth_state" gorm:"column:auth_state;serializer:json" description:"Advertise this namespace while no origin for it is online"`
 }
 

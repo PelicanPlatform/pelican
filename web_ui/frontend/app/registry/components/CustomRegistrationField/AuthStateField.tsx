@@ -26,7 +26,9 @@ import type {
 import type { BaseCustomRegistrationFieldProps } from './index';
 
 // One checkbox per capability flag, keyed and labelled the way the director's
-// namespace view shows them so a state can be copied across by eye
+// namespace view shows them so a state can be copied across by eye. Writes is
+// not offered, and the registry refuses a state that allows it: the state is
+// used only while no origin is online, and a cache cannot take a write.
 const CAPABILITY_FLAGS: {
   key: keyof Capabilities;
   label: string;
@@ -38,11 +40,6 @@ const CAPABILITY_FLAGS: {
     hint: 'Objects can be read without a token (implies reads)',
   },
   { key: 'Read', label: 'Reads', hint: 'Objects can be read with a token' },
-  {
-    key: 'Write',
-    label: 'Writes',
-    hint: 'Objects can be written with a token',
-  },
   { key: 'Listing', label: 'Listings', hint: 'Collections can be listed' },
   {
     key: 'FallBackRead',
@@ -97,6 +94,10 @@ const PathListInput = ({
   <Autocomplete
     multiple
     freeSolo
+    // Text still in the box when the field loses focus (for example when the
+    // owner clicks Submit) becomes a chip instead of staying visible but
+    // outside the value
+    autoSelect
     size='small'
     disabled={disabled}
     options={[]}
@@ -211,9 +212,10 @@ const AuthStateField = ({
             Token issuers
           </Typography>
           <FormHelperText>
-            The issuers whose tokens caches accept for this namespace. Each base
-            path must be the registered prefix or lie under it; a restricted
-            path must lie under one of the base paths.
+            The issuers whose tokens caches accept for this namespace. At least
+            one is required unless reads are public. Each base path must be the
+            registered prefix or lie under it; a restricted path must lie under
+            one of the base paths.
           </FormHelperText>
           {issuers.map((issuer, index) => (
             <Stack
@@ -237,7 +239,9 @@ const AuthStateField = ({
               />
               <PathListInput
                 label={'Base paths'}
-                helperText={'Type a path and press Enter'}
+                helperText={
+                  'Type a path and press Enter, or just leave the field'
+                }
                 placeholder={'/foo/bar'}
                 value={issuer.basePaths ?? []}
                 disabled={disabled}

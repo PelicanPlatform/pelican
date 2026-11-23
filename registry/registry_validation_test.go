@@ -423,18 +423,17 @@ func TestValidateAuthState(t *testing.T) {
 			want:   &server_structs.NamespaceAuthState{Capabilities: server_structs.Capabilities{PublicReads: true, Reads: true}},
 		},
 		{
-			// An origin that allows public reads and authenticated writes
-			// advertises exactly this; caches ignore the issuers of a public
-			// namespace, so the state is accepted.
+			// Issuers on a public namespace are harmless (caches ignore them,
+			// xrootd.GenerateCacheIssuers), so the state is accepted.
 			name:   "public-read-with-token-issuers-is-accepted",
 			prefix: "/foo",
 			state: &server_structs.NamespaceAuthState{
-				Capabilities:    server_structs.Capabilities{PublicReads: true, Writes: true},
+				Capabilities:    public,
 				TokenGeneration: []server_structs.TokenGenResponse{oauth(exampleIssuer)},
 				TokenIssuer:     []server_structs.TokenIssuerResponse{issuer(exampleIssuer, []string{"/foo"}, nil)},
 			},
 			want: &server_structs.NamespaceAuthState{
-				Capabilities:    server_structs.Capabilities{PublicReads: true, Reads: true, Writes: true},
+				Capabilities:    server_structs.Capabilities{PublicReads: true, Reads: true},
 				TokenGeneration: []server_structs.TokenGenResponse{oauth(exampleIssuer)},
 				TokenIssuer:     []server_structs.TokenIssuerResponse{issuer(exampleIssuer, []string{"/foo"}, nil)},
 			},
@@ -447,6 +446,37 @@ func TestValidateAuthState(t *testing.T) {
 				TokenGeneration: []server_structs.TokenGenResponse{oauth(exampleIssuer)},
 				TokenIssuer:     []server_structs.TokenIssuerResponse{issuer(exampleIssuer, []string{"/foo"}, []string{"/foo/bar"})},
 			},
+		},
+		{
+			// The rule an origin applies to its exports (handleIssuersIfNeeded
+			// in server_utils/origin.go): an export with these capabilities
+			// and no issuer gets the origin's own; a registration has none.
+			name:    "read-only-without-an-issuer-is-rejected",
+			prefix:  "/foo",
+			state:   &server_structs.NamespaceAuthState{Capabilities: readOnly},
+			wantErr: "the namespace requires a token to read, so the state needs at least one token issuer",
+		},
+		{
+			// A write needs an origin, and the state is used only while none
+			// is online, so it is refused outright, issuer or not.
+			name:   "writes-are-rejected-even-with-an-issuer",
+			prefix: "/foo",
+			state: &server_structs.NamespaceAuthState{
+				Capabilities: server_structs.Capabilities{Reads: true, Writes: true},
+				TokenIssuer:  []server_structs.TokenIssuerResponse{issuer(exampleIssuer, []string{"/foo"}, nil)},
+			},
+			wantErr: "capabilities: writes cannot be allowed",
+		},
+		{
+			name:    "third-party-copies-are-rejected",
+			prefix:  "/foo",
+			state:   &server_structs.NamespaceAuthState{Capabilities: server_structs.Capabilities{PublicReads: true, Copies: true}},
+			wantErr: "capabilities: third-party copies cannot be allowed",
+		},
+		{
+			name:   "public-read-only-without-an-issuer-is-accepted",
+			prefix: "/foo",
+			state:  &server_structs.NamespaceAuthState{Capabilities: server_structs.Capabilities{PublicReads: true, Reads: true, Listings: true}},
 		},
 		{
 			name:   "zero-token-generation-entry-is-dropped",
@@ -466,10 +496,12 @@ func TestValidateAuthState(t *testing.T) {
 			state: &server_structs.NamespaceAuthState{
 				Capabilities:    readOnly,
 				TokenGeneration: []server_structs.TokenGenResponse{{}, oauth(exampleIssuer)},
+				TokenIssuer:     []server_structs.TokenIssuerResponse{issuer(exampleIssuer, []string{"/foo"}, nil)},
 			},
 			want: &server_structs.NamespaceAuthState{
 				Capabilities:    readOnly,
 				TokenGeneration: []server_structs.TokenGenResponse{oauth(exampleIssuer)},
+				TokenIssuer:     []server_structs.TokenIssuerResponse{issuer(exampleIssuer, []string{"/foo"}, nil)},
 			},
 		},
 		{
@@ -675,7 +707,7 @@ func TestValidateAuthState(t *testing.T) {
 			name:    "state-over-the-size-limit-is-rejected",
 			prefix:  "/foo",
 			state:   manyRestrictedPaths(250),
-			wantErr: "the limit is 8192",
+			wantErr: fmt.Sprintf("the limit is %d", maxAuthStateBytes),
 		},
 	}
 

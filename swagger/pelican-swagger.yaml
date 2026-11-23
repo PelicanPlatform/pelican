@@ -489,6 +489,8 @@ definitions:
       namespace while no Origin for it is online. The shape matches the Director's namespace listing
       (`GET /director_ui/namespaces`), so the values can be copied from there while an Origin is online.
       Only namespace prefix registrations may carry one; Origin and Cache server registrations may not.
+      `Write` and `Copies` must be false: the state is used only while no Origin is online, and a Cache
+      cannot take a write or serve a third-party copy.
       It is validated and normalized on every create and update, and the serialized value is limited to 8 KiB.
     properties:
       capabilities:
@@ -506,9 +508,10 @@ definitions:
         type: array
         x-nullable: true
         description: >-
-          The issuers whose tokens are accepted for the namespace. Each `issuer` must be an absolute
-          `https` URL with at least one base path; every base path must lie within the registered prefix
-          and every restricted path under one of that issuer's base paths. Paths are normalized.
+          The issuers whose tokens are accepted for the namespace. At least one is required unless
+          `PublicRead` is set. Each `issuer` must be an absolute `https` URL with at least one base path;
+          every base path must lie within the registered prefix and every restricted path under one of
+          that issuer's base paths. Paths are normalized.
         items:
           $ref: "#/definitions/TokenIssuer"
     example:
