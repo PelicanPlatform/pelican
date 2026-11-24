@@ -49,7 +49,7 @@ func terminateSession(session *ssh.Session, done <-chan error) {
 
 	// Wait for process to exit or timeout
 	select {
-	case <-done:
+	case _ = <-done:
 		// Process exited gracefully
 		return
 	case <-time.After(signalEscalationTimeout):

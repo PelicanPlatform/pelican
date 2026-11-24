@@ -135,7 +135,8 @@ func TestWalkStreamingAPI(t *testing.T) {
 		// exits. A callback-based walker means there's no producer goroutine
 		// to leak, but we still want confirmation the break unwinds cleanly.
 		count := 0
-		for range client.WalkSeq(ft.Ctx, root, client.WithRecursive(true)) {
+		for _, err := range client.WalkSeq(ft.Ctx, root, client.WithRecursive(true)) {
+			require.NoError(t, err)
 			count++
 			if count == 2 {
 				break

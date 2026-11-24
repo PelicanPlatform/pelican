@@ -324,7 +324,7 @@ Loop:
 						time.Since(noProgressStartTime).Round(time.Second), currentDownloaded)
 					log.WithFields(fields).Error(copyErr)
 					cancel()
-					<-done
+					_ = <-done
 					break Loop
 				}
 			} else {
@@ -349,7 +349,7 @@ Loop:
 					transferRate, downloadLimit, time.Since(startBelowLimit).Round(time.Second), currentDownloaded)
 				log.WithFields(fields).Error(copyErr)
 				cancel()
-				<-done
+				_ = <-done
 				break Loop
 			} else {
 				startBelowLimit = time.Time{}
