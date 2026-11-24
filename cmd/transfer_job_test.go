@@ -36,7 +36,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/pelicanplatform/pelican/client_agent"
-	"github.com/pelicanplatform/pelican/transfer"
+	"github.com/pelicanplatform/pelican/server_structs"
 )
 
 // jobWaitDeadline bounds how long a test waits for a --wait call to return.
@@ -115,8 +115,8 @@ func writeSSE(t *testing.T, w http.ResponseWriter, events []map[string]any) {
 
 func TestTransferJobList(t *testing.T) {
 	completed := mustTime(t, "2026-01-02T03:04:05Z")
-	listResp := transfer.TransferJobListResponse{
-		Jobs: []transfer.TransferJobStatus{
+	listResp := server_structs.TransferJobListResponse{
+		Jobs: []server_structs.TransferJobStatus{
 			{
 				JobID:       "job-running",
 				Status:      "running",
@@ -172,7 +172,7 @@ func TestTransferJobList(t *testing.T) {
 		client, out := newTestJobClient(t, srv, true)
 		require.NoError(t, client.runTransferJobList(context.Background(), "", 10, 0))
 
-		var decoded transfer.TransferJobListResponse
+		var decoded server_structs.TransferJobListResponse
 		require.NoError(t, json.Unmarshal(out.Bytes(), &decoded))
 		require.Len(t, decoded.Jobs, 2)
 		assert.Equal(t, "job-running", decoded.Jobs[0].JobID)
@@ -184,8 +184,8 @@ func TestTransferJobList(t *testing.T) {
 
 func TestTransferJobListEmpty(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		writeJSON(t, w, http.StatusOK, transfer.TransferJobListResponse{
-			Jobs: []transfer.TransferJobStatus{}, Total: 0, Limit: 10, Offset: 0,
+		writeJSON(t, w, http.StatusOK, server_structs.TransferJobListResponse{
+			Jobs: []server_structs.TransferJobStatus{}, Total: 0, Limit: 10, Offset: 0,
 		})
 	}))
 	defer srv.Close()
@@ -200,7 +200,7 @@ func TestTransferJobStatus(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		assert.Equal(t, http.MethodGet, r.Method)
 		assert.Equal(t, "/api/v1.0/transfer/jobs/job-abc", r.URL.Path)
-		writeJSON(t, w, http.StatusOK, transfer.TransferJobStatus{
+		writeJSON(t, w, http.StatusOK, server_structs.TransferJobStatus{
 			JobID:              "job-abc",
 			Status:             "completed",
 			CreatedAt:          mustTime(t, "2026-03-04T05:00:00Z"),
@@ -228,7 +228,7 @@ func TestTransferJobIDIsEscaped(t *testing.T) {
 	var gotPath string
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		gotPath = r.URL.EscapedPath()
-		writeJSON(t, w, http.StatusOK, transfer.TransferJobStatus{JobID: "x", Status: "completed"})
+		writeJSON(t, w, http.StatusOK, server_structs.TransferJobStatus{JobID: "x", Status: "completed"})
 	}))
 	defer srv.Close()
 
@@ -239,7 +239,7 @@ func TestTransferJobIDIsEscaped(t *testing.T) {
 
 func TestTransferJobStatusNotFound(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		writeJSON(t, w, http.StatusNotFound, transfer.ErrorResponse{
+		writeJSON(t, w, http.StatusNotFound, server_structs.TransferErrorResponse{
 			Code: "NOT_FOUND", Error: "Transfer job not found",
 		})
 	}))
@@ -260,7 +260,7 @@ func TestTransferJobStatusWaitRejectsUnknownJob(t *testing.T) {
 		if strings.HasSuffix(r.URL.Path, "/events") {
 			sawEvents = true
 		}
-		writeJSON(t, w, http.StatusNotFound, transfer.ErrorResponse{
+		writeJSON(t, w, http.StatusNotFound, server_structs.TransferErrorResponse{
 			Code: "NOT_FOUND", Error: "Transfer job not found",
 		})
 	}))
@@ -296,7 +296,7 @@ func TestTransferJobStatusWaitOnTerminalJob(t *testing.T) {
 				if strings.HasSuffix(r.URL.Path, "/events") {
 					sawEvents = true
 				}
-				writeJSON(t, w, http.StatusOK, transfer.TransferJobStatus{
+				writeJSON(t, w, http.StatusOK, server_structs.TransferJobStatus{
 					JobID: "job-1", Status: tc.status, Error: tc.jobErr,
 				})
 			}))
@@ -356,7 +356,7 @@ func TestTransferJobStatusWaitFollowsEventStream(t *testing.T) {
 					})
 					return
 				}
-				writeJSON(t, w, http.StatusOK, transfer.TransferJobStatus{
+				writeJSON(t, w, http.StatusOK, server_structs.TransferJobStatus{
 					JobID: "job-1", Status: "running",
 				})
 			}))
@@ -473,7 +473,7 @@ func TestTransferJobCancel(t *testing.T) {
 
 func TestTransferJobCancelError(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		writeJSON(t, w, http.StatusNotFound, transfer.ErrorResponse{
+		writeJSON(t, w, http.StatusNotFound, server_structs.TransferErrorResponse{
 			Code: "NOT_FOUND", Error: "Transfer job not found",
 		})
 	}))
@@ -553,8 +553,8 @@ func TestProgressCell(t *testing.T) {
 func TestTransferJobListShowsProgress(t *testing.T) {
 	completed := mustTime(t, "2026-01-02T03:04:05Z")
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		writeJSON(t, w, http.StatusOK, transfer.TransferJobListResponse{
-			Jobs: []transfer.TransferJobStatus{
+		writeJSON(t, w, http.StatusOK, server_structs.TransferJobListResponse{
+			Jobs: []server_structs.TransferJobStatus{
 				{
 					JobID:     "job-live",
 					Status:    "running",
@@ -617,7 +617,7 @@ func TestTransferJobStatusShowsProgress(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-				writeJSON(t, w, http.StatusOK, transfer.TransferJobStatus{
+				writeJSON(t, w, http.StatusOK, server_structs.TransferJobStatus{
 					JobID: "job-1", Status: "running", Progress: tc.progress,
 				})
 			}))
@@ -641,7 +641,7 @@ func progressStreamServer(t *testing.T, frames int) *httptest.Server {
 	t.Helper()
 	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if !strings.HasSuffix(r.URL.Path, "/events") {
-			writeJSON(t, w, http.StatusOK, transfer.TransferJobStatus{
+			writeJSON(t, w, http.StatusOK, server_structs.TransferJobStatus{
 				JobID: "job-1", Status: "running", Progress: progressOf(0, 1024, 0),
 			})
 			return

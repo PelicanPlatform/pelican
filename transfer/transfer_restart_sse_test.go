@@ -34,6 +34,7 @@ import (
 	"github.com/pelicanplatform/pelican/client_agent"
 	"github.com/pelicanplatform/pelican/database"
 	"github.com/pelicanplatform/pelican/param"
+	"github.com/pelicanplatform/pelican/server_structs"
 	"github.com/pelicanplatform/pelican/test_utils"
 )
 
@@ -109,7 +110,7 @@ func TestTransferServerRestartMarksInflightJobsFailed(t *testing.T) {
 	// On the restarted server the orphaned job must report failed, not stuck.
 	w := doRequest(t, engine2, "GET", "/api/v1.0/transfer/jobs/inflight-restart", nil, tok)
 	require.Equal(t, http.StatusOK, w.Code, "Body: %s", w.Body.String())
-	var status TransferJobStatus
+	var status server_structs.TransferJobStatus
 	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &status))
 	assert.Equal(t, "failed", status.Status, "an interrupted job must be failed after restart")
 	assert.Contains(t, status.Error, "interrupted", "it must carry the restart error")

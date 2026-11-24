@@ -25,7 +25,9 @@ Source files (all under `transfer/`):
 - `handlers.go` — transfer job submission/status; credential → transfer-option wiring
 - `models.go` — GORM models and API request/response types
 
-The CLI counterpart lives in `cmd/transfer_*.go` (notably `cmd/transfer_bootstrap.go`).
+The CLI talks to the transfer server from files in `cmd/` that are built into the `pelican` client binary. They include the files for `pelican transfer` and `pelican object copy --transfer-server`. The CLI side of the bootstrap flows is in `cmd/transfer_bootstrap.go`.
+
+These files must not import `transfer/`, because doing so would link the transfer server and everything it imports into the client binary. Where they use an API type directly, the type lives in `server_structs/transfer.go` instead. Where they send or read one of the request or response types that remain in `transfer/`, they use untyped maps keyed by the JSON field names. Renaming a field of such a type can therefore break one of these files without breaking the build.
 
 ## 2. Deployment modes
 

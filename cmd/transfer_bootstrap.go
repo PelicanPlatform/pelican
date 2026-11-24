@@ -41,8 +41,8 @@ import (
 	pelican_oauth2 "github.com/pelicanplatform/pelican/oauth2"
 	"github.com/pelicanplatform/pelican/param"
 	"github.com/pelicanplatform/pelican/pelican_url"
+	"github.com/pelicanplatform/pelican/server_structs"
 	"github.com/pelicanplatform/pelican/token_scopes"
-	"github.com/pelicanplatform/pelican/transfer"
 )
 
 // normalizeServerURL strips any trailing slashes from a server URL.
@@ -285,7 +285,7 @@ func queryAuthMethods(ctx context.Context, serverURL, bearerToken, issuerURL str
 		return nil, fmt.Errorf("auth-methods query returned %d: %s", resp.StatusCode, string(body))
 	}
 
-	var result transfer.AuthMethodsResponse
+	var result server_structs.TransferAuthMethodsResponse
 	if err := json.Unmarshal(body, &result); err != nil {
 		return nil, errors.Wrap(err, "failed to parse auth methods response")
 	}
@@ -329,7 +329,7 @@ func bootstrapCredentialViaTokenExchange(ctx context.Context, serverURL, bearerT
 		return "", fmt.Errorf("token-exchange bootstrap returned %d: %s", resp.StatusCode, string(body))
 	}
 
-	var cred transfer.CredentialResponse
+	var cred server_structs.TransferCredentialResponse
 	if err := json.Unmarshal(body, &cred); err != nil {
 		return "", errors.Wrap(err, "failed to parse credential response")
 	}
@@ -378,7 +378,7 @@ func bootstrapCredentialViaAuthCode(ctx context.Context, serverURL, bearerToken,
 		return "", fmt.Errorf("auth-code bootstrap returned %d: %s", resp.StatusCode, string(body))
 	}
 
-	var authCodeResp transfer.AuthCodeBootstrapResponse
+	var authCodeResp server_structs.TransferAuthCodeBootstrapResponse
 	if err := json.Unmarshal(body, &authCodeResp); err != nil {
 		return "", errors.Wrap(err, "failed to parse auth-code bootstrap response")
 	}
@@ -419,7 +419,7 @@ func bootstrapCredentialViaAuthCode(ctx context.Context, serverURL, bearerToken,
 			return "", fmt.Errorf("poll returned %d: %s", pollResp.StatusCode, string(pollBody))
 		}
 
-		var status transfer.AuthCodeBootstrapStatus
+		var status server_structs.TransferAuthCodeBootstrapStatus
 		if err := json.Unmarshal(pollBody, &status); err != nil {
 			return "", errors.Wrap(err, "failed to parse poll response")
 		}

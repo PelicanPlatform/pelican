@@ -33,7 +33,7 @@ import (
 	log "github.com/sirupsen/logrus"
 	"github.com/spf13/cobra"
 
-	"github.com/pelicanplatform/pelican/transfer"
+	"github.com/pelicanplatform/pelican/server_structs"
 )
 
 var (
@@ -101,35 +101,35 @@ func init() {
 // buildOAuthClientCreateRequest validates the add command's inputs and renders
 // them as the request body the transfer server expects.
 //
-// It exists as its own function for two reasons.  The body is built from
-// transfer.OAuthClientCreateRequest rather than an ad-hoc map, so a field the
-// API understands cannot be dropped by forgetting to name it here -- which is
-// how grant_types came to be omitted, leaving every client registered by this
-// command unusable.  And the grant types are checked against the set the
-// server actually looks up: an unrecognized grant is never rejected by the
-// server, it just means the client is silently never selected, with the
-// failure surfacing much later as "no OAuth client configured for this
-// issuer".
+// It exists as its own function for two reasons. First, it builds the body
+// from server_structs.TransferOAuthClientCreateRequest rather than from
+// an ad hoc map. With a map, forgetting to name a field here drops it
+// from the body. That is how grant_types came to be omitted, which left
+// every client registered by this command unusable. Second, it checks
+// the grant types against the set that the server looks up. The server
+// does not reject an unrecognized grant type. Instead, it never selects
+// the client. The failure surfaces later as "no OAuth client configured
+// for this issuer".
 //
 // The server stores and matches grant types and scopes whitespace-separated,
 // while the CLI takes them comma-separated for consistency with
 // `origin issuer client create`; the join happens here.
-func buildOAuthClientCreateRequest(name, issuerURL, clientID, clientSecret, grantTypes, scopes string) (transfer.OAuthClientCreateRequest, error) {
+func buildOAuthClientCreateRequest(name, issuerURL, clientID, clientSecret, grantTypes, scopes string) (server_structs.TransferOAuthClientCreateRequest, error) {
 	grants := splitAndTrim(grantTypes)
 	if len(grants) == 0 {
-		return transfer.OAuthClientCreateRequest{}, errors.Errorf(
+		return server_structs.TransferOAuthClientCreateRequest{}, errors.Errorf(
 			"--grant-types is required and must not be empty; accepted values are %s",
-			strings.Join(transfer.SupportedGrantTypes, ", "))
+			strings.Join(server_structs.TransferSupportedGrantTypes, ", "))
 	}
 	for _, grant := range grants {
-		if !slices.Contains(transfer.SupportedGrantTypes, grant) {
-			return transfer.OAuthClientCreateRequest{}, errors.Errorf(
+		if !slices.Contains(server_structs.TransferSupportedGrantTypes, grant) {
+			return server_structs.TransferOAuthClientCreateRequest{}, errors.Errorf(
 				"unsupported grant type %q; accepted values are %s",
-				grant, strings.Join(transfer.SupportedGrantTypes, ", "))
+				grant, strings.Join(server_structs.TransferSupportedGrantTypes, ", "))
 		}
 	}
 
-	return transfer.OAuthClientCreateRequest{
+	return server_structs.TransferOAuthClientCreateRequest{
 		Name:         name,
 		IssuerURL:    issuerURL,
 		ClientID:     clientID,

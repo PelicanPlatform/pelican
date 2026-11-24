@@ -38,7 +38,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/pelicanplatform/pelican/client_agent"
-	"github.com/pelicanplatform/pelican/transfer"
+	"github.com/pelicanplatform/pelican/server_structs"
 	"github.com/pelicanplatform/pelican/utils"
 )
 
@@ -185,12 +185,12 @@ func (c *transferJobClient) jobsURL(jobID string, suffix ...string) string {
 
 // getJob fetches one job's status, returning both the decoded status and the
 // raw body so that --json can echo exactly what the server said.
-func (c *transferJobClient) getJob(ctx context.Context, jobID string) (*transfer.TransferJobStatus, []byte, error) {
+func (c *transferJobClient) getJob(ctx context.Context, jobID string) (*server_structs.TransferJobStatus, []byte, error) {
 	body, _, err := doTransferRequest(ctx, c.httpClient, http.MethodGet, c.jobsURL(jobID), c.token, nil)
 	if err != nil {
 		return nil, nil, err
 	}
-	var status transfer.TransferJobStatus
+	var status server_structs.TransferJobStatus
 	if err := json.Unmarshal(body, &status); err != nil {
 		return nil, body, errors.Wrap(err, "failed to parse transfer server response")
 	}
@@ -198,7 +198,7 @@ func (c *transferJobClient) getJob(ctx context.Context, jobID string) (*transfer
 }
 
 // listJobs fetches a page of the caller's jobs.
-func (c *transferJobClient) listJobs(ctx context.Context, status string, limit, offset int) (*transfer.TransferJobListResponse, []byte, error) {
+func (c *transferJobClient) listJobs(ctx context.Context, status string, limit, offset int) (*server_structs.TransferJobListResponse, []byte, error) {
 	query := url.Values{}
 	if status != "" {
 		query.Set("status", status)
@@ -211,7 +211,7 @@ func (c *transferJobClient) listJobs(ctx context.Context, status string, limit, 
 	if err != nil {
 		return nil, nil, err
 	}
-	var resp transfer.TransferJobListResponse
+	var resp server_structs.TransferJobListResponse
 	if err := json.Unmarshal(body, &resp); err != nil {
 		return nil, body, errors.Wrap(err, "failed to parse transfer server response")
 	}
@@ -239,9 +239,10 @@ func formatTransferProgress(bytesTransferred, totalBytes int64) string {
 	return fmt.Sprintf("%s (total size unknown)", utils.HumanBytes(bytesTransferred))
 }
 
-// progressCell renders a job's progress for one cell of the list table. A nil
-// progress is the server saying it cannot know (see
-// transfer.TransferJobStatus), which is not the same as nothing having moved.
+// progressCell renders a job's progress for one cell of the list table.
+// A nil progress means that the server cannot know the job's progress,
+// as server_structs.TransferJobStatus describes. That is not the same
+// as nothing having moved.
 func progressCell(progress *client_agent.JobProgress) string {
 	if progress == nil {
 		return "unknown"
@@ -534,7 +535,7 @@ func (c *transferJobClient) runTransferJobStatus(ctx context.Context, jobID stri
 // a caller that asked to wait for it expects: nil for success, an error
 // otherwise, matching what waitForJob reports for a job that finishes while
 // being watched.
-func terminalTransferJobError(jobID string, status *transfer.TransferJobStatus) error {
+func terminalTransferJobError(jobID string, status *server_structs.TransferJobStatus) error {
 	switch status.Status {
 	case "failed", "error":
 		return fmt.Errorf("transfer job %s failed: %s", jobID, status.Error)
@@ -545,7 +546,7 @@ func terminalTransferJobError(jobID string, status *transfer.TransferJobStatus) 
 }
 
 // printJobStatus renders one job for a human, or echoes the server's own JSON.
-func (c *transferJobClient) printJobStatus(status *transfer.TransferJobStatus, body []byte) {
+func (c *transferJobClient) printJobStatus(status *server_structs.TransferJobStatus, body []byte) {
 	if c.jsonOut {
 		fmt.Fprintln(c.out, string(body))
 		return
