@@ -354,6 +354,11 @@ func SaveConfigContents(config *CredentialConfig) error {
 // fresh ed25519/x25519 key pair, and returns the PEM-encoded result.
 // If password is non-empty the private key block is PKCS#8-encrypted;
 // otherwise it is stored in the clear.
+// credentialKeyIterations is the PBKDF2 iteration count for the key that
+// protects a password-protected credential file. Decryption reads the count
+// from the file, so files written with another count still open.
+const credentialKeyIterations = 100000
+
 func marshalEncryptedConfig(config *CredentialConfig, password []byte) ([]byte, error) {
 	defaultConfig := CredentialConfig{}
 	if config == nil {
@@ -388,8 +393,11 @@ func marshalEncryptedConfig(config *CredentialConfig, password []byte) ([]byte, 
 		key_bytes, err = x509.MarshalPKCS8PrivateKey(ed25519.PrivateKey(ed25519_sk[:]))
 	} else {
 		opts := *pkcs8.DefaultOpts
-		if kdfopts, ok := (opts.KDFOpts).(*pkcs8.PBKDF2Opts); ok {
-			kdfopts.IterationCount = 100000
+		// DefaultOpts holds a PBKDF2Opts value, so the assertion gives a copy:
+		// store the raised count back, or the library default of 10,000 is used.
+		if kdfopts, ok := opts.KDFOpts.(pkcs8.PBKDF2Opts); ok {
+			kdfopts.IterationCount = credentialKeyIterations
+			opts.KDFOpts = kdfopts
 		}
 		key_bytes, err = pkcs8.MarshalPrivateKey(ed25519.PrivateKey(ed25519_sk[:]), password, &opts)
 	}
