@@ -114,8 +114,8 @@ ARG XROOTD_MULTIUSER_RELEASE=
 # The GitHub Actions workflows read the version from these lines
 # (see .github/scripts/goreleaser/goreleaser_version.sh).
 #################################################################
-FROM --platform=${BUILDPLATFORM} goreleaser/goreleaser:v2.18.3@sha256:b61a4eedf5e3b1d283792dade34ee0f8c6cce3e6f1f65851d3b397b8f8a75b6d AS goreleaser-build
-FROM goreleaser/goreleaser:v2.18.3@sha256:b61a4eedf5e3b1d283792dade34ee0f8c6cce3e6f1f65851d3b397b8f8a75b6d AS goreleaser-target
+FROM --platform=${BUILDPLATFORM} goreleaser/goreleaser:v2.20.2@sha256:5d30bb36091b1a6d275ef450be05ee9c0d8c8b22955efe53dfe0974dd583cdc2 AS goreleaser-build
+FROM goreleaser/goreleaser:v2.20.2@sha256:5d30bb36091b1a6d275ef450be05ee9c0d8c8b22955efe53dfe0974dd583cdc2 AS goreleaser-target
 
 #################################################################
 # Pelican Build Base
@@ -124,7 +124,7 @@ FROM goreleaser/goreleaser:v2.18.3@sha256:b61a4eedf5e3b1d283792dade34ee0f8c6cce3
 # binaries. The actual build happens in a later stage because it
 # depends on the target we're building for.
 #################################################################
-FROM --platform=${BUILDPLATFORM} almalinux:9.8@sha256:9819dc675b67b595c2b59e42be7763fca1a8bb217fa5944e04daa22e9a64db16 AS pelican-build-base
+FROM --platform=${BUILDPLATFORM} almalinux:9.9@sha256:02df05719ef287ebd0df0a1eedb9172a00bd70703aed7b25660e426b8e0d6047 AS pelican-build-base
 ARG BUILDPLATFORM
 ARG BUILDOS
 ARG BUILDARCH
@@ -250,7 +250,7 @@ ENDRUN
 # This stage should contain setup common to all images that we wish
 # to build (director, registry, origin, cache, etc.).
 #################################################################
-FROM almalinux:9.8@sha256:9819dc675b67b595c2b59e42be7763fca1a8bb217fa5944e04daa22e9a64db16 AS pelican-software-base
+FROM almalinux:9.9@sha256:02df05719ef287ebd0df0a1eedb9172a00bd70703aed7b25660e426b8e0d6047 AS pelican-software-base
 ARG TARGETPLATFORM
 ARG BASE_OS
 ARG OSG_SERIES
@@ -592,7 +592,7 @@ ENDRUN
 #################################################################
 # Pelican Client
 #################################################################
-FROM gcr.io/distroless/static-debian13:nonroot@sha256:e2e927ec666bae08560abb3c55d0659eceabb657f56b6782ab500a9fc7f555e3 AS client
+FROM gcr.io/distroless/static-debian13:nonroot@sha256:8ce6dd87e9823c5b48dcfb2c8604714ccb351ce59607327bcc4957448da279b5 AS client
 ARG TARGETOS TARGETARCH
 COPY --from=pelican-build /pelican-build/dist/pelican_${TARGETOS}_${TARGETARCH}/pelican /bin/pelican
 ENTRYPOINT ["/bin/pelican"]
