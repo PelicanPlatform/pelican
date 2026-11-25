@@ -65,10 +65,7 @@ func setupAssertedGroupTest(t *testing.T, groupFileJSON string) *gorm.DB {
 
 func seedTestUser(t *testing.T, db *gorm.DB, id, username string) *database.User {
 	t.Helper()
-	u := &database.User{
-		ID: id, Username: username, Sub: id + "@idp",
-		Issuer: "https://idp.example", Status: database.UserStatusActive,
-	}
+	u := &database.User{ID: id, Username: username, Status: database.UserStatusActive}
 	require.NoError(t, db.Create(u).Error)
 	return u
 }

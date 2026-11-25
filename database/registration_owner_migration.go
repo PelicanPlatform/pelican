@@ -100,26 +100,34 @@ func migrateLegacyRegistrationOwners(db *gorm.DB) error {
 		return nil
 	}
 
-	// Resolve subjects to Pelican user IDs. The users table is unique on
+	// Resolve subjects to Pelican user IDs. user_identities is unique on
 	// (sub, issuer), so one subject can exist under several issuers; such
 	// subjects cannot be attributed to a single account and are skipped.
-	// Soft-deleted users are excluded by GORM automatically.
+	// The join to users drops identities whose account is soft-deleted.
 	subjectList := make([]string, 0, len(subjects))
 	for sub := range subjects {
 		subjectList = append(subjectList, sub)
 	}
-	var users []User
-	if err := db.Select("id", "sub", "issuer").Where("sub IN ?", subjectList).Find(&users).Error; err != nil {
+	type subjectOwner struct {
+		Sub    string
+		UserID string
+	}
+	var owners []subjectOwner
+	if err := db.Model(&UserIdentity{}).
+		Select("user_identities.sub AS sub", "user_identities.user_id AS user_id").
+		Joins("JOIN users ON users.id = user_identities.user_id AND users.deleted_at IS NULL").
+		Where("user_identities.sub IN ?", subjectList).
+		Find(&owners).Error; err != nil {
 		return errors.Wrap(err, "failed to look up users by subject")
 	}
-	subToUserID := make(map[string]string, len(users))
+	subToUserID := make(map[string]string, len(owners))
 	ambiguous := make(map[string]bool)
-	for _, u := range users {
-		if _, seen := subToUserID[u.Sub]; seen {
-			ambiguous[u.Sub] = true
+	for _, o := range owners {
+		if existing, seen := subToUserID[o.Sub]; seen && existing != o.UserID {
+			ambiguous[o.Sub] = true
 			continue
 		}
-		subToUserID[u.Sub] = u.ID
+		subToUserID[o.Sub] = o.UserID
 	}
 
 	rewritten, unresolved, skippedAmbiguous := 0, 0, 0

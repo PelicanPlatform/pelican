@@ -2032,7 +2032,7 @@ func TestUpdateNamespaceOwnerNeverFromBody(t *testing.T) {
 	t.Run("admin-edit-reassigns-owner", func(t *testing.T) {
 		resetMockRegistryDB(t)
 		require.NoError(t, database.ServerDatabase.Create(&database.User{
-			ID: "u-new-owner", Username: "newowner", Sub: "sub-new-owner", Issuer: "https://issuer.example", Status: database.UserStatusActive,
+			ID: "u-new-owner", Username: "newowner", Status: database.UserStatusActive,
 		}).Error)
 		require.NoError(t, insertMockDBData([]server_structs.Registration{mockOwned()}))
 		id, err := getLastNamespaceId()
@@ -2107,8 +2107,6 @@ func TestUpdateNamespaceAdminAssignsOwner(t *testing.T) {
 		require.NoError(t, database.ServerDatabase.Create(&database.User{
 			ID:       id,
 			Username: "user-" + id,
-			Sub:      "sub-" + id,
-			Issuer:   "https://issuer.example",
 			Status:   status,
 		}).Error)
 	}
