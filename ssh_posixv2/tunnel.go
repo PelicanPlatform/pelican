@@ -19,10 +19,9 @@
 package ssh_posixv2
 
 import (
-	"context"
-	"net"
 	"net/http"
 	"sync"
+	"time"
 
 	"github.com/pkg/errors"
 	"golang.org/x/crypto/ssh"
@@ -45,6 +44,9 @@ type SSHTunnelTransport struct {
 	// readyCh is closed when the SSH client and socket path are set.
 	readyCh chan struct{}
 	once    sync.Once
+
+	// responseHeaderTimeout is the first-byte limit for each request.
+	responseHeaderTimeout time.Duration
 }
 
 // NewSSHTunnelTransport creates a tunnel transport.  It is initially not
@@ -52,8 +54,9 @@ type SSHTunnelTransport struct {
 // reported its listening socket.
 func NewSSHTunnelTransport(authCookie string) *SSHTunnelTransport {
 	return &SSHTunnelTransport{
-		authCookie: authCookie,
-		readyCh:    make(chan struct{}),
+		authCookie:            authCookie,
+		readyCh:               make(chan struct{}),
+		responseHeaderTimeout: helperResponseHeaderTimeout(),
 	}
 }
 
@@ -119,19 +122,7 @@ func (t *SSHTunnelTransport) RoundTrip(req *http.Request) (*http.Response, error
 	}
 
 	// Build a single-use HTTP client over the SSH channel.
-	singleUseTransport := &http.Transport{
-		DisableKeepAlives: true,
-		DialContext: func(_ context.Context, _, _ string) (net.Conn, error) {
-			return conn, nil
-		},
-	}
-	httpClient := &http.Client{
-		Transport: singleUseTransport,
-		// Do not follow redirects — each channel carries one exchange.
-		CheckRedirect: func(_ *http.Request, _ []*http.Request) error {
-			return http.ErrUseLastResponse
-		},
-	}
+	httpClient := newSingleUseClient(conn, t.responseHeaderTimeout)
 
 	// Clone the request for the helper (plain HTTP, auth injected).
 	// The host is irrelevant since we use a pre-dialed connection,
