@@ -1433,3 +1433,88 @@ func TestHelperServerDropsSilentPeer(t *testing.T) {
 		assert.Equal(t, helperReadHeaderTimeout, time.Since(start))
 	})
 }
+
+// TestSingleUseClientFirstByteLimit verifies how long the origin waits for
+// the helper to start answering a request.
+func TestSingleUseClientFirstByteLimit(t *testing.T) {
+	const limit = 10 * time.Second
+
+	t.Run("silent-helper-fails-at-the-limit", func(t *testing.T) {
+		synctest.Test(t, func(t *testing.T) {
+			conn := serveHelperOnPipe(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				<-r.Context().Done()
+			}))
+
+			start := time.Now()
+			resp, err := newSingleUseClient(conn, limit).Get("http://helper/object")
+			if err == nil {
+				resp.Body.Close()
+			}
+			require.ErrorContains(t, err, "timeout awaiting response headers")
+			assert.Equal(t, limit, time.Since(start))
+		})
+	})
+
+	t.Run("upload-may-take-longer-than-the-limit", func(t *testing.T) {
+		synctest.Test(t, func(t *testing.T) {
+			const chunks = 6
+			const gap = 10 * time.Second
+			chunk := bytes.Repeat([]byte("u"), 1024)
+
+			conn := serveHelperOnPipe(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				_, _ = io.Copy(io.Discard, r.Body)
+				w.WriteHeader(http.StatusCreated)
+			}))
+
+			pr, pw := io.Pipe()
+			t.Cleanup(func() { _ = pr.Close() })
+			go func() {
+				for i := 0; i < chunks; i++ {
+					select {
+					case <-time.After(gap):
+					case <-t.Context().Done():
+						return
+					}
+					if _, err := pw.Write(chunk); err != nil {
+						return
+					}
+				}
+				_ = pw.Close()
+			}()
+
+			req, err := http.NewRequest(http.MethodPut, "http://helper/object", pr)
+			require.NoError(t, err)
+			resp, err := newSingleUseClient(conn, limit).Do(req)
+			require.NoError(t, err)
+			defer resp.Body.Close()
+			assert.Equal(t, http.StatusCreated, resp.StatusCode)
+		})
+	})
+}
+
+// TestHelperTransportAppliesFirstByteLimit verifies that a request sent
+// through the broker transport fails once the helper has taken longer than
+// the transport's first-byte limit to answer.
+func TestHelperTransportAppliesFirstByteLimit(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		const limit = 10 * time.Second
+
+		broker := NewHelperBroker(t.Context(), "test-cookie-first-byte")
+		broker.connectionPool <- serveHelperOnPipe(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			<-r.Context().Done()
+		}))
+		transport := NewHelperTransport(broker)
+		transport.responseHeaderTimeout = limit
+
+		req, err := http.NewRequestWithContext(t.Context(), http.MethodGet, "http://helper/test/object", nil)
+		require.NoError(t, err)
+
+		start := time.Now()
+		resp, err := transport.RoundTrip(req)
+		if err == nil {
+			resp.Body.Close()
+		}
+		require.ErrorContains(t, err, "timeout awaiting response headers")
+		assert.Equal(t, limit, time.Since(start))
+	})
+}

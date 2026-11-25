@@ -34,6 +34,8 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/pkg/errors"
 	"golang.org/x/sync/errgroup"
+
+	"github.com/pelicanplatform/pelican/param"
 )
 
 // HelperBroker manages reverse connections between the origin and the SSH helper.
@@ -460,14 +462,56 @@ func (l *oneShotListener) Addr() net.Addr {
 	return l.addr
 }
 
+// newSingleUseClient returns an HTTP client that sends one request to the
+// helper over conn, a connection the caller has already established.
+//
+// DisableKeepAlives ensures the transport releases the connection after
+// the response is fully read, so both sides cleanly finish.
+// CheckRedirect prevents automatic redirect following: each connection
+// carries exactly one HTTP exchange, so a redirect would attempt to
+// re-dial on an already-consumed connection, causing EOF.
+//
+// responseHeaderTimeout bounds how long the helper may take to start
+// answering once it has the whole request; zero means no limit.  For an
+// upload the clock starts after the last byte of the body is sent, so it
+// does not limit how long the upload itself may take.
+func newSingleUseClient(conn net.Conn, responseHeaderTimeout time.Duration) *http.Client {
+	return &http.Client{
+		Transport: &http.Transport{
+			DisableKeepAlives:     true,
+			ResponseHeaderTimeout: responseHeaderTimeout,
+			DialContext: func(context.Context, string, string) (net.Conn, error) {
+				return conn, nil
+			},
+		},
+		CheckRedirect: func(*http.Request, []*http.Request) error {
+			return http.ErrUseLastResponse
+		},
+	}
+}
+
+// helperResponseHeaderTimeout returns how long the origin waits for the
+// helper to start answering a request.  It is Transport.ResponseHeaderTimeout,
+// the first-byte limit config.GetTransport gives every other server the origin
+// talks to, such as the upstream of an "httpsv2" origin.
+func helperResponseHeaderTimeout() time.Duration {
+	return param.Transport_ResponseHeaderTimeout.GetDuration()
+}
+
 // HelperTransport is an http.RoundTripper that uses reverse connections to the helper
 type HelperTransport struct {
 	broker *HelperBroker
+
+	// responseHeaderTimeout is the first-byte limit for each request.
+	responseHeaderTimeout time.Duration
 }
 
 // NewHelperTransport creates a new transport that uses the helper broker
 func NewHelperTransport(broker *HelperBroker) *HelperTransport {
-	return &HelperTransport{broker: broker}
+	return &HelperTransport{
+		broker:                broker,
+		responseHeaderTimeout: helperResponseHeaderTimeout(),
+	}
 }
 
 // RoundTrip implements http.RoundTripper
@@ -480,22 +524,7 @@ func (t *HelperTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 
 	// Create a client that uses the reverse connection.
 	// The helper will be the server, we are the client.
-	// DisableKeepAlives ensures the transport releases the connection after
-	// the response is fully read, so both sides cleanly finish.
-	// CheckRedirect prevents automatic redirect following: each reverse
-	// connection carries exactly one HTTP exchange, so a redirect would
-	// attempt to re-dial on an already-consumed connection, causing EOF.
-	client := &http.Client{
-		Transport: &http.Transport{
-			DisableKeepAlives: true,
-			DialContext: func(ctx context.Context, network, addr string) (net.Conn, error) {
-				return conn, nil
-			},
-		},
-		CheckRedirect: func(req *http.Request, via []*http.Request) error {
-			return http.ErrUseLastResponse
-		},
-	}
+	client := newSingleUseClient(conn, t.responseHeaderTimeout)
 
 	// Forward the request to the helper
 	// Modify the URL to point to the helper's local address
