@@ -32,14 +32,32 @@ type (
 	}
 )
 
-// handleExportPrefixes returns just the FederationPrefix list for the
-// origin's configured exports — no storage paths, S3 credentials,
-// Globus IDs, or registry edit-URL tokens. The prefixes are already
-// advertised to the federation, so leaking them to authenticated
-// callers reveals nothing new; the slim response shape lets us gate
-// this on AuthHandler alone (rather than AdminAuthHandler) so the
-// collection-onboarding form's prefix dropdown works for callers who
-// hold server.collection_admin without holding server.admin.
+// exportPrefixesRes is the public-info slice of the origin's exports:
+// only what the origin already advertises to the director (prefixes,
+// public-read flag, data URL). No storage paths, S3
+// credentials, Globus IDs, or registry edit-URL tokens.
+type (
+	publicExportInfo struct {
+		FederationPrefix string `json:"federationPrefix"`
+		PublicRead       bool   `json:"publicRead"`
+	}
+
+	exportPrefixesRes struct {
+		// Prefixes is the FederationPrefix of each export, in declaration
+		// order. Kept alongside Exports for existing callers.
+		Prefixes []string           `json:"prefixes"`
+		Exports  []publicExportInfo `json:"exports"`
+		// OriginUrl is the origin's data endpoint (Origin.Url).
+		OriginUrl string `json:"originUrl"`
+	}
+)
+
+// handleExportPrefixes returns the public-info slice of the origin's
+// exports (see exportPrefixesRes). Everything in it is already
+// advertised to the federation, so it is gated on AuthHandler alone
+// rather than AdminAuthHandler. It drives the collection-onboarding
+// form's prefix dropdown and the web object browser, both of which
+// non-admin users reach.
 func handleExportPrefixes(ctx *gin.Context) {
 	exports, err := server_utils.GetOriginExports()
 	if err != nil {
@@ -50,11 +68,19 @@ func handleExportPrefixes(ctx *gin.Context) {
 		})
 		return
 	}
-	prefixes := make([]string, 0, len(exports))
-	for _, e := range exports {
-		prefixes = append(prefixes, e.FederationPrefix)
+	res := exportPrefixesRes{
+		Prefixes:  make([]string, 0, len(exports)),
+		Exports:   make([]publicExportInfo, 0, len(exports)),
+		OriginUrl: param.Origin_Url.GetString(),
 	}
-	ctx.JSON(http.StatusOK, gin.H{"prefixes": prefixes})
+	for _, e := range exports {
+		res.Prefixes = append(res.Prefixes, e.FederationPrefix)
+		res.Exports = append(res.Exports, publicExportInfo{
+			FederationPrefix: e.FederationPrefix,
+			PublicRead:       e.Capabilities.PublicReads,
+		})
+	}
+	ctx.JSON(http.StatusOK, res)
 }
 
 func handleExports(ctx *gin.Context) {

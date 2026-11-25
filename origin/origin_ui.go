@@ -28,13 +28,12 @@ import (
 func RegisterOriginWebAPI(routerGroup *gin.RouterGroup) error {
 
 	routerGroup.GET("/exports", web_ui.AuthHandler, web_ui.AdminAuthHandler, handleExports)
-	// Public-info slice of /exports: just the FederationPrefix list,
-	// no storage/S3/Globus details, no editUrl tokens. Reachable by
-	// any authenticated caller — the prefixes themselves are
-	// advertised to the registry, so listing them leaks nothing the
-	// federation can't already see. Drives the collection-onboarding
-	// form's prefix dropdown so a collection-admin (who isn't a
-	// system admin) can still pick an exported prefix.
+	// Public-info slice of /exports: prefixes, public-read
+	// flag and data URL, no storage/S3/Globus details, no editUrl
+	// tokens. Reachable by any authenticated caller — all of it is
+	// already advertised to the federation. Drives the
+	// collection-onboarding form's prefix dropdown and the object
+	// browser, both of which non-admins use.
 	routerGroup.GET("/exports/prefixes", web_ui.AuthHandler, handleExportPrefixes)
 
 	collectionAPIGroup := routerGroup.Group("/collections") // Path is /api/v1.0/origin_ui/collections
