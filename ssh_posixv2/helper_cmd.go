@@ -469,6 +469,31 @@ func (h *HelperProcess) createHTTPHandler() http.Handler {
 	return loggingMiddleware(mux)
 }
 
+const (
+	// helperReadHeaderTimeout bounds how long the helper waits for the
+	// origin to send the headers of a request.
+	helperReadHeaderTimeout = 30 * time.Second
+
+	// helperIdleTimeout bounds how long a keep-alive connection from the
+	// origin may sit between requests.
+	helperIdleTimeout = 60 * time.Second
+)
+
+// newHelperServer returns the HTTP server the helper uses to serve the
+// origin's requests, in both broker and direct-listen modes.
+//
+// ReadTimeout and WriteTimeout are deliberately left unset.  net/http
+// applies them as deadlines for the whole request and the whole response,
+// not as idle timers, so any value here ends every transfer that takes
+// longer than that value, however fast it is moving.
+func newHelperServer(handler http.Handler) *http.Server {
+	return &http.Server{
+		Handler:           handler,
+		ReadHeaderTimeout: helperReadHeaderTimeout,
+		IdleTimeout:       helperIdleTimeout,
+	}
+}
+
 // runBrokerListener listens for incoming broker connections
 func (h *HelperProcess) runBrokerListener(ctx context.Context) {
 	// Register with the broker using the provided callback URL
@@ -559,11 +584,7 @@ func (h *HelperProcess) runDirectListener(ctx context.Context) {
 
 	sshLog.Infof("Direct listener started on unix socket %s", socketPath)
 
-	srv := &http.Server{
-		Handler:      handler,
-		ReadTimeout:  60 * time.Second,
-		WriteTimeout: 60 * time.Second,
-	}
+	srv := newHelperServer(handler)
 
 	go func() {
 		<-ctx.Done()
@@ -957,11 +978,7 @@ func (h *HelperProcess) callbackAndServe(ctx context.Context, client *http.Clien
 
 	// Serve a single HTTP request on the TLS-encrypted reversed connection
 	sshLog.Debugf("Serving HTTP on reversed TLS connection for request %s", reqID)
-	srv := &http.Server{
-		Handler:      handler,
-		ReadTimeout:  30 * time.Second,
-		WriteTimeout: 30 * time.Second,
-	}
+	srv := newHelperServer(handler)
 
 	// Shut the single-request server down when the context is cancelled so
 	// the helper can exit promptly during graceful shutdown.

@@ -35,6 +35,7 @@ import (
 	"github.com/pkg/errors"
 	"golang.org/x/net/webdav"
 
+	"github.com/pelicanplatform/pelican/param"
 	"github.com/pelicanplatform/pelican/server_utils"
 )
 
@@ -50,6 +51,10 @@ type SSHFileSystem struct {
 
 	// httpClient uses the helper transport for reverse connections
 	httpClient *http.Client
+
+	// stallTimeout is how long one read from, or one write to, the helper
+	// may block before the transfer is abandoned.  Zero disables the check.
+	stallTimeout time.Duration
 }
 
 var (
@@ -119,7 +124,93 @@ func NewSSHFileSystem(transport http.RoundTripper, federationPrefix, storagePref
 			// client's deadline so the per-request context governs lifetime.
 			// A hardcoded timeout here would prematurely kill large transfers.
 		},
+		// A transfer is limited by progress, not by duration: see stallGuard.
+		stallTimeout: param.Client_StoppedTransferTimeout.GetDuration(),
 	}
+}
+
+// helperStalledError reports that a transfer was abandoned because the
+// helper stopped moving data.
+type helperStalledError struct {
+	limit time.Duration
+}
+
+func (e *helperStalledError) Error() string {
+	return fmt.Sprintf("SSH helper moved no data for %s (Client.StoppedTransferTimeout); abandoned the transfer", e.limit)
+}
+
+// stallGuard abandons a file's transfer when a single read from, or write
+// to, the helper blocks for longer than limit.
+//
+// The rule comes from the Pelican client, whose downloads and uploads give
+// up once no bytes have moved for Client.StoppedTransferTimeout (see
+// downloadHTTP in client/handle_http.go); the origin's third-party-copy
+// handler applies the same rule and the same parameter to the server it
+// pulls from.  Those two poll a byte counter.  The guard times each blocked
+// call instead, so its clock only runs while the origin is waiting on the
+// helper.  When the client is slow or paused the origin is waiting on the
+// client, and the guard cannot fire.  The minimum-speed rules that sit next
+// to the stopped-transfer check in the client are left out for the same
+// reason: on this leg the client sets the pace.
+type stallGuard struct {
+	// ctx is the context of the request that carries the object's bytes.
+	// When the guard fires, ctx is cancelled with a *helperStalledError.
+	ctx    context.Context
+	cancel context.CancelCauseFunc
+	limit  time.Duration
+	timer  *time.Timer
+}
+
+func newStallGuard(ctx context.Context, limit time.Duration) *stallGuard {
+	g := &stallGuard{limit: limit}
+	g.ctx, g.cancel = context.WithCancelCause(ctx)
+	return g
+}
+
+// arm starts the clock; call it right before a read or write that waits on
+// the helper.
+func (g *stallGuard) arm() {
+	if g == nil || g.limit <= 0 {
+		return
+	}
+	if g.timer == nil {
+		g.timer = time.AfterFunc(g.limit, func() {
+			g.cancel(&helperStalledError{limit: g.limit})
+		})
+		return
+	}
+	g.timer.Reset(g.limit)
+}
+
+// disarm stops the clock; call it as soon as the read or write returns.
+func (g *stallGuard) disarm() {
+	if g == nil || g.timer == nil {
+		return
+	}
+	g.timer.Stop()
+}
+
+// cause returns the stall error if the guard has abandoned the transfer,
+// and err otherwise.  An abandoned transfer surfaces as whatever error the
+// cancelled request happened to produce, which says nothing about the reason.
+func (g *stallGuard) cause(err error) error {
+	if g == nil {
+		return err
+	}
+	var stalled *helperStalledError
+	if errors.As(context.Cause(g.ctx), &stalled) {
+		return stalled
+	}
+	return err
+}
+
+// release stops the clock and frees the guard's context.
+func (g *stallGuard) release() {
+	if g == nil {
+		return
+	}
+	g.disarm()
+	g.cancel(nil)
 }
 
 // makeHelperURL constructs the URL for a request to the helper
@@ -193,10 +284,11 @@ func (fs *SSHFileSystem) Mkdir(ctx context.Context, name string, perm os.FileMod
 // OpenFile opens a file for reading or writing
 func (fs *SSHFileSystem) OpenFile(ctx context.Context, name string, flag int, perm os.FileMode) (webdav.File, error) {
 	f := &sshFile{
-		fs:   fs,
-		name: name,
-		flag: flag,
-		ctx:  ctx,
+		fs:    fs,
+		name:  name,
+		flag:  flag,
+		ctx:   ctx,
+		stall: newStallGuard(ctx, fs.stallTimeout),
 	}
 	if flag&(os.O_WRONLY|os.O_RDWR|os.O_CREATE|os.O_TRUNC) != 0 {
 		f.createTime = time.Now()
@@ -410,6 +502,10 @@ type sshFile struct {
 	flag int
 	ctx  context.Context
 
+	// stall abandons the GET or PUT that carries the object's bytes when
+	// the helper stops moving data.  Nil for a file not made by OpenFile.
+	stall *stallGuard
+
 	// For reading
 	reader     io.ReadCloser
 	readOffset int64
@@ -446,7 +542,18 @@ func (f *sshFile) Close() error {
 	if f.writeErr != nil {
 		err = f.writeErr
 	}
+	f.stall.release()
 	return err
+}
+
+// dataContext returns the context for the GET or PUT that carries the
+// object's bytes.  It ends when the file's own context does, and also when
+// the stall guard abandons the transfer.
+func (f *sshFile) dataContext() context.Context {
+	if f.stall != nil {
+		return f.stall.ctx
+	}
+	return f.ctx
 }
 
 // Read reads data from the file via HTTP GET with Range header
@@ -457,7 +564,7 @@ func (f *sshFile) Read(p []byte) (n int, err error) {
 		if err != nil {
 			return 0, err
 		}
-		req, err := http.NewRequestWithContext(f.ctx, "GET", url, nil)
+		req, err := http.NewRequestWithContext(f.dataContext(), "GET", url, nil)
 		if err != nil {
 			return 0, errors.Wrap(err, "failed to create GET request")
 		}
@@ -486,9 +593,28 @@ func (f *sshFile) Read(p []byte) (n int, err error) {
 		f.reader = resp.Body
 	}
 
+	f.stall.arm()
 	n, err = f.reader.Read(p)
+	f.stall.disarm()
 	f.readOffset += int64(n)
+	if err != nil && err != io.EOF {
+		err = f.stall.cause(err)
+		f.logBrokenRead(err)
+	}
 	return n, err
+}
+
+// logBrokenRead records that the helper's response ended before the object
+// did.  The status of a download is sent to the client before the first byte
+// of the object, so both the origin and the helper log such a request as a
+// success; this message is the origin's only trace of the failure.
+func (f *sshFile) logBrokenRead(err error) {
+	if f.ctx.Err() != nil {
+		// The request was cancelled, usually because the client hung up.
+		sshLog.Debugf("Read of %s from the SSH helper stopped at offset %d after the request was cancelled: %v", f.name, f.readOffset, err)
+		return
+	}
+	sshLog.Warnf("Read of %s from the SSH helper failed at offset %d: %v", f.name, f.readOffset, err)
 }
 
 // Seek seeks to a position in the file
@@ -544,7 +670,7 @@ func (f *sshFile) Write(p []byte) (n int, err error) {
 				_ = pr.CloseWithError(err)
 				return
 			}
-			req, err := http.NewRequestWithContext(f.ctx, "PUT", helperURL, pr)
+			req, err := http.NewRequestWithContext(f.dataContext(), "PUT", helperURL, pr)
 			if err != nil {
 				f.writeErr = errors.Wrap(err, "failed to create PUT request")
 				pr.CloseWithError(f.writeErr)
@@ -555,7 +681,9 @@ func (f *sshFile) Write(p []byte) (n int, err error) {
 
 			resp, err := f.fs.httpClient.Do(req)
 			if err != nil {
-				f.writeErr = errors.Wrap(err, "PUT request failed")
+				f.writeErr = errors.Wrap(f.stall.cause(err), "PUT request failed")
+				// Fail any Write that is still blocked on the pipe.
+				_ = pr.CloseWithError(f.writeErr)
 				return
 			}
 			defer resp.Body.Close()
@@ -566,9 +694,14 @@ func (f *sshFile) Write(p []byte) (n int, err error) {
 		}()
 	})
 
+	f.stall.arm()
 	n, err = f.writer.Write(p)
+	f.stall.disarm()
 	f.writeSize.Add(int64(n))
 	f.writeTime = time.Now()
+	if err != nil {
+		err = f.stall.cause(err)
+	}
 	return n, err
 }
 
