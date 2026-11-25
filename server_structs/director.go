@@ -68,6 +68,7 @@ type (
 		Generation   []TokenGen    `json:"token-generation"`
 		Issuer       []TokenIssuer `json:"token-issuer"`
 		FromTopology bool          `json:"from-topology"`
+		FromRegistry bool          `json:"from-registry"`
 	}
 
 	// Downtime represents a server downtime event
@@ -306,6 +307,7 @@ type (
 		Generation   []TokenGenResponse    `json:"tokenGeneration"`
 		Issuer       []TokenIssuerResponse `json:"tokenIssuer"`
 		FromTopology bool                  `json:"fromTopology"`
+		FromRegistry bool                  `json:"fromRegistry"`
 	}
 
 	// NamespaceAdMappedResponse creates a response struct for NamespaceAd with mapped origins and caches
@@ -315,6 +317,7 @@ type (
 		Generation   []TokenGenResponse    `json:"tokenGeneration"`
 		Issuer       []TokenIssuerResponse `json:"tokenIssuer"`
 		FromTopology bool                  `json:"fromTopology"`
+		FromRegistry bool                  `json:"fromRegistry"`
 		Origins      []string              `json:"origins"`
 		Caches       []string              `json:"caches"`
 	}

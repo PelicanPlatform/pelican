@@ -27,6 +27,9 @@ type (
 	MetricSimpleStatus    string
 	DirectorFTXTestStatus MetricSimpleStatus
 	DirectorStatResult    string
+	// The outcome of a request for a registry-backed namespace handled while
+	// none of its origins was online
+	DirectorOriginlessResult string
 )
 
 const (
@@ -39,6 +42,11 @@ const (
 	StatCancelled  DirectorStatResult = "Cancelled"
 	StatForbidden  DirectorStatResult = "Forbidden"
 	StatUnknownErr DirectorStatResult = "UnknownErr"
+
+	OriginlessRedirected DirectorOriginlessResult = "redirected"
+	OriginlessUnchecked  DirectorOriginlessResult = "unchecked"
+	OriginlessDenied     DirectorOriginlessResult = "denied"
+	OriginlessNoCopy     DirectorOriginlessResult = "no_copy"
 )
 
 var (
@@ -86,6 +94,16 @@ var (
 		Name: "pelican_director_server_count",
 		Help: "The number of servers currently recognized by the Director, delineated by pelican/non-pelican and origin/cache",
 	}, []string{"server_name", "server_type", "from_topology"})
+
+	PelicanDirectorRegistryNamespaces = promauto.NewGauge(prometheus.GaugeOpts{
+		Name: "pelican_director_registry_namespaces",
+		Help: "The number of namespaces the director advertises from the auth state their owners stored in the registry, as of its last successful poll of the registry",
+	})
+
+	PelicanDirectorOriginlessRedirectsTotal = promauto.NewCounterVec(prometheus.CounterOpts{
+		Name: "pelican_director_originless_redirects_total",
+		Help: "The number of requests for a registry-backed namespace handled while none of its origins was online, by outcome: redirected (at least one cache confirmed a copy; the client got a 307 to those caches), unchecked (the request carried no token for a namespace that needs one, usually a client's first request, or asked to skip the presence check; it got a 307 to the closest caches), no_copy (every cache asked answered and none has a copy; a 404), or denied (no cache confirmed a copy and at least one refused the check with 403, because the token was rejected or a public read was not allowed; a 403)",
+	}, []string{"result"}) // result: see enums for DirectorOriginlessResult
 
 	PelicanDirectorClientRequestsTotal = promauto.NewCounterVec(prometheus.CounterOpts{
 		Name: "pelican_director_client_requests_total",

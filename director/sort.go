@@ -20,6 +20,7 @@ package director
 
 import (
 	"context"
+	"fmt"
 	"net/http"
 	"net/netip"
 	"path"
@@ -416,9 +417,144 @@ func filterCaches(
 	return
 }
 
+// sortCachesHoldingObject picks the caches for a read when a registry-backed
+// namespace has no live origin. It returns only the caches that confirm a
+// copy of the object. See PR #3971 for details.
+func sortCachesHoldingObject(ctx *gin.Context, requestId uuid.UUID, reqPath string, nsAd server_structs.NamespaceAd, cacheAds []copyAd) ([]copyAd, error) {
+	reqParams := getRequestParameters(ctx.Request)
+	reqVerb := ctx.Request.Method
+
+	// Only a read served by a cache can succeed: an origin request, a direct
+	// read, a write or a listing needs the origin itself
+	if isOriginRequest(ctx) || reqParams.Has(pelican_url.QueryDirectRead) || (reqVerb != http.MethodGet && reqVerb != http.MethodHead) {
+		return nil, noOriginsForNsErr{reqPath}
+	}
+
+	outcome := func(result metrics.DirectorOriginlessResult) {
+		metrics.PelicanDirectorOriginlessRedirectsTotal.WithLabelValues(string(result)).Inc()
+	}
+
+	token := reqParams.Get("authz")
+
+	// The predicates every cache must pass on the normal path
+	commonPredicates := []AdPredicate{cacheNotFromTopoIfPubReads()}
+	if param.Director_FilterCachesInErrorState.GetBool() {
+		commonPredicates = append(commonPredicates, cacheNotInErrorState())
+	}
+	candidates := make([]server_structs.ServerAd, 0, len(cacheAds))
+	byUrl := make(map[string]copyAd, len(cacheAds))
+	for _, ad := range cacheAds {
+		if !allPredicatesPass(ctx, ad, commonPredicates...) {
+			continue
+		}
+		candidates = append(candidates, ad.ServerAd)
+		byUrl[ad.ServerAd.URL.String()] = ad
+	}
+	if len(candidates) == 0 {
+		outcome(metrics.OriginlessNoCopy)
+		return nil, noCopyInOutageErr{nsAd.Path, "no cache advertises the namespace"}
+	}
+
+	// Closest caches first, and only the working set is asked, as the adaptive
+	// sort does on the normal path
+	clientAddr := utils.ClientIPAddr(ctx)
+	redirectInfo := server_structs.NewRedirectInfoFromIP(clientAddr.String())
+	redirectInfo.DirectorSortMethod = server_structs.DistanceType.String()
+	redirectInfo.ClientInfo.IpAddr = clientAddr.String()
+	sortCtx := SortContext{
+		Ctx:          context.WithValue(context.Background(), ProjectContextKey{}, utils.ExtractProjectFromUserAgent(ctx.Request.Header.Values("User-Agent"))),
+		ClientAddr:   clientAddr,
+		RedirectInfo: redirectInfo,
+		GinCtx:       ctx,
+		NamespaceAd:  nsAd,
+		RequestId:    requestId,
+	}
+	sorted, err := (&DistanceSort{}).Sort(candidates, sortCtx)
+	if err != nil {
+		return nil, errors.Wrap(err, "failed to sort the caches by distance")
+	}
+	if ctx.GetHeader("X-Pelican-Debug") == "true" {
+		ctx.Set("redirectInfo", redirectInfo)
+	}
+
+	// Two kinds of request go to the closest caches without the check. One
+	// carries no token for a namespace that needs one: the caches would
+	// refuse the check, and the client learns the issuer from this response
+	// and asks again with a token. The other asked to skip the check.
+	skipCheck := reqParams.Has(pelican_url.QuerySkipStat)
+	if skipCheck || (!nsAd.Caps.PublicReads && token == "") {
+		closest := make([]copyAd, 0, len(sorted))
+		for _, cache := range sorted {
+			closest = append(closest, byUrl[cache.URL.String()])
+		}
+		why := "carries no token"
+		if skipCheck {
+			why = "asked to skip the presence check"
+		}
+		log.Debugf("Request %s: no origin is online for %s and the request %s, redirecting to %d cache(s) without a presence check", requestId.String(), reqPath, why, len(closest))
+		outcome(metrics.OriginlessUnchecked)
+		return closest, nil
+	}
+	// Ask the closest caches first, as many as the adaptive sort would, and
+	// the rest only when none of them holds a copy: with no origin to fall
+	// back on, a copy far away is better than none
+	closest := truncateAds(sorted, param.Director_AdaptiveSortTruncateConstant.GetInt())
+	rounds := [][]server_structs.ServerAd{closest, sorted[len(closest):]}
+	asked, denied := 0, 0
+	var holders []copyAd
+	for i, round := range rounds {
+		if len(round) == 0 {
+			continue
+		}
+		if i > 0 {
+			log.Debugf("Request %s: none of the %d closest cache(s) holds %s, asking the other %d", requestId.String(), asked, reqPath, len(round))
+		}
+		// A cache holds the object only when its answer carries a positive Age,
+		// the rule generateAvailabilityMaps applies: a cache also answers a HEAD
+		// for an object it would first have to fetch
+		qr := NewObjectStat().Query(context.Background(), reqPath, server_structs.CacheType, 1, len(round), withCacheAds(round), WithToken(token))
+		if qr.Status == queryFailed && qr.ErrorType != queryNoSourcesErr && qr.ErrorType != queryInsufficientResErr {
+			// The query cannot fail this way from here (fresh context, at least
+			// one cache); if it ever does, the round simply yields no holder
+			log.Warningf("Request %s: the presence check for %s did not run: %s", requestId.String(), reqPath, qr.Msg)
+		}
+		asked += len(round)
+		denied += len(qr.DeniedServers)
+		for _, cache := range round {
+			for _, obj := range qr.Objects {
+				if (cache.URL.Host == obj.URL.Host || cache.AuthURL.Host == obj.URL.Host) && obj.CacheAge > 0 {
+					holders = append(holders, byUrl[cache.URL.String()])
+					break
+				}
+			}
+		}
+		if len(holders) > 0 {
+			break
+		}
+	}
+	if len(holders) == 0 {
+		// A cache that refuses the check (403) is reported as a denial, not as a missing copy:
+		// it may well hold the object, but this request cannot read it due to lack of permissions.
+		if denied > 0 {
+			outcome(metrics.OriginlessDenied)
+			what := "denied access to the object"
+			if token != "" {
+				what = "rejected the request's token"
+			}
+			return nil, deniedInOutageErr{nsAd.Path, fmt.Sprintf("%d of the %d cache(s) asked %s", denied, asked, what)}
+		}
+		outcome(metrics.OriginlessNoCopy)
+		return nil, noCopyInOutageErr{nsAd.Path, fmt.Sprintf("none of the %d cache(s) asked confirmed a copy", asked)}
+	}
+	log.Debugf("Request %s: no origin is online for %s, redirecting to %d cache(s) that confirmed a copy", requestId.String(), reqPath, len(holders))
+	outcome(metrics.OriginlessRedirected)
+	return holders, nil
+}
+
 // Find and return a sorted list of all the origins/caches that may
-// be able to fulfill the request.
-func getSortedAds(ctx *gin.Context, requestId uuid.UUID) (sortedOrigins, sortedCaches []copyAd, err error) {
+// be able to fulfill the request, together with the namespace ad the
+// request resolved to.
+func getSortedAds(ctx *gin.Context, requestId uuid.UUID) (sortedOrigins, sortedCaches []copyAd, nsAd server_structs.NamespaceAd, err error) {
 	// Start off by getting all ads that support the given request path. In this case, an "ad" is a struct
 	// containing the server ad and the namespace ad for the request path. We track both to treat matchmaking
 	// as a function over the coupling of server+namespace.
@@ -428,14 +564,22 @@ func getSortedAds(ctx *gin.Context, requestId uuid.UUID) (sortedOrigins, sortedC
 	originAds, cacheAds := getAdsForPath(reqPath)
 
 	// If there are no matching origin ads, then we also assume no caches should be serving the object as shutting
-	// down the origin(s) is the same as unplugging from the federation.
+	// down the origin(s) is the same as unplugging from the federation. The one exception is a namespace whose
+	// owner stored an auth state in the registry: it stays served by the caches that hold a copy.
 	if len(originAds) == 0 {
 		// If the director restarted recently, tell the client to try again soon by sending a 429
 		if inStartupSequence() {
-			return nil, nil, directorStartupErr{reqPath}
-		} else {
-			return nil, nil, noOriginsForNsErr{reqPath}
+			return nil, nil, server_structs.NamespaceAd{}, directorStartupErr{reqPath}
 		}
+		regNs := server_structs.LongestNSMatch(reqPath, getRegistryNamespaceAds())
+		if regNs == nil {
+			return nil, nil, server_structs.NamespaceAd{}, noOriginsForNsErr{reqPath}
+		}
+		holders, err := sortCachesHoldingObject(ctx, requestId, reqPath, *regNs, cacheAds)
+		if err != nil {
+			return nil, nil, server_structs.NamespaceAd{}, err
+		}
+		return nil, holders, *regNs, nil
 	}
 
 	// Of the origins supporting the path, filter out those that don't support some other
@@ -449,7 +593,7 @@ func getSortedAds(ctx *gin.Context, requestId uuid.UUID) (sortedOrigins, sortedC
 	if len(sortedOrigins) == 0 {
 		// Since caches are supposed to act on behalf of origins, the fact that there are no
 		// origins capable of supporting the request means we can fail early.
-		return nil, nil, noOriginsForReqErr{verb: mapHTTPVerbToPelVerbWithContext(reqVerb, ctx), queries: mapQueriesToCaps(ctx)}
+		return nil, nil, server_structs.NamespaceAd{}, noOriginsForReqErr{verb: mapHTTPVerbToPelVerbWithContext(reqVerb, ctx), queries: mapQueriesToCaps(ctx)}
 	}
 
 	// Some of the Origins we're keeping track of up to this point may require specific features
@@ -498,7 +642,7 @@ func getSortedAds(ctx *gin.Context, requestId uuid.UUID) (sortedOrigins, sortedC
 	}
 
 	// All sorted Origins share the same namespace prefix by definition; grab it once.
-	nsAd := sortedOrigins[0].NamespaceAd
+	nsAd = sortedOrigins[0].NamespaceAd
 
 	// Generate availability maps for Origins eagerly (before sorting). This is needed because:
 	//  1. For read requests, Origins that don't have the object must be filtered out entirely.
@@ -511,7 +655,7 @@ func getSortedAds(ctx *gin.Context, requestId uuid.UUID) (sortedOrigins, sortedC
 	originAvailabilityMap, _, err := generateAvailabilityMaps(ctx, oServAds, nil, nsAd, requestId)
 	if err != nil {
 		if _, ok := err.(objectNotFoundErr); ok {
-			return nil, nil, err
+			return nil, nil, server_structs.NamespaceAd{}, err
 		}
 		// Non-objectNotFound stat errors should not be surfaced to the client.
 		// Log the error and proceed with a neutral (all-available) map so the sort
@@ -611,7 +755,7 @@ func getSortedAds(ctx *gin.Context, requestId uuid.UUID) (sortedOrigins, sortedC
 	}
 	wg.Wait()
 	if lastError != nil {
-		return nil, nil, lastError
+		return nil, nil, server_structs.NamespaceAd{}, lastError
 	}
 
 	// Provide redirect debugging info if asked to. This gets set in the context and should be retrieved
@@ -624,5 +768,5 @@ func getSortedAds(ctx *gin.Context, requestId uuid.UUID) (sortedOrigins, sortedC
 	// function or not.
 	sortedCaches = append(sortedCaches, unknownCaches...)
 
-	return sortedOrigins, sortedCaches, nil
+	return sortedOrigins, sortedCaches, nsAd, nil
 }
