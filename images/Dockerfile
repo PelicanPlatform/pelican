@@ -592,9 +592,12 @@ ENDRUN
 #################################################################
 # Pelican Client
 #################################################################
-FROM gcr.io/distroless/static-debian13:nonroot@sha256:8ce6dd87e9823c5b48dcfb2c8604714ccb351ce59607327bcc4957448da279b5 AS client
+FROM alpine:3.24.4@sha256:f59abe656b692d901e184be3445e084786602108599d2a51d229c0f5a48c71bf AS client
+
 ARG TARGETOS TARGETARCH
 COPY --from=pelican-build /pelican-build/dist/pelican_${TARGETOS}_${TARGETARCH}/pelican /bin/pelican
+RUN ["/usr/sbin/adduser", "-D", "-u", "1000", "pelican"]
+USER pelican
 ENTRYPOINT ["/bin/pelican"]
 
 #################################################################
