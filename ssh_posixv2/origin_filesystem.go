@@ -488,7 +488,23 @@ func (f *sshFile) Read(p []byte) (n int, err error) {
 
 	n, err = f.reader.Read(p)
 	f.readOffset += int64(n)
+	if err != nil && err != io.EOF {
+		f.logBrokenRead(err)
+	}
 	return n, err
+}
+
+// logBrokenRead records that the helper's response ended before the object
+// did.  The status of a download is sent to the client before the first byte
+// of the object, so both the origin and the helper log such a request as a
+// success; this message is the origin's only trace of the failure.
+func (f *sshFile) logBrokenRead(err error) {
+	if f.ctx.Err() != nil {
+		// The request was cancelled, usually because the client hung up.
+		sshLog.Debugf("Read of %s from the SSH helper stopped at offset %d after the request was cancelled: %v", f.name, f.readOffset, err)
+		return
+	}
+	sshLog.Warnf("Read of %s from the SSH helper failed at offset %d: %v", f.name, f.readOffset, err)
 }
 
 // Seek seeks to a position in the file
