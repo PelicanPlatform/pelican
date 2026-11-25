@@ -34,7 +34,6 @@ import (
 
 	"github.com/pelicanplatform/pelican/config"
 	"github.com/pelicanplatform/pelican/database"
-	"github.com/pelicanplatform/pelican/oa4mp"
 	"github.com/pelicanplatform/pelican/param"
 	"github.com/pelicanplatform/pelican/server_structs"
 	"github.com/pelicanplatform/pelican/server_utils"
@@ -166,6 +165,8 @@ func handleDispatch(ctx *gin.Context) {
 		handleDeviceVerifySubmit(provider)(ctx)
 	case action == "userinfo" && ctx.Request.Method == http.MethodGet:
 		handleUserInfo(provider)(ctx)
+	case action == "access" && ctx.Request.Method == http.MethodGet:
+		handleAccessQuery(provider)(ctx)
 	case action == "revoke" && ctx.Request.Method == http.MethodPost:
 		handleRevoke(provider)(ctx)
 	case action == "introspect" && ctx.Request.Method == http.MethodPost:
@@ -502,57 +503,11 @@ func handleAuthorize(provider *OIDCProvider) gin.HandlerFunc {
 			return
 		}
 
-		// Calculate allowed scopes for this user using per-namespace rules
-		// when available, falling back to the global rules.
-		var allowedScopes []string
-		var matchedGroups []string
-		if len(provider.AuthzRules) > 0 {
-			allowedScopes, matchedGroups = oa4mp.CalculateAllowedScopesWithRules(provider.AuthzRules, user, userID, groups)
-		} else {
-			allowedScopes, matchedGroups = oa4mp.CalculateAllowedScopes(user, userID, groups)
-		}
-		serverDB := database.ServerDatabase
-		if serverDB == nil {
-			serverDB = provider.storage.db
-		}
-		collectionScopes, collectionGroups, colErr := oa4mp.GetUserCollectionScopes(serverDB, user, userID, groups, provider.Namespace)
-		if colErr != nil {
-			log.WithError(colErr).Warn("Embedded issuer: failed to get collection scopes")
-		} else {
-			allowedScopes = append(allowedScopes, collectionScopes...)
-			matchedGroups = oa4mp.MergeGroups(matchedGroups, collectionGroups)
-		}
-
-		// Filter requested scopes to what the user is allowed.
-		// When a requested scope is broader than what's permitted,
-		// substitute in all narrower allowed scopes that fall under it.
-		//
-		// Standard OIDC scopes (openid, offline_access, wlcg, profile,
-		// email) are protocol-level and not governed by the user's data
-		// authorization rules. They bypass the user-authorization check
-		// but are still subject to the client's configured scope list so
-		// that operators can restrict which clients receive them.
-		clientScopes := ar.GetClient().GetScopes()
-		for _, scope := range ar.GetRequestedScopes() {
-			scope = cleanScopePath(scope)
-			var candidates []string
-			switch {
-			case scope == "pelican.transfer":
-				// Authorization-gated, not a free standard scope: granted only
-				// to users permitted to use the transfer API.
-				if transferAccessAllowed(serverDB, userID, groups) {
-					candidates = []string{scope}
-				}
-			case isStandardScope(scope) || scopeAllowed(scope, allowedScopes):
-				candidates = []string{scope}
-			default:
-				candidates = collectNarrowerScopes(scope, allowedScopes)
-			}
-			for _, s := range candidates {
-				if scopeAllowed(s, clientScopes) {
-					ar.GrantScope(s)
-				}
-			}
+		// Grant the requested scopes the user's authorization covers (see
+		// grantRequestedScopes), within the client's configured scope list.
+		allowedScopes, matchedGroups, serverDB := provider.userAllowedScopes(user, userID, groups)
+		for _, scope := range grantRequestedScopes(ar.GetRequestedScopes(), allowedScopes, ar.GetClient().GetScopes(), serverDB, userID, groups) {
+			ar.GrantScope(scope)
 		}
 
 		// Grant the WLCG wildcard audience so that caches (and any
@@ -784,54 +739,13 @@ func handleDeviceVerifySubmit(provider *OIDCProvider) gin.HandlerFunc {
 			return
 		}
 
-		// Calculate allowed scopes using per-namespace rules when available
-		var allowedScopes []string
-		var matchedGroups []string
-		if len(provider.AuthzRules) > 0 {
-			allowedScopes, matchedGroups = oa4mp.CalculateAllowedScopesWithRules(provider.AuthzRules, user, userID, groups)
-		} else {
-			allowedScopes, matchedGroups = oa4mp.CalculateAllowedScopes(user, userID, groups)
-		}
-		serverDB := database.ServerDatabase
-		if serverDB == nil {
-			serverDB = provider.storage.db
-		}
-		collectionScopes, collectionGroups, colErr := oa4mp.GetUserCollectionScopes(serverDB, user, userID, groups, provider.Namespace)
-		if colErr == nil {
-			allowedScopes = append(allowedScopes, collectionScopes...)
-			matchedGroups = oa4mp.MergeGroups(matchedGroups, collectionGroups)
-		}
-
 		// Parse requested scopes from the device code session
 		var requestedScopes []string
 		if err := json.Unmarshal([]byte(dc.Scopes), &requestedScopes); err != nil {
 			requestedScopes = []string{}
 		}
 
-		// Filter scopes — when a requested scope is broader than what's
-		// permitted, substitute in all narrower allowed scopes.
-		// Standard OIDC scopes (openid, offline_access, etc.) bypass
-		// the user-authorization check (they are protocol-level, not
-		// data-access scopes) but are still filtered against the
-		// client's configured scope list in the second pass below.
-		grantedScopes := make([]string, 0)
-		for _, scope := range requestedScopes {
-			scope = cleanScopePath(scope)
-			switch {
-			case scope == "pelican.transfer":
-				// Authorization-gated, not a free standard scope: granted only
-				// to users permitted to use the transfer API.
-				if transferAccessAllowed(serverDB, userID, groups) {
-					grantedScopes = append(grantedScopes, scope)
-				}
-			case isStandardScope(scope) || scopeAllowed(scope, allowedScopes):
-				grantedScopes = append(grantedScopes, scope)
-			default:
-				grantedScopes = append(grantedScopes, collectNarrowerScopes(scope, allowedScopes)...)
-			}
-		}
-
-		// Also enforce the client's configured scope allow-list: a device
+		// The client's configured scope list bounds the grant: a device
 		// client limited to certain scopes must not obtain broader scopes
 		// even if the user's authorization rules would permit them.
 		clientObj, clientErr := provider.Storage().GetClient(ctx, dc.ClientID)
@@ -840,14 +754,8 @@ func handleDeviceVerifySubmit(provider *OIDCProvider) gin.HandlerFunc {
 			ctx.JSON(http.StatusInternalServerError, gin.H{"status": "error", "error": "Failed to load client"})
 			return
 		}
-		clientScopes := clientObj.GetScopes()
-		filteredScopes := make([]string, 0, len(grantedScopes))
-		for _, scope := range grantedScopes {
-			if scopeAllowed(scope, clientScopes) {
-				filteredScopes = append(filteredScopes, scope)
-			}
-		}
-		grantedScopes = filteredScopes
+		allowedScopes, matchedGroups, serverDB := provider.userAllowedScopes(user, userID, groups)
+		grantedScopes := grantRequestedScopes(requestedScopes, allowedScopes, clientObj.GetScopes(), serverDB, userID, groups)
 
 		issuerURL := provider.Issuer()
 		session := DefaultOIDCSession(user, issuerURL, matchedGroups, grantedScopes)
