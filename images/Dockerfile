@@ -592,11 +592,11 @@ ENDRUN
 #################################################################
 # Pelican Client
 #################################################################
-FROM docker.io/library/busybox:1.38.0@sha256:f97baa533a26513c453a362be331a43eb60214302f449c16571b23cea141dce4 AS client
+FROM alpine:3.24.4@sha256:f59abe656b692d901e184be3445e084786602108599d2a51d229c0f5a48c71bf AS client
 
 ARG TARGETOS TARGETARCH
 COPY --from=pelican-build /pelican-build/dist/pelican_${TARGETOS}_${TARGETARCH}/pelican /bin/pelican
-RUN ["/bin/adduser", "-D", "-u", "1000", "pelican"]
+RUN ["/usr/sbin/adduser", "-D", "-u", "1000", "pelican"]
 USER pelican
 ENTRYPOINT ["/bin/pelican"]
 
