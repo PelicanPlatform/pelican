@@ -2,18 +2,23 @@ import { BooleanField } from './BooleanField';
 import { StringField } from './StringField';
 import { IntegerField } from './IntegerField';
 import PubkeyField from './PubkeyField';
+import AuthStateField from './AuthStateField';
 
 import EpochTimeField from '@/app/registry/components/CustomRegistrationField/EpochTimeField';
 import EnumerationField from '@/app/registry/components/CustomRegistrationField/EnumerationField';
 import type { CustomRegistrationField } from '@/components/configuration';
 import { CustomRegistrationField as CustomRegistrationFieldConfiguration } from '@/components/configuration';
+import type { NamespaceAuthState } from '@/types';
 
 export type CustomRegistrationFieldProps =
   | (BaseCustomRegistrationFieldProps<number> & { type: 'int' })
   | (BaseCustomRegistrationFieldProps<string> & { type: 'string' })
   | (BaseCustomRegistrationFieldProps<boolean> & { type: 'bool' })
   | (BaseCustomRegistrationFieldProps<number> & { type: 'datetime' })
-  | (BaseCustomRegistrationFieldProps<string> & { type: 'enum' });
+  | (BaseCustomRegistrationFieldProps<string> & { type: 'enum' })
+  | (BaseCustomRegistrationFieldProps<NamespaceAuthState> & {
+      type: 'auth_state';
+    });
 
 export interface BaseCustomRegistrationFieldProps<T>
   extends CustomRegistrationFieldConfiguration {
@@ -46,6 +51,9 @@ const CustomRegistrationField = ({
 
     case 'enum':
       return <EnumerationField {...props} />;
+
+    case 'auth_state':
+      return <AuthStateField {...props} />;
   }
 };
 

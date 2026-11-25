@@ -27,7 +27,7 @@ import { NamespaceFormPage } from '@/app/registry/components';
 import { alertOnError } from '@/helpers/util';
 import { AlertDispatchContext } from '@/components/AlertProvider';
 
-const PostPage = ({ update }: NamespaceFormPage) => {
+const PostPage = ({ kind, update }: NamespaceFormPage) => {
   const dispatch = useContext(AlertDispatchContext);
 
   const [fromUrl, setFromUrl] = useState<URL | undefined>(undefined);
@@ -61,6 +61,7 @@ const PostPage = ({ update }: NamespaceFormPage) => {
           }}
         >
           <Form
+            kind={kind}
             onSubmit={async (namespace) => {
               await alertOnError(
                 async () =>

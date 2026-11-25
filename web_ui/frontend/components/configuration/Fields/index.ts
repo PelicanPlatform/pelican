@@ -96,7 +96,13 @@ export interface Option {
   name: string;
 }
 
-export type FieldType = 'string' | 'int' | 'bool' | 'datetime' | 'enum';
+export type FieldType =
+  | 'string'
+  | 'int'
+  | 'bool'
+  | 'datetime'
+  | 'enum'
+  | 'auth_state';
 
 export interface CustomRegistrationField {
   name: string;

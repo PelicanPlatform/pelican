@@ -44,7 +44,7 @@ export default function Page() {
         </Grid>
         <Grid size={12}>
           <AuthenticatedContent redirect={true} promptLogin={false}>
-            <PutPage update={putCache} />
+            <PutPage kind={'origin'} update={putCache} />
           </AuthenticatedContent>
         </Grid>
       </Grid>

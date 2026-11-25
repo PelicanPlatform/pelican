@@ -10,6 +10,7 @@ import React, {
 import useSWR from 'swr';
 
 import { RegistryNamespace } from '@/index';
+import type { NamespaceAuthState } from '@/types';
 import CustomRegistrationField from '@/app/registry/components/CustomRegistrationField/index';
 import {
   calculateKeys,
@@ -18,6 +19,7 @@ import {
   populateKey,
 } from '@/app/registry/components/util';
 import { CustomRegistrationFieldProps } from './CustomRegistrationField';
+import type { RegistrationKind } from '@/app/registry/components';
 import { alertOnError } from '@/helpers/util';
 import { optionsNamespaceRegistrationFields, UserService } from '@/helpers/api';
 import useServiceSWR from '@/hooks/useServiceSWR';
@@ -26,6 +28,7 @@ import { getUser } from '@/helpers/login';
 import { userOwnsNamespace } from '@/components/Namespace';
 
 interface FormProps {
+  kind: RegistrationKind;
   namespace?: RegistryNamespace;
   onSubmit: (data: Partial<RegistryNamespace>) => Promise<void>;
 }
@@ -37,11 +40,14 @@ const OWNER_EDITABLE_APPROVED_FIELDS = [
   'admin_metadata.description',
   'admin_metadata.institution',
   'admin_metadata.security_contact_user_id',
+  'auth_state',
 ];
+
+type FieldValue = string | number | boolean | NamespaceAuthState | null;
 
 const onChange = (
   name: string,
-  value: string | number | boolean | null | undefined,
+  value: FieldValue | undefined,
   setData: Dispatch<SetStateAction<Partial<RegistryNamespace | undefined>>>
 ) => {
   setData((prevData) => {
@@ -59,7 +65,7 @@ const onChange = (
   });
 };
 
-const Form = ({ namespace, onSubmit }: FormProps) => {
+const Form = ({ kind, namespace, onSubmit }: FormProps) => {
   const dispatch = useContext(AlertDispatchContext);
 
   const [formNamespace, setFormNamespace] = useState<
@@ -81,6 +87,18 @@ const Form = ({ namespace, onSubmit }: FormProps) => {
       }
     },
     { fallbackData: [] }
+  );
+
+  // Only a namespace prefix registration may carry an auth state; the registry
+  // answers 400 for one on an origin or cache registration. The field list it
+  // serves is the same for all three kinds, so the origin and cache forms leave
+  // the field off here.
+  const visibleFields = useMemo(
+    () =>
+      fields?.filter(
+        (field) => kind === 'namespace' || field.type !== 'auth_state'
+      ),
+    [fields, kind]
   );
 
   const { data: user } = useSWR('getUser', getUser);
@@ -157,8 +175,12 @@ const Form = ({ namespace, onSubmit }: FormProps) => {
       {restrictedEdit && (
         <Alert severity={'info'} sx={{ mb: 2 }}>
           This registration is approved. You can update its description,
-          institution, and security contact; the remaining fields are locked and
-          can only be changed by a registry administrator.
+          institution,{' '}
+          {kind === 'namespace'
+            ? 'security contact, and auth state'
+            : 'and security contact'}
+          ; the remaining fields are locked and can only be changed by a
+          registry administrator.
         </Alert>
       )}
       {adminUserAndExistingRegistration && (
@@ -195,12 +217,12 @@ const Form = ({ namespace, onSubmit }: FormProps) => {
           />
         </Box>
       )}
-      {fields &&
-        fields.map((field, index) => {
+      {visibleFields &&
+        visibleFields.map((field, index) => {
           return (
             <Box key={field.name} pt={index == 0 ? 0 : 2}>
               <CustomRegistrationField
-                onChange={(value: string | number | boolean | null) =>
+                onChange={(value: FieldValue) =>
                   onChange(field.name, value, setFormNamespace)
                 }
                 value={getValue(formNamespace, calculateKeys(field.name))}

@@ -44,7 +44,7 @@ export default function Page() {
         </Grid>
         <Grid size={12}>
           <AuthenticatedContent redirect={true}>
-            <PostPage update={postCache} />
+            <PostPage kind={'origin'} update={postCache} />
           </AuthenticatedContent>
         </Grid>
       </Grid>

@@ -172,6 +172,7 @@ func excludePubKey(nss []server_structs.Registration) (nssNew []NamespaceWOPubke
 			Pubkey:        ns.Pubkey,
 			AdminMetadata: ns.AdminMetadata,
 			Identity:      ns.Identity,
+			AuthState:     ns.AuthState,
 		}
 		nssNew = append(nssNew, nsNew)
 	}
