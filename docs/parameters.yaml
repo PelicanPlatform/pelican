@@ -263,6 +263,9 @@ components: ["client", "registry", "origin"]
 name: Transport.ResponseHeaderTimeout
 description: |+
   Maximum time the client should wait for the response headers to be received from the server.
+
+  An origin with an `Origin.StorageType` of "ssh" also gives its helper on the remote host this long to start answering each request.
+  For an upload, the time is counted from the moment the origin has sent the whole object to the helper.
 type: duration
 default: 10s
 components: ["client", "registry", "origin"]
@@ -760,9 +763,13 @@ components: ["origin"]
 name: Client.StoppedTransferTimeout
 description: |+
   A timeout indicating when a "stopped transfer" event should be triggered.
+
+  An origin with an `Origin.StorageType` of "ssh" also applies it to its helper on the remote host:
+  the origin abandons a transfer once the helper has moved no data for this long.
+  A slow or paused client does not count against it.
 type: duration
 default: 100s
-components: ["client"]
+components: ["client", "origin"]
 ---
 name: Client.SlowTransferRampupTime
 description: |+
