@@ -75,6 +75,12 @@ export function Issuer({ metadata }: { metadata: ParameterMetadataRecord }) {
     return merge(structuredClone(serverConfig), structuredClone(patch));
   }, [serverConfig, patch]);
 
+  // The issuer settings are written through the same config API as the main
+  // config page, so Server.ConfigReadOnly freezes them too.
+  const readOnly = useMemo(() => {
+    return serverConfig?.['Server.ConfigReadOnly'] === true;
+  }, [serverConfig]);
+
   const submitPatch = useCallback(
     async (patch: any) => {
       setStatus({ message: 'Submitting', severity: 'info' });
@@ -109,6 +115,7 @@ export function Issuer({ metadata }: { metadata: ParameterMetadataRecord }) {
           </Box>
           <BooleanToggle
             label={'Enable Issuer'}
+            readOnly={readOnly}
             value={configView?.['Origin.EnableIssuer'] as boolean | false}
             onClick={(x) => {
               const patch = { 'Origin.EnableIssuer': x };
@@ -125,12 +132,13 @@ export function Issuer({ metadata }: { metadata: ParameterMetadataRecord }) {
                 configView={configView}
                 metadata={metadata}
                 setPatch={setPatch}
+                readOnly={readOnly}
               />
             </Box>
           )}
           <Snackbar
             anchorOrigin={{ vertical: 'bottom', horizontal: 'center' }}
-            open={updatesPending}
+            open={updatesPending && !readOnly}
             message='Save Changes'
             action={
               <Box>
@@ -204,6 +212,7 @@ interface IssuerConfigFormProps {
   patch: ParameterValueRecord;
   configView: ParameterValueRecord;
   setPatch: (fieldPatch: any) => void;
+  readOnly?: boolean;
 }
 
 const IssuerConfigForm = ({
@@ -212,6 +221,7 @@ const IssuerConfigForm = ({
   patch,
   configView,
   setPatch,
+  readOnly,
 }: IssuerConfigFormProps) => {
   return (
     <>
@@ -220,6 +230,7 @@ const IssuerConfigForm = ({
         patch={patch}
         metadata={getKeyValues('Issuer.AuthenticationSource', metadata)}
         onChange={setPatch}
+        readOnly={readOnly}
         omitLabels={true}
         showDescription={true}
       />
@@ -230,6 +241,7 @@ const IssuerConfigForm = ({
             patch={patch}
             metadata={getKeyValues(OIDCConfig, metadata)}
             onChange={setPatch}
+            readOnly={readOnly}
             omitLabels={true}
             showDescription={true}
           />
@@ -238,6 +250,7 @@ const IssuerConfigForm = ({
             patch={patch}
             metadata={getKeyValues('Issuer.GroupSource', metadata)}
             onChange={setPatch}
+            readOnly={readOnly}
             omitLabels={true}
             showDescription={true}
           />
@@ -250,6 +263,7 @@ const IssuerConfigForm = ({
                 patch={patch}
                 metadata={getKeyValues(OIDCGroupConfig, metadata)}
                 onChange={setPatch}
+                readOnly={readOnly}
                 omitLabels={true}
                 showDescription={true}
               />
@@ -273,6 +287,7 @@ const IssuerConfigForm = ({
           metadata
         )}
         onChange={setPatch}
+        readOnly={readOnly}
         omitLabels={true}
         showDescription={true}
       />
@@ -283,10 +298,12 @@ const IssuerConfigForm = ({
 const BooleanToggle = ({
   label,
   value,
+  readOnly,
   onClick,
 }: {
   label: string;
   value: boolean;
+  readOnly?: boolean;
   onClick: (x: boolean) => void;
 }) => {
   const [disabled, setDisabled] = useState(false);
@@ -303,7 +320,7 @@ const BooleanToggle = ({
         <FormControlLabel
           control={
             <Switch
-              disabled={disabled}
+              disabled={disabled || readOnly}
               checked={value}
               onChange={(e) => {
                 setDisabled(true);

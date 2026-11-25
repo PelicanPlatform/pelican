@@ -7,6 +7,7 @@ export type BooleanFieldProps = {
   name: string;
   value: boolean;
   focused?: boolean;
+  readOnly?: boolean;
   onChange: (value: boolean) => void;
 };
 
@@ -15,6 +16,7 @@ const BooleanField = ({
   name,
   value,
   focused,
+  readOnly,
 }: BooleanFieldProps) => {
   const id = useMemo(() => createId(name), [name]);
   const labelId = useMemo(() => `${id}-label`, [id]);
@@ -27,6 +29,7 @@ const BooleanField = ({
         labelId={labelId}
         id={id}
         label={name}
+        readOnly={readOnly}
         value={value ? 1 : 0}
         onChange={(e) => onChange(e.target.value === 1)}
       >
