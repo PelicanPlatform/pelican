@@ -82,6 +82,11 @@ cd xrootd_build
 cmake .. -GNinja
 ninja
 ninja install
+# xrootd 6: install the config for the http plugin so xrootd knows how to handle http URLs
+# Can't use curl-plugin.conf from xrdcl-pelican because that refers to libXrdClCurl.so
+# instead of libXrdClHttp.so (new in xrootd 6)
+sudo mkdir -p /etc/xrootd/client.plugins.d/
+sudo cp ../config/client.plugins.d/http.conf /etc/xrootd/client.plugins.d/
 popd
 
 git clone --branch v1.8.4 https://github.com/PelicanPlatform/xrdcl-pelican.git
