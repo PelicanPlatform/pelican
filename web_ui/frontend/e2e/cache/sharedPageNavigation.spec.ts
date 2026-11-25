@@ -30,6 +30,10 @@ import { PERSONAS, signIn } from '../shared_tests/navigationTests';
  * offers an admin and the cache rail has no equivalent of. The module names
  * themselves are the old "shared" rail's rows, so their absence pins that it
  * is gone.
+ *
+ * This lives under cache/ because that project's server runs both an origin
+ * and a cache, so both /view/origin/ and /view/cache/ are actually served.
+ * The origin project's server runs no cache and would 404 the latter.
  */
 
 // Cache listed first, so the fallback (first module the process runs) is
