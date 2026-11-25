@@ -28,9 +28,12 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -1280,4 +1283,153 @@ func TestCallbackAndServeDefaultPort(t *testing.T) {
 	require.Error(t, err, "expected an error since nothing listens on port 443")
 	assert.NotContains(t, err.Error(), "missing port in address",
 		"error should not be 'missing port in address' after the fix")
+}
+
+// serveHelperOnPipe runs the helper's HTTP server on one end of an in-memory
+// connection and returns the other end.  It must be called inside a synctest
+// bubble: the connection's deadlines then follow the bubble's fake clock, so
+// the server's timeouts fire without any wall time passing.
+func serveHelperOnPipe(t *testing.T, handler http.Handler) net.Conn {
+	t.Helper()
+	serverConn, clientConn := net.Pipe()
+	srv := newHelperServer(handler)
+
+	// The listener hands out one connection.  Note when the server takes it
+	// and when the server is done with it.
+	var accepted atomic.Bool
+	finished := make(chan struct{})
+	srv.ConnState = func(_ net.Conn, state http.ConnState) {
+		switch state {
+		case http.StateNew:
+			accepted.Store(true)
+		case http.StateClosed:
+			close(finished)
+		}
+	}
+
+	go func() {
+		_ = srv.Serve(newOneShotConnListener(serverConn))
+	}()
+	t.Cleanup(func() {
+		_ = srv.Close()
+		_ = clientConn.Close()
+		_ = serverConn.Close()
+		// net/http can hold on to a connection for a moment after its
+		// handler returns, for example when part of the request body was
+		// left unread.  The bubble's clock stops when the test ends, so wait
+		// here, while it still runs, for the server to let the connection go.
+		synctest.Wait()
+		if accepted.Load() {
+			<-finished
+		}
+	})
+	return clientConn
+}
+
+// pipeClient returns an HTTP client that sends its one request over conn.
+func pipeClient(conn net.Conn) *http.Client {
+	return &http.Client{
+		Transport: &http.Transport{
+			DisableKeepAlives: true,
+			DialContext: func(context.Context, string, string) (net.Conn, error) {
+				return conn, nil
+			},
+		},
+	}
+}
+
+// TestHelperServerLongDownload verifies that the helper's server delivers
+// all of a response that takes two minutes to produce.
+func TestHelperServerLongDownload(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		const chunks = 6
+		const gap = 20 * time.Second
+		chunk := bytes.Repeat([]byte("d"), 1024)
+
+		conn := serveHelperOnPipe(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			for i := 0; i < chunks; i++ {
+				select {
+				case <-time.After(gap):
+				case <-r.Context().Done():
+					return
+				}
+				if _, err := w.Write(chunk); err != nil {
+					return
+				}
+				w.(http.Flusher).Flush()
+			}
+		}))
+
+		start := time.Now()
+		resp, err := pipeClient(conn).Get("http://helper/object")
+		require.NoError(t, err)
+		defer resp.Body.Close()
+
+		body, err := io.ReadAll(resp.Body)
+		require.NoError(t, err)
+		assert.Len(t, body, chunks*len(chunk))
+		assert.GreaterOrEqual(t, time.Since(start), chunks*gap)
+	})
+}
+
+// TestHelperServerLongUpload verifies that the helper's server reads all of
+// a request body that takes two minutes to arrive.
+func TestHelperServerLongUpload(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		const chunks = 6
+		const gap = 20 * time.Second
+		chunk := bytes.Repeat([]byte("u"), 1024)
+
+		conn := serveHelperOnPipe(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			n, err := io.Copy(io.Discard, r.Body)
+			if err != nil {
+				http.Error(w, err.Error(), http.StatusInternalServerError)
+				return
+			}
+			w.WriteHeader(http.StatusCreated)
+			_, _ = io.WriteString(w, strconv.FormatInt(n, 10))
+		}))
+
+		pr, pw := io.Pipe()
+		t.Cleanup(func() { _ = pr.Close() })
+		go func() {
+			for i := 0; i < chunks; i++ {
+				select {
+				case <-time.After(gap):
+				case <-t.Context().Done():
+					return
+				}
+				if _, err := pw.Write(chunk); err != nil {
+					return
+				}
+			}
+			_ = pw.Close()
+		}()
+
+		start := time.Now()
+		req, err := http.NewRequest(http.MethodPut, "http://helper/object", pr)
+		require.NoError(t, err)
+		resp, err := pipeClient(conn).Do(req)
+		require.NoError(t, err)
+		defer resp.Body.Close()
+
+		body, err := io.ReadAll(resp.Body)
+		require.NoError(t, err)
+		assert.Equal(t, http.StatusCreated, resp.StatusCode)
+		assert.Equal(t, strconv.Itoa(chunks*len(chunk)), string(body))
+		assert.GreaterOrEqual(t, time.Since(start), chunks*gap)
+	})
+}
+
+// TestHelperServerDropsSilentPeer verifies that the helper's server hangs up
+// on a peer that connects and never sends a request.
+func TestHelperServerDropsSilentPeer(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		conn := serveHelperOnPipe(t, http.NotFoundHandler())
+
+		start := time.Now()
+		_, err := conn.Read(make([]byte, 1))
+		assert.ErrorIs(t, err, io.EOF)
+		assert.Equal(t, helperReadHeaderTimeout, time.Since(start))
+	})
 }
