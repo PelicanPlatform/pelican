@@ -380,7 +380,7 @@ type (
 		file  *transferFile
 	}
 
-	// Different types of synchronization for recursize transfers
+	// Different types of synchronization for recursive transfers
 	SyncLevel int
 
 	// An object able to process transfer jobs.
@@ -6015,7 +6015,7 @@ func RemoteObjectBaseName(remotePath string) (string, error) {
 // Recursively walks through the remote server collection, emitting transfer files
 // for the engine to process.
 func (te *TransferEngine) walkDirDownloadHelper(job *clientTransferJob, transfers []transferAttemptDetails, remotePath string, client *gowebdav.Client) error {
-	// Check for cancelation since the client does not respect the context
+	// Check for cancellation since the client does not respect the context
 	if err := job.job.ctx.Err(); err != nil {
 		return err
 	}

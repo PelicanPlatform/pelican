@@ -531,7 +531,7 @@ func TestRegistryKeyChainingOSDF(t *testing.T) {
 	require.ErrorContains(t, err, "Cannot register a namespace that is suffixed or prefixed")
 
 	// Make sure we can register things similar but distinct in prefix and suffix
-	err = registry_client.NamespaceRegister(privKey, registrySvr.URL+"/api/v1.0/registry", "", "/fo", "test-site-name")
+	err = registry_client.NamespaceRegister(privKey, registrySvr.URL+"/api/v1.0/registry", "", "/fo", "test-site-name") // codespell:ignore fo
 	require.NoError(t, err)
 	err = registry_client.NamespaceRegister(privKey, registrySvr.URL+"/api/v1.0/registry", "", "/foo/barz", "test-site-name")
 	require.NoError(t, err)

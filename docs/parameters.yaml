@@ -5758,7 +5758,7 @@ description: |+
   registering with the federation's Registry (overriding the service's hostname, which is the default).
   Origins currently always use the hostname at the Registry.
 
-  For both cahces/origins the sitename will be displayed as the service's name in the federation's Director.
+  For both caches/origins the sitename will be displayed as the service's name in the federation's Director.
 type: string
 default: ${Server.Hostname}
 components: ["cache", "origin"]
