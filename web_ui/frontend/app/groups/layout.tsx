@@ -18,20 +18,19 @@
 
 // Groups are server-wide (not origin-specific), so the route lives at
 // the top level — `/groups/...` rather than under any one server type.
-// We use Navigation with sharedPage=true (same chrome as /settings and
-// /config, which are also server-type-agnostic) and intentionally do
-// NOT gate to admins: any authenticated user can list the groups they
-// belong to, and only the management actions inside are gated.
+// We use Navigation with sharedPage=true (same chrome as /settings, which is
+// also server-type-agnostic) and intentionally do NOT gate to admins: any
+// authenticated user can list the groups they belong to, and only the
+// management actions inside are gated.
 //
-// We render the Settings sub-navigation here too so admins clicking
-// "Groups" from the /settings/ sidebar don't lose their context.
-// SubNavigation gates itself on admin — non-admin members still see
-// the page without the (admin-only) sub-nav.
+// Deliberately no SubNavigation: Groups is a primary destination in the rail,
+// and rendering the administration menu beside it shrank the rail on arrival
+// — you clicked a top-level item and the navigation you clicked it from
+// folded away.
 
-import { Box, Grid } from '@mui/material';
+import { Box } from '@mui/material';
 import { Main, PaddedContent } from '@/components/layout';
 import { Navigation } from '@/components/layout/Navigation';
-import SubNavigation from '@/app/settings/components/SubNavigation';
 
 export const metadata = {
   title: 'Groups',
@@ -46,21 +45,7 @@ export default function GroupsLayout({
     <Navigation sharedPage={true}>
       <Main>
         <PaddedContent>
-          <Grid container spacing={2}>
-            <Grid size={'auto'}>
-              <SubNavigation />
-            </Grid>
-            <Grid
-              size={{
-                xs: 12,
-                md: 12,
-                lg: 10,
-                xl: 8,
-              }}
-            >
-              <Box width={'100%'}>{children}</Box>
-            </Grid>
-          </Grid>
+          <Box width={'100%'}>{children}</Box>
         </PaddedContent>
       </Main>
     </Navigation>

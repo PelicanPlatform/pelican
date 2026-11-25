@@ -1,3 +1,15 @@
+# Each server's healthcheck polls /api/v1.0/health on its own web port, the
+# endpoint the server itself pings during startup. Dependants wait for
+# `service_healthy` rather than plain container start, so the director is
+# answering before the registry starts, and both before the origin and cache.
+# -k because the dev certificates are self-signed. start_period covers the
+# first boot, when a server generates its keys and certificates.
+x-pelican-healthcheck: &pelican-healthcheck
+  interval: 5s
+  timeout: 3s
+  retries: 5
+  start_period: 60s
+
 services:
   # Build pelican binary
   pelican-builder:
@@ -5,24 +17,48 @@ services:
     working_dir: /app
     volumes:
       - ../../:/app
-    command: build --clean --snapshot --config .goreleaser.generated.yml
+    command: build --clean --snapshot --config .goreleaser.dev.yml
 
-  pelican-server-central:
-    image: hub.osg-htc.org/pelican-ci/pelican-dev:latest-itb
+  pelican-server-director:
+    image: hub.opensciencegrid.org/pelican_platform/pelican-dev:latest-itb
+    ports:
+      - '8441:8441'
+    working_dir: /app
+    volumes:
+      - ../../dist/pelican-server_linux_arm64_v8.0/:/app # Replace with the correct path to the built binary
+      - ../../local/director/:/etc/pelican/
+    command: ./pelican-server serve --module director
+    environment:
+      - SSL_CERT_DIR=/etc/pelican/certificates
+    healthcheck:
+      <<: *pelican-healthcheck
+      test: ['CMD', 'curl', '-fsk', 'https://localhost:8441/api/v1.0/health']
+
+  pelican-server-registry:
+    depends_on:
+      pelican-server-director:
+        condition: service_healthy
+    image: hub.opensciencegrid.org/pelican_platform/pelican-dev:latest-itb
     ports:
       - '8440:8440'
     working_dir: /app
     volumes:
       - ../../dist/pelican-server_linux_arm64_v8.0/:/app # Replace with the correct path to the built binary
       - ../../local/registry/:/etc/pelican/
-    command: ./pelican-server serve --module registry,director
+    command: ./pelican-server serve --module registry
     environment:
       - SSL_CERT_DIR=/etc/pelican/certificates
+    healthcheck:
+      <<: *pelican-healthcheck
+      test: ['CMD', 'curl', '-fsk', 'https://localhost:8440/api/v1.0/health']
 
   pelican-server-origin:
     depends_on:
-      - pelican-server-central
-    image: hub.osg-htc.org/pelican-ci/pelican-dev:latest-itb
+      pelican-server-director:
+        condition: service_healthy
+      pelican-server-registry:
+        condition: service_healthy
+    image: hub.opensciencegrid.org/pelican_platform/pelican-dev:latest-itb
     ports:
       - '8444:8444'
       - '8445:8445'
@@ -31,6 +67,30 @@ services:
       - ../../dist/pelican-server_linux_arm64_v8.0/:/app # Replace with the correct path to the built binary
       - ../../local/:/etc/pelican/
     command: ./pelican-server serve --module origin
+    healthcheck:
+      <<: *pelican-healthcheck
+      test: ['CMD', 'curl', '-fsk', 'https://localhost:8444/api/v1.0/health']
+
+  pelican-server-cache:
+    depends_on:
+      pelican-server-director:
+        condition: service_healthy
+      pelican-server-registry:
+        condition: service_healthy
+    image: hub.opensciencegrid.org/pelican_platform/pelican-dev:latest-itb
+    ports:
+      - '8446:8444'
+      - '8447:8445'
+    working_dir: /app
+    volumes:
+      - ../../dist/pelican-server_linux_arm64_v8.0/:/app # Replace with the correct path to the built binary
+      - ../../local/:/etc/pelican/
+    command: ./pelican-server serve --module cache
+    healthcheck:
+      <<: *pelican-healthcheck
+      # Same config directory as the origin, so the same in-container port;
+      # only the host mapping differs.
+      test: ['CMD', 'curl', '-fsk', 'https://localhost:8444/api/v1.0/health']
 
   # Run pelican API proxy
   pelican-api-proxy:

@@ -19,17 +19,19 @@
 'use client';
 
 import {
-  Box,
   Button,
   Collapse,
+  Divider,
   Skeleton,
   Stack,
   TextField,
   Typography,
 } from '@mui/material';
+import { ExpandLess, ExpandMore } from '@mui/icons-material';
 import { useRouter } from 'next/navigation';
 import { useContext, useEffect, useMemo, useState } from 'react';
 
+import AuthPanel from '../components/AuthPanel';
 import LoadingButton from '../components/LoadingButton';
 import PasswordInput from '../components/PasswordInput';
 import useSWR from 'swr';
@@ -74,42 +76,24 @@ const safeSameOriginPath = (raw: string): string | null => {
   }
 };
 
-const PasswordLogin = () => {
+/**
+ * Username + password sign-in.
+ *
+ * `collapsible` is true when OAuth is the primary route for this server, in
+ * which case the form is folded behind a link so the page leads with the
+ * button most callers want. The parent already knows which servers are
+ * enabled and which have OAuth; it used to be fetched a second time here.
+ */
+const PasswordLogin = ({ collapsible }: { collapsible: boolean }) => {
   const dispatch = useContext(AlertDispatchContext);
 
   const router = useRouter();
   const { mutate } = useSWR('getUser', getUser);
 
-  let [username, setUsername] = useState<string>('');
-  let [password, setPassword] = useState<string>('');
-  let [loading, setLoading] = useState(false);
+  const [username, setUsername] = useState<string>('');
+  const [password, setPassword] = useState<string>('');
+  const [loading, setLoading] = useState(false);
   const [toggled, setToggled] = useState(false);
-
-  const { data: enabledServers } = useSWR<ServerType[] | undefined>(
-    'getEnabledServers',
-    async () =>
-      await alertOnError(
-        getEnabledServers,
-        'Could not get enabled servers',
-        dispatch
-      )
-  );
-  const { data: oauthServers } = useSWR<ServerType[] | undefined>(
-    'getOauthEnabledServers',
-    async () =>
-      await alertOnError(
-        getOauthEnabledServers,
-        'Could not get oauth enabled servers',
-        dispatch
-      ),
-    { fallbackData: [] }
-  );
-
-  const serverIntersect = useMemo(() => {
-    if (enabledServers && oauthServers) {
-      return enabledServers.filter((server) => oauthServers.includes(server));
-    }
-  }, [enabledServers, oauthServers]);
 
   async function submit(username: string, password: string) {
     setLoading(true);
@@ -154,12 +138,11 @@ const PasswordLogin = () => {
     submit(username, password);
   }
 
-  const LoginComponent = (
+  const form = (
     <form onSubmit={onSubmit} action='#'>
-      <Stack spacing={1.5}>
+      <Stack spacing={2}>
         <TextField
           label='Username'
-          size='small'
           value={username}
           onChange={(e) => setUsername(e.target.value)}
           autoComplete='username'
@@ -168,49 +151,52 @@ const PasswordLogin = () => {
         <PasswordInput
           TextFieldProps={{
             label: 'Password',
-            InputProps: {
-              onChange: (e) => {
-                setPassword(e.target.value);
-              },
-            },
+            onChange: (e) => setPassword(e.target.value),
           }}
         />
-        <Box display={'flex'} flexDirection={'column'}>
-          <LoadingButton
-            variant='outlined'
-            sx={{ margin: 'auto' }}
-            color={'primary'}
-            type={'submit'}
-            loading={loading}
-          >
-            <span>Login</span>
-          </LoadingButton>
-        </Box>
+        <LoadingButton
+          variant='contained'
+          size='large'
+          fullWidth
+          type={'submit'}
+          loading={loading}
+        >
+          <span>Login</span>
+        </LoadingButton>
       </Stack>
     </form>
   );
 
-  if (
-    serverIntersect &&
-    (serverIntersect.includes('registry') ||
-      serverIntersect.includes('origin') ||
-      serverIntersect.includes('cache'))
-  ) {
-    return (
-      <Box display={'flex'} flexDirection={'column'} justifyContent={'center'}>
-        <Button
-          size={'small'}
-          variant={'text'}
-          onClick={() => setToggled(!toggled)}
-        >
-          Username + password login
-        </Button>
-        <Collapse in={toggled}>{LoginComponent}</Collapse>
-      </Box>
-    );
+  if (!collapsible) {
+    return form;
   }
 
-  return LoginComponent;
+  return (
+    <Stack spacing={1.5}>
+      <Divider>
+        <Typography variant={'caption'} color={'text.secondary'}>
+          or
+        </Typography>
+      </Divider>
+      <Button
+        size={'small'}
+        variant={'text'}
+        onClick={() => setToggled(!toggled)}
+        aria-expanded={toggled}
+        endIcon={
+          toggled ? (
+            <ExpandLess fontSize={'small'} />
+          ) : (
+            <ExpandMore fontSize={'small'} />
+          )
+        }
+        sx={{ alignSelf: 'center' }}
+      >
+        Username + password login
+      </Button>
+      <Collapse in={toggled}>{form}</Collapse>
+    </Stack>
+  );
 };
 
 export default function Home() {
@@ -251,56 +237,45 @@ export default function Home() {
     }
   }, [enabledServers, oauthServers]);
 
+  // OAuth is offered whenever any enabled server has it configured. The
+  // password form yields to it -- folding away behind a link -- only on the
+  // servers whose accounts are ordinarily OAuth-backed; a director keeps the
+  // form open because its local admin account is the usual way in.
+  const oauthEnabled =
+    !!serverIntersect &&
+    (['registry', 'origin', 'cache', 'director'] as ServerType[]).some((s) =>
+      serverIntersect.includes(s)
+    );
+  const passwordCollapsible =
+    !!serverIntersect &&
+    (['registry', 'origin', 'cache'] as ServerType[]).some((s) =>
+      serverIntersect.includes(s)
+    );
+
   return (
-    <>
-      <Box m={'auto'} mt={'20vh'} display={'flex'} flexDirection={'column'}>
-        <Box>
-          <Typography textAlign={'center'} variant={'h3'} component={'h3'}>
-            Login
-          </Typography>
-          <Box color={'grey'} mt={1} mb={2}>
-            <Typography
-              variant={'h6'}
-              component={'p'}
-              sx={{
-                textAlign: 'center',
-                whiteSpace: 'nowrap',
-                overflow: 'hidden',
-                textOverflow: 'ellipsis',
-              }}
+    <AuthPanel title={'Login'} description={'Administer your Pelican Platform'}>
+      {!serverIntersect && (
+        <Stack spacing={2} aria-busy={true} aria-label={'Loading sign-in'}>
+          <Skeleton variant={'rounded'} height={48} />
+          <Skeleton variant={'rounded'} height={48} />
+        </Stack>
+      )}
+      {serverIntersect && (
+        <Stack spacing={2}>
+          {oauthEnabled && (
+            <Button
+              size={'large'}
+              fullWidth
+              href={`/api/v1.0/auth/oauth/login?nextUrl=${returnUrl ? returnUrl : '/'}`}
+              variant={'contained'}
             >
-              Administer your Pelican Platform
-            </Typography>
-          </Box>
-        </Box>
-        {serverIntersect &&
-          (serverIntersect.includes('registry') ||
-            serverIntersect.includes('origin') ||
-            serverIntersect.includes('cache') ||
-            serverIntersect.includes('director')) && (
-            <>
-              <Box display={'flex'} justifyContent={'center'} mb={1}>
-                <Button
-                  size={'large'}
-                  href={`/api/v1.0/auth/oauth/login?nextUrl=${returnUrl ? returnUrl : '/'}`}
-                  variant={'contained'}
-                >
-                  Login with OAuth
-                </Button>
-              </Box>
-            </>
+              Login with OAuth
+            </Button>
           )}
-        {serverIntersect && <PasswordLogin />}
-        {!serverIntersect && (
-          <Skeleton
-            variant={'rectangular'}
-            height={90}
-            width={'100%'}
-            sx={{ borderRadius: 2 }}
-          />
-        )}
-      </Box>
-    </>
+          <PasswordLogin collapsible={passwordCollapsible} />
+        </Stack>
+      )}
+    </AuthPanel>
   );
 }
 

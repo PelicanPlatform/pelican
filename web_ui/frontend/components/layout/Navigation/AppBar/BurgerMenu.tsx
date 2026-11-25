@@ -1,17 +1,27 @@
 import React from 'react';
-import { Box, IconButton, List } from '@mui/material';
+import {
+  Box,
+  Divider,
+  IconButton,
+  List,
+  ListItem,
+  Skeleton,
+} from '@mui/material';
 import {
   Api,
   BugReport,
   Close,
   Description,
   GitHub,
-  HelpOutline,
+  Help,
 } from '@mui/icons-material';
 import {
+  NavigationEntry,
   NavigationProps,
   StaticNavigationItemProps,
+  isNavigationGroup,
 } from '@/components/layout/Navigation/index';
+import { evaluateOrReturn } from '@/helpers/util';
 import Container from '@mui/material/Container';
 import Toolbar from '@mui/material/Toolbar';
 import Image from 'next/image';
@@ -19,12 +29,15 @@ import PelicanLogo from '@/public/static/images/PelicanPlatformLogo_Icon.png';
 import Typography from '@mui/material/Typography';
 import UserMenu from '@/components/layout/Navigation/Sidebar/UserMenu';
 import AppBar from '@mui/material/AppBar';
-import { NavigationItem } from '@/components/layout/Navigation/AppBar/NavigationItem';
+import {
+  NavigationGroup,
+  NavigationItem,
+} from '@/components/layout/Navigation/AppBar/NavigationItem';
 import { getVersionNumber } from '@/components/layout/Navigation/Sidebar/AboutMenu';
 
 const helpMenu: StaticNavigationItemProps[] = [
   {
-    icon: <HelpOutline />,
+    icon: <Help />,
     title: 'Help',
     children: [
       {
@@ -54,11 +67,37 @@ const helpMenu: StaticNavigationItemProps[] = [
 
 type BurgerMenuProps = { onClose: () => void } & NavigationProps;
 
+/**
+ * Stands in for the destination list while we are still learning who the
+ * caller is -- the burger menu's half of the rail's placeholder, for the same
+ * reason: the rows that survive are exactly what is being waited on, so none
+ * are drawn until they are all known. See Sidebar/NavigationSkeleton.
+ */
+const MenuSkeleton = ({ rows }: { rows: number }) => (
+  <List aria-hidden>
+    {Array.from({ length: rows }, (_, i) => (
+      <ListItem key={i}>
+        <Skeleton variant={'rounded'} height={24} width={'100%'} />
+      </ListItem>
+    ))}
+  </List>
+);
+
+/** One row per potential destination, groups contributing their contents. */
+const countRows = (entries: NavigationEntry[]): number =>
+  entries.reduce(
+    (total, entry) =>
+      total + (isNavigationGroup(entry) ? entry.items.length : 1),
+    0
+  );
+
 const BurgerMenu: React.FC<BurgerMenuProps> = ({
   config,
+  authenticated,
   exportType,
   role,
   scopes,
+  pending,
   onClose,
 }) => {
   return (
@@ -76,9 +115,9 @@ const BurgerMenu: React.FC<BurgerMenuProps> = ({
             <Box sx={{ flexGrow: 1, display: { xs: 'flex', md: 'none' } }}>
               <IconButton
                 size='large'
-                aria-label='account of current user'
-                aria-controls='menu-appbar'
-                aria-haspopup='true'
+                // Was "account of current user", copied from an account
+                // control; this one closes the menu.
+                aria-label='Close navigation menu'
                 onClick={onClose}
               >
                 <Close />
@@ -96,7 +135,7 @@ const BurgerMenu: React.FC<BurgerMenuProps> = ({
               variant='h6'
               noWrap
               component='a'
-              href='#app-bar-with-responsive-menu'
+              href='/'
               sx={{
                 m: 2,
                 display: { xs: 'flex', md: 'none' },
@@ -111,35 +150,72 @@ const BurgerMenu: React.FC<BurgerMenuProps> = ({
               <br />
               Platform
             </Typography>
-            <Box sx={{ flexGrow: 0 }}>
-              <UserMenu
-                menuOptions={{
-                  anchorOrigin: {
-                    vertical: 'bottom',
-                    horizontal: 'left',
-                  },
-                  transformOrigin: {
-                    vertical: 'top',
-                    horizontal: 'right',
-                  },
-                }}
-              />
-            </Box>
           </Toolbar>
         </Container>
       </AppBar>
-      <List component='nav'>
-        {[...config, ...helpMenu].map((item, index) => (
-          <NavigationItem
-            key={index}
-            config={item}
-            role={role}
-            scopes={scopes}
-            exportType={exportType}
-            onClose={onClose}
+      <Box component={'nav'} aria-label={'Primary'}>
+        {pending ? (
+          <MenuSkeleton rows={countRows(config)} />
+        ) : (
+          <List>
+            {config.map((entry) =>
+              isNavigationGroup(entry) ? (
+                <NavigationGroup
+                  key={entry.group}
+                  group={entry}
+                  authenticated={authenticated}
+                  role={role}
+                  scopes={scopes}
+                  exportType={exportType}
+                  onClose={onClose}
+                />
+              ) : (
+                <NavigationItem
+                  key={evaluateOrReturn(entry.title)}
+                  config={entry}
+                  authenticated={authenticated}
+                  role={role}
+                  scopes={scopes}
+                  exportType={exportType}
+                  onClose={onClose}
+                />
+              )
+            )}
+          </List>
+        )}
+        {/*
+          The desktop rail's footer: account, then help, under a rule. Help
+          used to be appended to the destination list, so on a module ending
+          in a group (every one, now that Server closes each rail) it read as
+          that group's last entry. The account row replaces the icon that sat
+          in this drawer's toolbar, so the drawer has the same row -- red for
+          an admin -- as the rail.
+        */}
+        <Divider sx={{ mx: 2 }} />
+        <List>
+          <UserMenu
+            variant={'drawer'}
+            menuOptions={{
+              // The rail opens its menu to the right of the row, which on a
+              // phone is off the screen. Open it upward from the row instead.
+              anchorOrigin: { vertical: 'top', horizontal: 'left' },
+              transformOrigin: { vertical: 'bottom', horizontal: 'left' },
+              sx: {},
+            }}
           />
-        ))}
-      </List>
+          {helpMenu.map((entry) => (
+            <NavigationItem
+              key={evaluateOrReturn(entry.title)}
+              config={entry}
+              authenticated={authenticated}
+              role={role}
+              scopes={scopes}
+              exportType={exportType}
+              onClose={onClose}
+            />
+          ))}
+        </List>
+      </Box>
     </Box>
   );
 };
