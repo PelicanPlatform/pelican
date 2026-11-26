@@ -25,8 +25,39 @@ import (
 
 	"github.com/pelicanplatform/pelican/token"
 
+	"github.com/spf13/cobra"
 	"github.com/stretchr/testify/assert"
 )
+
+// The message for a missing flag names the profile that was chosen, not
+// always scitokens (#3835).
+func TestMissingProfileFlagsNamesTheChosenProfile(t *testing.T) {
+	newCmd := func(args ...string) *cobra.Command {
+		cmd := &cobra.Command{Use: "create"}
+		cmd.Flags().String("profile", "wlcg", "")
+		cmd.Flags().String("subject", "", "")
+		cmd.Flags().StringSlice("audience", []string{}, "")
+		cmd.Flags().StringSlice("scope", []string{}, "")
+		assert.NoError(t, cmd.Flags().Parse(args))
+		return cmd
+	}
+
+	assert.Equal(t, []string{
+		"The --audience flag must be populated for the wlcg profile",
+	}, missingProfileFlags(newCmd("--profile", "wlcg", "--subject", "someone")))
+
+	assert.Equal(t, []string{
+		"The --subject flag must be populated for the wlcg profile",
+		"The --audience flag must be populated for the wlcg profile",
+	}, missingProfileFlags(newCmd()))
+
+	assert.Equal(t, []string{
+		"The --audience flag must be populated for the scitokens2 profile",
+		"The --scope flag must be populated for the scitokens2 profile",
+	}, missingProfileFlags(newCmd("--profile", "scitokens2")))
+
+	assert.Empty(t, missingProfileFlags(newCmd("--profile", "wlcg", "--subject", "someone", "--audience", "https://example.org")))
+}
 
 func TestParseClaimsToTokenConfig(t *testing.T) {
 	// Should parse basic fields correctly
