@@ -121,6 +121,9 @@ func inferCopyObjectName(destURL *url.URL, source string) (string, error) {
 func copyMain(cmd *cobra.Command, args []string) {
 	ctx := cmd.Context()
 
+	// Set up signal handlers to flush logs on SIGTERM
+	client.SetupSignalHandlers()
+
 	// Need to check just stashcp since it does not go through root, the other modes get checked there
 	if strings.HasPrefix(execName, "stashcp") {
 		if val, err := cmd.Flags().GetBool("debug"); err == nil && val {
