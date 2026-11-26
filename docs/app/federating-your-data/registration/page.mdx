@@ -59,7 +59,7 @@ Once claimed, you will be directed to the registration form:
 2. Confirm the security contact (defaults to your account).
 3. Submit the form to transition status to `Pending` (displayed to admins as "Pending (Ready to review)").
 
-*Note: Your service does not require a restart during this process. It detects approval on its next advertisement cycle (about one minute) and goes live. An Origin is only accepted by the Director once its server registration **and every exported namespace** are approved.*
+*Note: Your service does not require a restart during this process. It detects approval on its next advertisement cycle (about one minute) and goes live. The Director accepts an Origin once its **server registration** is approved; an exported namespace that is not yet approved is withheld from routing until it is, while the Origin's approved namespaces stay live. The Origin's **Federation** health component shows a warning naming any withheld namespaces.*
 
 ## Post-Registration Management
 

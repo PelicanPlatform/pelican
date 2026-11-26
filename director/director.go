@@ -1332,15 +1332,7 @@ func registerServerAd(engineCtx context.Context, ctx *gin.Context, sType server_
 		return
 	}
 
-	approvalErrMsg := "You may find more information on " + param.Server_ExternalWebUrl.GetString()
-	// Prepare the admin approval error message
-	if param.Director_SupportContactEmail.GetString() != "" && param.Director_SupportContactUrl.GetString() != "" {
-		approvalErrMsg = fmt.Sprintf("Contact %s or visit %s for help.", param.Director_SupportContactEmail.GetString(), param.Director_SupportContactUrl.GetString())
-	} else if param.Director_SupportContactEmail.GetString() != "" {
-		approvalErrMsg = fmt.Sprintf("Contact %s for help.", param.Director_SupportContactEmail.GetString())
-	} else if param.Director_SupportContactUrl.GetString() != "" {
-		approvalErrMsg = fmt.Sprintf("Visit %s for help.", param.Director_SupportContactUrl.GetString())
-	}
+	approvalErrMsg := approvalHelpText()
 
 	ok, err := verifyAdvertiseToken(engineCtx, token, registryPrefix)
 	if err != nil {
@@ -1369,18 +1361,21 @@ func registerServerAd(engineCtx context.Context, ctx *gin.Context, sType server_
 		return
 	}
 
-	// For origin, also verify namespace registrations
+	// For origin, also verify namespace registrations.
+	// A namespace the registry has not approved yet is withheld from
+	// the ad rather than failing the whole advertisement.
+	var withheld []string
 	if sType == server_structs.OriginType {
+		approved := make([]server_structs.NamespaceAd, 0, len(ad.Namespaces))
 		for _, namespace := range ad.Namespaces {
 			// We're assuming there's only one token in the slice
 			token := strings.TrimPrefix(tokens[0], "Bearer ")
 			ok, err := verifyAdvertiseToken(engineCtx, token, namespace.Path)
 			if err != nil {
 				if err == adminApprovalErr {
-					log.Warningf("Failed to verify advertise token. Namespace %q requires administrator approval", namespace.Path)
-					ctx.JSON(http.StatusForbidden, gin.H{"approval_error": true, "error": fmt.Sprintf("The namespace %q was not approved by an administrator. %s", namespace.Path, approvalErrMsg)})
-					metrics.PelicanDirectorRejectedAdvertisements.With(prometheus.Labels{"hostname": ad.Name}).Inc()
-					return
+					log.Infof("Withholding namespace %q from the advertisement of %s %q: it has not been approved by an administrator", namespace.Path, sType.String(), ad.Name)
+					withheld = append(withheld, namespace.Path)
+					continue
 				} else {
 					log.Warningf("Failed to verify advertise token for namespace %q from %s %q: %v", namespace.Path, sType.String(), ad.Name, err)
 					ctx.JSON(http.StatusForbidden, server_structs.SimpleApiResp{
@@ -1401,7 +1396,9 @@ func registerServerAd(engineCtx context.Context, ctx *gin.Context, sType server_
 				metrics.PelicanDirectorRejectedAdvertisements.With(prometheus.Labels{"hostname": ad.Name}).Inc()
 				return
 			}
+			approved = append(approved, namespace)
 		}
+		ad.Namespaces = approved
 	}
 
 	// if we didn't receive a version from the ad but we were able to extract the request version from the user agent,
@@ -1484,11 +1481,31 @@ func registerServerAd(engineCtx context.Context, ctx *gin.Context, sType server_
 	}
 	ad.Now = time.Time{}
 
-	finishRegisterServeAd(engineCtx, ctx, &ad, sType)
+	finishRegisterServeAd(engineCtx, ctx, &ad, sType, withheld)
+}
+
+// approvalHelpText tells a server operator where to turn when the registry
+// has not approved their server or one of its namespaces: the configured
+// support contact when there is one, otherwise the director's web UI.
+func approvalHelpText() string {
+	email := param.Director_SupportContactEmail.GetString()
+	site := param.Director_SupportContactUrl.GetString()
+	switch {
+	case email != "" && site != "":
+		return fmt.Sprintf("Contact %s or visit %s for help.", email, site)
+	case email != "":
+		return fmt.Sprintf("Contact %s for help.", email)
+	case site != "":
+		return fmt.Sprintf("Visit %s for help.", site)
+	default:
+		return "You may find more information on " + param.Server_ExternalWebUrl.GetString()
+	}
 }
 
 // Finish registering the provided service ad (cache or origin) after authorization was completed.
-func finishRegisterServeAd(engineCtx context.Context, ctx *gin.Context, ad *server_structs.OriginAdvertise, sType server_structs.ServerType) {
+// withheld names the namespaces that were left out of the ad because the registry has not
+// approved them yet; they are reported back to the server in the response.
+func finishRegisterServeAd(engineCtx context.Context, ctx *gin.Context, ad *server_structs.OriginAdvertise, sType server_structs.ServerType, withheld []string) {
 	log.Debugf("finishRegisterServeAd received %+v", ad)
 	st := ad.StorageType
 	// Defaults to POSIX
@@ -1555,7 +1572,15 @@ func finishRegisterServeAd(engineCtx context.Context, ctx *gin.Context, ad *serv
 
 	recordAd(engineCtx, sAd, &ad.Namespaces)
 
-	ctx.JSON(http.StatusOK, server_structs.SimpleApiResp{Status: server_structs.RespOK, Msg: "Successful registration"})
+	resp := server_structs.AdvertiseResponse{
+		SimpleApiResp: server_structs.SimpleApiResp{Status: server_structs.RespOK, Msg: "Successful registration"},
+	}
+	if len(withheld) > 0 {
+		resp.Msg = fmt.Sprintf("Successful registration; %d namespace(s) withheld pending administrator approval: %s. %s",
+			len(withheld), strings.Join(withheld, ", "), approvalHelpText())
+		resp.WithheldNamespaces = withheld
+	}
+	ctx.JSON(http.StatusOK, resp)
 }
 
 func serverAdMetricMiddleware(ctx *gin.Context) {
