@@ -136,7 +136,7 @@ func TestGetUserCollectionScopes_ShareIntersection(t *testing.T) {
 		// share (she has ACL on the row) — the design's intersection
 		// is about *data plane*, not about hiding the share's
 		// existence from someone the share owner already let in.
-		assert.Contains(t, scopes, "collection.read:share-3")
+		assert.Contains(t, scopes, "collection.read:/share-3")
 		// Data plane: NO storage scope and NO share.access — both are
 		// pointless when the share owner can't read the underlying
 		// data anyway.

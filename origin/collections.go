@@ -31,11 +31,6 @@ func RegisterCollectionsAPI(group *gin.RouterGroup) {
 	group.PATCH("/:id", web_ui.AuthHandler, handleUpdateCollection)
 	group.DELETE("/:id", web_ui.AuthHandler, handleDeleteCollection)
 	group.GET("/:id", web_ui.AuthHandler, handleGetCollection)
-	// TODO: More collections work in the future, the notion of members is up in the air
-	// group.POST("/:id/members", web_ui.AuthHandler, handleAddCollectionMembers)
-	// group.DELETE("/:id/members", web_ui.AuthHandler, handleRemoveCollectionMembers)
-	// group.DELETE("/:id/members/:encoded_object_url", web_ui.AuthHandler, handleRemoveCollectionMember)
-	// group.GET("/:id/members", web_ui.AuthHandler, handleListCollectionMembers)
 	group.GET("/:id/metadata", web_ui.AuthHandler, handleGetCollectionMetadata)
 	group.PUT("/:id/metadata/:key", web_ui.AuthHandler, handlePutCollectionMetadata)
 	group.DELETE("/:id/metadata/:key", web_ui.AuthHandler, handleDeleteCollectionMetadata)
@@ -97,49 +92,48 @@ func callerIsCollectionAdmin(ctx *gin.Context) bool {
 		Groups:   groups,
 		Sub:      ctx.GetString("OIDCSub"),
 	}
-	if isAdmin, _ := web_ui.CheckAdmin(identity); isAdmin {
-		return true
-	}
-	if isCollAdmin, _ := web_ui.CheckCollectionAdmin(identity); isCollAdmin {
-		return true
-	}
-	return false
+	// server.admin implies server.collection_admin in the effective
+	// scope set, so the one check covers both roles.
+	isCollAdmin, _ := web_ui.CheckCollectionAdmin(identity)
+	return isCollAdmin
 }
 
-// hasExplicitBearerCollectionScope reports whether the caller presented
-// a bearer (Authorization: Bearer …) token whose verified scope set
-// contains the supplied collection.* scope EXPLICITLY — i.e. not via
-// the web_ui.access fallback that verifyTokenWithCollectionScope also
-// accepts. This is the path OA4MP / CLI clients use to drive a
-// collection action without holding a management role; we keep it
-// open in the management-endpoint authorization step.
-func hasExplicitBearerCollectionScope(ctx *gin.Context, scope token_scopes.TokenScope) bool {
-	auth := ctx.Request.Header.Get("Authorization")
-	if !strings.HasPrefix(auth, "Bearer ") {
-		return false
+// requireCaller resolves the authenticated caller. AuthHandler has already
+// refused unauthenticated requests, so an empty user gets 401 rather than
+// 500. On failure the response is written and ok is false.
+func requireCaller(ctx *gin.Context) (user, userId string, groups []string, ok bool) {
+	user, userId, groups, err := web_ui.GetUserGroups(ctx)
+	if err != nil {
+		ctx.JSON(http.StatusInternalServerError, server_structs.SimpleApiResp{
+			Status: server_structs.RespFailed,
+			Msg:    fmt.Sprintf("Failed to get user from context: %v", err),
+		})
+		return "", "", nil, false
 	}
-	_, ok, _ := token.Verify(ctx, token.AuthOption{
-		Sources: []token.TokenSource{token.Header},
-		Issuers: []token.TokenIssuer{token.LocalIssuer, token.APITokenIssuer},
-		Scopes:  []token_scopes.TokenScope{scope},
-	})
-	return ok
+	if user == "" {
+		ctx.JSON(http.StatusUnauthorized, server_structs.SimpleApiResp{
+			Status: server_structs.RespFailed,
+			Msg:    "Authentication required to perform this operation",
+		})
+		return "", "", nil, false
+	}
+	return user, userId, groups, true
 }
 
 // verifyTokenWithCollectionScope verifies a token with standard verification first,
 // and falls back to manual collection scope verification if standard verification fails.
-// This handles cases where OA4MP adds collection IDs to scopes (e.g., "collection.read:test_collection").
+// The fallback handles the path-form scopes the issuer mints ("collection.read:/",
+// "collection.modify:/<id>"), which the exact-match validator does not recognise.
 // For read operations on public collections, it also provides a fallback that doesn't require explicit scopes.
 //
 // Note: This accepts tokens with EITHER web_ui.access OR the specific collection scope.
 // This design allows both:
 //   - Web UI users (who have web_ui.access from login cookies) to access collections
-//   - CLI/API clients (who have collection-specific scopes from OAuth2 device flow) to access collections
+//   - CLI/API clients (who have collection-specific scopes from the OAuth2 device flow) to access collections
 //
-// AUTHENTICATION ONLY. The web_ui.access fallback means every logged-in
-// caller (including unprivileged ones) clears this gate. Management
-// endpoints must additionally call callerIsCollectionAdmin (or
-// equivalent) before mutating collection state.
+// AUTHENTICATION ONLY: every logged-in caller clears this gate. Handlers
+// must authorize separately (callerIsCollectionAdmin or the database's
+// ACL checks).
 func verifyTokenWithCollectionScope(ctx *gin.Context, expectedScope token_scopes.TokenScope, collectionID string) (status int, ok bool, err error) {
 	authOption := token.AuthOption{
 		Sources: []token.TokenSource{token.Cookie, token.Header},
@@ -164,9 +158,10 @@ func verifyTokenWithCollectionScope(ctx *gin.Context, expectedScope token_scopes
 	return status, false, err
 }
 
-// verifyCollectionScope manually verifies a token has a collection scope, handling scopes with collection IDs.
-// This is used as a fallback when standard token.Verify fails due to OA4MP adding collection IDs to scopes.
-// For read operations, it also checks if the collection is public as a final fallback.
+// verifyCollectionScope manually verifies a token has a collection scope in path
+// form ("collection.read:/" or "collection.read:/<id>"); an ID-bearing scope must
+// name collectionID when one is given. For read operations, it also checks if the
+// collection is public as a final fallback.
 func verifyCollectionScope(ctx *gin.Context, expectedScope token_scopes.TokenScope, collectionID string) bool {
 	// Extract token from Authorization header
 	headerToken := ctx.Request.Header["Authorization"]
@@ -243,7 +238,7 @@ func verifyCollectionScope(ctx *gin.Context, expectedScope token_scopes.TokenSco
 		}
 		log.Debugf("verifyCollectionScope: Checking scope '%s' against expected '%s'", scope, expectedScope.String())
 		// Use CheckCollectionScope helper which handles collection IDs
-		if token_scopes.CheckCollectionScope(scope, expectedScope) {
+		if token_scopes.CheckCollectionScope(scope, expectedScope, collectionID) {
 			log.Debugf("verifyCollectionScope: Scope match found! scope='%s', expected='%s'", scope, expectedScope.String())
 			// Extract user identity from the token (subject claim)
 			user := parsed.Subject()
@@ -464,14 +459,6 @@ func (r *RevokeAclReq) resolvedACLTarget() string {
 	return r.GroupIDSnakeAlt
 }
 
-type AddCollectionMembersReq struct {
-	Members []string `json:"members"`
-}
-
-type RemoveCollectionMembersReq struct {
-	Members []string `json:"members"`
-}
-
 type ListCollectionRes struct {
 	ID   string `json:"id"`
 	Name string `json:"name"`
@@ -594,19 +581,8 @@ func handleListCollections(ctx *gin.Context) {
 		return
 	}
 
-	user, userId, groups, err := web_ui.GetUserGroups(ctx)
-	if err != nil {
-		ctx.JSON(http.StatusInternalServerError, server_structs.SimpleApiResp{
-			Status: server_structs.RespFailed,
-			Msg:    fmt.Sprintf("Failed to get user from context: %v", err),
-		})
-		return
-	}
-	if user == "" {
-		ctx.JSON(http.StatusInternalServerError, server_structs.SimpleApiResp{
-			Status: server_structs.RespFailed,
-			Msg:    "Failed to get user from context",
-		})
+	user, userId, groups, ok := requireCaller(ctx)
+	if !ok {
 		return
 	}
 
@@ -714,15 +690,9 @@ func handleCreateCollection(ctx *gin.Context) {
 		return
 	}
 
-	// AUTHORIZATION: verifyTokenWithCollectionScope only AUTHENTICATES.
-	// Web UI cookies all carry web_ui.access, so without this guard every
-	// logged-in user could create a collection. Per the design contract,
-	// creating a collection is server.collection_admin (or
-	// server.admin, which transitively grants collection_admin); the
-	// bearer-API-token path with an explicit collection.create scope
-	// stays open for OA4MP / device-flow clients.
-	if !hasExplicitBearerCollectionScope(ctx, token_scopes.Collection_Create) &&
-		!callerIsCollectionAdmin(ctx) {
+	// verifyTokenWithCollectionScope only authenticates; creation requires
+	// server.collection_admin (server.admin implies it).
+	if !callerIsCollectionAdmin(ctx) {
 		ctx.JSON(http.StatusForbidden, server_structs.SimpleApiResp{
 			Status: server_structs.RespFailed,
 			Msg:    "you must hold server.collection_admin (or server.admin) to create a collection",
@@ -790,18 +760,8 @@ func handleCreateCollection(ctx *gin.Context) {
 		return
 	}
 
-	user, userId, _, err := web_ui.GetUserGroups(ctx)
-	if err != nil {
-		ctx.JSON(http.StatusInternalServerError, server_structs.SimpleApiResp{
-			Status: server_structs.RespFailed,
-			Msg:    fmt.Sprintf("Failed to get user from context: %v", err),
-		})
-	}
-	if user == "" {
-		ctx.JSON(http.StatusInternalServerError, server_structs.SimpleApiResp{
-			Status: server_structs.RespFailed,
-			Msg:    "Failed to get user from context",
-		})
+	_, userId, _, ok := requireCaller(ctx)
+	if !ok {
 		return
 	}
 
@@ -862,18 +822,8 @@ func handleUpdateCollection(ctx *gin.Context) {
 		return
 	}
 
-	user, userId, groups, err := web_ui.GetUserGroups(ctx)
-	if err != nil {
-		ctx.JSON(http.StatusInternalServerError, server_structs.SimpleApiResp{
-			Status: server_structs.RespFailed,
-			Msg:    fmt.Sprintf("Failed to get user from context: %v", err),
-		})
-	}
-	if user == "" {
-		ctx.JSON(http.StatusInternalServerError, server_structs.SimpleApiResp{
-			Status: server_structs.RespFailed,
-			Msg:    "Failed to get user from context",
-		})
+	user, userId, groups, ok := requireCaller(ctx)
+	if !ok {
 		return
 	}
 
@@ -922,284 +872,6 @@ func handleUpdateCollection(ctx *gin.Context) {
 	ctx.Status(http.StatusNoContent)
 }
 
-/*
-func handleRemoveCollectionMembers(ctx *gin.Context) {
-	authOption := token.AuthOption{
-		Sources: []token.TokenSource{token.Cookie, token.Header},
-		Issuers: []token.TokenIssuer{token.LocalIssuer, token.APITokenIssuer},
-		Scopes:  []token_scopes.TokenScope{token_scopes.WebUi_Access, token_scopes.Collection_Modify},
-	}
-	status, ok, err := token.Verify(ctx, authOption)
-	if !ok {
-		ctx.JSON(status, server_structs.SimpleApiResp{
-			Status: server_structs.RespFailed,
-			Msg:    err.Error(),
-		})
-		return
-	}
-
-	var req RemoveCollectionMembersReq
-	err = ctx.ShouldBindJSON(&req)
-	if err != nil {
-		ctx.JSON(http.StatusBadRequest, server_structs.SimpleApiResp{
-			Status: server_structs.RespFailed,
-			Msg:    fmt.Sprintf("Invalid request body: %v", err),
-		})
-		return
-	}
-
-	user, groups, err := web_ui.GetUserGroups(ctx)
-	if err != nil {
-		ctx.JSON(http.StatusInternalServerError, server_structs.SimpleApiResp{
-			Status: server_structs.RespFailed,
-			Msg:    fmt.Sprintf("Failed to get user from context: %v", err),
-		})
-	}
-	if user == "" {
-		ctx.JSON(http.StatusInternalServerError, server_structs.SimpleApiResp{
-			Status: server_structs.RespFailed,
-			Msg:    "Failed to get user from context",
-		})
-		return
-	}
-
-	isAdmin, _ := web_ui.CheckAdmin(user)
-
-	err = database.RemoveCollectionMembers(database.ServerDatabase, ctx.Param("id"), req.Members, user, groups, isAdmin)
-	if err != nil {
-		if errors.Is(err, gorm.ErrRecordNotFound) || errors.Is(err, database.ErrForbidden) {
-			ctx.JSON(http.StatusNotFound, server_structs.SimpleApiResp{
-				Status: server_structs.RespFailed,
-				Msg:    "collection not found",
-			})
-		} else {
-			ctx.JSON(http.StatusInternalServerError, server_structs.SimpleApiResp{
-				Status: server_structs.RespFailed,
-				Msg:    fmt.Sprintf("Failed to remove collection members: %v", err),
-			})
-		}
-		return
-	}
-
-	ctx.Status(http.StatusNoContent)
-}
-
-func handleRemoveCollectionMember(ctx *gin.Context) {
-	authOption := token.AuthOption{
-		Sources: []token.TokenSource{token.Cookie, token.Header},
-		Issuers: []token.TokenIssuer{token.LocalIssuer, token.APITokenIssuer},
-		Scopes:  []token_scopes.TokenScope{token_scopes.WebUi_Access, token_scopes.Collection_Modify},
-	}
-	status, ok, err := token.Verify(ctx, authOption)
-	if !ok {
-		ctx.JSON(status, server_structs.SimpleApiResp{
-			Status: server_structs.RespFailed,
-			Msg:    err.Error(),
-		})
-		return
-	}
-
-	encodedObjectURL := ctx.Param("encoded_object_url")
-	objectURL, err := url.PathUnescape(encodedObjectURL)
-	if err != nil {
-		ctx.JSON(http.StatusBadRequest, server_structs.SimpleApiResp{
-			Status: server_structs.RespFailed,
-			Msg:    fmt.Sprintf("Invalid encoded object URL: %v", err),
-		})
-		return
-	}
-
-	user, groups, err := web_ui.GetUserGroups(ctx)
-	if err != nil {
-		ctx.JSON(http.StatusInternalServerError, server_structs.SimpleApiResp{
-			Status: server_structs.RespFailed,
-			Msg:    fmt.Sprintf("Failed to get user from context: %v", err),
-		})
-	}
-	if user == "" {
-		ctx.JSON(http.StatusInternalServerError, server_structs.SimpleApiResp{
-			Status: server_structs.RespFailed,
-			Msg:    "Failed to get user from context",
-		})
-		return
-	}
-
-	isAdmin, _ := web_ui.CheckAdmin(user)
-
-	err = database.RemoveCollectionMembers(database.ServerDatabase, ctx.Param("id"), []string{objectURL}, user, groups, isAdmin)
-	if err != nil {
-		if errors.Is(err, gorm.ErrRecordNotFound) || errors.Is(err, database.ErrForbidden) {
-			ctx.JSON(http.StatusNotFound, server_structs.SimpleApiResp{
-				Status: server_structs.RespFailed,
-				Msg:    "collection not found",
-			})
-		} else {
-			ctx.JSON(http.StatusInternalServerError, server_structs.SimpleApiResp{
-				Status: server_structs.RespFailed,
-				Msg:    fmt.Sprintf("Failed to remove collection member: %v", err),
-			})
-		}
-		return
-	}
-
-	ctx.Status(http.StatusNoContent)
-}
-
-func handleAddCollectionMembers(ctx *gin.Context) {
-	authOption := token.AuthOption{
-		Sources: []token.TokenSource{token.Cookie, token.Header},
-		Issuers: []token.TokenIssuer{token.LocalIssuer, token.APITokenIssuer},
-		Scopes:  []token_scopes.TokenScope{token_scopes.WebUi_Access, token_scopes.Collection_Modify},
-	}
-
-	status, ok, err := token.Verify(ctx, authOption)
-	if !ok {
-		ctx.JSON(status, server_structs.SimpleApiResp{
-			Status: server_structs.RespFailed,
-			Msg:    err.Error(),
-		})
-		return
-	}
-
-	var req AddCollectionMembersReq
-	err = ctx.ShouldBindJSON(&req)
-	if err != nil {
-		ctx.JSON(http.StatusBadRequest, server_structs.SimpleApiResp{
-			Status: server_structs.RespFailed,
-			Msg:    fmt.Sprintf("Invalid request body: %v", err),
-		})
-		return
-	}
-
-	// validate the members are valid pelican URLs
-	for _, member := range req.Members {
-		if _, err := pelican_url.Parse(member, []pelican_url.ParseOption{}, []pelican_url.DiscoveryOption{}); err != nil {
-			ctx.JSON(http.StatusBadRequest, server_structs.SimpleApiResp{
-				Status: server_structs.RespFailed,
-				Msg:    fmt.Sprintf("Invalid member URL: %v", err),
-			})
-			return
-		}
-	}
-
-	user, groups, err := web_ui.GetUserGroups(ctx)
-	if err != nil {
-		ctx.JSON(http.StatusInternalServerError, server_structs.SimpleApiResp{
-			Status: server_structs.RespFailed,
-			Msg:    fmt.Sprintf("Failed to get user from context: %v", err),
-		})
-	}
-	if user == "" {
-		ctx.JSON(http.StatusInternalServerError, server_structs.SimpleApiResp{
-			Status: server_structs.RespFailed,
-			Msg:    "Failed to get user from context",
-		})
-		return
-	}
-
-	isAdmin, _ := web_ui.CheckAdmin(user)
-
-	err = database.AddCollectionMembers(database.ServerDatabase, ctx.Param("id"), req.Members, user, groups, isAdmin)
-	if err != nil {
-		if errors.Is(err, gorm.ErrRecordNotFound) || errors.Is(err, database.ErrForbidden) {
-			ctx.JSON(http.StatusNotFound, server_structs.SimpleApiResp{
-				Status: server_structs.RespFailed,
-				Msg:    "collection not found",
-			})
-		} else {
-			ctx.JSON(http.StatusInternalServerError, server_structs.SimpleApiResp{
-				Status: server_structs.RespFailed,
-				Msg:    fmt.Sprintf("Failed to add collection members: %v", err),
-			})
-		}
-		return
-	}
-
-	ctx.Status(http.StatusNoContent)
-}
-
-func handleListCollectionMembers(ctx *gin.Context) {
-	authOption := token.AuthOption{
-		Sources: []token.TokenSource{token.Cookie, token.Header},
-		Issuers: []token.TokenIssuer{token.LocalIssuer, token.APITokenIssuer},
-		Scopes:  []token_scopes.TokenScope{token_scopes.WebUi_Access, token_scopes.Collection_Read},
-	}
-	status, ok, err := token.Verify(ctx, authOption)
-	if !ok {
-		ctx.JSON(status, server_structs.SimpleApiResp{
-			Status: server_structs.RespFailed,
-			Msg:    err.Error(),
-		})
-		return
-	}
-
-	user, groups, err := web_ui.GetUserGroups(ctx)
-	if err != nil {
-		ctx.JSON(http.StatusInternalServerError, server_structs.SimpleApiResp{
-			Status: server_structs.RespFailed,
-			Msg:    fmt.Sprintf("Failed to get user from context: %v", err),
-		})
-	}
-	if user == "" {
-		ctx.JSON(http.StatusInternalServerError, server_structs.SimpleApiResp{
-			Status: server_structs.RespFailed,
-			Msg:    "Failed to get user from context",
-		})
-		return
-	}
-
-	sinceStr := ctx.Query("since")
-	var since *time.Time
-	if sinceStr != "" {
-		t, err := time.Parse(time.RFC3339, sinceStr)
-		if err != nil {
-			ctx.JSON(http.StatusBadRequest, server_structs.SimpleApiResp{
-				Status: server_structs.RespFailed,
-				Msg:    "Invalid 'since' timestamp format. Use ISO8601",
-			})
-			return
-		}
-		since = &t
-	}
-
-	limitStr := ctx.Query("limit")
-	limit := 100 // default
-	if limitStr != "" {
-		l, err := strconv.Atoi(limitStr)
-		if err != nil || l <= 0 {
-			ctx.JSON(http.StatusBadRequest, server_structs.SimpleApiResp{
-				Status: server_structs.RespFailed,
-				Msg:    "Invalid 'limit' parameter. Must be a positive integer",
-			})
-			return
-		}
-		if l > 1000 {
-			limit = 1000 // max
-		} else {
-			limit = l
-		}
-	}
-
-	members, err := database.GetCollectionMembers(database.ServerDatabase, ctx.Param("id"), user, groups, since, limit)
-	if err != nil {
-		if errors.Is(err, gorm.ErrRecordNotFound) || errors.Is(err, database.ErrForbidden) {
-			ctx.JSON(http.StatusNotFound, server_structs.SimpleApiResp{
-				Status: server_structs.RespFailed,
-				Msg:    "collection not found",
-			})
-		} else {
-			ctx.JSON(http.StatusInternalServerError, server_structs.SimpleApiResp{
-				Status: server_structs.RespFailed,
-				Msg:    fmt.Sprintf("Failed to list collection members: %v", err),
-			})
-		}
-		return
-	}
-
-	ctx.JSON(http.StatusOK, members)
-}
-*/
-
 func handleGetCollectionMetadata(ctx *gin.Context) {
 	collectionID := ctx.Param("id")
 	status, ok, err := verifyTokenWithCollectionScope(ctx, token_scopes.Collection_Read, collectionID)
@@ -1211,18 +883,8 @@ func handleGetCollectionMetadata(ctx *gin.Context) {
 		return
 	}
 
-	user, userId, groups, err := web_ui.GetUserGroups(ctx)
-	if err != nil {
-		ctx.JSON(http.StatusInternalServerError, server_structs.SimpleApiResp{
-			Status: server_structs.RespFailed,
-			Msg:    fmt.Sprintf("Failed to get user from context: %v", err),
-		})
-	}
-	if user == "" {
-		ctx.JSON(http.StatusInternalServerError, server_structs.SimpleApiResp{
-			Status: server_structs.RespFailed,
-			Msg:    "Failed to get user from context",
-		})
+	user, userId, groups, ok := requireCaller(ctx)
+	if !ok {
 		return
 	}
 
@@ -1289,18 +951,8 @@ func handlePutCollectionMetadata(ctx *gin.Context) {
 		value = string(bodyBytes)
 	}
 
-	user, userId, groups, err := web_ui.GetUserGroups(ctx)
-	if err != nil {
-		ctx.JSON(http.StatusInternalServerError, server_structs.SimpleApiResp{
-			Status: server_structs.RespFailed,
-			Msg:    fmt.Sprintf("Failed to get user from context: %v", err),
-		})
-	}
-	if user == "" {
-		ctx.JSON(http.StatusInternalServerError, server_structs.SimpleApiResp{
-			Status: server_structs.RespFailed,
-			Msg:    "Failed to get user from context",
-		})
+	user, userId, groups, ok := requireCaller(ctx)
+	if !ok {
 		return
 	}
 
@@ -1351,18 +1003,8 @@ func handleDeleteCollectionMetadata(ctx *gin.Context) {
 		return
 	}
 
-	user, userId, groups, err := web_ui.GetUserGroups(ctx)
-	if err != nil {
-		ctx.JSON(http.StatusInternalServerError, server_structs.SimpleApiResp{
-			Status: server_structs.RespFailed,
-			Msg:    fmt.Sprintf("Failed to get user from context: %v", err),
-		})
-	}
-	if user == "" {
-		ctx.JSON(http.StatusInternalServerError, server_structs.SimpleApiResp{
-			Status: server_structs.RespFailed,
-			Msg:    "Failed to get user from context",
-		})
+	user, userId, groups, ok := requireCaller(ctx)
+	if !ok {
 		return
 	}
 
@@ -1404,18 +1046,8 @@ func handleGetCollection(ctx *gin.Context) {
 		return
 	}
 
-	user, userId, groups, err := web_ui.GetUserGroups(ctx)
-	if err != nil {
-		ctx.JSON(http.StatusInternalServerError, server_structs.SimpleApiResp{
-			Status: server_structs.RespFailed,
-			Msg:    fmt.Sprintf("Failed to get user from context: %v", err),
-		})
-	}
-	if user == "" {
-		ctx.JSON(http.StatusInternalServerError, server_structs.SimpleApiResp{
-			Status: server_structs.RespFailed,
-			Msg:    "Failed to get user from context",
-		})
+	user, userId, groups, ok := requireCaller(ctx)
+	if !ok {
 		return
 	}
 
@@ -1517,20 +1149,8 @@ func handleDeleteCollection(ctx *gin.Context) {
 		return
 	}
 
-	user, userId, groups, err := web_ui.GetUserGroups(ctx)
-	if err != nil {
-		ctx.JSON(http.StatusInternalServerError, server_structs.SimpleApiResp{
-			Status: server_structs.RespFailed,
-			Msg:    fmt.Sprintf("Failed to get user from context: %v", err),
-		})
-		return
-	}
-
-	if user == "" {
-		ctx.JSON(http.StatusInternalServerError, server_structs.SimpleApiResp{
-			Status: server_structs.RespFailed,
-			Msg:    "Failed to get user from context",
-		})
+	user, userId, groups, ok := requireCaller(ctx)
+	if !ok {
 		return
 	}
 
@@ -1579,9 +1199,9 @@ func handleDeleteCollection(ctx *gin.Context) {
 // holders of server.collection_admin) who still need to pick a new
 // owner from the people already adjacent to the collection.
 //
-// Authorization: same gate as PATCH on the collection — owner /
-// admin-group / collection_admin pass; everyone else gets the
-// generic 404 to match GetCollection's leak posture.
+// Authorization: GetCollection's read gate — anyone who can see the
+// collection can see its candidate owners; everyone else gets the
+// generic 404 to match the rest of the surface's leak posture.
 func handleListCollectionCandidateOwners(ctx *gin.Context) {
 	collectionID := ctx.Param("id")
 	if collectionID == "" {
@@ -1601,12 +1221,8 @@ func handleListCollectionCandidateOwners(ctx *gin.Context) {
 		return
 	}
 
-	user, userId, groups, err := web_ui.GetUserGroups(ctx)
-	if err != nil || user == "" {
-		ctx.JSON(http.StatusInternalServerError, server_structs.SimpleApiResp{
-			Status: server_structs.RespFailed,
-			Msg:    "Failed to get user from context",
-		})
+	user, userId, groups, ok := requireCaller(ctx)
+	if !ok {
 		return
 	}
 	identity := web_ui.UserIdentity{
@@ -1675,12 +1291,8 @@ func handleListCollectionShares(ctx *gin.Context) {
 		return
 	}
 
-	user, userId, groups, err := web_ui.GetUserGroups(ctx)
-	if err != nil || user == "" {
-		ctx.JSON(http.StatusInternalServerError, server_structs.SimpleApiResp{
-			Status: server_structs.RespFailed,
-			Msg:    "Failed to get user from context",
-		})
+	user, userId, groups, ok := requireCaller(ctx)
+	if !ok {
 		return
 	}
 	identity := web_ui.UserIdentity{
@@ -1779,7 +1391,8 @@ type CreateShareReq struct {
 //     filesystem mode cannot safely do.
 //
 // The new share's owner is the caller — NOT the parent's owner. At
-// token-mint time (oa4mp/proxy.go) the share's effective scope set
+// token-mint time (oa4mp.GetUserCollectionScopes, run by the embedded
+// issuer) the share's effective scope set
 // is intersected with the share owner's CURRENT access to the
 // parent, so revocation propagates: removing the share owner from
 // the parent's ACLs clamps any token they mint via the share.
@@ -1817,12 +1430,8 @@ func handleCreateCollectionShare(ctx *gin.Context) {
 		return
 	}
 
-	user, userId, groups, err := web_ui.GetUserGroups(ctx)
-	if err != nil || user == "" {
-		ctx.JSON(http.StatusInternalServerError, server_structs.SimpleApiResp{
-			Status: server_structs.RespFailed,
-			Msg:    "Failed to get user from context",
-		})
+	user, userId, groups, ok := requireCaller(ctx)
+	if !ok {
 		return
 	}
 	identity := web_ui.UserIdentity{
@@ -1980,12 +1589,8 @@ func handleCreateCollectionOwnershipInvite(ctx *gin.Context) {
 		expiry = d
 	}
 
-	user, userId, groups, err := web_ui.GetUserGroups(ctx)
-	if err != nil || user == "" {
-		ctx.JSON(http.StatusInternalServerError, server_structs.SimpleApiResp{
-			Status: server_structs.RespFailed,
-			Msg:    "Failed to get user from context",
-		})
+	user, userId, groups, ok := requireCaller(ctx)
+	if !ok {
 		return
 	}
 	identity := web_ui.UserIdentity{
@@ -2039,18 +1644,8 @@ func handleGetCollectionAcls(ctx *gin.Context) {
 		return
 	}
 
-	user, userId, groups, err := web_ui.GetUserGroups(ctx)
-	if err != nil {
-		ctx.JSON(http.StatusInternalServerError, server_structs.SimpleApiResp{
-			Status: server_structs.RespFailed,
-			Msg:    fmt.Sprintf("Failed to get user from context: %v", err),
-		})
-	}
-	if user == "" {
-		ctx.JSON(http.StatusInternalServerError, server_structs.SimpleApiResp{
-			Status: server_structs.RespFailed,
-			Msg:    "Failed to get user from context",
-		})
+	user, userId, groups, ok := requireCaller(ctx)
+	if !ok {
 		return
 	}
 
@@ -2138,18 +1733,8 @@ func handleGrantCollectionAcl(ctx *gin.Context) {
 		return
 	}
 
-	user, userId, groups, err := web_ui.GetUserGroups(ctx)
-	if err != nil {
-		ctx.JSON(http.StatusInternalServerError, server_structs.SimpleApiResp{
-			Status: server_structs.RespFailed,
-			Msg:    fmt.Sprintf("Failed to get user from context: %v", err),
-		})
-	}
-	if user == "" {
-		ctx.JSON(http.StatusInternalServerError, server_structs.SimpleApiResp{
-			Status: server_structs.RespFailed,
-			Msg:    "Failed to get user from context",
-		})
+	user, userId, groups, ok := requireCaller(ctx)
+	if !ok {
 		return
 	}
 
@@ -2243,18 +1828,8 @@ func handleRevokeCollectionAcl(ctx *gin.Context) {
 		return
 	}
 
-	user, userId, groups, err := web_ui.GetUserGroups(ctx)
-	if err != nil {
-		ctx.JSON(http.StatusInternalServerError, server_structs.SimpleApiResp{
-			Status: server_structs.RespFailed,
-			Msg:    fmt.Sprintf("Failed to get user from context: %v", err),
-		})
-	}
-	if user == "" {
-		ctx.JSON(http.StatusInternalServerError, server_structs.SimpleApiResp{
-			Status: server_structs.RespFailed,
-			Msg:    "Failed to get user from context",
-		})
+	user, userId, groups, ok := requireCaller(ctx)
+	if !ok {
 		return
 	}
 

@@ -354,10 +354,11 @@ func GetUserCollectionScopes(db *gorm.DB, user, userID string, groupsList []stri
 	scopes = make([]string, 0)
 	matchedGroupSet := make(map[string]struct{})
 
-	// collection.create is a collection-admin capability; the create
-	// endpoint re-checks the role, so this only reflects who holds it.
+	// collection.create is a collection-admin capability. Resolve through
+	// this function's db handle, not the global, so DB-granted admins are
+	// seen too.
 	identity := web_ui.UserIdentity{Username: user, ID: userID, Groups: groupsList}
-	if isCollectionAdmin, _ := web_ui.CheckCollectionAdmin(identity); isCollectionAdmin {
+	if web_ui.HasScopeWithDB(db, identity, token_scopes.Server_CollectionAdmin) {
 		scopes = append(scopes, token_scopes.Collection_Create.String()+":/")
 	}
 
@@ -465,22 +466,22 @@ func GetUserCollectionScopes(db *gorm.DB, user, userID string, groupsList []stri
 	}
 
 	for collectionID, perm := range collectionPerms {
-		// Management-plane: collection.* scopes are keyed by collection
-		// ID. These are NOT clamped by share semantics — a share
-		// recipient with read ACL on a share gets to read the share's
-		// metadata, regardless of what the share owner can do on the
-		// parent. (Modify / Delete are still rare since the share's
-		// own ACL almost never grants those.)
+		// Management-plane scopes are keyed by collection ID in path form
+		// ("collection.modify:/<id>") so the client filter's blanket
+		// "collection.modify:/" covers them. Not clamped by share
+		// semantics: a share recipient may read the share's metadata
+		// regardless of the owner's access to the parent.
+		idPath := ":/" + collectionID
 		switch perm.role {
 		case database.AclRoleOwner:
-			scopes = append(scopes, token_scopes.Collection_Read.String()+":"+collectionID)
-			scopes = append(scopes, token_scopes.Collection_Modify.String()+":"+collectionID)
-			scopes = append(scopes, token_scopes.Collection_Delete.String()+":"+collectionID)
+			scopes = append(scopes, token_scopes.Collection_Read.String()+idPath)
+			scopes = append(scopes, token_scopes.Collection_Modify.String()+idPath)
+			scopes = append(scopes, token_scopes.Collection_Delete.String()+idPath)
 		case database.AclRoleWrite:
-			scopes = append(scopes, token_scopes.Collection_Read.String()+":"+collectionID)
-			scopes = append(scopes, token_scopes.Collection_Modify.String()+":"+collectionID)
+			scopes = append(scopes, token_scopes.Collection_Read.String()+idPath)
+			scopes = append(scopes, token_scopes.Collection_Modify.String()+idPath)
 		case database.AclRoleRead:
-			scopes = append(scopes, token_scopes.Collection_Read.String()+":"+collectionID)
+			scopes = append(scopes, token_scopes.Collection_Read.String()+idPath)
 		}
 
 		// Data-plane: storage.* scopes keyed by the collection's namespace.
@@ -535,6 +536,44 @@ func GetUserCollectionScopes(db *gorm.DB, user, userID string, groupsList []stri
 			scopes = append(scopes,
 				token_scopes.Wlcg_Storage_Read.String()+":"+ns,
 			)
+		}
+	}
+
+	// Ownership and admin-group membership live on the collection row, not
+	// in ACL rows, but still confer management authority (owner: all;
+	// admin group: no delete). Data-plane access is not implied.
+	if subjects.UserID != "" || len(subjects.GroupIDs) > 0 {
+		var managed []database.Collection
+		q := db.Model(&database.Collection{}).Select("id", "owner_id", "admin_id")
+		switch {
+		case subjects.UserID != "" && len(subjects.GroupIDs) > 0:
+			q = q.Where("owner_id = ? OR admin_id IN ?", subjects.UserID, subjects.GroupIDs)
+		case subjects.UserID != "":
+			q = q.Where("owner_id = ?", subjects.UserID)
+		default:
+			q = q.Where("admin_id IN ?", subjects.GroupIDs)
+		}
+		if err := q.Find(&managed).Error; err != nil {
+			return nil, nil, err
+		}
+		have := make(map[string]struct{}, len(scopes))
+		for _, s := range scopes {
+			have[s] = struct{}{}
+		}
+		addScope := func(s string) {
+			if _, ok := have[s]; ok {
+				return
+			}
+			have[s] = struct{}{}
+			scopes = append(scopes, s)
+		}
+		for _, c := range managed {
+			idPath := ":/" + c.ID
+			addScope(token_scopes.Collection_Read.String() + idPath)
+			addScope(token_scopes.Collection_Modify.String() + idPath)
+			if subjects.UserID != "" && c.OwnerID == subjects.UserID {
+				addScope(token_scopes.Collection_Delete.String() + idPath)
+			}
 		}
 	}
 
