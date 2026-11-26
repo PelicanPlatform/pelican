@@ -87,12 +87,15 @@ builds:
       - goos: darwin
         goarch: ppc64le
 
-  # Build a `pelican` binary that includes debugging symbols.
+  # Build a binary intended specifically for debugging.
+  # Compared to `pelican`, this build preserves symbols and disables
+  # some optimizations.
   - <<: *build-pelican
     id: pelican-debug
     gcflags:
-      # From https://go.dev/doc/gdb: Disable inlining of function invocations.
-      - all="-N"
+      # From https://go.dev/doc/gdb: Disable inlining
+      # of function invocations and registerization of variables.
+      - all=-N -l
     ldflags:
       - *ldflags-metadata
 
