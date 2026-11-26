@@ -1,5 +1,3 @@
-//go:build linux && !ppc64le
-
 /***************************************************************
 *
 * Copyright (C) 2026, Pelican Project, Morgridge Institute for Research
@@ -81,7 +79,10 @@ func projectLotPaths(in []LotPath) []LotPathView {
 	}
 	out := make([]LotPathView, len(in))
 	for i, p := range in {
-		out[i] = LotPathView{Path: p.Path, Recursive: p.Recursive, LotName: p.LotName}
+		// Stored paths are federation-qualified; operators speak the bare
+		// namespace path. This is the single exit point for lot paths, so
+		// stripping here covers every handler that returns a Reservation.
+		out[i] = LotPathView{Path: unqualifyLotPath(p.Path), Recursive: p.Recursive, LotName: p.LotName}
 	}
 	return out
 }
@@ -117,7 +118,7 @@ func lotToReservation(lot *Lot, nowMs int64) Reservation {
 }
 
 // mpaInputToInternal converts the camelCase MPAInput accepted on the wire
-// into the snake-cased lotman MPA struct used to talk to the C library.
+// into the snake-cased lotman MPA struct of the lotjson wire schema.
 // Nil-safe; nil in -> nil out.
 func mpaInputToInternal(in *MPAInput) *MPA {
 	if in == nil {
@@ -321,11 +322,18 @@ func createLot(ctx *gin.Context) {
 		MPA:                mpaInputToInternal(req.ManagementPolicyAttrs),
 		ParentAttributions: parentAttributionsInputToInternal(req.ParentAttributions),
 	}
+	// Authorization resolves the path against the Director, which knows only
+	// bare namespace paths, so it must see the request as submitted.
 	res, ok := requireAuthForCreate(ctx, &lot)
 	if !ok {
 		return
 	}
-	if err := CreateLot(&lot, res.caller); err != nil {
+	// Now move the path into the stored (federation-qualified) space, so the
+	// lot actually matches the keys the cache resolves objects against.
+	for i := range lot.Paths {
+		lot.Paths[i].Path = qualifyLotPath(lot.Paths[i].Path)
+	}
+	if err := CreateLot(&lot, res.lotmanCaller()); err != nil {
 		abortWithErr(ctx, http.StatusInternalServerError, "failed to create lot", err)
 		return
 	}
@@ -432,7 +440,7 @@ func patchLot(ctx *gin.Context) {
 		MPA:                internalMPA,
 		ParentAttributions: parentAttributionsInputToInternal(req.ParentAttributions),
 	}
-	if err := UpdateLot(&upd, res.caller); err != nil {
+	if err := UpdateLot(&upd, res.lotmanCaller()); err != nil {
 		abortWithErr(ctx, http.StatusInternalServerError, "failed to update lot", err)
 		return
 	}
@@ -497,7 +505,7 @@ func deleteLot(ctx *gin.Context) {
 	if !ok {
 		return
 	}
-	if err := DeleteLotsRecursive(lotName, res.caller); err != nil {
+	if err := DeleteLotsRecursive(lotName, res.lotmanCaller()); err != nil {
 		abortWithErr(ctx, http.StatusInternalServerError, "failed to delete lot", err)
 		return
 	}
@@ -552,7 +560,7 @@ func reclaimLot(ctx *gin.Context) {
 	// Allowing the client to backdate or future-date this would let
 	// any caller corrupt the audit trail.
 	reclaimedAt := time.Now().UnixMilli()
-	rows, err := ReclaimLot(lotName, reclaimedAt, req.Reason, res.caller)
+	rows, err := ReclaimLot(lotName, reclaimedAt, req.Reason, res.lotmanCaller())
 	if err != nil {
 		abortWithErr(ctx, http.StatusInternalServerError, "failed to reclaim lot", err)
 		return
@@ -730,7 +738,7 @@ func listLotsByPath(ctx *gin.Context) {
 		return
 	}
 	from, to := normalizeWindow(q.FromMs, q.ToMs)
-	lots, err := GetLotsForPath(q.Path, q.Recursive, from, to, q.IncludeReclaimed)
+	lots, err := GetLotsForPath(qualifyLotPath(q.Path), q.Recursive, from, to, q.IncludeReclaimed)
 	if err != nil {
 		abortWithErr(ctx, http.StatusInternalServerError, "failed to enumerate lots for path", err)
 		return

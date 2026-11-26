@@ -1,5 +1,3 @@
-//go:build linux && !ppc64le
-
 /***************************************************************
 *
 * Copyright (C) 2026, Pelican Project, Morgridge Institute for Research
@@ -48,7 +46,6 @@ import (
 	"net/url"
 	"strings"
 	"time"
-	"unsafe"
 
 	"github.com/gin-gonic/gin"
 	"github.com/lestrrat-go/jwx/v2/jwt"
@@ -124,14 +121,10 @@ func verifyTokenSignedByAnyIssuer(strToken string, candidateIssuers []string) (b
 // capacity endpoints query "default" directly when appropriate, rather
 // than going through this resolver — see getAvailableCapacity.)
 func resolveParentsForPath(path string) ([]string, error) {
-	errMsg := make([]byte, 2048)
-	lots := unsafe.Pointer(nil)
-	ret := LotmanGetLotsFromDir(path, false, time.Now().UnixMilli(), &lots, &errMsg)
-	if ret != 0 {
-		trimBuf(&errMsg)
-		return nil, errors.Errorf("error resolving parent lots for path %s: %s", path, string(errMsg))
+	goLots, err := GetLotsFromDir(path, false, time.Now().UnixMilli())
+	if err != nil {
+		return nil, errors.Wrapf(err, "error resolving parent lots for path %s", path)
 	}
-	goLots := cArrToGoArr(&lots)
 	if len(goLots) == 0 || goLots[0] == "default" {
 		return []string{"root"}, nil
 	}
@@ -299,6 +292,20 @@ func VerifyNewLotToken(lot *Lot, strToken string) (bool, error) {
 type authResult struct {
 	caller  string
 	isAdmin bool
+}
+
+// lotmanCaller returns the caller string to pass to lotman's mutating
+// operations. An admin is a trusted/system actor whose authority overrides lot
+// ownership: the core treats the empty ("system") caller as an ownership
+// bypass, so an admin request maps to it. Non-admin callers pass their verified
+// issuer, so the normal owner/ancestor check applies. (The admin's federation
+// issuer is still used as res.caller elsewhere, e.g. to derive a new lot's
+// owner; only the ownership *check* is overridden here.)
+func (r *authResult) lotmanCaller() string {
+	if r.isAdmin {
+		return ""
+	}
+	return r.caller
 }
 
 // tryAdminCookie returns true (and a non-nil authResult) iff the request

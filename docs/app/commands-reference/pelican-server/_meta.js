@@ -7,6 +7,7 @@ export default {
     "downtime": "pelican-server downtime",
     "generate": "pelican-server generate",
     "key": "pelican-server key",
+    "lot": "pelican-server lot",
     "namespace": "pelican-server namespace",
     "origin": "pelican-server origin",
     "registry": "pelican-server registry",

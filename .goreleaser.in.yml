@@ -30,6 +30,17 @@ release:
   replace_existing_draft: true
   # Mark each new release as a pre-release.
   prerelease: true
+  # The libLotMan packages, built by .github/workflows/build-lotman-rpm.yml
+  # and downloaded into the workspace by the release workflow. They are not
+  # GoReleaser artifacts: libLotMan needs cgo, so it cannot be cross-compiled
+  # the way the pelican binaries are, and it has to Obsolete the C++ `lotman`
+  # package it replaces, which nfpm cannot express.
+  #
+  # This glob errors if it matches nothing, which is what we want on a real
+  # release -- the release job depends on the one that produces these. Snapshot
+  # builds never reach the release step, so `make pelican-build` is unaffected.
+  extra_files:
+    - glob: ./dist-lotman/*.rpm
 checksum:
   # Use a simpler name for the checksums file, compared to the default.
   name_template: "checksums.txt"

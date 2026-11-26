@@ -1,0 +1,42 @@
+---
+title: pelican server lot reclaim
+---
+
+## pelican-server lot reclaim
+
+Reclaim a lot and its descendants
+
+### Synopsis
+
+Mark a storage lot (and its descendants) as reclaimed. Reclamation severs the
+lot's accounting tie to its paths so its usage no longer counts toward quotas;
+it is recorded in an append-only ledger. Requires an administrative token for
+the cache.
+
+```
+pelican-server lot reclaim <lotName> [flags]
+```
+
+### Options
+
+```
+  -h, --help            help for reclaim
+      --reason string   Free-form audit note recorded with the reclamation
+```
+
+### Options inherited from parent commands
+
+```
+      --config string       config file (default is $HOME/.config/pelican/pelican.yaml)
+  -d, --debug               Enable debug log messages
+  -f, --federation string   Pelican federation to utilize
+      --json                output results in JSON format
+  -L, --log string          Specified log output file
+  -s, --server string       Web URL of the Pelican cache (e.g. https://my-cache.com:8447)
+  -t, --token string        Path to an admin token file
+      --version             Print the version and exit
+```
+
+### SEE ALSO
+
+* [pelican-server lot](/commands-reference/pelican-server/lot/)	 - Manage storage lots (reservations) on a Pelican cache

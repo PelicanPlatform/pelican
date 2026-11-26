@@ -1,0 +1,51 @@
+---
+title: pelican server lot create
+---
+
+## pelican-server lot create
+
+Create a new lot
+
+### Synopsis
+
+Create a new storage lot (reservation) on a Pelican cache.
+
+At least one --path is required. Quota flags are in GB; time flags are UTC
+'YYYY-MM-DD HH:MM:SS'. Unspecified attributes are filled in by the server's
+policy defaults. Requires an administrative token for the cache.
+
+```
+pelican-server lot create [flags]
+```
+
+### Options
+
+```
+      --creation string          Creation time, UTC 'YYYY-MM-DD HH:MM:SS' (optional)
+      --dedicated-gb float       Dedicated (guaranteed) quota, in GB
+      --deletion string          Deletion time, UTC 'YYYY-MM-DD HH:MM:SS' (optional)
+      --expiration string        Expiration time, UTC 'YYYY-MM-DD HH:MM:SS' (optional)
+  -h, --help                     help for create
+      --max-objects int          Maximum number of objects
+      --name string              Optional lot name; the server generates a UUID if omitted
+      --opportunistic-gb float   Opportunistic (burst) quota, in GB
+      --path stringArray         Path prefix owned by the lot (repeatable); at least one is required
+      --recursive                Treat the given --path values as recursive
+```
+
+### Options inherited from parent commands
+
+```
+      --config string       config file (default is $HOME/.config/pelican/pelican.yaml)
+  -d, --debug               Enable debug log messages
+  -f, --federation string   Pelican federation to utilize
+      --json                output results in JSON format
+  -L, --log string          Specified log output file
+  -s, --server string       Web URL of the Pelican cache (e.g. https://my-cache.com:8447)
+  -t, --token string        Path to an admin token file
+      --version             Print the version and exit
+```
+
+### SEE ALSO
+
+* [pelican-server lot](/commands-reference/pelican-server/lot/)	 - Manage storage lots (reservations) on a Pelican cache
