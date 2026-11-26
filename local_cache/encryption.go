@@ -148,7 +148,23 @@ func (em *EncryptionManager) decryptMasterKey(data []byte) ([]byte, error) {
 		return decrypted, nil
 	}
 
-	return nil, errors.New("no issuer key could decrypt the master key")
+	return nil, errMasterKeyUnwrappable
+}
+
+// errMasterKeyUnwrappable says that issuer keys are loaded but none of them
+// wrapped the master key -- every key that did has been rotated out.
+var errMasterKeyUnwrappable = errors.New("no issuer key could decrypt the master key")
+
+// masterKeyUnwrappable reports whether baseDir holds a master key that none
+// of the loaded issuer keys can unwrap.  It is false when there is no master
+// key, or no issuer key to try, or the key file cannot be read.
+func masterKeyUnwrappable(baseDir string) bool {
+	data, err := os.ReadFile(filepath.Join(baseDir, masterKeyFileName))
+	if err != nil {
+		return false
+	}
+	_, err = (&EncryptionManager{baseDir: baseDir}).decryptMasterKey(data)
+	return errors.Is(err, errMasterKeyUnwrappable)
 }
 
 // saveMasterKey encrypts and saves the master key to disk

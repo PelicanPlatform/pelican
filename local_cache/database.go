@@ -828,6 +828,33 @@ func (cdb *CacheDB) MergeExistingMetadata(instanceHash InstanceHash, incoming *C
 }
 
 func (cdb *CacheDB) mergeMetadata(instanceHash InstanceHash, incoming *CacheMetadata, create bool) (found bool, err error) {
+	return cdb.updateMetadata(instanceHash, create, func(existing *CacheMetadata) (*CacheMetadata, error) {
+		if existing == nil {
+			return incoming, nil
+		}
+		if err := mergeMetadataFields(existing, incoming); err != nil {
+			return nil, err
+		}
+		return existing, nil // existing was mutated in place
+	})
+}
+
+// UpdateExistingMetadata applies update to an object's record, if it exists,
+// in one transaction, and reports whether it did.  Unlike a merge, update
+// may set any field to any value -- clear a Cache-Control directive the
+// source no longer sends, say -- so it suits a caller that knows the
+// record's current state better than the merge rules can.
+func (cdb *CacheDB) UpdateExistingMetadata(instanceHash InstanceHash, update func(*CacheMetadata)) (bool, error) {
+	return cdb.updateMetadata(instanceHash, false, func(existing *CacheMetadata) (*CacheMetadata, error) {
+		update(existing)
+		return existing, nil
+	})
+}
+
+// updateMetadata replaces instanceHash's record with what update makes of it
+// (nil when there is none, which happens only with create), retrying on
+// transaction conflicts, and reports whether a record was written.
+func (cdb *CacheDB) updateMetadata(instanceHash InstanceHash, create bool, update func(existing *CacheMetadata) (*CacheMetadata, error)) (found bool, err error) {
 	if err := cdb.checkWritable(); err != nil {
 		return false, err
 	}
@@ -845,12 +872,9 @@ func (cdb *CacheDB) mergeMetadata(instanceHash InstanceHash, incoming *CacheMeta
 			}
 			found = true
 
-			merged := incoming
-			if existing != nil {
-				if err := mergeMetadataFields(existing, incoming); err != nil {
-					return err
-				}
-				merged = existing // existing was mutated in place
+			merged, err := update(existing)
+			if err != nil {
+				return err
 			}
 
 			data, err := msgpack.Marshal(merged)
@@ -1060,11 +1084,19 @@ func (cdb *CacheDB) GetLatestETag(objectHash ObjectHash) (string, bool, error) {
 // prevents a slow download that finishes late from clobbering a newer
 // ETag written by a more recent request.
 func (cdb *CacheDB) SetLatestETag(objectHash ObjectHash, etag string, observedAt time.Time) error {
+	_, err := cdb.SetLatestETagIfNewer(objectHash, etag, observedAt)
+	return err
+}
+
+// SetLatestETagIfNewer is SetLatestETag, reporting whether it stored etag:
+// it does not when the stored entry was observed at observedAt or later.
+func (cdb *CacheDB) SetLatestETagIfNewer(objectHash ObjectHash, etag string, observedAt time.Time) (applied bool, err error) {
 	if err := cdb.checkWritable(); err != nil {
-		return err
+		return false, err
 	}
 	key := ETagKey(objectHash)
-	return cdb.db.Update(func(txn *badger.Txn) error {
+	err = cdb.db.Update(func(txn *badger.Txn) error {
+		applied = false
 		// Read-modify-write: only update if newer.
 		item, err := txn.Get(key)
 		if err == nil {
@@ -1079,8 +1111,10 @@ func (cdb *CacheDB) SetLatestETag(objectHash ObjectHash, etag string, observedAt
 		} else if !errors.Is(err, badger.ErrKeyNotFound) {
 			return err
 		}
+		applied = true
 		return txn.Set(key, encodeETagEntry(etag, observedAt))
 	})
+	return applied, err
 }
 
 // DeleteLatestETag removes the ETag entry for an object

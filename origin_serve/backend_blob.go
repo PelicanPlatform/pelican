@@ -31,12 +31,16 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/aws/aws-sdk-go-v2/aws"
+	"github.com/aws/aws-sdk-go-v2/service/s3"
 	log "github.com/sirupsen/logrus"
 	"gocloud.dev/blob"
 	_ "gocloud.dev/blob/memblob" // register mem:// URL opener (useful for testing); blobstore registers the rest
+	"gocloud.dev/gcerrors"
 	"golang.org/x/net/webdav"
 
 	"github.com/pelicanplatform/pelican/blobstore"
+	"github.com/pelicanplatform/pelican/local_cache"
 	"github.com/pelicanplatform/pelican/server_utils"
 	"github.com/pelicanplatform/pelican/utils"
 )
@@ -321,6 +325,47 @@ func (fs *blobFileSystem) OpenFile(ctx context.Context, name string, flag int, _
 	}, nil
 }
 
+// ReadVersionRange implements versionRangeReader: it writes bytes start
+// through end of version etag of name to w.
+//
+// On S3 the read is conditional (If-Match), so the bytes come from that
+// version or not at all.  Other providers' drivers offer no such hook here,
+// so the version is checked against the object's attributes once the read is
+// open; an overwrite landing between the two is not caught, which is why the
+// cache only goes this way for those providers.
+func (fs *blobFileSystem) ReadVersionRange(ctx context.Context, name string, w io.Writer, start, end int64, etag string) error {
+	key := blobKey(name)
+	conditional := false
+	r, err := fs.bucket.NewRangeReader(ctx, key, start, end-start+1, &blob.ReaderOptions{
+		BeforeRead: func(as func(any) bool) error {
+			var in *s3.GetObjectInput
+			if as(&in) {
+				in.IfMatch = aws.String(etag)
+				conditional = true
+			}
+			return nil
+		},
+	})
+	if err != nil {
+		if blobstore.IsNotFound(err) || gcerrors.Code(err) == gcerrors.FailedPrecondition {
+			return fmt.Errorf("blob read %q: %w", key, local_cache.ErrSourceVersionChanged)
+		}
+		return fmt.Errorf("blob read %q: %w", key, err)
+	}
+	defer r.Close()
+	if !conditional {
+		attrs, err := fs.bucket.Attributes(ctx, key)
+		if err != nil {
+			return fmt.Errorf("blob attributes %q: %w", key, err)
+		}
+		if attrs.ETag != etag {
+			return fmt.Errorf("blob read %q: %w", key, local_cache.ErrSourceVersionChanged)
+		}
+	}
+	_, err = io.CopyN(w, r, end-start+1)
+	return err
+}
+
 // RemoveAll implements webdav.FileSystem.
 //
 // Per the webdav.FileSystem contract this must remove `name` and, if it is a
@@ -441,10 +486,11 @@ func (fs *blobFileSystem) Stat(ctx context.Context, name string) (os.FileInfo, e
 	attrs, err := fs.bucket.Attributes(ctx, key)
 	if err == nil {
 		return &blobFileInfo{
-			name: path.Base(name),
-			size: attrs.Size,
-			mod:  attrs.ModTime,
-			etag: attrs.ETag,
+			name:         path.Base(name),
+			size:         attrs.Size,
+			mod:          attrs.ModTime,
+			etag:         attrs.ETag,
+			cacheControl: attrs.CacheControl,
 		}, nil
 	}
 
@@ -470,16 +516,20 @@ func (fs *blobFileSystem) Stat(ctx context.Context, name string) (os.FileInfo, e
 // ---------------------------------------------------------------------------
 
 type blobFileInfo struct {
-	name  string
-	size  int64
-	mod   time.Time
-	isDir bool
-	etag  string
+	name         string
+	size         int64
+	mod          time.Time
+	isDir        bool
+	etag         string
+	cacheControl string
 }
 
 // BlobFileSysInfo is returned by blobFileInfo.Sys() when metadata is available.
 type BlobFileSysInfo struct {
 	ETag string
+	// CacheControl is the object's Cache-Control metadata as reported by the
+	// provider (e.g. the S3 object's Cache-Control attribute), if any.
+	CacheControl string
 }
 
 func (fi *blobFileInfo) Name() string      { return fi.name }
@@ -493,8 +543,8 @@ func (fi *blobFileInfo) ModTime() time.Time {
 }
 func (fi *blobFileInfo) IsDir() bool { return fi.isDir }
 func (fi *blobFileInfo) Sys() interface{} {
-	if fi.etag != "" {
-		return &BlobFileSysInfo{ETag: fi.etag}
+	if fi.etag != "" || fi.cacheControl != "" {
+		return &BlobFileSysInfo{ETag: fi.etag, CacheControl: fi.cacheControl}
 	}
 	return nil
 }
