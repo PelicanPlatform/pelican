@@ -74,10 +74,11 @@ builds:
     tags:
       - client
     ldflags:
+      # Stamp build information into the binary.
       - &ldflags-metadata
         -X github.com/pelicanplatform/pelican/version.commit={{.Commit}} -X github.com/pelicanplatform/pelican/version.date={{.Date}} -X github.com/pelicanplatform/pelican/version.builtBy=goreleaser -X github.com/pelicanplatform/pelican/version.version=%VERSION%
-      - &ldflags-strip-symbols
-        -s -w
+      # Drop the symbol table (-s) and DWARF debug data (-w).
+      - -s -w
     ignore:
       - goos: windows
         goarch: arm64
@@ -112,7 +113,6 @@ builds:
       - server
     ldflags:
       - *ldflags-metadata
-      - *ldflags-strip-symbols
     ignore:
       - goos: darwin
         goarch: ppc64le
