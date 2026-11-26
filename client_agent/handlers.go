@@ -257,6 +257,7 @@ func (s *Server) StatHandler(c *gin.Context) {
 
 	c.JSON(http.StatusOK, StatResponse{
 		Name:         info.Name,
+		EscapedPath:  info.EscapedPath,
 		Size:         info.Size,
 		ModTime:      info.ModTime,
 		IsCollection: info.IsCollection,
@@ -294,6 +295,7 @@ func (s *Server) ListHandler(c *gin.Context) {
 	for i, item := range items {
 		respItems[i] = ListItem{
 			Name:         item.Name,
+			EscapedPath:  item.EscapedPath,
 			Size:         item.Size,
 			ModTime:      item.ModTime,
 			IsCollection: item.IsCollection,

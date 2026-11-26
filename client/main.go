@@ -55,7 +55,23 @@ var ObjectServersToTry int = 3
 // NOTE: this was created to provide more flexibility to information on a file. The fs.FileInfo interface was causing some issues like not always returning a Name attribute
 // ALSO NOTE: the fields are exported so they can be marshalled into JSON, it does not work otherwise
 type FileInfo struct {
-	Name         string
+	// Name is the namespace path in DECODED form: the spelling a person
+	// reads and the one `pelican object ls` prints.  It is deliberately
+	// not the form to feed back into a function that takes a URL -- an
+	// object named "a b.txt" appears here as "a b.txt", and a space is
+	// not legal in a URL path.  Use EscapedPath for that.
+	Name string
+	// EscapedPath is the same path percent-encoded, which is the form
+	// every Pelican client entry point taking a remote path expects.
+	// The two exist separately because a single field cannot be both,
+	// and the version that had only Name handed out names that the same
+	// client then rejected: whichever spelling it chose was wrong for
+	// half its callers.
+	//
+	// Whoever sets Name sets this too.  They are two spellings of one
+	// path, so a FileInfo carrying only one of them describes an object
+	// that half its consumers cannot reach.
+	EscapedPath  string `json:"escaped_path,omitempty"`
 	Size         int64
 	ModTime      time.Time
 	IsCollection bool
