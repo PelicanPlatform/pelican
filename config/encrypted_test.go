@@ -19,6 +19,9 @@
 package config
 
 import (
+	"crypto/x509/pkix"
+	"encoding/asn1"
+	"encoding/pem"
 	"io"
 	"os"
 	"path/filepath"
@@ -48,6 +51,44 @@ func TestGetSecret(t *testing.T) {
 		require.NoError(t, err)
 		assert.Len(t, get, 32)
 	})
+}
+
+// pbkdf2IterationCount returns the PBKDF2 iteration count of a PKCS #8
+// EncryptedPrivateKeyInfo protected with PBES2.
+func pbkdf2IterationCount(t *testing.T, der []byte) int {
+	t.Helper()
+	var info struct {
+		Algorithm     pkix.AlgorithmIdentifier
+		EncryptedData []byte
+	}
+	_, err := asn1.Unmarshal(der, &info)
+	require.NoError(t, err)
+	var pbes2 struct {
+		KeyDerivationFunc pkix.AlgorithmIdentifier
+		EncryptionScheme  pkix.AlgorithmIdentifier
+	}
+	_, err = asn1.Unmarshal(info.Algorithm.Parameters.FullBytes, &pbes2)
+	require.NoError(t, err)
+	var params struct {
+		Salt           []byte
+		IterationCount int
+		PRF            pkix.AlgorithmIdentifier `asn1:"optional"`
+	}
+	_, err = asn1.Unmarshal(pbes2.KeyDerivationFunc.Parameters.FullBytes, &params)
+	require.NoError(t, err)
+	return params.IterationCount
+}
+
+func TestMarshalEncryptedConfigKeyIterations(t *testing.T) {
+	password := []byte("correct horse battery staple")
+	contents, err := marshalEncryptedConfig(&CredentialConfig{}, password)
+	require.NoError(t, err)
+
+	block, _ := pem.Decode(contents)
+	require.NotNil(t, block)
+	require.Equal(t, "ENCRYPTED PRIVATE KEY", block.Type)
+	assert.Equal(t, credentialKeyIterations, pbkdf2IterationCount(t, block.Bytes))
+	assert.Equal(t, 100000, credentialKeyIterations)
 }
 
 func TestEncryptString(t *testing.T) {
