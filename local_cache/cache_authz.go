@@ -404,6 +404,26 @@ func (ac *authConfig) loader(cache *ttlcache.Cache[string, authzResult], token s
 // authorize checks whether the given token grants the requested action on
 // the resource.  It returns whether access is granted and a human-readable
 // reason when it is denied.
+// anonymousReadVerdict reports whether a request with no token may read
+// resource, and whether that answer is known.
+//
+// "Not allowed" is only a verdict when a namespace the cache knows of covers
+// the path and does not grant public reads.  A path no namespace covers is
+// unknown, not private: the namespace list comes from the director and holds
+// only namespaces whose origins are advertising right now, so an origin
+// down for maintenance, or a director that just restarted, makes its
+// namespaces vanish for a while.  Treating that as "private" would strip a
+// shared-filesystem target's names view exactly when its copies matter most.
+// Before the list has loaded at all, everything is unknown.
+func (ac *authConfig) anonymousReadVerdict(resource string) (allowed, known bool) {
+	nsAds := ac.ns.Load()
+	if nsAds == nil || server_structs.LongestNSMatchIndex(resource, *nsAds) < 0 {
+		return false, false
+	}
+	ok, _ := ac.authorize(token_scopes.Wlcg_Storage_Read, resource, "")
+	return ok, true
+}
+
 func (ac *authConfig) authorize(action token_scopes.TokenScope, resource, token string) (bool, string) {
 	aclsItem := ac.tokenAuthz.Get(token)
 	if aclsItem == nil {

@@ -313,13 +313,33 @@ func (u *tierUploader) workerLoop(ctx context.Context) {
 // eligible checks whether an object should be tiered right now.  Chunked
 // objects are eligible: large objects (the prime tiering candidates) are
 // exactly the ones chunking splits across directories, and relocation
-// flattens them into a single remote object.
+// flattens them into a single remote object.  A small object (see small) is
+// eligible only if some target takes every object (AllObjects).
 func (u *tierUploader) eligible(meta *CacheMetadata) bool {
-	return meta != nil &&
-		!meta.Completed.IsZero() &&
-		meta.StorageID != StorageIDInline &&
-		!u.storage.IsTiered(meta.StorageID) &&
-		meta.ContentLength >= u.threshold
+	if meta == nil || meta.Completed.IsZero() || u.storage.IsTiered(meta.StorageID) {
+		return false
+	}
+	if meta.StorageID == StorageIDInline && !meta.IsInline() {
+		return false // chunked, with nothing allocated
+	}
+	return !u.small(meta) || u.storage.tiersAllObjects()
+}
+
+// small reports whether an object is one only an AllObjects target takes:
+// below the tiering threshold, or kept inside the database.
+func (u *tierUploader) small(meta *CacheMetadata) bool {
+	return meta.IsInline() || meta.ContentLength < u.threshold
+}
+
+// takes reports whether target may take the object: whether its contents
+// may be put there at all (see tierTarget.mayHold), and whether the target
+// takes objects of its size.
+func (u *tierUploader) takes(target *tierTarget, sourceURL string, small bool) bool {
+	if small && !target.cfg.AllObjects {
+		return false
+	}
+	allowed, _ := target.mayHold(sourceURL)
+	return allowed
 }
 
 // anyTargetHealthy reports whether any tiering target passed its latest
@@ -333,10 +353,23 @@ func (u *tierUploader) anyTargetHealthy() bool {
 	return false
 }
 
-// chooseTarget randomly selects a tiering target that can currently hold the
-// object, weighted by each target's estimated free space, so concurrent
-// uploads spread across targets instead of all piling onto the single
-// emptiest one.  Returns nil when no target fits.
+// anyTargetMayHold reports whether some healthy target may hold an object at
+// all (see tierTarget.mayHold), as opposed to merely lacking room for it.
+// An object no target may take stays on local storage; waiting for eviction
+// to make room would not change that.
+func (u *tierUploader) anyTargetMayHold(sourceURL string, small bool) bool {
+	for _, target := range u.storage.tierTargets {
+		if target.healthy.Load() && u.takes(target, sourceURL, small) {
+			return true
+		}
+	}
+	return false
+}
+
+// chooseTarget randomly selects a tiering target that may, and currently
+// can, hold the object, weighted by each target's estimated free space, so
+// concurrent uploads spread across targets instead of all piling onto the
+// single emptiest one.  Returns nil when no target fits.
 //
 // Concurrency: tierTargets is read-only after initialization and DirFree reads
 // lock-free atomic counters, so this is safe to call from every worker
@@ -345,7 +378,7 @@ func (u *tierUploader) anyTargetHealthy() bool {
 // is the up-front usage charge in processObject (plus watermark eviction), so
 // a stale estimate can at worst cause a transient overshoot that eviction
 // corrects — never a lost or corrupted object.
-func (u *tierUploader) chooseTarget(size int64) *tierTarget {
+func (u *tierUploader) chooseTarget(size int64, sourceURL string, small bool) *tierTarget {
 	type candidate struct {
 		target *tierTarget
 		free   int64
@@ -355,6 +388,9 @@ func (u *tierUploader) chooseTarget(size int64) *tierTarget {
 	for id, target := range u.storage.tierTargets {
 		if !target.healthy.Load() {
 			continue // failing its liveness probe; see tierTarget.probe
+		}
+		if !u.takes(target, sourceURL, small) {
+			continue // e.g. a private object and a shared filesystem
 		}
 		if free := u.eviction.DirFree(id); free >= size {
 			candidates = append(candidates, candidate{target: target, free: free})
@@ -421,7 +457,12 @@ func (u *tierUploader) processObject(ctx context.Context, instanceHash InstanceH
 	if !u.anyTargetHealthy() {
 		return nil // nothing to upload to; the rescan retries once a probe passes
 	}
-	target := u.chooseTarget(fileSize)
+	small := u.small(meta)
+	if !u.anyTargetMayHold(meta.SourceURL, small) {
+		log.Debugf("No tiering target may hold %s; it stays on local storage", instanceHash)
+		return nil
+	}
+	target := u.chooseTarget(fileSize, meta.SourceURL, small)
 	if target == nil {
 		// No target currently fits; nudge eviction so space opens up and
 		// let the periodic sweep retry.
@@ -533,6 +574,7 @@ func (u *tierUploader) processObject(ctx context.Context, instanceHash InstanceH
 	u.inflightMu.Lock()
 	delete(u.failures, instanceHash)
 	u.inflightMu.Unlock()
+	u.storage.publishTierName(target, instanceHash)
 
 	// Record that the remote copy is now authoritative before touching the
 	// local one.  If the process dies anywhere below, recovery needs to know
@@ -625,7 +667,14 @@ func (u *tierUploader) releaseLocalCopy(instanceHash InstanceHash, prev *CacheMe
 	// the record is deleted, so writers are not fenced off.
 	release := u.storage.fences.exclude(instanceHash)
 	u.storage.invalidateObjectCaches(instanceHash, prev.ChunkCount())
-	u.storage.deleteChunkFiles(instanceHash, prev.ContentLength, prev.StorageID, prev.ChunkSizeCode, prev.ChunkLocations)
+	if prev.IsInline() {
+		// An inline object's local copy is its record's inline data.
+		if err := u.db.DeleteRelocatedInlineData(instanceHash); err != nil {
+			log.Warnf("Failed to remove the inline data of tiered object %s: %v", instanceHash, err)
+		}
+	} else {
+		u.storage.deleteChunkFiles(instanceHash, prev.ContentLength, prev.StorageID, prev.ChunkSizeCode, prev.ChunkLocations)
+	}
 	release(false)
 	return true
 }
@@ -818,6 +867,7 @@ func (u *tierUploader) recoverIntent(ctx context.Context, hash InstanceHash, int
 		// The metadata already names the target but the intent was never
 		// marked relocated (that write is best-effort), so this is the
 		// same leftover-local-copy case as above.
+		u.storage.publishTierName(target, hash)
 		if !u.releaseLocalCopy(hash, localCopyFromIntent(intent)) {
 			u.markPendingRelease(hash)
 			return // pinned; the reader's release will wake the loop

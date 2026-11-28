@@ -179,6 +179,17 @@ func cacheExternalHost() string {
 	return hostOnly(param.Server_Hostname.GetString())
 }
 
+// redirectAdvertisement is what a client must advertise to be redirected to
+// a URL with the given scheme: the scheme itself, except that a file://
+// redirect goes only to a client that will check the directory it reaches
+// (server_structs.RedirectSchemeFileVerified).
+func redirectAdvertisement(scheme string) string {
+	if strings.EqualFold(scheme, server_structs.RedirectSchemeFile) {
+		return server_structs.RedirectSchemeFileVerified
+	}
+	return scheme
+}
+
 // clientAcceptsRedirectScheme reports whether the request advertised that the
 // client can follow a redirect in the given scheme.  The header and its
 // parsing live in server_structs so the client writing it and the cache
@@ -251,6 +262,14 @@ func (pc *PersistentCache) tryTierRedirect(w http.ResponseWriter, r *http.Reques
 		tierRedirectSkippedTotal.WithLabelValues(target.metricLabel(), reason).Inc()
 		return false
 	}
+	if target.servesByPath() && !target.healthy.Load() {
+		// The client would read by path, and the failing probe may be
+		// saying that the path no longer leads to the cache's files (or
+		// that the filesystem is hung).  The cache's own handle still
+		// does, so serve through it.
+		reqLog.Debug("Shared-filesystem tier target is failing its liveness probe; not redirecting to it")
+		return skip(tierSkipTargetDown)
+	}
 	if !target.redirectUsable() {
 		// The target cannot hand out a URL the client could fetch on its
 		// own -- not at all, or not as of its latest self-test.
@@ -267,9 +286,20 @@ func (pc *PersistentCache) tryTierRedirect(w http.ResponseWriter, r *http.Reques
 	// namespace.  So the client has to say so, and we believe only what it
 	// claims.  http and https need no advertisement; every client follows
 	// those.
-	if scheme := target.redirectScheme; scheme != "http" && scheme != "https" && !clientAcceptsRedirectScheme(r, scheme) {
+	if scheme := target.redirectScheme; scheme != "http" && scheme != "https" && !clientAcceptsRedirectScheme(r, redirectAdvertisement(scheme)) {
 		reqLog.WithField("scheme", scheme).Debug("Client did not advertise support for this redirect scheme; proxying instead")
 		return skip(tierSkipSchemeNotAccepted)
+	}
+	// A client redirected into a shared filesystem checks the directory it
+	// reaches against the one the cache wrote to, so it must be told which
+	// that is; a target that cannot say does not redirect.
+	var fileTarget string
+	if strings.EqualFold(target.redirectScheme, server_structs.RedirectSchemeFile) {
+		ft, ok := target.fileTarget()
+		if !ok {
+			return skip(tierSkipCannotRedirect)
+		}
+		fileTarget = ft.String()
 	}
 	// Would redirecting hand this client's Authorization header to the target?
 	// Only a request that carries one has anything to leak -- a public read,
@@ -366,6 +396,9 @@ func (pc *PersistentCache) tryTierRedirect(w http.ResponseWriter, r *http.Reques
 		}
 	}
 	w.Header().Set("Cache-Control", meta.ResponseCacheControl())
+	if fileTarget != "" {
+		w.Header().Set(server_structs.FileTargetHeader, fileTarget)
+	}
 	http.Redirect(w, r, targetURL, http.StatusTemporaryRedirect)
 	tierRequestsTotal.WithLabelValues(target.metricLabel(), tierServedByRedirect).Inc()
 	tierRedirectedBytesTotal.WithLabelValues(target.metricLabel()).Add(float64(redirectedBytes(r, meta.ContentLength)))

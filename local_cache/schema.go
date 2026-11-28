@@ -26,7 +26,9 @@ import (
 	"net"
 	"net/url"
 	"path"
+	"path/filepath"
 	"reflect"
+	"runtime"
 	"strings"
 	"time"
 
@@ -1116,8 +1118,10 @@ func RedirectHoldKey(instanceHash InstanceHash) []byte {
 // second spelling.
 type TierTargetConfig struct {
 	// ProviderURL names the backend in gocloud.dev/blob form --
-	// "s3://bucket", "gs://bucket", "azblob://container", "mem://".  When
-	// set it takes precedence over the S3-specific fields.
+	// "s3://bucket", "gs://bucket", "azblob://container", "mem://" -- or,
+	// as "file:///absolute/path", a directory on a filesystem the cache
+	// shares with its clients (see posixTierBackend).  When set it takes
+	// precedence over the S3-specific fields.
 	ProviderURL string
 	// ServiceUrl is the S3 endpoint (e.g. https://s3.us-east-1.amazonaws.com).
 	ServiceUrl string
@@ -1160,6 +1164,113 @@ type TierTargetConfig struct {
 	// target another cache is still using would have each delete the
 	// other's objects.
 	AdoptExisting bool
+
+	// The remaining fields apply only to a shared-filesystem (file://)
+	// target, whose objects every user of that filesystem can read.
+
+	// NamesView chooses whether and how the cache keeps a browsable tree of
+	// logical names beside the objects: "versioned" (the default), "exact"
+	// or "none"; see tierNameView.
+	NamesView string
+	// ExposedNamespaces lists namespace prefixes whose objects may be
+	// tiered to -- and named on -- the shared filesystem even though
+	// reading them through Pelican requires a token.  Without an entry
+	// here only publicly readable objects go to such a target, because
+	// putting an object there makes it readable by every local user.
+	ExposedNamespaces []string
+	// AllObjects makes the target take every completed object it may hold,
+	// whatever its size: those below Cache.TieringThreshold, and the small
+	// ones the cache otherwise keeps inside its database, too.  The shared
+	// filesystem then holds a copy of everything the cache serves from it.
+	AllObjects bool
+}
+
+// Values of TierTargetConfig.NamesView.
+const (
+	tierNamesVersioned = "versioned"
+	tierNamesExact     = "exact"
+	tierNamesNone      = "none"
+)
+
+// namesViewEnabled reports whether the target keeps a names view.
+func (c *TierTargetConfig) namesViewEnabled() bool { return c.NamesView != tierNamesNone }
+
+// exactNames reports whether the target's names view spells exact names.
+func (c *TierTargetConfig) exactNames() bool { return c.NamesView == tierNamesExact }
+
+// tierFileScheme is the ProviderURL scheme of a shared-filesystem target.
+const tierFileScheme = "file"
+
+// IsSharedFilesystem reports whether the target is a directory on a shared
+// filesystem rather than an object store.
+func (c *TierTargetConfig) IsSharedFilesystem() bool {
+	u, err := url.Parse(c.ProviderURL)
+	return c.ProviderURL != "" && err == nil && strings.EqualFold(u.Scheme, tierFileScheme)
+}
+
+// SharedFilesystemDir returns the directory a shared-filesystem target
+// stores its data in: the URL's path with any Prefix appended.  The result
+// is cleaned and absolute.
+func (c *TierTargetConfig) SharedFilesystemDir() string {
+	u, err := url.Parse(c.ProviderURL)
+	if err != nil {
+		return ""
+	}
+	dir := utils.FileURLToPath(u)
+	if prefix := trimTierPrefix(c.Prefix); prefix != "" {
+		dir = filepath.Join(dir, filepath.FromSlash(prefix))
+	}
+	return filepath.Clean(dir)
+}
+
+// exposesNamespace reports whether objectPath falls under one of the
+// operator's ExposedNamespaces, matching whole path components.
+func (c *TierTargetConfig) exposesNamespace(objectPath string) bool {
+	for _, prefix := range c.ExposedNamespaces {
+		if prefix == "/" || objectPath == prefix || strings.HasPrefix(objectPath, prefix+"/") {
+			return true
+		}
+	}
+	return false
+}
+
+// validateSharedFilesystem checks the keys particular to a file:// target.
+func (cfg *TierTargetConfig) validateSharedFilesystem() error {
+	// The target's safety rests on POSIX ownership and mode bits -- that
+	// only the cache can write what other users trust -- and on symlinks
+	// for the names view.  Neither holds on Windows.
+	if runtime.GOOS == "windows" {
+		return errors.New("a shared-filesystem (file://) tiering target is not supported on Windows")
+	}
+	u, err := url.Parse(cfg.ProviderURL)
+	if err != nil {
+		return fmt.Errorf("ProviderURL is not a valid URL: %w", err)
+	}
+	// A host would name some other machine's filesystem, which the cache
+	// cannot write to; "localhost" is RFC 8089's spelling of this one.
+	if u.Host != "" && !strings.EqualFold(u.Host, "localhost") {
+		return fmt.Errorf("ProviderURL %s names a remote host; a file:// target must be a local (or mounted) directory, "+
+			"spelled file:///path", cfg.DisplayURL())
+	}
+	if u.RawQuery != "" || u.Fragment != "" {
+		return fmt.Errorf("ProviderURL %s: a file:// target takes no query or fragment", cfg.DisplayURL())
+	}
+	if !filepath.IsAbs(utils.FileURLToPath(u)) {
+		return fmt.Errorf("ProviderURL %s must name an absolute directory (file:///path)", cfg.DisplayURL())
+	}
+	for _, component := range strings.Split(trimTierPrefix(cfg.Prefix), "/") {
+		if component == ".." {
+			return errors.New("Prefix must not contain \"..\"")
+		}
+	}
+	for i, prefix := range cfg.ExposedNamespaces {
+		cleaned := path.Clean(prefix)
+		if !strings.HasPrefix(cleaned, "/") {
+			return fmt.Errorf("ExposedNamespaces entry %q must be an absolute namespace path such as /ns", prefix)
+		}
+		cfg.ExposedNamespaces[i] = cleaned
+	}
+	return nil
 }
 
 // UsesVirtualHostStyle reports whether S3 virtual-host addressing was asked
@@ -1175,6 +1286,9 @@ func (c *TierTargetConfig) UsesVirtualHostStyle() bool {
 // (s3://bucket?endpoint=http://...), since the cloud providers' own
 // endpoints are https.
 func (c *TierTargetConfig) TransportScheme() string {
+	if c.IsSharedFilesystem() {
+		return tierFileScheme // no network transport at all
+	}
 	if c.WebDavUrl != "" {
 		if u, err := url.Parse(c.WebDavUrl); err == nil && u.Scheme != "" {
 			return strings.ToLower(u.Scheme)
@@ -1307,6 +1421,11 @@ func (cfg *TierTargetConfig) validate() error {
 			return errors.New("AccessKeyfile and SecretKeyfile apply only to the " +
 				"S3 keys (ServiceUrl, Bucket), not to ProviderURL, which uses the provider's ambient credential chain")
 		}
+		if cfg.IsSharedFilesystem() {
+			if err := cfg.validateSharedFilesystem(); err != nil {
+				return err
+			}
+		}
 	} else {
 		// Fall back to the explicit S3 spelling, which then has to be complete.
 		if cfg.ServiceUrl == "" {
@@ -1324,6 +1443,16 @@ func (cfg *TierTargetConfig) validate() error {
 	}
 	if (cfg.AccessKeyfile == "") != (cfg.SecretKeyfile == "") {
 		return errors.New("AccessKeyfile and SecretKeyfile must be set together")
+	}
+
+	if !cfg.IsSharedFilesystem() && (cfg.NamesView != "" || len(cfg.ExposedNamespaces) > 0 || cfg.AllObjects) {
+		return errors.New("NamesView, ExposedNamespaces and AllObjects apply only to a shared-filesystem (file://) target")
+	}
+	switch strings.ToLower(cfg.NamesView) {
+	case "", tierNamesVersioned, tierNamesExact, tierNamesNone:
+		cfg.NamesView = strings.ToLower(cfg.NamesView)
+	default:
+		return fmt.Errorf("NamesView %q is not one of %q, %q or %q", cfg.NamesView, tierNamesVersioned, tierNamesExact, tierNamesNone)
 	}
 
 	if cfg.MaxSize == 0 {

@@ -777,6 +777,11 @@ func NewPersistentCache(ctx context.Context, egrp *errgroup.Group, cfg Persisten
 	pc.expectFedToken = cfg.ExpectFedToken
 	pc.prestageManager = NewPrestageManager(pc)
 
+	// A shared-filesystem tiering target makes what it holds readable by
+	// every local user, so it must be able to ask whether an object is
+	// public.  Set while initialization is still single-threaded.
+	storage.SetTierExposurePolicy(pc.anonymouslyReadable)
+
 	// Restore persisted namespace mappings so that LRU keys and usage
 	// counters from prior runs remain valid.
 	nsMap, maxID, err := db.LoadNamespaceMappings()
@@ -3341,6 +3346,12 @@ func (pc *PersistentCache) normalizePath(objectPath string) string {
 	u.Path = path.Clean(objectPath)
 
 	return u.String()
+}
+
+// anonymouslyReadable reports whether a request with no token may read
+// objectPath, and whether that is known; see authConfig.anonymousReadVerdict.
+func (pc *PersistentCache) anonymouslyReadable(objectPath string) (allowed, known bool) {
+	return pc.ac.anonymousReadVerdict(objectPath)
 }
 
 // getNamespaceID returns or assigns a namespace ID for a path

@@ -18,7 +18,14 @@
 
 package server_structs
 
-import "strings"
+import (
+	"net/url"
+	"path/filepath"
+	"strconv"
+	"strings"
+
+	"github.com/pkg/errors"
+)
 
 // AcceptRedirectHeader is the request header through which a client tells a
 // cache which non-HTTP URL schemes it is able to follow if redirected to one.
@@ -32,9 +39,78 @@ import "strings"
 // See docs/pelican-http-headers.md.
 const AcceptRedirectHeader = "X-Pelican-Accept-Redirect"
 
-// RedirectSchemeFile is advertised by a client that can read objects straight
-// off a filesystem it shares with the cache.
+// RedirectSchemeFile is the scheme of a redirect to an object on a
+// filesystem the client shares with the cache.  A client does not advertise
+// it bare; see RedirectSchemeFileVerified.
 const RedirectSchemeFile = "file"
+
+// RedirectSchemeFileVerified is advertised by a client that can read objects
+// straight off a filesystem it shares with the cache, and that will first
+// check that the directory it reaches is the one the cache means (see
+// FileTargetHeader).  A cache sends a file:// redirect only to a client that
+// advertises it.
+//
+// The check is what makes following such a redirect safe when someone other
+// than the cache can rearrange the directories above its own: without it, a
+// user who could rename the cache's directory away and put one of their own
+// in its place would have every redirected client read their files instead.
+const RedirectSchemeFileVerified = "file-verified"
+
+// FileTargetHeader accompanies a file:// redirect.  It identifies the
+// directory the redirected path lies in, so the client can check, before
+// reading anything, that the directory at that path is the one the cache
+// wrote to.  Its value is a FileTarget.
+const FileTargetHeader = "X-Pelican-File-Target"
+
+// FileTargetIdentityFile is where, below the directory a FileTarget names,
+// the file holding its ID lies.
+const FileTargetIdentityFile = "objects/.pelican-cache-id"
+
+// FileTarget identifies the directory a file:// redirect points into: its
+// absolute path as the cache sees it, its inode, and the ID the cache keeps
+// in FileTargetIdentityFile there.
+//
+// The inode is what defeats a swapped directory: a user who renames the
+// cache's directory away and puts their own in its place cannot give theirs
+// the same inode, since the original still exists.  The ID tells apart a
+// different filesystem mounted at the same path, whose directory could
+// happen to have the same inode number.  The device number is left out:
+// on a network filesystem it is assigned by each host's kernel when the
+// filesystem is mounted, and differs from host to host.
+type FileTarget struct {
+	Root  string
+	Inode uint64
+	ID    string
+}
+
+// String encodes the target as a FileTargetHeader value, in the form of a
+// URL query: "id=<id>&inode=<inode>&root=<percent-encoded path>".
+func (t FileTarget) String() string {
+	return url.Values{
+		"root":  {t.Root},
+		"inode": {strconv.FormatUint(t.Inode, 10)},
+		"id":    {t.ID},
+	}.Encode()
+}
+
+// ParseFileTarget decodes a FileTargetHeader value.
+func ParseFileTarget(value string) (FileTarget, error) {
+	values, err := url.ParseQuery(value)
+	if err != nil {
+		return FileTarget{}, errors.Wrap(err, "malformed file target")
+	}
+	t := FileTarget{Root: values.Get("root"), ID: values.Get("id")}
+	if !filepath.IsAbs(t.Root) || filepath.Clean(t.Root) != t.Root {
+		return FileTarget{}, errors.Errorf("file target root %q is not a clean absolute path", t.Root)
+	}
+	if t.ID == "" {
+		return FileTarget{}, errors.New("file target has no ID")
+	}
+	if t.Inode, err = strconv.ParseUint(values.Get("inode"), 10, 64); err != nil || t.Inode == 0 {
+		return FileTarget{}, errors.Errorf("file target inode %q is not a valid inode", values.Get("inode"))
+	}
+	return t, nil
+}
 
 // AcceptsRedirectScheme reports whether an X-Pelican-Accept-Redirect header
 // value advertises the given scheme.

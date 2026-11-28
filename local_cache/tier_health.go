@@ -56,7 +56,7 @@ const (
 // uploader until a later probe succeeds; its objects are still served (a
 // redirect does not touch the target at all) but may fail if it stays down.
 func (t *tierTarget) probe(ctx context.Context) error {
-	err := t.roundTrip(ctx)
+	err := t.boundedRoundTrip(ctx)
 	if err == nil {
 		t.probeFailures.Store(0)
 		t.healthy.Store(true)
@@ -70,11 +70,40 @@ func (t *tierTarget) probe(ctx context.Context) error {
 	return err
 }
 
+// boundedRoundTrip runs roundTrip with a deadline that holds even when the
+// backend ignores its context -- as a hung filesystem mount does, blocking
+// system calls nothing can interrupt.  Without it a hung target would hang
+// its probe, and a probe that never returns never reports the target down.
+// At most one probe per target is outstanding: while an abandoned one is
+// still blocked, later probes fail at once instead of stacking up behind it.
+func (t *tierTarget) boundedRoundTrip(ctx context.Context) error {
+	if !t.probeRunning.CompareAndSwap(false, true) {
+		return errors.Wrap(errTargetNotResponding, "the previous liveness probe has not returned")
+	}
+	timeout := t.probeTimeout
+	if timeout == 0 {
+		timeout = tierProbeTimeout
+	}
+	_, err := runWithDeadline(timeout, func() (struct{}, error) {
+		defer t.probeRunning.Store(false) // only once the probe really returns
+		return struct{}{}, t.roundTrip(ctx, timeout)
+	}, nil, nil)
+	return err
+}
+
 // roundTrip uploads random bytes to the probe key and checks they read back
 // unchanged.
-func (t *tierTarget) roundTrip(ctx context.Context) error {
-	ctx, cancel := context.WithTimeout(ctx, tierProbeTimeout)
+func (t *tierTarget) roundTrip(ctx context.Context, timeout time.Duration) error {
+	ctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
+
+	// A backend may have conditions of its own to check -- a shared
+	// filesystem must still be writable only by the cache.
+	if checker, ok := t.backend.(interface{ checkHealth() error }); ok {
+		if err := checker.checkHealth(); err != nil {
+			return err
+		}
+	}
 
 	want := make([]byte, tierProbeSize)
 	if _, err := rand.Read(want); err != nil {

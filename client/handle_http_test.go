@@ -4704,6 +4704,43 @@ func TestDownloadHTTPByteRange(t *testing.T) {
 	assert.Equal(t, fullBody[:rangeEnd+1], readBack, "downloaded content should match the requested range")
 }
 
+// TestDownloadHTTPByteRangeFromMiddle: a range that does not start at the
+// object's first byte lands in a fresh file holding just the range, and the
+// on-disk size check expects that -- not the object up to the range's end.
+func TestDownloadHTTPByteRangeFromMiddle(t *testing.T) {
+	t.Cleanup(test_utils.SetupTestLogging(t))
+	test_utils.InitClient(t, map[param.Param]any{})
+	ctx, _, _ := test_utils.TestContext(context.Background(), t)
+
+	fullBody := []byte("0123456789ABCDEFGHIJ")
+	start, end := int64(5), int64(8)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		assert.Equal(t, fmt.Sprintf("bytes=%d-%d", start, end), r.Header.Get("Range"))
+		w.Header().Set("Content-Length", fmt.Sprintf("%d", end-start+1))
+		w.Header().Set("Content-Range", fmt.Sprintf("bytes %d-%d/%d", start, end, len(fullBody)))
+		w.WriteHeader(http.StatusPartialContent)
+		_, _ = w.Write(fullBody[start : end+1])
+	}))
+	defer server.Close()
+
+	serverURL, err := url.Parse(server.URL)
+	require.NoError(t, err)
+	fname := filepath.Join(t.TempDir(), "test.txt")
+	writer, err := os.OpenFile(fname, os.O_RDWR|os.O_CREATE|os.O_TRUNC, 0o644)
+	require.NoError(t, err)
+	defer writer.Close()
+
+	downloaded, _, _, _, _, err := downloadHTTP(ctx, nil, nil,
+		transferAttemptDetails{Url: serverURL, Proxy: false},
+		fname, writer, start, end, -1, "", "", nil, nil,
+	)
+	require.NoError(t, err)
+	assert.Equal(t, end-start+1, downloaded)
+	readBack, err := os.ReadFile(fname)
+	require.NoError(t, err)
+	assert.Equal(t, fullBody[start:end+1], readBack)
+}
+
 // TestDownloadHTTPResume verifies that downloadHTTP sends a Range header
 // when bytesSoFar > 0 for resume functionality.
 func TestDownloadHTTPResume(t *testing.T) {
